@@ -229,6 +229,7 @@ fn mesh_target(addr: std::net::SocketAddr) -> MeshPeerTarget {
         node_name: xp_test_fixtures::primary_node_name().to_owned(),
         mesh_base_url: Some(format!("https://{addr}")),
         endpoint_transport: Some("vision_tcp"),
+        endpoint_fingerprint: None,
         mesh_reason: crate::mesh_telemetry::MeshPeerReason::MeshAvailable,
         public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
     }

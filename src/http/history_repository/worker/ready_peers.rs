@@ -131,6 +131,7 @@ mod tests {
             node_name: "repo-a".to_owned(),
             mesh_base_url: None,
             endpoint_transport: None,
+            endpoint_fingerprint: None,
             mesh_reason: crate::mesh_telemetry::MeshPeerReason::MissingEndpoint,
             public_base_url: "https://repo-a.invalid".to_owned(),
         }];

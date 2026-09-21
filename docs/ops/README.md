@@ -143,9 +143,10 @@ Host-managed mode assumptions:
   `disabled_pending_rework`; they remain on Direct/Public and leave existing assignment state
   unchanged. A future re-enable requires a new release and an explicitly authorized maintenance
   window.
-- Native Reverse tombstone cleanup is not part of normal reconciliation in this release. A future
-  maintenance implementation may use the controlled Xray restart path, but production upgrade and
-  socket-zero verification are separate operator-authorized work.
+- Native Reverse tombstone cleanup is not part of normal reconciliation. The controlled host-managed
+  and container upgrade path removes XP-owned `xp-reverse-*` and bootstrap artifacts before its
+  maintenance Xray restart. Production rollout and socket-zero verification remain separately
+  operator-authorized; ordinary diagnosis never removes retained topology state.
 - Nodes exposes the same repository status and a membership editor. The editor selects existing
   cluster nodes; `PUT /api/admin/history-repositories` accepts only `node_ids` and derives pinned
   repository identities server-side. Lifecycle, convergence and capacity remain worker-owned. A
@@ -537,8 +538,8 @@ Container-specific note:
 - `xp` still reports `xray` health through `GET /api/health`.
 - `cloudflared` is intentionally started outside `xp`'s built-in runtime supervisor, so the Web runtime pages treat `cloudflared` as disabled in container mode.
 - Existing Reverse topology remains diagnostic while the feature is quarantined. Do not restart
-  Xray or remove Reverse artifacts during ordinary diagnosis; cleanup/restart and socket-zero
-  verification require a separately authorized maintenance procedure.
+  Xray or remove Reverse artifacts during ordinary diagnosis; the controlled upgrade cleanup/restart
+  and socket-zero verification require a separately authorized maintenance procedure.
 
 ## `xp-ops mihomo redact` (subscription/config sanitization)
 

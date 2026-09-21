@@ -1,5 +1,19 @@
 use super::*;
 
+pub(super) fn endpoint_fingerprint(
+    endpoint: &Endpoint,
+    access_host: &str,
+    endpoint_transport: Option<&str>,
+) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        endpoint.endpoint_id,
+        endpoint.port,
+        access_host,
+        endpoint_transport.unwrap_or("")
+    )
+}
+
 pub(super) fn mesh_attempt_budget(total: Duration) -> Duration {
     let third = total / 3;
     third.clamp(Duration::from_millis(500), Duration::from_secs(5))
@@ -37,9 +51,13 @@ pub(super) struct DirectValidationStore {
 impl DirectValidationStore {
     fn fingerprint(peer: &MeshPeerTarget) -> String {
         format!(
-            "{}|{}",
+            "{}|{}|{}|{}|{}|{}",
+            peer.node_id,
+            peer.node_name,
             peer.mesh_base_url.as_deref().unwrap_or_default(),
-            peer.endpoint_transport.unwrap_or_default()
+            peer.endpoint_transport.unwrap_or_default(),
+            peer.public_base_url,
+            peer.endpoint_fingerprint.as_deref().unwrap_or_default()
         )
     }
 
@@ -99,7 +117,17 @@ pub struct PeerCircuitBreakers {
 }
 
 impl PeerCircuitBreakers {
+    #[cfg(test)]
     pub(super) async fn before_attempt(&self, peer_id: &str, enabled: bool) -> MeshAttemptDecision {
+        self.before_attempt_with_probe(peer_id, enabled, true).await
+    }
+
+    pub(super) async fn before_attempt_with_probe(
+        &self,
+        peer_id: &str,
+        enabled: bool,
+        probe_allowed: bool,
+    ) -> MeshAttemptDecision {
         if !enabled {
             return MeshAttemptDecision::Disabled;
         }
@@ -113,6 +141,7 @@ impl PeerCircuitBreakers {
             None => MeshAttemptDecision::Attempt,
             Some(retry_at) if now < retry_at => MeshAttemptDecision::SkipOpen,
             Some(_) if circuit.half_open_in_flight => MeshAttemptDecision::SkipOpen,
+            Some(_) if !probe_allowed => MeshAttemptDecision::SkipOpen,
             Some(_) => {
                 circuit.half_open_in_flight = true;
                 MeshAttemptDecision::Probe
@@ -166,7 +195,16 @@ impl PeerCircuitBreakers {
         BreakerState::Open
     }
 
+    #[cfg(test)]
     pub(super) async fn before_public_attempt(&self, peer_id: &str) -> MeshAttemptDecision {
+        self.before_public_attempt_with_probe(peer_id, true).await
+    }
+
+    pub(super) async fn before_public_attempt_with_probe(
+        &self,
+        peer_id: &str,
+        probe_allowed: bool,
+    ) -> MeshAttemptDecision {
         let now = Instant::now();
         let mut peers = self.public_peers.lock().await;
         let circuit = peers.entry(peer_id.to_string()).or_default();
@@ -174,6 +212,7 @@ impl PeerCircuitBreakers {
             None => MeshAttemptDecision::Attempt,
             Some(retry_at) if now < retry_at => MeshAttemptDecision::SkipOpen,
             Some(_) if circuit.half_open_in_flight => MeshAttemptDecision::SkipOpen,
+            Some(_) if !probe_allowed => MeshAttemptDecision::SkipOpen,
             Some(_) => {
                 circuit.half_open_in_flight = true;
                 MeshAttemptDecision::Probe
@@ -235,5 +274,34 @@ impl PeerCircuitBreakers {
             Some(retry_at) if Instant::now() < retry_at => BreakerState::Open,
             Some(_) => BreakerState::HalfOpen,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn endpoint_identity_change_invalidates_direct_validation() {
+        let store = DirectValidationStore::default();
+        let mut peer = MeshPeerTarget {
+            node_id: "peer".to_owned(),
+            node_name: "peer".to_owned(),
+            mesh_base_url: Some("https://peer.example:443".to_owned()),
+            endpoint_transport: Some("vision_tcp"),
+            endpoint_fingerprint: Some("endpoint-a|443|peer.example|vision_tcp".to_owned()),
+            mesh_reason: MeshPeerReason::MeshAvailable,
+            public_base_url: "https://peer.example/api".to_owned(),
+        };
+        store.record(&peer, DirectValidationState::Verified).await;
+        assert_eq!(
+            store.state(&peer, true).await,
+            DirectValidationState::Verified
+        );
+        peer.endpoint_fingerprint = Some("endpoint-b|443|peer.example|vision_tcp".to_owned());
+        assert_eq!(
+            store.state(&peer, true).await,
+            DirectValidationState::ConfiguredUnverified
+        );
     }
 }

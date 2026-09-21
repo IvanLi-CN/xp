@@ -206,11 +206,35 @@ impl MeshAwareHttpClient {
         &self,
         peer_id: &str,
         enabled: bool,
+        health_probe: bool,
     ) -> (MeshAttemptDecision, u64) {
         let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
         let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
-        let decision = self.circuits.before_attempt(peer_id, enabled).await;
+        let decision = self
+            .circuits
+            .before_attempt_with_probe(peer_id, enabled, health_probe)
+            .await;
         (decision, epoch)
+    }
+
+    pub(super) async fn before_mesh_request(
+        &self,
+        peer_id: &str,
+        enabled: bool,
+        route: InternalRoute,
+    ) -> (MeshAttemptDecision, u64) {
+        self.before_mesh_attempt(peer_id, enabled, route == InternalRoute::HealthV2)
+            .await
+    }
+
+    pub(super) async fn before_public_request(
+        &self,
+        peer_id: &str,
+        route: InternalRoute,
+    ) -> MeshAttemptDecision {
+        self.circuits
+            .before_public_attempt_with_probe(peer_id, route == InternalRoute::HealthV2)
+            .await
     }
 
     pub(super) async fn mesh_attempt_is_current(&self, epoch: u64) -> bool {

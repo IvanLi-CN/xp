@@ -29,7 +29,8 @@ mod telemetry;
 mod transport;
 pub use circuit::DirectValidationState;
 use circuit::{
-    DirectValidationStore, MeshAttemptDecision, PeerCircuitBreakers, mesh_attempt_budget,
+    DirectValidationStore, MeshAttemptDecision, PeerCircuitBreakers, endpoint_fingerprint,
+    mesh_attempt_budget,
 };
 pub use error::MeshRequestError;
 pub(crate) use request::CapabilityProbeResponse;
@@ -56,6 +57,7 @@ pub struct MeshPeerTarget {
     pub node_name: String,
     pub mesh_base_url: Option<String>,
     pub endpoint_transport: Option<&'static str>,
+    pub endpoint_fingerprint: Option<String>,
     pub mesh_reason: MeshPeerReason,
     pub public_base_url: String,
 }
@@ -104,11 +106,14 @@ pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTar
         })
         .flatten()
         .map(|meta| meta.transport.mesh_label());
+    let endpoint_fingerprint = (mesh_reason == MeshPeerReason::MeshAvailable)
+        .then(|| endpoint_fingerprint(managed[0], access_host, endpoint_transport));
     MeshPeerTarget {
         node_id: node.node_id.clone(),
         node_name: node.node_name.clone(),
         mesh_base_url,
         endpoint_transport,
+        endpoint_fingerprint,
         mesh_reason,
         public_base_url: node.api_base_url.clone(),
     }
@@ -131,7 +136,6 @@ pub struct MeshAwareHttpClient {
     #[cfg(test)]
     mesh_observation_pause: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
-
 impl MeshAwareHttpClient {
     pub fn new(direct: reqwest::Client) -> Self {
         Self::from_transport_clients(direct.clone(), direct)
@@ -166,7 +170,6 @@ impl MeshAwareHttpClient {
         self.circuits = circuits;
         self
     }
-
     pub fn with_direct_validation_required(mut self) -> Self {
         self.enforce_direct_validation = true;
         self
@@ -176,14 +179,12 @@ impl MeshAwareHttpClient {
             .state(peer, self.enforce_direct_validation)
             .await
     }
-
     pub async fn direct_validation_state_for(
         &self,
         peer: &MeshPeerTarget,
     ) -> DirectValidationState {
         self.direct_validation_state(peer).await
     }
-
     pub async fn mark_direct_validation_success(&self, peer: &MeshPeerTarget) {
         self.direct_validation
             .record(peer, DirectValidationState::Verified)
@@ -238,7 +239,6 @@ impl MeshAwareHttpClient {
     pub async fn clear_reverse_route(&self, target_node_id: &str) {
         self.reverse_routes.write().await.remove(target_node_id);
     }
-
     /// Sends over exactly one peer-direct transport. It never uses a configured proxy.
     pub async fn send_peer_direct_request(
         &self,
@@ -271,7 +271,6 @@ impl MeshAwareHttpClient {
         )
         .await
     }
-
     /// Sends over one direct path with a caller-owned Mesh admission guard. The guard may
     /// span asynchronous target preparation for dedicated probes and is never reacquired.
     pub(crate) async fn send_peer_direct_request_with_gate(
@@ -294,7 +293,6 @@ impl MeshAwareHttpClient {
         )
         .await
     }
-
     pub(crate) async fn send_peer_direct_preflight(
         &self,
         peer: &MeshPeerTarget,
@@ -313,7 +311,6 @@ impl MeshAwareHttpClient {
         )
         .await
     }
-
     #[allow(clippy::too_many_arguments)]
     async fn send_peer_direct_request_with_options(
         &self,
@@ -405,7 +402,6 @@ impl MeshAwareHttpClient {
         )?;
         Ok(response)
     }
-
     /// Sends through Mesh first, then public only after a retryable transport failure.
     pub async fn send_peer_request(
         &self,
@@ -431,7 +427,6 @@ impl MeshAwareHttpClient {
             )),
         }
     }
-
     /// Allows a predecessor's unsigned 404 only for an explicit compatibility probe.
     pub(crate) async fn send_peer_request_allowing_legacy_not_found(
         &self,
@@ -511,7 +506,9 @@ impl MeshAwareHttpClient {
                 direct_validation,
                 DirectValidationState::Verified | DirectValidationState::TransportFailed
             );
-        let (decision, mesh_epoch) = self.before_mesh_attempt(&peer.node_id, mesh_enabled).await;
+        let (decision, mesh_epoch) = self
+            .before_mesh_request(&peer.node_id, mesh_enabled, request.route)
+            .await;
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
         let mut mesh_outcome_ambiguous = false;
 
@@ -682,7 +679,10 @@ impl MeshAwareHttpClient {
             self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::OutcomeUnknown);
         }
-        match self.circuits.before_public_attempt(&peer.node_id).await {
+        match self
+            .before_public_request(&peer.node_id, request.route)
+            .await
+        {
             MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined => {
                 self.record_terminal_failure(peer).await;
                 return Err(MeshRequestError::CircuitOpen { path: "Public" });

@@ -224,6 +224,7 @@ fn mesh_target(proxy: &CountingProxy) -> MeshPeerTarget {
             proxy.addr.port()
         )),
         endpoint_transport: Some("vision_tcp"),
+        endpoint_fingerprint: None,
         mesh_reason: MeshPeerReason::MeshAvailable,
         public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
     }

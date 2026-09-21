@@ -148,6 +148,27 @@ async fn public_circuit_isolates_after_one_failed_request() {
 }
 
 #[tokio::test]
+async fn half_open_circuit_rejects_non_health_requests() {
+    let circuits = PeerCircuitBreakers::default();
+    {
+        let mut peers = circuits.peers.lock().await;
+        let circuit = peers.entry("peer".to_owned()).or_default();
+        circuit.failures = MESH_FAILURES_BEFORE_OPEN;
+        circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+    }
+    assert_eq!(
+        circuits
+            .before_attempt_with_probe("peer", true, false)
+            .await,
+        MeshAttemptDecision::SkipOpen
+    );
+    assert_eq!(
+        circuits.before_attempt_with_probe("peer", true, true).await,
+        MeshAttemptDecision::Probe
+    );
+}
+
+#[tokio::test]
 async fn direct_protocol_failure_quarantines_without_public_fallback() {
     let circuits = PeerCircuitBreakers::default();
     assert_eq!(
