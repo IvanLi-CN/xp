@@ -455,7 +455,8 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
         "x25519_relay_public_key": URL_SAFE_NO_PAD.encode([8_u8; 32]),
     }))
     .expect("encode source journal identity");
-    let source_wire_len = 192 * 1024 - 1024;
+    let segment_wire_len = 192 * 1024 - 1024;
+    let source_wire_len = 1024;
     for sequence in 0..257_u64 {
         let observed = first_observed.saturating_add(sequence);
         transaction
@@ -468,7 +469,7 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
                     format!("{sequence:064x}"),
                     observed,
                     sequence,
-                    192 * 1024 - 1024
+                    segment_wire_len
                 ],
             )
             .expect("insert summary resource segment");
