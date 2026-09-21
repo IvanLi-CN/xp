@@ -472,6 +472,37 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
                 ],
             )
             .expect("insert summary resource segment");
+        if sequence == 0 {
+            let record_payload = serde_json::to_vec(&serde_json::json!({
+                "observed_at_unix_seconds": observed,
+                "received_at_unix_seconds": observed,
+                "source_node_id": "summary-source",
+                "source_epoch": 1,
+                "stream": "runtime",
+                "sequence": sequence,
+                "subject_node_id": "summary-subject",
+                "observer_node_id": "summary-source",
+                "schema_id": "runtime.v1",
+                "schema_version": 1,
+                "record_key": "summary-record",
+                "payload": [],
+                "tombstone": false,
+            }))
+            .expect("encode summary resource record");
+            transaction
+                .execute(
+                    "INSERT INTO repository_history_records
+                         (source_node_id, source_epoch, stream, sequence, subject_node_id,
+                          observer_node_id, schema_id, schema_version, record_key, is_tombstone,
+                          observed_start, observed_end, received_at, aggregate_complete,
+                          aggregate_start, aggregate_end, payload)
+                     VALUES ('summary-source', 1, 'runtime', 0, 'summary-subject',
+                             'summary-source', 'runtime.v1', 1, 'summary-record', 0, ?1, ?1, ?1,
+                             1, NULL, NULL, ?2)",
+                    rusqlite::params![observed, record_payload],
+                )
+                .expect("insert summary resource record");
+        }
         transaction
             .execute(
                 "INSERT INTO source_delivery_journal
