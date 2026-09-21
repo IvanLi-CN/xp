@@ -292,7 +292,7 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         reverse_supervisor_enabled: Arc::new(AtomicBool::new(false)),
         reverse_runtime_ready: Arc::new(AtomicBool::new(false)),
         reverse_recovery_required: Arc::new(AtomicBool::new(false)),
-        reverse_operator_enabled: Arc::new(AtomicBool::new(config.reverse_mesh_enabled)),
+        reverse_operator_enabled: Arc::new(AtomicBool::new(false)),
         reverse_links: ReverseLinkRuntime::default(),
         mesh_enabled: Arc::new(AtomicBool::new(true)),
         mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
@@ -659,6 +659,9 @@ async fn reconcile_once_with_runtime(
         forced_rebuild_inbounds.extend(local_endpoint_ids.clone());
     }
 
+    let reverse_mesh_enabled = config.reverse_mesh_enabled
+        && cluster_mesh_enabled
+        && crate::reverse_mesh::NATIVE_REVERSE_ENABLED;
     let outcome = reconcile_snapshot(
         config.xray_api_addr,
         cluster_ca_key_pem,
@@ -669,14 +672,11 @@ async fn reconcile_once_with_runtime(
         reverse_reconciler,
         restart_handle,
         config.bind.port(),
-        config.reverse_mesh_enabled && cluster_mesh_enabled,
+        reverse_mesh_enabled,
     )
     .await;
 
-    if outcome
-        .as_ref()
-        .is_ok_and(|outcome| outcome.reverse_restart_required)
-    {
+    if reverse_mesh_enabled && outcome.as_ref().is_ok_and(|o| o.reverse_restart_required) {
         restart_handle.request_xray_restart();
     }
 

@@ -226,6 +226,7 @@ impl MeshAwareHttpClient {
     }
 
     /// Probes every assigned rendezvous so a standby can serve immediately after failover.
+    #[cfg(test)]
     pub(crate) async fn send_peer_reverse_health_request(
         &self,
         peer: &MeshPeerTarget,

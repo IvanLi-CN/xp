@@ -425,8 +425,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         format!("http://127.0.0.1:{}", config.bind.port()),
     )
     .with_mesh_gate_epoch(reconcile.mesh_gate(), reconcile.mesh_gate_epoch())
-    .with_mesh_gate_lock(reconcile.mesh_gate_lock())
-    .with_reverse_gate(reconcile.reverse_gate());
+    .with_mesh_gate_lock(reconcile.mesh_gate_lock());
     let mesh_client = raft_network.mesh_client();
     let raft = xp::raft::runtime::start_raft(
         &config.data_dir,

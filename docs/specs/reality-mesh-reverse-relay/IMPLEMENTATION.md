@@ -2,10 +2,14 @@
 
 ## Current Status
 
-- Implementation: core relay path and runtime reconciliation are implemented; deployment/join rollout
-  gates remain explicitly closed until their integration evidence exists.
-- Lifecycle: active.
-- Delivery stop: merge-ready / Step 5C Ready (target; not yet declared).
+- Implementation: retained for diagnosis, but Native Reverse runtime is quarantined and cannot
+  route, probe, reconcile, or create Xray dynamic artifacts.
+- Lifecycle: dormant pending rework.
+- Delivery stop: production re-enable is not part of this release.
+
+The historical implementation notes below document retained state and prior evidence only. They
+do not authorize Reverse probes, assignment writes, Xray dynamic artifact changes, relay serving,
+or automatic restarts in the current release.
 
 ## Delivered
 
@@ -19,20 +23,13 @@
   leave the durable checkpoint or outbox for the next bounded retry.
   Control-plane fallback URL handling preserves the registered public endpoint for non-history
   callers while keeping this history-specific HTTPS-only boundary explicit.
-- Fresh join now returns an additive `reverse_mesh_bootstrap` marker when the assignment capability
-  barrier and a managed Rendezvous candidate are available. The leader pre-registers the learner's
-  generation/assignment in Raft; `xp join` stores only the public endpoint parameters, epoch and
-  generation in the existing mode-0600 `raft_bootstrap_sender` marker. The marker is metadata-only
-  until the learner applies authenticated Raft state or a snapshot; Mesh and Reverse remain closed
-  during that interval. Unsupported or candidate-less clusters retain the existing Direct/Public
-  bootstrap path.
-- Assignment reconciliation runs a reverse-only signed `health-v2` probe through every assigned
-  primary and standby Rendezvous. Remote outer delivery tries that Rendezvous through Reality Mesh
-  before Public/API; when the caller is itself the Rendezvous, it uses the signed local XP loopback
-  portal instead of its public address. Each Rendezvous validates both outer and target ACKs before
-  retaining a bounded health observation; local Xray/portal readiness remains the admission gate
-  and a failed probe never disables Direct/Public. The bodyless health GET is safe to retry, so a
-  retryable Reality timeout also proceeds to the Rendezvous Public/API path.
+- Fresh joins and join retries return no `reverse_mesh_bootstrap` marker while Native Reverse is
+  quarantined. They do not probe voters or write Reverse epoch/assignment state; existing durable
+  assignment data remains untouched for diagnosis and future rework.
+- Assignment reconciliation, Reverse probes, Xray dynamic artifact creation/removal, and relay
+  serving are disabled in this release. Normal XP reconciliation does not touch dormant Reverse
+  state or request an Xray restart; only the separately authorized maintenance upgrade path may
+  perform one-time cleanup and restart verification.
 - Mesh and Reverse sends use shared read admission, while cluster gate transitions take an
   exclusive write barrier so normal reverse concurrency is preserved without crossing a disable
   boundary.
@@ -48,8 +45,8 @@
   enter a 15-minute cooldown, after which one half-open probe is permitted per cooldown. Lease
   expiry begins the same bounded acquisition sequence after a 30-second wait. A retired handler
   gets one fixed 120-second drain deadline, even when its replacement never becomes healthy.
-  `XP_REVERSE_MESH_ENABLED=false` forces local XP-owned Reverse Xray artifact discovery and removal
-  after an XP restart while Direct/Public and Raft membership continue.
+  The historical `XP_REVERSE_MESH_ENABLED=false` path is superseded by the compile-time quarantine;
+  current normal reconciliation leaves dormant Reverse artifacts untouched.
 - The unreachable-Rendezvous resource fixture first installs and removes one real Reverse outbound,
   then keeps Reverse disabled during its baseline phase and includes a loopback-only managed
   VLESS/REALITY inbound. This warms Xray's lazy native Reverse handler once, so the unchanged 2 MiB

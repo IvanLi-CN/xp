@@ -31,10 +31,11 @@ fn managed_xhttp_endpoint(port: u16) -> Endpoint {
 }
 
 #[test]
-fn peer_target_skips_xhttp_endpoint_for_control_plane_mesh() {
+fn peer_target_accepts_xhttp_endpoint_for_control_plane_mesh() {
     let node = peer_node();
     let target = peer_target_from_node(&node, &[managed_xhttp_endpoint(443)]);
-    assert!(target.mesh_base_url.is_none());
-    assert_eq!(target.mesh_reason, MeshPeerReason::UnsupportedTransport);
+    assert!(target.mesh_base_url.is_some());
+    assert_eq!(target.mesh_reason, MeshPeerReason::MeshAvailable);
+    assert_eq!(target.endpoint_transport, Some("xhttp_reality_fallback"));
     assert_eq!(target.public_base_url, node.api_base_url);
 }

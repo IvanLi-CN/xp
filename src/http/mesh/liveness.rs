@@ -128,6 +128,11 @@ pub(in crate::http) async fn admin_internal_reverse_probe(
     internal: Option<Extension<InternalSignatureAuth>>,
     Json(request): Json<ReverseLinkProbeRequest>,
 ) -> Result<StatusCode, ApiError> {
+    if !crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+        return Err(ApiError::conflict(
+            "Native Reverse is disabled pending rework",
+        ));
+    }
     let Some(Extension(internal)) = internal else {
         return Err(ApiError::unauthorized("internal auth required"));
     };
@@ -212,6 +217,9 @@ pub(in crate::http) async fn admin_internal_reverse_probe(
 }
 
 pub(in crate::http) fn spawn_reverse_link_probe_worker(state: AppState) {
+    if !crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+        return;
+    }
     tokio::spawn(async move {
         let links = state.reconcile.reverse_links();
         loop {

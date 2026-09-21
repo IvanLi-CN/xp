@@ -11,9 +11,9 @@ outcome question.
 ## Decision
 
 - For general Mesh calls, derive a Mesh origin only from exactly one peer
-  `managed_default` VLESS-REALITY Vision/TCP endpoint. Treat absent, ambiguous,
-  or XHTTP endpoint state as public-only because XHTTP is not a plain HTTPS
-  control-plane listener.
+  `managed_default` VLESS-REALITY endpoint with a valid access host. Vision/TCP
+  uses `vision_tcp`; XHTTP uses its Reality fallback with the existing signed
+  HTTP/2 control-plane protocol. It does not share a user's XHTTP session.
 - Membership-lifecycle capability reads are stricter: a peer with an eligible Mesh
   endpoint uses Mesh exclusively, while a peer with no eligible endpoint uses its
   registered API control-plane origin only with the same signed `mesh-v2` request
@@ -33,8 +33,9 @@ outcome question.
 - Count a signed acknowledgement for any HTTP status as authoritative. Only
   retryable transport failures can open the per-peer breaker or permit a public
   fallback.
-- A relay timeout is just as ambiguous as a Mesh timeout. Retry it on a direct public path only
-  when the operation is read-only, Raft-idempotent, or protected by the durable request ledger.
+- A direct transport timeout is just as ambiguous as a Mesh timeout. Retry it on a direct
+  public path only when the operation is read-only, Raft-idempotent, or protected by the
+  durable request ledger.
 - Persist the latest per-peer diagnostic reason independently of the active path. Static target
   reasons are `missing_endpoint`, `ambiguous_endpoint`, `invalid_access_host`, and
   `unsupported_transport`; runtime reasons are `no_sample`, `transport_timeout`,
@@ -45,9 +46,8 @@ outcome question.
   `unsupported_transport` reason is serialized as the legacy `invalid_access_host` value so Web
   clients in the fixed compatibility window continue to parse the response.
 - Build the strict Mesh client once per process. Keep it HTTP/2-only with one idle connection per
-  origin and a bounded idle timeout; public direct and relay fallback use separate compatibility
-  clients. This limits steady-state control-plane sockets without forcing the public fallback onto
-  a stricter transport contract.
+  origin and a bounded idle timeout; public direct fallback uses a separate compatibility client.
+  Native Reverse is not a generic fallback path.
 - Use the HTTP/2 adaptive flow-control window for Mesh instead of reserving a
   large fixed window for every peer. An active Raft snapshot then gets enough
   credit to share a connection with a long-lived stream, while idle peers do

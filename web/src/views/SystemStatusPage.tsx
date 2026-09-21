@@ -107,6 +107,14 @@ function reasonLabel(peer: AdminMeshPeer) {
 		: "Mesh reason unknown";
 }
 
+function endpointTransportLabel(peer: AdminMeshPeer) {
+	if (peer.endpoint_transport === "vision_tcp") return "Vision TCP";
+	if (peer.endpoint_transport === "xhttp_reality_fallback") {
+		return "XHTTP · Reality fallback";
+	}
+	return "Endpoint transport unavailable";
+}
+
 function meshTransportLabel(peer: AdminMeshPeer) {
 	const transport = peer.mesh_transport;
 	if (
@@ -262,8 +270,8 @@ function ConnectionAccounting({ status }: { status: AdminMeshStatus }) {
 				<div>
 					<h2 className="text-lg font-semibold">Connection accounting</h2>
 					<p className="mt-1 text-sm text-muted-foreground">
-						Internal Reverse underlay sockets and external user inbound sessions
-						are tracked separately.
+						Native Reverse sockets are diagnostic only; external user inbound
+						sessions are tracked separately.
 					</p>
 				</div>
 				{usage?.sampled_at ? (
@@ -280,7 +288,7 @@ function ConnectionAccounting({ status }: { status: AdminMeshStatus }) {
 			) : null}
 			<div className="mt-4 grid gap-4 sm:grid-cols-2">
 				<StatusFact
-					label="Reverse underlay · internal"
+					label="Native Reverse · internal diagnostic"
 					value={
 						reverseLinks > 0
 							? reverseConnections === null
@@ -288,7 +296,7 @@ function ConnectionAccounting({ status }: { status: AdminMeshStatus }) {
 								: `${reverseConnections} / ${reverseLimit}`
 							: "None"
 					}
-					detail={`${reverseLinks} logical Link${reverseLinks === 1 ? "" : "s"} · max 2 each`}
+					detail={`${reverseLinks} logical Link${reverseLinks === 1 ? "" : "s"} · not a request route`}
 				/>
 				<StatusFact
 					label="User inbound · external"
@@ -408,6 +416,12 @@ function PeerRows({
 				</div>
 				<p className="mt-1 truncate whitespace-nowrap font-mono text-xs text-muted-foreground">
 					{peer.mesh_url ?? peer.api_base_url}
+				</p>
+				<p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">
+					{endpointTransportLabel(peer)}
+					{peer.reverse_relay_state === "disabled_pending_rework"
+						? " · Native Reverse disabled pending rework"
+						: ""}
 				</p>
 			</div>
 			<div className="min-w-0 text-sm" data-peer-cell="route">

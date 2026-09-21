@@ -1,6 +1,7 @@
 # Ops: host-managed and container deployments
 
-This directory contains both the traditional host-managed service examples and the single-image Docker deployment guide.
+This directory contains traditional host-managed service examples and the single-image
+Docker deployment guide.
 
 - Host-managed services (systemd/OpenRC): this document
 - Single-image Docker runtime: `docs/ops/docker.md`
@@ -109,22 +110,12 @@ Host-managed mode assumptions:
 - `xp` runs as a local HTTP admin/API server and binds loopback by default (`127.0.0.1:62416`).
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
-- `xp` uses managed VLESS/REALITY and the peer `api_base_url` Tunnel/public origin as equal
-  peer-direct control-plane paths for health, Raft, Admin fan-out and SSE. When Raft has assigned a
-  target a healthy Reverse Rendezvous, those control-plane requests try that authenticated Reality
-  Mesh Reverse relay after the direct path and before the existing in-memory encrypted dynamic
-  relay. The Reverse portal is TCP-only,
-  password-authenticated, bound to XP-owned `127.0.0.1:10086`, and does not add a public listener.
-  A target installs a Reverse initiating outbound only during its 10-second signed-health probe or
-  120-second local lease; an unreachable Rendezvous removes that outbound and retries locally with
-  bounded backoff. XP also admits at most eight concurrent Reverse outer requests per Rendezvous
-  across all cloned clients; ordinary requests use at most seven so one slot remains for signed
-  health probes. Excess requests fail before opening another underlay stream and follow the
-  existing fallback/error policy. The slot remains held while the response body/stream is live.
-  This is a fixed safety limit with no node-local override. XP-generated Reverse XHTTP outbounds
-  also set XMUX `max_connections=2` per logical Link; existing underlays are reused and a third
-  socket is not opened. Requests continue to reuse those underlays; only a full Reverse request
-  admission slot fails fast and follows the existing Direct/Public fallback policy.
+- `xp` uses managed VLESS/REALITY and the peer `api_base_url` public origin as the control-plane
+  paths for health, Raft, Admin fan-out and SSE. Vision/TCP and XHTTP managed-default endpoints
+  both support Direct Mesh; XHTTP uses its Reality fallback for signed HTTP/2 control-plane
+  traffic and does not share a user session. Native Reverse is retained only as
+  `disabled_pending_rework` diagnostic state and is not selected, probed, reconciled, or
+  dynamically installed.
   Repository synchronization is separate from that control-plane fallback: direct requests use the
   peer's public HTTPS `api_base_url` only; they do not select or probe Mesh or Reverse Mesh. Source
   delivery uses the same public HTTPS path. A
@@ -148,16 +139,13 @@ Host-managed mode assumptions:
   capability and records PING as `unsupported`; it never calls an external `ping` command or
   substitutes TCP connect. The deployed `xp` runtime must retain its normal network namespace
   and outbound access to the public target.
-- Fresh joins may receive an additive `reverse_mesh_bootstrap` response and 0600 bootstrap marker
-  after the voter capability barrier. The marker contains only public Rendezvous endpoint
-  parameters, assignment generation and epoch; it never replaces learner catch-up or log-index
-  promotion. Until the first authenticated Raft state or snapshot apply, the marker is metadata-only
-  and the learner remains on Direct/Public; Reverse bootstrap starts only after that apply. When the
-  barrier or candidate readiness is unavailable, the join remains on Direct/Public bootstrap.
-- Reverse tombstone overflow is fail-closed. systemd/OpenRC nodes use the controlled Xray restart
-  path; a single-image container without a successful child-process restart keeps Reverse disabled
-  until the operator restarts the container and XP completes reconciliation. Direct/Public and
-  membership lifecycle remain available during that intervention.
+- Fresh joins and retries do not request or persist `reverse_mesh_bootstrap` while Native Reverse is
+  `disabled_pending_rework`; they remain on Direct/Public and leave existing assignment state
+  unchanged. A future re-enable requires a new release and an explicitly authorized maintenance
+  window.
+- Native Reverse tombstone cleanup is not part of normal reconciliation in this release. A future
+  maintenance implementation may use the controlled Xray restart path, but production upgrade and
+  socket-zero verification are separate operator-authorized work.
 - Nodes exposes the same repository status and a membership editor. The editor selects existing
   cluster nodes; `PUT /api/admin/history-repositories` accepts only `node_ids` and derives pinned
   repository identities server-side. Lifecycle, convergence and capacity remain worker-owned. A
@@ -298,10 +286,9 @@ upgrade a stale learner before changing the switch.
 Fresh non-bootstrap nodes use public-only control-plane requests until authenticated Raft state is
 applied; this prevents a local default from overriding a disabled cluster switch during join.
 
-When a peer has exactly one managed-default VLESS/REALITY Vision/TCP endpoint, XP derives
-`https://<access_host>:<vless_port>` as a signed control-plane Mesh route. Managed XHTTP endpoints
-are proxy-only and are excluded from this plain HTTPS route, so XP uses the existing Reverse/Public
-fallbacks for control-plane traffic. The canary keeps
+When a peer has exactly one managed-default VLESS/REALITY endpoint and a valid access host, XP derives
+`https://<access_host>:<vless_port>` as a signed control-plane Mesh route. The API reports
+`vision_tcp` or `xhttp_reality_fallback`. The canary keeps
 ordinary `/generate_204` and authority-based camouflage traffic separate from Mesh traffic:
 
 - signed `health-v2` requests reach only the bodyless Mesh health endpoint;
@@ -336,8 +323,8 @@ Raft, leader forwarding, node history, probes, runtime, alerts, quota, traffic, 
 history, endpoint probes and SSE share one process-wide Mesh client. Its managed route is
 HTTP/2-only, retains at most one idle connection per origin for 120 seconds, and does not send H2
 PING frames. The normal 60-second probe cadence keeps an active peer connection reusable. Public
-direct and optional relay fallback use separate long-lived compatibility clients, so the strict H2
-contract never changes public-origin compatibility. H2 transport failures enter the existing
+direct fallback uses a separate long-lived compatibility client, so the strict H2 contract never
+changes public-origin compatibility. H2 transport failures enter the existing
 breaker/fallback path; invalid authentication or acknowledgement remains terminal and never
 downgrades to public transport.
 
@@ -498,10 +485,9 @@ Mesh read-only diagnosis:
 - For every directed peer edge, compare the endpoint inventory with the canary status and Xray
   listener, then verify DNS/port reachability and a signed `health-v2` acknowledgement.
 - `missing_endpoint`, `ambiguous_endpoint`, and `invalid_access_host` are configuration capability
-  failures in the status API. An internal `unsupported_transport` reason means the managed
-  endpoint is XHTTP, which is a user-proxy transport and not a plain HTTPS control-plane Mesh
-  listener; for compatibility with the fixed 3.22/3.21/3.20 Web window, the status API serializes
-  that reason as the existing `invalid_access_host` value.
+  failures in the status API. `endpoint_transport=xhttp_reality_fallback` means the managed
+  XHTTP/Reality endpoint is eligible for signed Direct Mesh HTTP/2 and does not reuse a user
+  session. `unsupported_transport` is not emitted for a valid managed-default XHTTP endpoint.
   `transport_timeout`, `transport_error`, and `protocol_rejected` mean the Mesh target exists but
   the directed transport or protocol failed. A public success with `fallback_active` is end-to-end
   success, not Mesh availability.
@@ -536,10 +522,9 @@ Container-specific note:
   running container or its data volume by hand.
 - `xp` still reports `xray` health through `GET /api/health`.
 - `cloudflared` is intentionally started outside `xp`'s built-in runtime supervisor, so the Web runtime pages treat `cloudflared` as disabled in container mode.
-- If the Reverse Xray reconciler reaches its two-tombstone limit and the child restart does not
-  complete, Reverse remains disabled by design. Restart the Compose container from the host, then
-  wait for the normal XP/Xray readiness and reconciliation checks; Direct/Public and membership
-  lifecycle stay available while Reverse is disabled.
+- Existing Reverse topology remains diagnostic while the feature is quarantined. Do not restart
+  Xray or remove Reverse artifacts during ordinary diagnosis; cleanup/restart and socket-zero
+  verification require a separately authorized maintenance procedure.
 
 ## `xp-ops mihomo redact` (subscription/config sanitization)
 
@@ -643,11 +628,10 @@ Required (or commonly set):
     recreate the service through Compose. Do not place the plaintext token in the Compose file.
 - `XP_XRAY_API_ADDR` (default: `127.0.0.1:10085`)
   - Address of the local `xray` gRPC API.
-- `XP_REVERSE_MESH_ENABLED` (default: `true`)
-  - Set to `false` and restart `xp` to fail-close Reverse on that node. XP removes its
-    Reverse Xray artifacts and closes Reverse forwarding while preserving Raft assignments,
-    Direct/Public paths, and membership. Restore `true` and restart `xp` only after the
-    incident gate permits another bounded probe.
+- `XP_REVERSE_MESH_ENABLED` (legacy compatibility input; runtime remains quarantined)
+  - The current release ignores this input for Native Reverse execution. Existing assignments are
+    preserved for diagnosis, Direct/Public control-plane paths remain available, and re-enable is
+    not exposed through environment, API, or Web controls.
 - `XP_XRAY_HEALTH_INTERVAL_SECS` (default: `2`, allowed range `1..=30`)
   - Probe interval for `xray` gRPC availability.
 - `XP_XRAY_HEALTH_FAILS_BEFORE_DOWN` (default: `3`, allowed range `1..=10`)

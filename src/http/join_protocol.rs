@@ -44,6 +44,9 @@ pub(super) async fn prepare_reverse_bootstrap(
     state: &AppState,
     target_node_id: &str,
 ) -> Result<Option<ReverseMeshBootstrapMarker>, ApiError> {
+    if !crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+        return Ok(None);
+    }
     if raft_metrics(state)
         .membership_config
         .membership()
@@ -120,6 +123,9 @@ pub(super) async fn reverse_bootstrap_marker(
     state: &AppState,
     target_node_id: &str,
 ) -> Option<ReverseMeshBootstrapMarker> {
+    if !crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+        return None;
+    }
     let epoch = state.store.lock().await.state().reverse_mesh_epoch;
     let voter_nodes = current_voter_nodes(state).await;
     let readiness = reverse_bootstrap_readiness(state, &voter_nodes).await;

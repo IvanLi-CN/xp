@@ -31,6 +31,8 @@ pub const REVERSE_MAX_TOMBSTONES: usize = 2;
 pub const REVERSE_NORMAL_BODY_LIMIT: usize = 1 << 20;
 pub const REVERSE_RAFT_BODY_LIMIT: usize = 8 << 20;
 pub const REVERSE_VERSION: &str = "reverse-mesh-v1";
+/// Native Reverse remains persisted for diagnosis but is not an executable route in this release.
+pub const NATIVE_REVERSE_ENABLED: bool = false;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReverseMeshBootstrapEndpoint {

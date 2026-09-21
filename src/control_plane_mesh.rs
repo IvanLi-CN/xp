@@ -130,10 +130,10 @@ pub struct MeshPeerTarget {
     pub node_id: String,
     pub node_name: String,
     pub mesh_base_url: Option<String>,
+    pub endpoint_transport: Option<&'static str>,
     pub mesh_reason: MeshPeerReason,
     pub public_base_url: String,
 }
-
 #[derive(Debug, Clone)]
 pub struct ReverseRelayRoute {
     pub rendezvous: MeshPeerTarget,
@@ -141,7 +141,6 @@ pub struct ReverseRelayRoute {
     pub assignment: ReverseMeshAssignment,
     pub role: ReverseRole,
 }
-
 impl ReverseRelayRoute {
     fn candidates(&self) -> Vec<Self> {
         let mut routes = vec![self.clone()];
@@ -167,23 +166,24 @@ pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTar
         [_] if validate_reality_server_name(access_host).is_err() => {
             MeshPeerReason::InvalidAccessHost
         }
-        [endpoint] => {
-            let meta = managed_default_vless_endpoint(endpoint)
-                .expect("managed endpoint was filtered above");
-            if meta.transport.is_vision_tcp() {
-                MeshPeerReason::MeshAvailable
-            } else {
-                MeshPeerReason::UnsupportedTransport
-            }
-        }
+        [_] => MeshPeerReason::MeshAvailable,
         _ => MeshPeerReason::AmbiguousEndpoint,
     };
     let mesh_base_url = matches!(mesh_reason, MeshPeerReason::MeshAvailable)
         .then(|| format!("https://{access_host}:{}", managed[0].port));
+    let endpoint_transport = (mesh_reason == MeshPeerReason::MeshAvailable)
+        .then(|| {
+            managed
+                .first()
+                .and_then(|endpoint| managed_default_vless_endpoint(endpoint))
+        })
+        .flatten()
+        .map(|meta| meta.transport.mesh_label());
     MeshPeerTarget {
         node_id: node.node_id.clone(),
         node_name: node.node_name.clone(),
         mesh_base_url,
+        endpoint_transport,
         mesh_reason,
         public_base_url: node.api_base_url.clone(),
     }
@@ -202,7 +202,6 @@ pub struct MeshRequest {
     pub sender_id: String,
     pub updates_active_path: bool,
 }
-
 /// The only compatibility result accepted from the signed capability probe.
 pub(crate) enum CapabilityProbeResponse {
     Verified(reqwest::Response),
@@ -288,7 +287,7 @@ impl MeshAwareHttpClient {
             mesh_gate_lock: Arc::new(tokio::sync::RwLock::new(())),
             telemetry: None,
             reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
-            reverse_enabled: Arc::new(AtomicBool::new(true)),
+            reverse_enabled: Arc::new(AtomicBool::new(cfg!(test))),
             local_reverse_relay: None,
             #[cfg(test)]
             mesh_observation_pause: None,
@@ -315,7 +314,8 @@ impl MeshAwareHttpClient {
         self
     }
 
-    pub fn with_reverse_gate(mut self, gate: Arc<AtomicBool>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_reverse_gate(mut self, gate: Arc<AtomicBool>) -> Self {
         self.reverse_enabled = gate;
         self
     }
