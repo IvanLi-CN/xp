@@ -438,6 +438,24 @@ fn repository_record_count_uses_the_payload_free_keyset_index() {
 }
 
 #[test]
+fn repository_segment_count_uses_the_payload_free_keyset_index() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    let backend = storage.lock_backend();
+    let Backend::Sqlite(connection) = &*backend else {
+        panic!("test storage should use SQLite");
+    };
+    let plan = query_plan(
+        connection,
+        "SELECT COUNT(id) FROM repository_history_segments
+         INDEXED BY repository_history_segments_sync_order_v2",
+    );
+    assert!(plan.iter().any(|detail| {
+        detail.contains("USING COVERING INDEX repository_history_segments_sync_order_v2")
+    }));
+}
+
+#[test]
 fn repository_segment_summary_keyset_index_supports_cursor_seeks() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());

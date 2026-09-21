@@ -876,7 +876,10 @@ impl HistoryStorage {
                 "SELECT COUNT(source_node_id) FROM repository_history_records
                  INDEXED BY repository_history_records_keyset"
             }
-            "repository_history_segments" => "SELECT COUNT(*) FROM repository_history_segments",
+            "repository_history_segments" => {
+                "SELECT COUNT(id) FROM repository_history_segments
+                 INDEXED BY repository_history_segments_sync_order_v2"
+            }
             _ => {
                 return Err(HistoryStorageError(
                     "unknown repository history table".to_owned(),
