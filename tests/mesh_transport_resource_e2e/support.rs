@@ -771,6 +771,7 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         max_pss_kib = max_pss_kib
             .max(sampled_peak_pss_kib.load(Ordering::Relaxed))
             .max(read_pss(pid).expect("read summary XP PSS").total_kib);
+        println!("repository_summary_resource_pss={:?}", read_pss(pid));
         sleep(Duration::from_secs(1)).await;
     }
     source_journal_resource::stop_child(&mut child).await;
