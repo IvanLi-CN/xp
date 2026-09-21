@@ -710,9 +710,14 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         let mut summary = None;
         for response in responses {
             let response = response.expect("summary resource response");
-            assert_eq!(response.status(), reqwest::StatusCode::OK);
-            let value: serde_json::Value = response.json().await.expect("decode summary response");
-            summary.get_or_insert(value);
+            if response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS {
+                assert_eq!(response.status(), reqwest::StatusCode::OK);
+                assert!(
+                    summary.is_none(),
+                    "summary gate admitted more than one request"
+                );
+                summary = Some(response.json().await.expect("decode summary response"));
+            }
         }
         let summary = summary.expect("summary resource batch response");
         request_active.store(false, Ordering::Release);
@@ -771,7 +776,6 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         max_pss_kib = max_pss_kib
             .max(sampled_peak_pss_kib.load(Ordering::Relaxed))
             .max(read_pss(pid).expect("read summary XP PSS").total_kib);
-        println!("repository_summary_resource_pss={:?}", read_pss(pid));
         sleep(Duration::from_secs(1)).await;
     }
     source_journal_resource::stop_child(&mut child).await;
@@ -841,7 +845,6 @@ async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
         sleep(Duration::from_millis(100)).await;
     }
 }
-
 fn read_pss(pid: u32) -> Option<PssSample> {
     let rollup = PathBuf::from(format!("/proc/{pid}/smaps_rollup"));
     let fallback = PathBuf::from(format!("/proc/{pid}/smaps"));
@@ -861,7 +864,6 @@ fn read_pss(pid: u32) -> Option<PssSample> {
         file_kib: if uses_rollup { metric("Pss_File:") } else { 0 },
     })
 }
-
 fn assert_expected_memory_scope(pid: u32) {
     if std::env::var_os("XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT").is_none() {
         return;

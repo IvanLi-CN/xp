@@ -362,17 +362,21 @@ pub(super) async fn admin_internal_history_repository_summary(
     let summary_permit = state
         .repository_summary_gate
         .clone()
-        .acquire_owned()
-        .await
-        .map_err(|_| ApiError::internal("repository summary gate is closed"))?;
+        .try_acquire_owned()
+        .map_err(|_| {
+            ApiError::new(
+                "resource_busy",
+                StatusCode::TOO_MANY_REQUESTS,
+                "repository summary is busy; retry shortly",
+            )
+        })?;
     let summary = state
         .repository_replica
         .lock()
         .await
         .replication_summary_after(query.after_segment_id.as_deref(), query.deep_verification)
         .map_err(repository_error)?;
-    // Encode while the single-flight permit is held. Axum's Json response otherwise defers
-    // serialization until the body is polled, after the permit has already been released.
+    // Encode while the permit is held; Axum's Json response defers serialization until body poll.
     let payload = serde_json::to_vec(&summary)
         .map_err(|error| ApiError::internal(format!("serialize repository summary: {error}")))?;
     let response = Response::builder()
