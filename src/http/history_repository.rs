@@ -2,6 +2,7 @@ use axum::http::StatusCode;
 use axum::{
     Json,
     extract::{Extension, Query},
+    response::{IntoResponse, Response},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
@@ -23,8 +24,8 @@ use crate::{
         query::{HistoryQuery, QueryCandidate, QuerySelector},
         replica::{
             LocalQueryMetadata, RepositoryHistoryQueryResponse, RepositoryRepairBatch,
-            RepositoryReplicaGap, RepositoryReplicaSummary, RepositoryRuntimeError,
-            RepositoryRuntimeStatus, RepositorySyncReceipt, RepositoryTombstoneAcknowledgement,
+            RepositoryReplicaGap, RepositoryRuntimeError, RepositoryRuntimeStatus,
+            RepositorySyncReceipt, RepositoryTombstoneAcknowledgement,
         },
     },
 };
@@ -346,7 +347,7 @@ pub(super) async fn admin_internal_history_repository_summary(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
     Query(query): Query<RepositorySummaryQuery>,
-) -> Result<Json<RepositoryReplicaSummary>, ApiError> {
+) -> Result<Response, ApiError> {
     ensure_syncing_or_ready_repository_sender(&state, internal).await?;
     if query
         .after_segment_id
@@ -357,13 +358,23 @@ pub(super) async fn admin_internal_history_repository_summary(
             "invalid repository summary cursor",
         ));
     }
+    let summary_permit = state
+        .repository_summary_gate
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| ApiError::internal("repository summary gate is closed"))?;
     let summary = state
         .repository_replica
         .lock()
         .await
         .replication_summary_after(query.after_segment_id.as_deref(), query.deep_verification)
         .map_err(repository_error)?;
-    Ok(Json(summary))
+    // Serialize while the single-flight permit is held. This keeps concurrent summary callers
+    // from retaining multiple response buffers at the same time under the XP memory budget.
+    let response = Json(summary).into_response();
+    drop(summary_permit);
+    Ok(response)
 }
 
 pub(super) async fn admin_internal_history_repository_status(

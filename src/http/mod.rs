@@ -22,7 +22,7 @@ use std::{
     time::Instant as StdInstant,
 };
 use tokio::{
-    sync::{Mutex, mpsc},
+    sync::{Mutex, Semaphore, mpsc},
     time::Duration,
 };
 mod embedded_ui;
@@ -149,6 +149,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub store: Arc<Mutex<JsonSnapshotStore>>,
     pub(crate) repository_replica: Arc<Mutex<RepositoryReplicaRuntime>>,
+    pub(crate) repository_summary_gate: Arc<Semaphore>,
     pub reconcile: ReconcileHandle,
     pub xray_health: XrayHealthHandle,
     pub cloudflared_health: CloudflaredHealthHandle,
@@ -217,7 +218,6 @@ impl ApiError {
     pub fn gateway_timeout(message: impl Into<String>) -> Self {
         Self::new("timeout", StatusCode::GATEWAY_TIMEOUT, message)
     }
-
     pub fn too_many_requests(message: impl Into<String>) -> Self {
         Self::new("auth_busy", StatusCode::TOO_MANY_REQUESTS, message)
     }
@@ -275,7 +275,6 @@ impl From<StoreError> for ApiError {
 struct ErrorResponse {
     error: ErrorBody,
 }
-
 #[derive(Serialize)]
 struct ErrorBody {
     code: String,
@@ -1054,6 +1053,7 @@ pub fn build_router_with_mesh_telemetry(
         config: Arc::new(config),
         store,
         repository_replica: Arc::new(Mutex::new(repository_replica)),
+        repository_summary_gate: Arc::new(Semaphore::new(1)),
         reconcile,
         xray_health,
         cloudflared_health,

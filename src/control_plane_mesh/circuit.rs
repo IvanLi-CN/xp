@@ -84,9 +84,9 @@ impl DirectValidationStore {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PeerCircuit {
-    failures: u8,
+    pub(crate) failures: u8,
     open_count: usize,
-    retry_at: Option<Instant>,
+    pub(crate) retry_at: Option<Instant>,
     pub(crate) half_open_in_flight: bool,
     quarantined: bool,
 }
