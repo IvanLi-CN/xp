@@ -115,6 +115,15 @@ function endpointTransportLabel(peer: AdminMeshPeer) {
 	return "Endpoint transport unavailable";
 }
 
+function directValidationLabel(peer: AdminMeshPeer) {
+	return {
+		configured_unverified: "Direct not verified",
+		verified: "Direct verified",
+		transport_failed: "Direct transport failed",
+		protocol_rejected: "Direct protocol rejected",
+	}[peer.direct_validation ?? "configured_unverified"];
+}
+
 function meshTransportLabel(peer: AdminMeshPeer) {
 	const transport = peer.mesh_transport;
 	if (
@@ -422,6 +431,10 @@ function PeerRows({
 					{peer.reverse_relay_state === "disabled_pending_rework"
 						? " · Native Reverse disabled pending rework"
 						: ""}
+				</p>
+				<p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">
+					{directValidationLabel(peer)} · Public circuit{" "}
+					{(peer.public_circuit ?? "closed").replaceAll("_", " ")}
 				</p>
 			</div>
 			<div className="min-w-0 text-sm" data-peer-cell="route">

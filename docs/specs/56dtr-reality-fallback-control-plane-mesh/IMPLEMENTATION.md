@@ -4,9 +4,20 @@
 
 ## Current Status
 
-- Implementation: complete pending final review.
+- Implementation: the earlier Direct Mesh route is deployed; the directed admission and
+  per-peer isolation remediation in ADR 0015 is not implemented.
 - Lifecycle: active.
 - Catalog: supersedes `nbs5f`.
+
+## Confirmed Recovery Gap
+
+A deployed `101 -> us` Direct XHTTP/Reality request established TCP but reached TLS EOF before
+the peer's signed acknowledgement. The existing real-Xray test topology did not prove this
+deployment-level directed edge, so it is insufficient evidence that Direct Mesh is ready to
+enable. While the durable cluster Mesh gate remains disabled, control-plane traffic uses the
+registered Public Path. The remediation must add the ADR 0015 Direct Ingress Contract,
+server-enforced all-voter re-enable preflight, and bounded Peer Public Circuit before Direct Mesh
+is enabled again.
 
 For the current release, Native Reverse is a retained diagnostic schema only: its historical
 assignment, probe, and runtime notes below are not active. The production path does not select,

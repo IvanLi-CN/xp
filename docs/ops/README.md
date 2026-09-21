@@ -286,6 +286,13 @@ upgrade a stale learner before changing the switch.
 Fresh non-bootstrap nodes use public-only control-plane requests until authenticated Raft state is
 applied; this prevents a local default from overriding a disabled cluster switch during join.
 
+Enabling Mesh also requires a server-side directed preflight while the gate remains closed. Each
+current voter performs a Direct-only signed `health-v2` request to every other voter through the
+existing managed endpoint. `PUT /api/admin/mesh/config` returns `409 mesh_preflight_failed` and
+does not write Raft state when any edge fails. A peer whose endpoint fingerprint changes, whose
+five-minute Direct validation becomes stale, or which has restarted remains `configured_unverified`
+and uses Public until that edge validates again.
+
 When a peer has exactly one managed-default VLESS/REALITY endpoint and a valid access host, XP derives
 `https://<access_host>:<vless_port>` as a signed control-plane Mesh route. The API reports
 `vision_tcp` or `xhttp_reality_fallback`. The canary keeps
@@ -304,6 +311,13 @@ never triggers a second path attempt. The local node keeps 24 hours of one-minut
 last 200 global transitions in `${XP_DATA_DIR}/mesh/telemetry.json`; inspect them with
 `GET /api/admin/mesh/status` or the Web **System status** page. `POST /api/admin/mesh/probes`
 accepts only current remote member IDs.
+
+Direct protocol/authentication failures are isolated and never silently downgraded. Public
+transport failures and unsigned/invalid acknowledgements use a separate peer-local circuit with
+the same backoff sequence; while cooling down, only one bodyless `health-v2` half-open probe may
+reach that peer and other Raft calls fail locally with a retry deadline. Status exposes
+`direct_validation` and `public_circuit` separately so Public recovery is not reported as Direct
+availability.
 
 When a public edge returns `502`, `503`, `504`, `520`, `522`, `523`, or `524` without the XP
 signed acknowledgement, Raft-idempotent, read-only, and durable-history requests retry twice with

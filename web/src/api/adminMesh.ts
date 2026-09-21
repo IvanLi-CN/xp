@@ -139,6 +139,15 @@ export const AdminMeshPeerSchema = z.object({
 	quality: MeshQualitySchema,
 	stale: z.boolean(),
 	breaker: MeshBreakerStateSchema,
+	direct_validation: z
+		.enum([
+			"configured_unverified",
+			"verified",
+			"transport_failed",
+			"protocol_rejected",
+		])
+		.optional(),
+	public_circuit: MeshBreakerStateSchema.optional(),
 	last_sample_at: z.string().nullable(),
 	last_transition_at: z.string().nullable(),
 	availability_1h: z.number().nullable(),

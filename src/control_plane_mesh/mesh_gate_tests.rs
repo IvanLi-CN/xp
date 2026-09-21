@@ -123,3 +123,44 @@ async fn mesh_epoch_change_releases_half_open_probe_without_resetting_backoff() 
     );
     assert_eq!(circuits.state("peer", true).await, BreakerState::HalfOpen);
 }
+
+#[tokio::test]
+async fn public_circuit_isolates_after_one_failed_request() {
+    let circuits = PeerCircuitBreakers::default();
+    assert_eq!(
+        circuits.before_public_attempt("peer").await,
+        MeshAttemptDecision::Attempt
+    );
+    assert_eq!(
+        circuits.record_public_failure("peer").await,
+        BreakerState::Open
+    );
+    assert_eq!(
+        circuits.before_public_attempt("peer").await,
+        MeshAttemptDecision::SkipOpen
+    );
+    assert_eq!(circuits.public_state("peer").await, BreakerState::Open);
+    assert_eq!(
+        circuits.record_public_success("peer").await,
+        BreakerState::Closed
+    );
+    assert_eq!(circuits.public_state("peer").await, BreakerState::Closed);
+}
+
+#[tokio::test]
+async fn direct_protocol_failure_quarantines_without_public_fallback() {
+    let circuits = PeerCircuitBreakers::default();
+    assert_eq!(
+        circuits.record_protocol_failure("peer").await,
+        BreakerState::Open
+    );
+    assert_eq!(
+        circuits.before_attempt("peer", true).await,
+        MeshAttemptDecision::Quarantined
+    );
+    assert_eq!(circuits.record_success("peer").await, BreakerState::Closed);
+    assert_eq!(
+        circuits.before_attempt("peer", true).await,
+        MeshAttemptDecision::Attempt
+    );
+}

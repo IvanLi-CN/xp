@@ -155,6 +155,8 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                 )
                 .await;
+                self.mark_direct_validation_failure(peer, DirectValidationState::TransportFailed)
+                    .await;
                 Ok(MeshAttemptResult::Fallback { ambiguous: true })
             }
             Some((Err(_), gate_guard)) => {
@@ -166,6 +168,8 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                 )
                 .await;
+                self.mark_direct_validation_failure(peer, DirectValidationState::TransportFailed)
+                    .await;
                 Ok(MeshAttemptResult::Fallback { ambiguous: true })
             }
         }
