@@ -7,6 +7,7 @@ use axum::{
     routing::any,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use futures_util::future::join_all;
 use rcgen::{CertificateParams, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256};
 use std::{
     fs::{self, File},
@@ -30,13 +31,10 @@ use xp::{
     },
     state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
 };
-
 mod source_journal_resource;
 pub use source_journal_resource::run_source_delivery_journal_resource_workload;
-
 const PEER_COUNT: usize = 50;
 const BODY_LIMIT: usize = 16 * 1024 * 1024;
-
 #[derive(Debug)]
 pub struct ResourceRun {
     pub xp_peak_pss_kib: u64,
@@ -240,7 +238,6 @@ async fn spawn_peer_fleet(cluster: &ClusterMetadata, data_dir: &Path) -> PeerFle
         tasks,
     }
 }
-
 fn reserve_local_port() -> u16 {
     std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .expect("reserve XP bind port")
@@ -248,7 +245,6 @@ fn reserve_local_port() -> u16 {
         .expect("XP bind address")
         .port()
 }
-
 fn run_init(binary: &Path, data_dir: &Path, bind_port: u16) {
     let status = Command::new(binary)
         .args([
@@ -266,7 +262,6 @@ fn run_init(binary: &Path, data_dir: &Path, bind_port: u16) {
         .expect("run xp init");
     assert!(status.success(), "xp init failed with {status}");
 }
-
 fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFleet) {
     xp::internal_auth_epoch::ensure_startup_epoch(data_dir, 1).expect("initialize auth epoch");
     let mut store = JsonSnapshotStore::load_or_init(StoreInit {
@@ -329,7 +324,6 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
     }
     store.save().expect("persist resource state");
 }
-
 struct XpProcess {
     child: Child,
     unit: Option<String>,
@@ -441,7 +435,6 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
         })
         .expect("spawn XP resource candidate")
 }
-
 fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
     let connection = rusqlite::Connection::open(data_dir.join("history.sqlite3"))
         .expect("open summary resource database");
@@ -479,7 +472,6 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
                 ],
             )
             .expect("insert summary resource segment");
-
         let record_payload = serde_json::to_vec(&serde_json::json!({
             "observed_at_unix_seconds": observed,
             "received_at_unix_seconds": observed,
@@ -554,7 +546,6 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
             [i64::from(source_wire_len * 257)],
         )
         .expect("record source delivery resource backlog");
-
     let replica_snapshot = serde_json::json!({
         "external_history": true,
         "legacy_segment_cursor_index_complete": true,
@@ -586,7 +577,6 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
             rusqlite::params![replica_payload],
         )
         .expect("write summary resource replica snapshot");
-
     let state_payload = transaction
         .query_row(
             "SELECT payload FROM history_snapshots WHERE key = 'persistent_state'",
@@ -625,7 +615,6 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
         .commit()
         .expect("commit summary resource fixtures");
 }
-
 pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
     let temp = tempfile::tempdir().expect("summary resource data directory");
     let bind_port = reserve_local_port();
@@ -637,7 +626,6 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
     wait_for_xp(&mut child, bind_port, &log_path).await;
     let pid = child.id();
     assert_expected_memory_scope(pid);
-
     let ca_pem = cluster
         .read_cluster_ca_pem(temp.path())
         .expect("read summary resource CA");
@@ -714,9 +702,21 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
             tokio::task::yield_now().await;
         }
         request_active.store(true, Ordering::Release);
-        let response = request.send().await.expect("summary resource response");
-        assert_eq!(response.status(), reqwest::StatusCode::OK);
-        let summary: serde_json::Value = response.json().await.expect("decode summary response");
+        let responses = join_all((0..16).map(|_| {
+            request
+                .try_clone()
+                .expect("clone summary resource request")
+                .send()
+        }))
+        .await;
+        let mut summary = None;
+        for response in responses {
+            let response = response.expect("summary resource response");
+            assert_eq!(response.status(), reqwest::StatusCode::OK);
+            let value: serde_json::Value = response.json().await.expect("decode summary response");
+            summary.get_or_insert(value);
+        }
+        let summary = summary.expect("summary resource batch response");
         request_active.store(false, Ordering::Release);
         sampling.store(false, Ordering::Relaxed);
         sampler.await.expect("summary PSS sampler");
