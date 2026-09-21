@@ -300,14 +300,11 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
-        self.send_peer_direct_request_with_options(
+        self.send_peer_direct_preflight_with_admission(
             peer,
-            PeerDirectPath::RealityMesh,
             request,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
-            None,
-            true,
         )
         .await
     }

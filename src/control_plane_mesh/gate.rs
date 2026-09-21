@@ -237,6 +237,42 @@ impl MeshAwareHttpClient {
             .await
     }
 
+    pub(super) async fn send_peer_direct_preflight_with_admission(
+        &self,
+        peer: &MeshPeerTarget,
+        request: MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+    ) -> Result<reqwest::Response, MeshRequestError> {
+        let (decision, epoch) = self
+            .before_mesh_request(&peer.node_id, true, InternalRoute::HealthV2)
+            .await;
+        if matches!(
+            decision,
+            MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined
+        ) {
+            return Err(MeshRequestError::CircuitOpen {
+                path: "Direct Mesh",
+            });
+        }
+        let result = self
+            .send_peer_direct_request_with_options(
+                peer,
+                PeerDirectPath::RealityMesh,
+                request,
+                cluster_ca_key_pem,
+                cluster_ca_cert_pem,
+                None,
+                true,
+            )
+            .await;
+        if matches!(decision, MeshAttemptDecision::Probe) {
+            self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
+                .await;
+        }
+        result
+    }
+
     pub(super) async fn mesh_attempt_is_current(&self, epoch: u64) -> bool {
         let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
         self.mesh_gate_matches(epoch)
