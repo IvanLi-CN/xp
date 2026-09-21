@@ -416,6 +416,28 @@ fn repository_keyset_indexes_avoid_a_full_sort_for_compaction_and_export() {
 }
 
 #[test]
+fn repository_record_count_uses_the_payload_free_keyset_index() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    let backend = storage.lock_backend();
+    let Backend::Sqlite(connection) = &*backend else {
+        panic!("test storage should use SQLite");
+    };
+    let plan = query_plan(
+        connection,
+        "SELECT COUNT(source_node_id) FROM repository_history_records
+         INDEXED BY repository_history_records_keyset",
+    );
+    assert!(
+        plan.iter()
+            .any(|detail| detail.contains("repository_history_records_keyset"))
+    );
+    assert!(plan.iter().any(|detail| {
+        detail.contains("USING COVERING INDEX repository_history_records_keyset")
+    }));
+}
+
+#[test]
 fn repository_segment_summary_keyset_index_supports_cursor_seeks() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());

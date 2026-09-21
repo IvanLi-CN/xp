@@ -869,10 +869,22 @@ impl HistoryStorage {
         let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(0);
         };
+        let query = match table {
+            // The keyset index contains the complete ordering metadata but no payload. Counting
+            // through it keeps startup metadata-only even when history rows carry large values.
+            "repository_history_records" => {
+                "SELECT COUNT(source_node_id) FROM repository_history_records
+                 INDEXED BY repository_history_records_keyset"
+            }
+            "repository_history_segments" => "SELECT COUNT(*) FROM repository_history_segments",
+            _ => {
+                return Err(HistoryStorageError(
+                    "unknown repository history table".to_owned(),
+                ));
+            }
+        };
         connection
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                row.get::<_, i64>(0)
-            })
+            .query_row(query, [], |row| row.get::<_, i64>(0))
             .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
             .map_err(sqlite_error)
     }
