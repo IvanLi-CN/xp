@@ -625,6 +625,10 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
     wait_for_xp(&mut child, bind_port, &log_path).await;
     let pid = child.id();
     assert_expected_memory_scope(pid);
+    println!(
+        "repository_summary_resource_baseline_pss={:?}",
+        read_pss(pid)
+    );
     let ca_pem = cluster
         .read_cluster_ca_pem(temp.path())
         .expect("read summary resource CA");
@@ -774,12 +778,12 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         max_pss_kib = max_pss_kib
             .max(sampled_peak_pss_kib.load(Ordering::Relaxed))
             .max(read_pss(pid).expect("read summary XP PSS").total_kib);
+        println!("repository_summary_resource_pss={:?}", read_pss(pid));
         sleep(Duration::from_secs(1)).await;
     }
     source_journal_resource::stop_child(&mut child).await;
     max_pss_kib
 }
-
 async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
@@ -891,7 +895,6 @@ fn assert_expected_memory_scope(pid: u32) {
         "XP workload must disable swap in its cgroup"
     );
 }
-
 pub(crate) fn read_cpu_ticks(pid: u32) -> u64 {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).expect("read process stat");
     let fields = stat
@@ -904,7 +907,6 @@ pub(crate) fn read_cpu_ticks(pid: u32) -> u64 {
     let system = fields[12].parse::<u64>().expect("system CPU ticks");
     user + system
 }
-
 pub fn support_pids_from_env() -> Vec<u32> {
     std::env::var("XP_MESH_RESOURCE_SUPPORT_PIDS")
         .unwrap_or_default()
