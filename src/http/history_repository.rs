@@ -1,8 +1,9 @@
-use axum::http::StatusCode;
+use axum::body::Body;
+use axum::http::{StatusCode, header};
 use axum::{
     Json,
     extract::{Extension, Query},
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
@@ -370,9 +371,17 @@ pub(super) async fn admin_internal_history_repository_summary(
         .await
         .replication_summary_after(query.after_segment_id.as_deref(), query.deep_verification)
         .map_err(repository_error)?;
-    // Serialize while the single-flight permit is held. This keeps concurrent summary callers
-    // from retaining multiple response buffers at the same time under the XP memory budget.
-    let response = Json(summary).into_response();
+    // Encode while the single-flight permit is held. Axum's Json response otherwise defers
+    // serialization until the body is polled, after the permit has already been released.
+    let payload = serde_json::to_vec(&summary)
+        .map_err(|error| ApiError::internal(format!("serialize repository summary: {error}")))?;
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(payload))
+        .map_err(|error| {
+            ApiError::internal(format!("build repository summary response: {error}"))
+        })?;
     drop(summary_permit);
     Ok(response)
 }
