@@ -707,7 +707,7 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
                 .send()
         }))
         .await;
-        let mut summary = None;
+        let mut summary: Option<serde_json::Value> = None;
         for response in responses {
             let response = response.expect("summary resource response");
             if response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS {
