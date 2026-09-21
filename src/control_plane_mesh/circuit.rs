@@ -46,19 +46,26 @@ pub(super) struct DirectValidationRecord {
 #[derive(Clone, Default)]
 pub(super) struct DirectValidationStore {
     records: Arc<Mutex<BTreeMap<String, DirectValidationRecord>>>,
+    membership_revision: Arc<RwLock<Option<String>>>,
 }
 
 impl DirectValidationStore {
-    fn fingerprint(peer: &MeshPeerTarget) -> String {
+    fn fingerprint(peer: &MeshPeerTarget, membership_revision: Option<&str>) -> String {
         format!(
-            "{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}",
             peer.node_id,
             peer.node_name,
             peer.mesh_base_url.as_deref().unwrap_or_default(),
             peer.endpoint_transport.unwrap_or_default(),
             peer.public_base_url,
-            peer.endpoint_fingerprint.as_deref().unwrap_or_default()
+            peer.endpoint_fingerprint.as_deref().unwrap_or_default(),
+            membership_revision.unwrap_or_default()
         )
+    }
+
+    pub(super) async fn set_membership_revision(&self, revision: Option<String>) {
+        let mut current = self.membership_revision.write().await;
+        *current = revision;
     }
 
     pub(super) async fn state(
@@ -69,7 +76,8 @@ impl DirectValidationStore {
         if !enforce {
             return DirectValidationState::Verified;
         }
-        let fingerprint = Self::fingerprint(peer);
+        let membership_revision = self.membership_revision.read().await.clone();
+        let fingerprint = Self::fingerprint(peer, membership_revision.as_deref());
         let records = self.records.lock().await;
         let Some(record) = records.get(&peer.node_id) else {
             return DirectValidationState::ConfiguredUnverified;
@@ -88,11 +96,12 @@ impl DirectValidationStore {
     }
 
     pub(super) async fn record(&self, peer: &MeshPeerTarget, state: DirectValidationState) {
+        let membership_revision = self.membership_revision.read().await.clone();
         let mut records = self.records.lock().await;
         records.insert(
             peer.node_id.clone(),
             DirectValidationRecord {
-                fingerprint: Self::fingerprint(peer),
+                fingerprint: Self::fingerprint(peer, membership_revision.as_deref()),
                 state,
                 verified_at: (state == DirectValidationState::Verified).then_some(Instant::now()),
             },
@@ -299,6 +308,37 @@ mod tests {
             DirectValidationState::Verified
         );
         peer.endpoint_fingerprint = Some("endpoint-b|443|peer.example|vision_tcp".to_owned());
+        assert_eq!(
+            store.state(&peer, true).await,
+            DirectValidationState::ConfiguredUnverified
+        );
+    }
+
+    #[tokio::test]
+    async fn membership_revision_change_invalidates_direct_validation() {
+        let store = DirectValidationStore::default();
+        let peer = MeshPeerTarget {
+            node_id: "peer".to_owned(),
+            node_name: "peer".to_owned(),
+            mesh_base_url: Some("https://peer.example:443".to_owned()),
+            endpoint_transport: Some("xhttp_reality_fallback"),
+            endpoint_fingerprint: Some(
+                "endpoint-a|443|peer.example|xhttp_reality_fallback".to_owned(),
+            ),
+            mesh_reason: MeshPeerReason::MeshAvailable,
+            public_base_url: "https://peer.example/api".to_owned(),
+        };
+        store
+            .set_membership_revision(Some("membership-a".to_owned()))
+            .await;
+        store.record(&peer, DirectValidationState::Verified).await;
+        assert_eq!(
+            store.state(&peer, true).await,
+            DirectValidationState::Verified
+        );
+        store
+            .set_membership_revision(Some("membership-b".to_owned()))
+            .await;
         assert_eq!(
             store.state(&peer, true).await,
             DirectValidationState::ConfiguredUnverified

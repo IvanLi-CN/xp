@@ -21,6 +21,12 @@ pub(super) enum MeshAttemptResult {
 }
 
 impl MeshAwareHttpClient {
+    pub async fn set_membership_revision(&self, revision: Option<String>) {
+        self.direct_validation
+            .set_membership_revision(revision)
+            .await;
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn attempt_mesh_request(
         &self,
