@@ -50,6 +50,7 @@ impl HistoryStorage {
             after_id,
             limit,
             FULL_SEGMENT_PROJECTION,
+            None,
             segment_row,
         )
     }
@@ -70,6 +71,7 @@ impl HistoryStorage {
             after_id,
             limit,
             "id, contains_tombstone",
+            Some("INDEXED BY repository_history_segments_sync_order_v2"),
             metadata_segment_row,
         )
     }
@@ -176,6 +178,7 @@ fn segment_page<T, F>(
     after_id: Option<&str>,
     limit: usize,
     projection: &str,
+    index_hint: Option<&str>,
     mut row_mapper: F,
 ) -> Result<Vec<T>>
 where
@@ -192,6 +195,7 @@ where
         after_id,
         limit,
         projection,
+        index_hint,
         &mut row_mapper,
     )?;
     if tombstones && rows.len() < limit {
@@ -201,6 +205,7 @@ where
             None,
             limit - rows.len(),
             projection,
+            index_hint,
             &mut row_mapper,
         )?);
     }
@@ -213,6 +218,7 @@ fn segment_phase_with_row<T, F>(
     after_id: Option<&str>,
     limit: usize,
     projection: &str,
+    index_hint: Option<&str>,
     mut row_mapper: F,
 ) -> Result<Vec<T>>
 where
@@ -241,7 +247,7 @@ where
         else {
             return Ok(Vec::new());
         };
-        let sql = segment_phase_sql(projection, true);
+        let sql = segment_phase_sql(projection, index_hint, true);
         let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
         let rows = statement
             .query_map(
@@ -262,7 +268,7 @@ where
             .map_err(sqlite_error);
     }
 
-    let sql = segment_phase_sql(projection, false);
+    let sql = segment_phase_sql(projection, index_hint, false);
     let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
     let rows = statement
         .query_map(params![tombstones, limit], &mut row_mapper)
@@ -271,11 +277,16 @@ where
         .map_err(sqlite_error)
 }
 
-pub(crate) fn segment_phase_sql(projection: &str, continuation: bool) -> String {
+pub(crate) fn segment_phase_sql(
+    projection: &str,
+    index_hint: Option<&str>,
+    continuation: bool,
+) -> String {
+    let index_hint = index_hint.unwrap_or_default();
     if continuation {
         return format!(
             "SELECT {projection}
-             FROM repository_history_segments
+             FROM repository_history_segments {index_hint}
              WHERE contains_tombstone = ?1
                AND (source_node_id, source_epoch, stream, first_sequence, id)
                    > (?2, ?3, ?4, ?5, ?6)
@@ -287,7 +298,7 @@ pub(crate) fn segment_phase_sql(projection: &str, continuation: bool) -> String 
 
     format!(
         "SELECT {projection}
-         FROM repository_history_segments
+         FROM repository_history_segments {index_hint}
          WHERE contains_tombstone = ?1
          ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
                   id ASC

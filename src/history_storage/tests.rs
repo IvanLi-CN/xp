@@ -448,7 +448,11 @@ fn repository_segment_summary_keyset_index_supports_cursor_seeks() {
 
     let first_page_plan = query_plan_with_params(
         connection,
-        &segment_phase_sql("id, contains_tombstone", false),
+        &segment_phase_sql(
+            "id, contains_tombstone",
+            Some("INDEXED BY repository_history_segments_sync_order_v2"),
+            false,
+        ),
         rusqlite::params![false, 1_i64],
     );
     assert!(
@@ -464,7 +468,11 @@ fn repository_segment_summary_keyset_index_supports_cursor_seeks() {
 
     let cursor_page_plan = query_plan_with_params(
         connection,
-        &segment_phase_sql("id, contains_tombstone", true),
+        &segment_phase_sql(
+            "id, contains_tombstone",
+            Some("INDEXED BY repository_history_segments_sync_order_v2"),
+            true,
+        ),
         rusqlite::params![
             false,
             "node-a",
