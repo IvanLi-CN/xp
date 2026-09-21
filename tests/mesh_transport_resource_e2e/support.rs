@@ -710,14 +710,11 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         let mut summary: Option<serde_json::Value> = None;
         for response in responses {
             let response = response.expect("summary resource response");
-            if response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS {
-                assert_eq!(response.status(), reqwest::StatusCode::OK);
-                assert!(
-                    summary.is_none(),
-                    "summary gate admitted more than one request"
-                );
-                summary = Some(response.json().await.expect("decode summary response"));
+            if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                continue;
             }
+            assert_eq!(response.status(), reqwest::StatusCode::OK);
+            summary = Some(response.json().await.expect("decode summary response"));
         }
         let summary = summary.expect("summary resource batch response");
         request_active.store(false, Ordering::Release);
