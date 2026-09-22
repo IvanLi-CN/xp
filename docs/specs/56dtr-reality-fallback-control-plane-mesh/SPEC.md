@@ -312,12 +312,16 @@ Latest real AppShell route evidence:
 Current candidate browser viewport evidence:
 
 - Source: local login-free `/ui-demo/system-status` served by the candidate Web shell.
-- Bound implementation commit: `61ab9a76`.
+- Bound implementation commit: `f6353357`.
 - Capture metadata: `source_type=ui_demo`, `target_program=Playwright Chromium`,
   `capture_scope=browser-viewport`, `requested_viewport=1280x900`,
-  `evidence_surface=full-page`, `sensitive_exclusion=N/A`.
+  `rendered_assets=1280x900`, `viewport_strategy=explicit-fixed-viewport`,
+  `margin_policy=visible-browser-viewport`, `evidence_surface=full-page`,
+  `sensitive_exclusion=N/A`, `submission_gate=approved`.
 - The viewport shows the actual System Status page, including separate Native Reverse internal
   diagnostics, external user inbound accounting, and per-peer Direct/Public transport state.
+
+![Current candidate System Status browser viewport](./assets/system-status-current-1280x900.png)
 
 ## 参考
 
