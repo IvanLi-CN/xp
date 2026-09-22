@@ -79,6 +79,11 @@ impl DirectValidationStore {
     }
 
     #[cfg(test)]
+    pub(super) async fn membership_revision(&self) -> Option<String> {
+        self.membership_revision.read().await.clone()
+    }
+
+    #[cfg(test)]
     pub(super) async fn state(
         &self,
         peer: &MeshPeerTarget,
@@ -131,6 +136,13 @@ impl DirectValidationStore {
                 verified_at: (state == DirectValidationState::Verified).then_some(Instant::now()),
             },
         );
+    }
+
+    #[cfg(test)]
+    pub(super) async fn record(&self, peer: &MeshPeerTarget, state: DirectValidationState) {
+        let membership_revision = self.membership_revision().await;
+        self.record_at(peer, state, membership_revision.as_deref())
+            .await;
     }
 }
 
