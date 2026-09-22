@@ -418,11 +418,7 @@ impl MeshAwareHttpClient {
         let (_, validation_revision, _membership_guard) =
             self.direct_validation_snapshot(peer).await;
         let (decision, epoch) = self
-            .before_mesh_request(
-                &peer.node_id,
-                allow_mesh_when_disabled,
-                InternalRoute::HealthV2,
-            )
+            .before_mesh_request(&peer.node_id, true, InternalRoute::HealthV2)
             .await;
         if matches!(
             decision,
