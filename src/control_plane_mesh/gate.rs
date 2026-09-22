@@ -379,6 +379,11 @@ impl MeshAwareHttpClient {
             .circuits
             .before_attempt_with_probe(peer_id, enabled, health_probe)
             .await;
+        if matches!(decision, MeshAttemptDecision::Probe) {
+            self.circuits
+                .mark_half_open_probe_epoch(peer_id, epoch)
+                .await;
+        }
         (decision, epoch)
     }
 
@@ -499,9 +504,9 @@ impl MeshAwareHttpClient {
 
     pub(super) async fn release_half_open_probe_for_epoch(&self, peer_id: &str, epoch: u64) {
         let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
-        if self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch {
-            self.circuits.release_half_open_probe(peer_id).await;
-        }
+        self.circuits
+            .release_half_open_probe_for_epoch(peer_id, epoch)
+            .await;
     }
 }
 
@@ -510,6 +515,7 @@ impl PeerCircuitBreakers {
         let mut peers = self.peers.lock().await;
         for circuit in peers.values_mut() {
             circuit.half_open_in_flight = false;
+            circuit.half_open_epoch = None;
         }
     }
 }

@@ -152,6 +152,7 @@ pub(crate) struct PeerCircuit {
     open_count: usize,
     pub(crate) retry_at: Option<Instant>,
     pub(crate) half_open_in_flight: bool,
+    pub(crate) half_open_epoch: Option<u64>,
     quarantined: bool,
 }
 
@@ -202,14 +203,27 @@ impl PeerCircuitBreakers {
         circuit.open_count = 0;
         circuit.retry_at = None;
         circuit.half_open_in_flight = false;
+        circuit.half_open_epoch = None;
         circuit.quarantined = false;
         BreakerState::Closed
     }
 
-    pub(super) async fn release_half_open_probe(&self, peer_id: &str) {
+    pub(super) async fn mark_half_open_probe_epoch(&self, peer_id: &str, epoch: u64) {
         let mut peers = self.peers.lock().await;
-        if let Some(circuit) = peers.get_mut(peer_id) {
+        if let Some(circuit) = peers.get_mut(peer_id)
+            && circuit.half_open_in_flight
+        {
+            circuit.half_open_epoch = Some(epoch);
+        }
+    }
+
+    pub(super) async fn release_half_open_probe_for_epoch(&self, peer_id: &str, epoch: u64) {
+        let mut peers = self.peers.lock().await;
+        if let Some(circuit) = peers.get_mut(peer_id)
+            && circuit.half_open_epoch == Some(epoch)
+        {
             circuit.half_open_in_flight = false;
+            circuit.half_open_epoch = None;
         }
     }
 
@@ -218,6 +232,7 @@ impl PeerCircuitBreakers {
         let mut peers = self.peers.lock().await;
         let circuit = peers.entry(peer_id.to_string()).or_default();
         circuit.half_open_in_flight = false;
+        circuit.half_open_epoch = None;
         circuit.failures = circuit.failures.saturating_add(1);
         if circuit.failures < MESH_FAILURES_BEFORE_OPEN {
             return BreakerState::Closed;
@@ -236,6 +251,7 @@ impl PeerCircuitBreakers {
         circuit.open_count = circuit.open_count.saturating_add(1);
         circuit.retry_at = Some(now + backoff);
         circuit.half_open_in_flight = false;
+        circuit.half_open_epoch = None;
         circuit.quarantined = true;
         BreakerState::Open
     }
@@ -272,6 +288,7 @@ impl PeerCircuitBreakers {
         circuit.open_count = 0;
         circuit.retry_at = None;
         circuit.half_open_in_flight = false;
+        circuit.half_open_epoch = None;
         BreakerState::Closed
     }
 
@@ -284,6 +301,7 @@ impl PeerCircuitBreakers {
         circuit.open_count = circuit.open_count.saturating_add(1);
         circuit.retry_at = Some(now + backoff);
         circuit.half_open_in_flight = false;
+        circuit.half_open_epoch = None;
         BreakerState::Open
     }
 
@@ -303,6 +321,7 @@ impl PeerCircuitBreakers {
         let mut peers = self.public_peers.lock().await;
         if let Some(circuit) = peers.get_mut(peer_id) {
             circuit.half_open_in_flight = false;
+            circuit.half_open_epoch = None;
         }
     }
 

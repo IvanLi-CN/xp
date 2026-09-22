@@ -171,7 +171,7 @@
 - `PUT /api/admin/mesh/config` 的 `enabled=true` 在 Raft 写入前执行有向预检。失败返回
   `409 mesh_preflight_failed`，仅返回 sender、target 和 `invalid_target|transport|protocol`，
   不返回 socket、IP、证书或 endpoint URL 细节。整个预检由服务端 30 秒截止时间约束，
-  每个节点方向最多并发 4 条检查；截止或取消时不得写入 Raft。
+  节点方向检查按有界串行顺序执行；截止或取消时不得写入 Raft。
 
 ## Web
 

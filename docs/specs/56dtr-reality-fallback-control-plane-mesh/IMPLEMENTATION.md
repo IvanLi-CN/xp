@@ -102,8 +102,8 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
 - Shared testbox real-Xray validation passed the Reality fallback suite, including repeated and
   concurrent signed Mesh requests over one external TCP connection and successful reconnect after
   an intentional disconnect.
-- Mesh re-enable preflight is server-bounded to 30 seconds with at most four concurrent directed
-  checks per node; cancellation and deadline expiry fail closed before any Raft write.
+- Mesh re-enable preflight is server-bounded to 30 seconds with a bounded serialized direction
+  schedule; cancellation and deadline expiry fail closed before any Raft write.
 - The 50-peer resource comparison records XP anonymous and total PSS separately. Anonymous PSS has
   an 18 MiB absolute ceiling; XP total PSS and the isolated XP-plus-Xray stack each have a 1 MiB
   regression ceiling against the locked baseline. File-backed executable pages remain included in
