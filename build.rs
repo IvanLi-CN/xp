@@ -8,6 +8,8 @@ use flate2::{Compression, GzBuilder};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rustc-check-cfg=cfg(xp_missing_web_dist)");
+    println!("cargo:rerun-if-env-changed=XP_BUILD_VERSION");
+    println!("cargo:rerun-if-changed=.xp-source-marker");
 
     let protoc_path: PathBuf = protoc_bin_vendored::protoc_bin_path()?;
     unsafe {

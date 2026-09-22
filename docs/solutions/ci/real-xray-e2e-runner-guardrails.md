@@ -31,6 +31,9 @@ That combination makes the real-Xray harness look flaky even though the product 
 - If multiple agents can launch compose runs concurrently on the same Docker host, subnet selection needs a cross-run lock or persisted claim path; a pure "scan then pick" algorithm is still racy.
 - When the repo depends on vendored OpenSSL, shared Linux runners need the minimal host build toolchain (`cc`, `ar`, `ranlib`, `perl`, `make`) even if the project itself is otherwise pure Rust.
 - If the shared testbox is reprovisioned, repair it through the shared-testbox bootstrap path before blaming the Xray tests.
+- Mesh resource builds use the generic Cargo cache wrapper. Share only the compatible Cargo
+  download cache, keep candidate and baseline targets in the owning Agent Directory, and copy
+  resolved binaries into the disposable run before sampling.
 
 ## References
 

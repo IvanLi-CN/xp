@@ -93,9 +93,12 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
 - The 50-peer resource comparison records XP anonymous and total PSS separately. Anonymous PSS has
   an 18 MiB absolute ceiling; XP total PSS and the isolated XP-plus-Xray stack each have a 1 MiB
   regression ceiling against the locked baseline. File-backed executable pages remain included in
-  total PSS. Candidate and baseline use separate Cargo target directories so build scripts and
-  release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64 MiB
-  target remains outside this topic's contract.
+  total PSS. Candidate and baseline use separate target directories in the owning Agent Directory;
+  only Cargo's compatible download cache may be shared. Stable source markers include the source
+  generated Web-shell archive and build-version identities before a target is reused. The runner
+  copies the resolved executables into the disposable run before measurement, so build scripts and
+  release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
+  MiB target remains outside this topic's contract.
 - The locked 15-minute comparison completed with 50 persistent H2 connections: TLS accepts fell
   from 921 to 50, XP total PSS from 30,660 KiB to 24,469 KiB, XP anonymous PSS from 17,624 KiB to
   12,464 KiB, the isolated stack from 53,564 KiB to 47,337 KiB, and XP CPU ticks from 1,378 to 218.

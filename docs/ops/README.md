@@ -931,6 +931,11 @@ Notes:
   Retained partition mismatches after segment repair drains trigger the same single-authority
   tiered import followed by a fresh deep summary pass; the member cannot enter `ready` while that
   verification remains unresolved.
+
+  Mesh resource runner Cargo caching is documented in `docs/ops/cargo-cache.md`. The shared
+  Cargo Home contains dependency downloads only; candidate and baseline build targets remain
+  inside the owning shared-testbox Agent Directory. The disposable run directory is cleaned after
+  evidence capture and is never a cache. The formal comparison remains 900 seconds per side.
   Tombstones accepted during `syncing` are persisted locally but their acknowledgement fanout is
   deferred until the member is Raft-`ready`, after which the existing durable acknowledgement page
   retries delivery to all cluster nodes.
