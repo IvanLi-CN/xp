@@ -84,6 +84,18 @@ export const Healthy: Story = {
 			(await canvas.findAllByText("Public fallback")).length,
 		).toBeGreaterThan(0);
 		await expect(
+			(await canvas.findAllByText(/Direct verified/)).length,
+		).toBeGreaterThan(0);
+		await expect(
+			(await canvas.findAllByText(/Direct transport failed/)).length,
+		).toBeGreaterThan(0);
+		await expect(
+			(await canvas.findAllByText(/Direct not verified/)).length,
+		).toBeGreaterThan(0);
+		await expect(
+			(await canvas.findAllByText(/Public circuit closed/)).length,
+		).toBeGreaterThan(0);
+		await expect(
 			(await canvas.findAllByText("H2 · 58 req · gen 3")).length,
 		).toBeGreaterThan(0);
 		await expect(
@@ -118,6 +130,33 @@ export const ReuseUnavailable: Story = {
 		const canvas = within(canvasElement);
 		await expect(
 			(await canvas.findAllByText("Reuse data unavailable")).length,
+		).toBeGreaterThan(0);
+	},
+};
+
+export const CircuitIsolation: Story = {
+	args: {
+		status: {
+			...demoMeshStatus,
+			peers: demoMeshStatus.peers.map((peer, index) =>
+				index === 0
+					? {
+							...peer,
+							current_path: "public" as const,
+							direct_validation: "protocol_rejected" as const,
+							public_circuit: "open" as const,
+						}
+					: peer,
+			),
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			(await canvas.findAllByText(/Direct protocol rejected/)).length,
+		).toBeGreaterThan(0);
+		await expect(
+			(await canvas.findAllByText(/Public circuit open/)).length,
 		).toBeGreaterThan(0);
 	},
 };
@@ -226,10 +265,10 @@ export const DormantReverseTopology: Story = {
 				canvasElement.querySelector(
 					`[data-peer-row="${nodeId}"] [data-peer-cell="identity"]`,
 				)?.children.length,
-			).toBe(3);
+			).toBe(4);
 		}
 		for (const cell of canvasElement.querySelectorAll("[data-peer-cell]")) {
-			await expect(cell.children.length).toBeLessThanOrEqual(3);
+			await expect(cell.children.length).toBeLessThanOrEqual(4);
 			for (const line of cell.querySelectorAll(":scope > p")) {
 				await expect(getComputedStyle(line).whiteSpace).toBe("nowrap");
 			}

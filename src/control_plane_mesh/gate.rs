@@ -21,6 +21,72 @@ pub(super) enum MeshAttemptResult {
 }
 
 impl MeshAwareHttpClient {
+    pub(super) async fn direct_validation_snapshot(
+        &self,
+        peer: &MeshPeerTarget,
+    ) -> (DirectValidationState, Option<String>) {
+        let membership_revision = self.direct_validation.membership_revision().await;
+        let state = self
+            .direct_validation
+            .state_at(
+                peer,
+                self.enforce_direct_validation,
+                membership_revision.as_deref(),
+            )
+            .await;
+        (state, membership_revision)
+    }
+
+    pub async fn direct_validation_state_for(
+        &self,
+        peer: &MeshPeerTarget,
+    ) -> DirectValidationState {
+        self.direct_validation_snapshot(peer).await.0
+    }
+
+    pub async fn mark_direct_validation_success(&self, peer: &MeshPeerTarget) {
+        self.direct_validation
+            .record(peer, DirectValidationState::Verified)
+            .await;
+    }
+
+    pub async fn direct_validation_revision(&self) -> Option<String> {
+        self.direct_validation.membership_revision().await
+    }
+
+    pub async fn mark_direct_validation_success_at(
+        &self,
+        peer: &MeshPeerTarget,
+        membership_revision: Option<String>,
+    ) {
+        self.direct_validation
+            .record_at(
+                peer,
+                DirectValidationState::Verified,
+                membership_revision.as_deref(),
+            )
+            .await;
+    }
+
+    pub async fn mark_direct_validation_failure(
+        &self,
+        peer: &MeshPeerTarget,
+        state: DirectValidationState,
+    ) {
+        self.direct_validation.record(peer, state).await;
+    }
+
+    pub async fn mark_direct_validation_failure_at(
+        &self,
+        peer: &MeshPeerTarget,
+        state: DirectValidationState,
+        membership_revision: Option<String>,
+    ) {
+        self.direct_validation
+            .record_at(peer, state, membership_revision.as_deref())
+            .await;
+    }
+
     pub async fn set_membership_revision(&self, revision: Option<String>) {
         self.direct_validation
             .set_membership_revision(revision)
@@ -36,6 +102,7 @@ impl MeshAwareHttpClient {
         mesh_url: &str,
         budget: Duration,
         mesh_epoch: u64,
+        validation_revision: Option<String>,
         started: Instant,
         allow_unsigned_not_found: bool,
         cluster_ca_key_pem: &str,
@@ -69,6 +136,7 @@ impl MeshAwareHttpClient {
                             mesh_epoch,
                             response,
                             gate_guard,
+                            validation_revision.clone(),
                             MeshRequestError::Protocol("Mesh response did not use HTTP/2".into()),
                         )
                         .await);
@@ -85,6 +153,7 @@ impl MeshAwareHttpClient {
                                     mesh_epoch,
                                     response,
                                     gate_guard,
+                                    validation_revision.clone(),
                                     MeshRequestError::Protocol(
                                         "Mesh response carries a malformed signed acknowledgement"
                                             .into(),
@@ -107,6 +176,7 @@ impl MeshAwareHttpClient {
                                 mesh_epoch,
                                 response,
                                 gate_guard,
+                                validation_revision.clone(),
                                 error.into(),
                             )
                             .await);
@@ -117,6 +187,7 @@ impl MeshAwareHttpClient {
                         request,
                         transport,
                         mesh_epoch,
+                        validation_revision.clone(),
                         &gate_guard,
                     )
                     .await;
@@ -131,6 +202,7 @@ impl MeshAwareHttpClient {
                         request,
                         transport,
                         mesh_epoch,
+                        validation_revision.clone(),
                         &gate_guard,
                     )
                     .await;
@@ -146,6 +218,7 @@ impl MeshAwareHttpClient {
                         mesh_epoch,
                         response,
                         gate_guard,
+                        validation_revision,
                         MeshRequestError::Protocol(
                             "Mesh response did not carry a valid signed acknowledgement".into(),
                         ),
@@ -161,8 +234,12 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                 )
                 .await;
-                self.mark_direct_validation_failure(peer, DirectValidationState::TransportFailed)
-                    .await;
+                self.mark_direct_validation_failure_at(
+                    peer,
+                    DirectValidationState::TransportFailed,
+                    validation_revision,
+                )
+                .await;
                 Ok(MeshAttemptResult::Fallback { ambiguous: true })
             }
             Some((Err(_), gate_guard)) => {
@@ -174,8 +251,12 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                 )
                 .await;
-                self.mark_direct_validation_failure(peer, DirectValidationState::TransportFailed)
-                    .await;
+                self.mark_direct_validation_failure_at(
+                    peer,
+                    DirectValidationState::TransportFailed,
+                    validation_revision,
+                )
+                .await;
                 Ok(MeshAttemptResult::Fallback { ambiguous: true })
             }
         }
@@ -189,6 +270,94 @@ impl MeshAwareHttpClient {
         self.cluster_mesh_enabled = gate;
         self.cluster_mesh_epoch = epoch;
         self
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn record_mesh_success(
+        &self,
+        peer: &MeshPeerTarget,
+        started: Instant,
+        request: &MeshRequest,
+        transport: MeshTransportObservation,
+        epoch: u64,
+        validation_revision: Option<String>,
+        _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
+    ) {
+        if !self.mesh_gate_matches(epoch) {
+            return;
+        }
+        let breaker_state = self.circuits.record_success(&peer.node_id).await;
+        if let Some(telemetry) = &self.telemetry {
+            let _ = telemetry
+                .set_breaker(&peer.node_id, breaker_state, None)
+                .await;
+        }
+        self.mark_direct_validation_success_at(peer, validation_revision)
+            .await;
+        self.record_sample(
+            peer,
+            telemetry_sample(
+                TelemetryPath::Mesh,
+                true,
+                started.elapsed(),
+                false,
+                request.updates_active_path,
+                Some(transport),
+            ),
+        )
+        .await;
+    }
+
+    async fn reject_mesh_response(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        response: reqwest::Response,
+        gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+        validation_revision: Option<String>,
+        error: MeshRequestError,
+    ) -> MeshRequestError {
+        drop(response);
+        drop(gate_guard);
+        self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
+            .await;
+        let Some(breaker_state) = self
+            .record_protocol_failure_for_epoch(peer, epoch, validation_revision)
+            .await
+        else {
+            return error;
+        };
+        self.record_mesh_protocol_failure(peer, epoch).await;
+        if let Some(telemetry) = &self.telemetry {
+            let _ = telemetry
+                .set_breaker(
+                    &peer.node_id,
+                    breaker_state,
+                    Some("Direct protocol rejection isolated the path".to_string()),
+                )
+                .await;
+        }
+        self.record_terminal_failure_for_epoch(peer, epoch).await;
+        error
+    }
+
+    pub(super) async fn record_protocol_failure_for_epoch(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+    ) -> Option<BreakerState> {
+        if !self.mesh_gate_matches(epoch) {
+            return None;
+        }
+        let breaker_state = self.circuits.record_protocol_failure(&peer.node_id).await;
+        self.mark_direct_validation_failure_at(
+            peer,
+            DirectValidationState::ProtocolRejected,
+            validation_revision,
+        )
+        .await;
+        Some(breaker_state)
     }
 
     pub fn with_mesh_gate_lock(mut self, lock: Arc<tokio::sync::RwLock<()>>) -> Self {

@@ -193,6 +193,7 @@ async fn run_direct_health_preflight(
         .cluster_ca_key_pem
         .as_deref()
         .ok_or_else(|| MeshRequestError::InvalidTarget("cluster CA is unavailable".into()))?;
+    let validation_revision = state.mesh_client.direct_validation_revision().await;
     let result = state
         .mesh_client
         .send_peer_direct_preflight(
@@ -225,7 +226,7 @@ async fn run_direct_health_preflight(
             };
             state
                 .mesh_client
-                .mark_direct_validation_failure(target, validation_state)
+                .mark_direct_validation_failure_at(target, validation_state, validation_revision)
                 .await;
             return Err(error);
         }
@@ -238,7 +239,7 @@ async fn run_direct_health_preflight(
         .await;
     state
         .mesh_client
-        .mark_direct_validation_success(target)
+        .mark_direct_validation_success_at(target, validation_revision)
         .await;
     Ok(())
 }

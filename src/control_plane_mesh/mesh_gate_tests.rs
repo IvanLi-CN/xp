@@ -176,12 +176,58 @@ async fn direct_protocol_failure_quarantines_without_public_fallback() {
         BreakerState::Open
     );
     assert_eq!(
-        circuits.before_attempt("peer", true).await,
+        circuits
+            .before_attempt_with_probe("peer", true, false)
+            .await,
         MeshAttemptDecision::Quarantined
     );
     assert_eq!(circuits.record_success("peer").await, BreakerState::Closed);
     assert_eq!(
         circuits.before_attempt("peer", true).await,
         MeshAttemptDecision::Attempt
+    );
+}
+
+#[tokio::test]
+async fn quarantined_direct_peer_allows_only_health_revalidation() {
+    let circuits = PeerCircuitBreakers::default();
+    assert_eq!(
+        circuits.record_protocol_failure("peer").await,
+        BreakerState::Open
+    );
+    {
+        let mut peers = circuits.peers.lock().await;
+        peers
+            .get_mut("peer")
+            .expect("protocol failure creates circuit")
+            .retry_at = Some(Instant::now() - Duration::from_secs(1));
+    }
+    assert_eq!(
+        circuits
+            .before_attempt_with_probe("peer", true, false)
+            .await,
+        MeshAttemptDecision::Quarantined
+    );
+    assert_eq!(
+        circuits.before_attempt_with_probe("peer", true, true).await,
+        MeshAttemptDecision::Probe
+    );
+}
+
+#[tokio::test]
+async fn stale_epoch_protocol_failure_does_not_quarantine_current_circuit() {
+    let gate = Arc::new(AtomicBool::new(true));
+    let epoch = Arc::new(AtomicU64::new(0));
+    let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_mesh_gate_epoch(gate, epoch);
+    let peer = primary_reverse_target(None, xp_test_fixtures::primary_api_url().to_string());
+    assert!(
+        client
+            .record_protocol_failure_for_epoch(&peer, 1, Some("stale-membership".to_owned()),)
+            .await
+            .is_none()
+    );
+    assert_eq!(
+        client.circuits().state("peer", true).await,
+        BreakerState::Closed
     );
 }

@@ -68,16 +68,31 @@ impl DirectValidationStore {
         *current = revision;
     }
 
+    pub(super) async fn membership_revision(&self) -> Option<String> {
+        self.membership_revision.read().await.clone()
+    }
+
+    #[cfg(test)]
     pub(super) async fn state(
         &self,
         peer: &MeshPeerTarget,
         enforce: bool,
     ) -> DirectValidationState {
+        let membership_revision = self.membership_revision().await;
+        self.state_at(peer, enforce, membership_revision.as_deref())
+            .await
+    }
+
+    pub(super) async fn state_at(
+        &self,
+        peer: &MeshPeerTarget,
+        enforce: bool,
+        membership_revision: Option<&str>,
+    ) -> DirectValidationState {
         if !enforce {
             return DirectValidationState::Verified;
         }
-        let membership_revision = self.membership_revision.read().await.clone();
-        let fingerprint = Self::fingerprint(peer, membership_revision.as_deref());
+        let fingerprint = Self::fingerprint(peer, membership_revision);
         let records = self.records.lock().await;
         let Some(record) = records.get(&peer.node_id) else {
             return DirectValidationState::ConfiguredUnverified;
@@ -96,12 +111,22 @@ impl DirectValidationStore {
     }
 
     pub(super) async fn record(&self, peer: &MeshPeerTarget, state: DirectValidationState) {
-        let membership_revision = self.membership_revision.read().await.clone();
+        let membership_revision = self.membership_revision().await;
+        self.record_at(peer, state, membership_revision.as_deref())
+            .await;
+    }
+
+    pub(super) async fn record_at(
+        &self,
+        peer: &MeshPeerTarget,
+        state: DirectValidationState,
+        membership_revision: Option<&str>,
+    ) {
         let mut records = self.records.lock().await;
         records.insert(
             peer.node_id.clone(),
             DirectValidationRecord {
-                fingerprint: Self::fingerprint(peer, membership_revision.as_deref()),
+                fingerprint: Self::fingerprint(peer, membership_revision),
                 state,
                 verified_at: (state == DirectValidationState::Verified).then_some(Instant::now()),
             },
@@ -143,7 +168,7 @@ impl PeerCircuitBreakers {
         let now = Instant::now();
         let mut peers = self.peers.lock().await;
         let circuit = peers.entry(peer_id.to_string()).or_default();
-        if circuit.quarantined {
+        if circuit.quarantined && !probe_allowed {
             return MeshAttemptDecision::Quarantined;
         }
         match circuit.retry_at {

@@ -174,29 +174,6 @@ impl MeshAwareHttpClient {
         self.enforce_direct_validation = true;
         self
     }
-    async fn direct_validation_state(&self, peer: &MeshPeerTarget) -> DirectValidationState {
-        self.direct_validation
-            .state(peer, self.enforce_direct_validation)
-            .await
-    }
-    pub async fn direct_validation_state_for(
-        &self,
-        peer: &MeshPeerTarget,
-    ) -> DirectValidationState {
-        self.direct_validation_state(peer).await
-    }
-    pub async fn mark_direct_validation_success(&self, peer: &MeshPeerTarget) {
-        self.direct_validation
-            .record(peer, DirectValidationState::Verified)
-            .await;
-    }
-    pub async fn mark_direct_validation_failure(
-        &self,
-        peer: &MeshPeerTarget,
-        state: DirectValidationState,
-    ) {
-        self.direct_validation.record(peer, state).await;
-    }
     pub fn circuits(&self) -> PeerCircuitBreakers {
         self.circuits.clone()
     }
@@ -487,7 +464,7 @@ impl MeshAwareHttpClient {
         let mut allow_public_fallback = public_fallback_policy.allows(cluster_mesh_enabled)
             || (request.path_and_query == LEGACY_CAPABILITIES_PROBE_PATH
                 && !matches!(peer.mesh_reason, MeshPeerReason::MeshAvailable));
-        let direct_validation = self.direct_validation_state(peer).await;
+        let (direct_validation, validation_revision) = self.direct_validation_snapshot(peer).await;
         if cluster_mesh_enabled
             && peer.mesh_base_url.is_some()
             && direct_validation == DirectValidationState::ProtocolRejected
@@ -542,6 +519,7 @@ impl MeshAwareHttpClient {
                     &mesh_url,
                     budget,
                     mesh_epoch,
+                    validation_revision.clone(),
                     started,
                     allow_unsigned_not_found,
                     cluster_ca_key_pem,
@@ -750,68 +728,6 @@ impl MeshAwareHttpClient {
         )
         .await;
         Ok(PeerRequestResponse::Verified(response))
-    }
-
-    async fn record_mesh_success(
-        &self,
-        peer: &MeshPeerTarget,
-        started: Instant,
-        request: &MeshRequest,
-        transport: MeshTransportObservation,
-        epoch: u64,
-        _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
-    ) {
-        if !self.mesh_gate_matches(epoch) {
-            return;
-        }
-        let breaker_state = self.circuits.record_success(&peer.node_id).await;
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .set_breaker(&peer.node_id, breaker_state, None)
-                .await;
-        }
-        self.mark_direct_validation_success(peer).await;
-        self.record_sample(
-            peer,
-            telemetry_sample(
-                TelemetryPath::Mesh,
-                true,
-                started.elapsed(),
-                false,
-                request.updates_active_path,
-                Some(transport),
-            ),
-        )
-        .await;
-    }
-
-    async fn reject_mesh_response(
-        &self,
-        peer: &MeshPeerTarget,
-        epoch: u64,
-        response: reqwest::Response,
-        gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
-        error: MeshRequestError,
-    ) -> MeshRequestError {
-        drop(response);
-        drop(gate_guard);
-        self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
-            .await;
-        let breaker_state = self.circuits.record_protocol_failure(&peer.node_id).await;
-        self.record_mesh_protocol_failure(peer, epoch).await;
-        self.mark_direct_validation_failure(peer, DirectValidationState::ProtocolRejected)
-            .await;
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .set_breaker(
-                    &peer.node_id,
-                    breaker_state,
-                    Some("Direct protocol rejection isolated the path".to_string()),
-                )
-                .await;
-        }
-        self.record_terminal_failure_for_epoch(peer, epoch).await;
-        error
     }
 
     #[allow(clippy::too_many_arguments)]

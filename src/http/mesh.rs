@@ -1166,6 +1166,11 @@ fn direct_validation_label(
         crate::control_plane_mesh::DirectValidationState::ProtocolRejected => "protocol_rejected",
     }
 }
+
+fn health_probe_public_only(requested_public_only: bool, mesh_enabled: bool) -> bool {
+    requested_public_only || !mesh_enabled
+}
+
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
@@ -1179,6 +1184,13 @@ mod tests {
         );
         assert_eq!(breaker_for_mesh_target(false, None), BreakerState::Disabled);
         assert_eq!(breaker_for_mesh_target(true, None), BreakerState::Closed);
+    }
+
+    #[test]
+    fn health_probe_follows_the_mesh_gate() {
+        assert!(health_probe_public_only(false, false));
+        assert!(!health_probe_public_only(false, true));
+        assert!(health_probe_public_only(true, true));
     }
     #[test]
     fn mesh_availability_uses_only_the_last_24_hours() {
@@ -1492,6 +1504,10 @@ async fn run_mesh_health_probe(
     let Some(ca_key_pem) = state.cluster_ca_key_pem.as_deref() else {
         return Err(ApiError::internal("cluster CA key is not available"));
     };
+    let public_only = health_probe_public_only(
+        public_only,
+        state.reconcile.mesh_gate().load(Ordering::Acquire),
+    );
     let mut peer = mesh_peer_target(state, node_id).await?;
     let client = state.mesh_client.clone();
     let request = MeshRequest {
@@ -1514,12 +1530,15 @@ async fn run_mesh_health_probe(
             .await
             .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
     } else {
+        let validation_revision = client.direct_validation_revision().await;
         client
             .send_peer_direct_preflight(&peer, request, ca_key_pem, &state.cluster_ca_pem)
             .await
             .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
         client.circuits().record_success(&peer.node_id).await;
-        client.mark_direct_validation_success(&peer).await;
+        client
+            .mark_direct_validation_success_at(&peer, validation_revision)
+            .await;
     }
     Ok(())
 }
