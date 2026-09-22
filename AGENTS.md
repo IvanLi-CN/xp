@@ -263,6 +263,11 @@
 - UI regression: `cd web && bun run storybook`, `cd web && bun run test-storybook`
 - E2E: `cd web && bun run test:e2e` (Playwright)
 
+For Mesh resource runs on shared testbox, use the project cache contract in
+`docs/ops/cargo-cache.md`: share only the compatible Cargo download cache,
+keep candidate and baseline targets in the current Agent Directory, and pass
+both `XP_TESTBOX_CARGO_CACHE_ROOT` and `XP_TESTBOX_CARGO_HOME` explicitly.
+
 ## Coding Style & Naming Conventions
 
 - Rust: format with rustfmt (`cargo fmt`); keep Clippy clean (warnings are errors).

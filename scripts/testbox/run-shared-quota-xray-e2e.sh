@@ -4,7 +4,7 @@ set -euo pipefail
 # Run real-xray e2e tests on the shared testbox (codex-testbox).
 #
 # This follows the shared-testbox-runner rules:
-# - per-run isolation under /srv/codex/workspaces/$USER
+# - per-run isolation under the current shared-testbox Agent Directory
 # - unique docker compose project name
 # - LXC cap compatibility override
 # - safe cleanup (only resources created by this run)
@@ -23,6 +23,37 @@ fi
 # Compare resource changes with the checked-out development baseline. Older hard-coded
 # Mesh baselines can no longer exercise the current signed control-plane protocol.
 MESH_RESOURCE_BASELINE_SHA="${XP_MESH_RESOURCE_BASELINE_SHA:-origin/main}"
+TESTBOX_CARGO_CACHE_ROOT="${XP_TESTBOX_CARGO_CACHE_ROOT:-}"
+TESTBOX_CARGO_HOME="${XP_TESTBOX_CARGO_HOME:-}"
+MESH_RESOURCE_CACHE_SMOKE="${XP_TESTBOX_CACHE_SMOKE:-0}"
+case "$MESH_RESOURCE_CACHE_SMOKE" in
+  0|1) ;;
+  *)
+    echo "XP_TESTBOX_CACHE_SMOKE must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
+if [ "$RUN_MESH_RESOURCE" = "1" ]; then
+  if [ -z "$TESTBOX_CARGO_CACHE_ROOT" ] || [ -z "$TESTBOX_CARGO_HOME" ]; then
+    echo "XP_TESTBOX_CARGO_CACHE_ROOT and XP_TESTBOX_CARGO_HOME are required for Mesh resource runs" >&2
+    exit 2
+  fi
+  if [ "$MESH_RESOURCE_CACHE_SMOKE" = "1" ]; then
+    MESH_RESOURCE_DURATION_SECS="${XP_MESH_RESOURCE_DURATION_SECS:-600}"
+    if [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ] && [ "$MESH_RESOURCE_DURATION_SECS" != "600" ]; then
+      echo "cache smoke requires XP_MESH_RESOURCE_DURATION_SECS=600" >&2
+      exit 2
+    fi
+  else
+    MESH_RESOURCE_DURATION_SECS="${XP_MESH_RESOURCE_DURATION_SECS:-900}"
+    if [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ] && [ "$MESH_RESOURCE_DURATION_SECS" != "900" ]; then
+      echo "the final Mesh resource gate requires XP_MESH_RESOURCE_DURATION_SECS=900" >&2
+      exit 2
+    fi
+  fi
+else
+  MESH_RESOURCE_DURATION_SECS="${XP_MESH_RESOURCE_DURATION_SECS:-900}"
+fi
 
 # 1) Identify local repo root (fallback to current dir if not a git repo).
 if REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -61,9 +92,35 @@ fi
 SOURCE_ARCHIVE="$(mktemp -t xp-testbox-source.XXXXXX.tar)"
 WEB_DIST_ARCHIVE="$(mktemp -t xp-testbox-web-dist.XXXXXX.tar)"
 BASELINE_ARCHIVE=""
+create_deterministic_tar() {
+  local source_dir="$1"
+  local archive_path="$2"
+  python3 - "$source_dir" "$archive_path" <<'PY'
+import os
+import pathlib
+import sys
+import tarfile
+
+root = pathlib.Path(sys.argv[1]).resolve()
+archive = pathlib.Path(sys.argv[2])
+with tarfile.open(archive, "w") as output:
+    for path in sorted(root.rglob("*")):
+        info = output.gettarinfo(str(path), arcname=str(path.relative_to(root)))
+        info.uid = 0
+        info.gid = 0
+        info.uname = ""
+        info.gname = ""
+        info.mtime = 0
+        if info.isfile():
+            with path.open("rb") as source:
+                output.addfile(info, source)
+        else:
+            output.addfile(info)
+PY
+}
 git -C "$REPO_ROOT" archive --format=tar "$GIT_SHA_FULL" > "$SOURCE_ARCHIVE"
 SOURCE_ARCHIVE_SHA="$(shasum -a 256 "$SOURCE_ARCHIVE" | awk '{print $1}')"
-tar -C "$REPO_ROOT/web/dist" -cf "$WEB_DIST_ARCHIVE" .
+create_deterministic_tar "$REPO_ROOT/web/dist" "$WEB_DIST_ARCHIVE"
 WEB_DIST_ARCHIVE_SHA="$(shasum -a 256 "$WEB_DIST_ARCHIVE" | awk '{print $1}')"
 
 REPO_NAME="$(basename "$REPO_ROOT")"
@@ -92,9 +149,21 @@ case "${USER:-}" in
     exit 2
     ;;
 esac
-REMOTE_BASE="/srv/codex/workspaces/$USER"
-REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
-REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
+if [ "$RUN_MESH_RESOURCE" = "1" ]; then
+  case "${CODEX_THREAD_ID:-}" in
+    ""|*[!A-Za-z0-9._-]*)
+      echo "CODEX_THREAD_ID is required for Mesh resource runs" >&2
+      exit 2
+      ;;
+  esac
+  REMOTE_AGENT_DIR="/srv/codex/agents/$CODEX_THREAD_ID"
+  REMOTE_WORKSPACE="$REMOTE_AGENT_DIR/workspace"
+  REMOTE_RUN="$REMOTE_AGENT_DIR/runs/$RUN_ID"
+else
+  REMOTE_BASE="/srv/codex/workspaces/$USER"
+  REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
+  REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
+fi
 # Subnet claims are host-global so concurrent runs from different users cannot
 # select the same Docker network range.
 REMOTE_SUBNET_CLAIMS="/srv/codex/agents/.shared-testbox-subnet-claims"
@@ -114,11 +183,16 @@ SUBNET_CLAIM_ROOT_B64="$(printf '%s' "$REMOTE_SUBNET_CLAIMS" | base64 | tr -d '\
 REMOTE_RESOURCE_BASELINE_B64="$(printf '%s' "$REMOTE_RESOURCE_BASELINE" | base64 | tr -d '\n')"
 RUN_MESH_RESOURCE_B64="$(printf '%s' "$RUN_MESH_RESOURCE" | base64 | tr -d '\n')"
 ONLY_MESH_RESOURCE_B64="$(printf '%s' "$ONLY_MESH_RESOURCE" | base64 | tr -d '\n')"
-MESH_RESOURCE_DURATION_B64="$(printf '%s' "${XP_MESH_RESOURCE_DURATION_SECS:-900}" | base64 | tr -d '\n')"
+MESH_RESOURCE_DURATION_B64="$(printf '%s' "$MESH_RESOURCE_DURATION_SECS" | base64 | tr -d '\n')"
+MESH_RESOURCE_CACHE_SMOKE_B64="$(printf '%s' "$MESH_RESOURCE_CACHE_SMOKE" | base64 | tr -d '\n')"
 MESH_RESOURCE_SUMMARY_ONLY_B64="$(printf '%s' "$MESH_RESOURCE_SUMMARY_ONLY" | base64 | tr -d '\n')"
 GIT_SHA_FULL_B64="$(printf '%s' "$GIT_SHA_FULL" | base64 | tr -d '\n')"
 RUN_ID_B64="$(printf '%s' "$RUN_ID" | base64 | tr -d '\n')"
 REMOTE_WORKSPACE_B64="$(printf '%s' "$REMOTE_WORKSPACE" | base64 | tr -d '\n')"
+TESTBOX_CARGO_CACHE_ROOT_B64="$(printf '%s' "$TESTBOX_CARGO_CACHE_ROOT" | base64 | tr -d '\n')"
+TESTBOX_CARGO_HOME_B64="$(printf '%s' "$TESTBOX_CARGO_HOME" | base64 | tr -d '\n')"
+SOURCE_ARCHIVE_SHA_B64="$(printf '%s' "$SOURCE_ARCHIVE_SHA" | base64 | tr -d '\n')"
+WEB_DIST_ARCHIVE_SHA_B64="$(printf '%s' "$WEB_DIST_ARCHIVE_SHA" | base64 | tr -d '\n')"
 EVIDENCE_DIR="${XP_TESTBOX_EVIDENCE_DIR:-${TMPDIR:-/tmp}/xp-testbox-evidence}"
 EVIDENCE_PATH="$EVIDENCE_DIR/${RUN_ID}.manifest"
 EVIDENCE_OUTPUT_PATH="$EVIDENCE_DIR/${RUN_ID}.log"
@@ -135,6 +209,7 @@ write_evidence_manifest() {
     "source_archive_sha256=$SOURCE_ARCHIVE_SHA" \
     "web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA" \
     "baseline_archive_sha256=${BASELINE_ARCHIVE_SHA:-none}" \
+    "resource_gate_mode=$([ "$MESH_RESOURCE_CACHE_SMOKE" = "1" ] && printf smoke || printf formal)" \
     "status=$status" \
     "output_log=$EVIDENCE_OUTPUT_PATH" > "$EVIDENCE_PATH"
 }
@@ -160,7 +235,7 @@ REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
 case "$REMOTE_RUN" in
-  /srv/codex/workspaces/*/runs/*) ;;
+  /srv/codex/agents/*/runs/*|/srv/codex/workspaces/*/runs/*) ;;
   *) exit 2 ;;
 esac
 scope_unit="codex-xp-source-journal-${RUN_ID}.scope"
@@ -212,17 +287,29 @@ ssh -o BatchMode=yes "$TESTBOX" \
 set -euo pipefail
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 REMOTE_WORKSPACE="$(printf '%s' "${REMOTE_WORKSPACE_B64:?}" | base64 -d)"
-mkdir -p "$REMOTE_RUN"
+if [[ "$REMOTE_RUN" == /srv/codex/agents/*/runs/* ]]; then
+  agent_base=/srv/codex/agents
+  agent_dir="$(dirname "$REMOTE_WORKSPACE")"
+  [[ -d "$agent_base" && ! -L "$agent_base" ]]
+  [[ "$(readlink -f -- "$agent_base")" == "$agent_base" ]]
+  if [[ -e "$agent_dir" || -L "$agent_dir" ]]; then
+    [[ -d "$agent_dir" && ! -L "$agent_dir" ]]
+  else
+    mkdir -- "$agent_dir"
+  fi
+  [[ "$(readlink -f -- "$agent_dir")" == "$agent_dir" ]]
+fi
+mkdir -p "$REMOTE_WORKSPACE" "$REMOTE_RUN"
 printf '%s' "${WORKSPACE_METADATA_B64:?}" | base64 -d > "$REMOTE_WORKSPACE/workspace.txt"
 REMOTE_BOOTSTRAP
 
 # 4) Sync the immutable tracked tree, then overlay the generated Web shell.
 rsync -a "$SOURCE_ARCHIVE" "$TESTBOX:$REMOTE_RUN/source.tar"
 ssh -o BatchMode=yes "$TESTBOX" \
-  "test \"\$(sha256sum '$REMOTE_RUN/source.tar' | awk '{print \$1}')\" = '$SOURCE_ARCHIVE_SHA' && tar -xf '$REMOTE_RUN/source.tar' -C '$REMOTE_RUN' && rm -f '$REMOTE_RUN/source.tar'"
+  "test \"\$(sha256sum '$REMOTE_RUN/source.tar' | awk '{print \$1}')\" = '$SOURCE_ARCHIVE_SHA' && mkdir -p '$REMOTE_RUN/candidate-source' && tar -xf '$REMOTE_RUN/source.tar' -C '$REMOTE_RUN' && tar -xf '$REMOTE_RUN/source.tar' -C '$REMOTE_RUN/candidate-source' && rm -f '$REMOTE_RUN/source.tar'"
 rsync -a "$WEB_DIST_ARCHIVE" "$TESTBOX:$REMOTE_RUN/web-dist.tar"
 ssh -o BatchMode=yes "$TESTBOX" \
-  "test \"\$(sha256sum '$REMOTE_RUN/web-dist.tar' | awk '{print \$1}')\" = '$WEB_DIST_ARCHIVE_SHA' && mkdir -p '$REMOTE_RUN/web/dist' && tar -xf '$REMOTE_RUN/web-dist.tar' -C '$REMOTE_RUN/web/dist' && rm -f '$REMOTE_RUN/web-dist.tar'"
+  "test \"\$(sha256sum '$REMOTE_RUN/web-dist.tar' | awk '{print \$1}')\" = '$WEB_DIST_ARCHIVE_SHA' && mkdir -p '$REMOTE_RUN/web/dist' '$REMOTE_RUN/candidate-source/web/dist' && tar -xf '$REMOTE_RUN/web-dist.tar' -C '$REMOTE_RUN/web/dist' && tar -xf '$REMOTE_RUN/web-dist.tar' -C '$REMOTE_RUN/candidate-source/web/dist' && rm -f '$REMOTE_RUN/web-dist.tar'"
 
 if [ "$RUN_MESH_RESOURCE" = "1" ] && [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
   git -C "$REPO_ROOT" cat-file -e "$MESH_RESOURCE_BASELINE_SHA^{commit}"
@@ -234,10 +321,11 @@ if [ "$RUN_MESH_RESOURCE" = "1" ] && [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; t
     "test \"\$(sha256sum '$REMOTE_RUN/resource-baseline.tar' | awk '{print \$1}')\" = '$BASELINE_ARCHIVE_SHA' && mkdir -p '$REMOTE_RESOURCE_BASELINE' && tar -xf '$REMOTE_RUN/resource-baseline.tar' -C '$REMOTE_RESOURCE_BASELINE' && rm -f '$REMOTE_RUN/resource-baseline.tar'"
   rsync -az --delete "$REPO_ROOT/web/dist/" "$TESTBOX:$REMOTE_RESOURCE_BASELINE/web/dist/"
 fi
+BASELINE_ARCHIVE_SHA_B64="$(printf '%s' "${BASELINE_ARCHIVE_SHA:-none}" | base64 | tr -d '\n')"
 
 # 5) Run on testbox.
 if ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' GIT_SHA_FULL_B64='$GIT_SHA_FULL_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" 2>&1 <<'REMOTE' | tee "$EVIDENCE_OUTPUT_PATH"
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_CACHE_SMOKE_B64='$MESH_RESOURCE_CACHE_SMOKE_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' GIT_SHA_FULL_B64='$GIT_SHA_FULL_B64' RUN_ID_B64='$RUN_ID_B64' TESTBOX_CARGO_CACHE_ROOT_B64='$TESTBOX_CARGO_CACHE_ROOT_B64' TESTBOX_CARGO_HOME_B64='$TESTBOX_CARGO_HOME_B64' SOURCE_ARCHIVE_SHA_B64='$SOURCE_ARCHIVE_SHA_B64' WEB_DIST_ARCHIVE_SHA_B64='$WEB_DIST_ARCHIVE_SHA_B64' BASELINE_ARCHIVE_SHA_B64='$BASELINE_ARCHIVE_SHA_B64' bash -s" 2>&1 <<'REMOTE' | tee "$EVIDENCE_OUTPUT_PATH"
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
@@ -247,9 +335,15 @@ REMOTE_RESOURCE_BASELINE="$(printf '%s' "${REMOTE_RESOURCE_BASELINE_B64:?}" | ba
 RUN_MESH_RESOURCE="$(printf '%s' "${RUN_MESH_RESOURCE_B64:?}" | base64 -d)"
 ONLY_MESH_RESOURCE="$(printf '%s' "${ONLY_MESH_RESOURCE_B64:?}" | base64 -d)"
 MESH_RESOURCE_DURATION="$(printf '%s' "${MESH_RESOURCE_DURATION_B64:?}" | base64 -d)"
+MESH_RESOURCE_CACHE_SMOKE="$(printf '%s' "${MESH_RESOURCE_CACHE_SMOKE_B64:?}" | base64 -d)"
 MESH_RESOURCE_SUMMARY_ONLY="$(printf '%s' "${MESH_RESOURCE_SUMMARY_ONLY_B64:?}" | base64 -d)"
 GIT_SHA_FULL="$(printf '%s' "${GIT_SHA_FULL_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
+TESTBOX_CARGO_CACHE_ROOT="$(printf '%s' "${TESTBOX_CARGO_CACHE_ROOT_B64:?}" | base64 -d)"
+TESTBOX_CARGO_HOME="$(printf '%s' "${TESTBOX_CARGO_HOME_B64:?}" | base64 -d)"
+SOURCE_ARCHIVE_SHA="$(printf '%s' "${SOURCE_ARCHIVE_SHA_B64:?}" | base64 -d)"
+WEB_DIST_ARCHIVE_SHA="$(printf '%s' "${WEB_DIST_ARCHIVE_SHA_B64:?}" | base64 -d)"
+BASELINE_ARCHIVE_SHA="$(printf '%s' "${BASELINE_ARCHIVE_SHA_B64:?}" | base64 -d)"
 
 cleanup() {
   if [ "${CLEANUP_DONE:-0}" = "1" ]; then
@@ -282,6 +376,144 @@ on_signal() {
 trap cleanup EXIT
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
+
+if [ "$RUN_MESH_RESOURCE" = "1" ]; then
+  case "$TESTBOX_CARGO_CACHE_ROOT:$TESTBOX_CARGO_HOME" in
+    /*:/*) ;;
+    *)
+      echo "Cargo cache paths must be absolute" >&2
+      exit 2
+      ;;
+  esac
+  case "$TESTBOX_CARGO_CACHE_ROOT" in
+    /|*/..|*/../*)
+      echo "Cargo cache root must be a dedicated directory" >&2
+      exit 2
+      ;;
+  esac
+  if [ "$TESTBOX_CARGO_CACHE_ROOT" = "$TESTBOX_CARGO_HOME" ]; then
+    echo "Cargo cache root and Cargo Home must be separate" >&2
+    exit 2
+  fi
+  if [ -L "$TESTBOX_CARGO_CACHE_ROOT" ]; then
+    echo "Cargo cache root must not be a symlink" >&2
+    exit 2
+  fi
+  for managed_path in \
+    "$TESTBOX_CARGO_CACHE_ROOT/source" \
+    "$TESTBOX_CARGO_CACHE_ROOT/target"; do
+    if [ -L "$managed_path" ]; then
+      echo "managed Cargo cache path must not be a symlink: $managed_path" >&2
+      exit 2
+    fi
+  done
+  agent_root="$(dirname "$REMOTE_WORKSPACE")"
+  agent_root_real="$(readlink -f -- "$agent_root")"
+  [ -n "$agent_root_real" ] || exit 2
+  case "$agent_root_real" in
+    /srv/codex/agents/*) ;;
+    *)
+      echo "remote workspace is not inside the shared-testbox Agent Directory" >&2
+      exit 2
+      ;;
+  esac
+  assert_no_symlink_path() {
+    local path="$1"
+    while [ "$path" != "/" ] && [ "$path" != "." ]; do
+      if [ -L "$path" ]; then
+        echo "cache path contains a symlink: $path" >&2
+        exit 2
+      fi
+      path="$(dirname "$path")"
+    done
+  }
+  assert_no_symlink_path "$agent_root"
+  assert_no_symlink_path "$TESTBOX_CARGO_CACHE_ROOT"
+  assert_no_symlink_path "$TESTBOX_CARGO_HOME"
+  mkdir -p "$TESTBOX_CARGO_CACHE_ROOT/source"
+  cache_root_real="$(readlink -f -- "$TESTBOX_CARGO_CACHE_ROOT")"
+  case "$cache_root_real" in
+    "$agent_root_real"/*) ;;
+    *)
+      echo "Cargo cache root must be inside the current Agent Directory" >&2
+      exit 2
+      ;;
+  esac
+  cargo_home_parent_real="$(readlink -f -- "$(dirname "$TESTBOX_CARGO_HOME")")"
+  case "$TESTBOX_CARGO_HOME" in
+    /srv/codex/caches/linux-amd64/cargo) ;;
+    *)
+      echo "Cargo Home must be /srv/codex/caches/linux-amd64/cargo" >&2
+      exit 2
+      ;;
+  esac
+  case "$cargo_home_parent_real" in
+    /srv/codex/caches/linux-amd64) ;;
+    *)
+      echo "Cargo Home must be inside the shared Cargo cache root" >&2
+      exit 2
+      ;;
+  esac
+  command -v flock >/dev/null 2>&1 || {
+    echo "flock is required on the shared testbox" >&2
+    exit 2
+  }
+  if [ -L "$TESTBOX_CARGO_CACHE_ROOT/.xp-resource-run.lock" ]; then
+    echo "resource cache lock must not be a symlink" >&2
+    exit 2
+  fi
+  exec 8>"$TESTBOX_CARGO_CACHE_ROOT/.xp-resource-run.lock"
+  flock -x 8
+  toolchain_key="$(rustc -Vv | sha256sum | awk '{print substr($1, 1, 16)}')"
+  candidate_resource_source="$TESTBOX_CARGO_CACHE_ROOT/source/candidate"
+  baseline_resource_source="$TESTBOX_CARGO_CACHE_ROOT/source/baseline"
+  candidate_resource_target="$TESTBOX_CARGO_CACHE_ROOT/target/$toolchain_key/candidate"
+  baseline_resource_target="$TESTBOX_CARGO_CACHE_ROOT/target/$toolchain_key/baseline"
+  for managed_path in \
+    "$candidate_resource_source" \
+    "$baseline_resource_source" \
+    "$candidate_resource_target" \
+    "$baseline_resource_target"; do
+    if [ -L "$managed_path" ]; then
+      echo "managed Cargo cache path must not be a symlink: $managed_path" >&2
+      exit 2
+    fi
+  done
+
+  sync_cache_source() {
+    local source_dir="$1"
+    local destination="$2"
+    local marker="$3"
+    local slot="$4"
+    local source_root="$TESTBOX_CARGO_CACHE_ROOT/source"
+    local staging="$source_root/.incoming-${slot}.$$"
+    local marker_file="$destination/.xp-source-marker"
+
+    case "$destination" in
+      "$source_root"/*) ;;
+      *)
+        echo "cache source escaped the cache root" >&2
+        exit 2
+        ;;
+    esac
+    if [ -L "$destination" ] || [ -L "$staging" ]; then
+      echo "cache source path must not be a symlink" >&2
+      exit 2
+    fi
+    if [ -f "$marker_file" ] && [ "$(cat "$marker_file")" = "$marker" ] &&
+      [ -f "$destination/Cargo.toml" ]; then
+      echo "cargo_cache_source=hit slot=$slot"
+      return
+    fi
+    rm -rf "$staging"
+    mkdir -p "$staging"
+    cp -a "$source_dir/." "$staging/"
+    printf '%s\n' "$marker" > "$staging/.xp-source-marker"
+    rm -rf "$destination"
+    mv "$staging" "$destination"
+    echo "cargo_cache_source=refreshed slot=$slot"
+  }
+fi
 
 cd "$REMOTE_RUN/scripts/e2e"
 
@@ -441,10 +673,14 @@ try:
         def remove_stale_run():
             if run_path.is_symlink() or not run_path.is_dir():
                 return
-            allowed_root = pathlib.Path("/srv/codex/workspaces").resolve()
-            try:
-                run_path.resolve(strict=False).relative_to(allowed_root)
-            except ValueError:
+            run_real = run_path.resolve(strict=False)
+            allowed_roots = (
+                pathlib.Path("/srv/codex/agents").resolve(),
+                pathlib.Path("/srv/codex/workspaces").resolve(),
+            )
+            if not any(
+                run_real == root or root in run_real.parents for root in allowed_roots
+            ):
                 return
             shutil.rmtree(run_path, ignore_errors=True)
 
@@ -586,13 +822,38 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   mkdir -p "$REMOTE_RESOURCE_BASELINE/web"
   rm -rf "$REMOTE_RESOURCE_BASELINE/web/dist"
   cp -a "$REMOTE_RUN/web/dist" "$REMOTE_RESOURCE_BASELINE/web/dist"
-  candidate_resource_target="$REMOTE_RUN/target-resource-candidate"
-  baseline_resource_target="$REMOTE_RUN/target-resource-baseline"
-  XP_BUILD_VERSION="$GIT_SHA_FULL" CARGO_TARGET_DIR="$candidate_resource_target" cargo build --release --bin xp
+  sync_cache_source \
+    "$REMOTE_RUN/candidate-source" \
+    "$candidate_resource_source" \
+    "source_archive_sha256=$SOURCE_ARCHIVE_SHA web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA build_version=$GIT_SHA_FULL" \
+    candidate
+  if [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
+    sync_cache_source \
+      "$REMOTE_RESOURCE_BASELINE" \
+      "$baseline_resource_source" \
+      "source_archive_sha256=$BASELINE_ARCHIVE_SHA web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA build_version=package" \
+      baseline
+  fi
+  cache_tool="$REMOTE_RUN/scripts/cargo-cache/with-cargo-target.sh"
+  cargo_phase_started=$SECONDS
+  XP_BUILD_VERSION="$GIT_SHA_FULL" \
+    "$cache_tool" \
+    --cache-root "$TESTBOX_CARGO_CACHE_ROOT" \
+    --cargo-home "$TESTBOX_CARGO_HOME" \
+    --slot candidate \
+    --source "$candidate_resource_source" \
+    -- cargo build --release --locked --bin xp
+  echo "cargo_phase=resource_candidate_build duration_secs=$((SECONDS - cargo_phase_started))"
   cp "$candidate_resource_target/release/xp" "$REMOTE_RUN/xp-resource-candidate"
   if [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
-    CARGO_TARGET_DIR="$baseline_resource_target" \
-      cargo build --release --bin xp --manifest-path "$REMOTE_RESOURCE_BASELINE/Cargo.toml"
+    cargo_phase_started=$SECONDS
+    "$cache_tool" \
+      --cache-root "$TESTBOX_CARGO_CACHE_ROOT" \
+      --cargo-home "$TESTBOX_CARGO_HOME" \
+      --slot baseline \
+      --source "$baseline_resource_source" \
+      -- cargo build --release --locked --bin xp
+    echo "cargo_phase=resource_baseline_build duration_secs=$((SECONDS - cargo_phase_started))"
     cp "$baseline_resource_target/release/xp" "$REMOTE_RUN/xp-resource-baseline"
   fi
   xray_container="$(docker ps -q \
@@ -607,14 +868,54 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     echo "missing systemd-run; cannot enforce the 128 MiB/no-swap XP resource gate" >&2
     exit 2
   fi
-  CARGO_TARGET_DIR="$candidate_resource_target" \
-    cargo test --release --test mesh_transport_resource_e2e --no-run
-  resource_test_bin="$(find "$candidate_resource_target/release/deps" -maxdepth 1 -type f \
-    -name 'mesh_transport_resource_e2e-*' -perm -111 -print -quit)"
+  cargo_phase_started=$SECONDS
+  resource_test_bin="$(
+    XP_BUILD_VERSION="$GIT_SHA_FULL" \
+      "$cache_tool" \
+      --cache-root "$TESTBOX_CARGO_CACHE_ROOT" \
+      --cargo-home "$TESTBOX_CARGO_HOME" \
+      --slot candidate \
+      --source "$candidate_resource_source" \
+      -- cargo test --release --locked --test mesh_transport_resource_e2e --no-run \
+        --message-format=json |
+      python3 -c '
+import json
+import sys
+
+executables = []
+for line in sys.stdin:
+    message = json.loads(line)
+    target = message.get("target", {})
+    executable = message.get("executable")
+    if (
+        message.get("reason") == "compiler-artifact"
+        and target.get("name") == "mesh_transport_resource_e2e"
+        and executable
+    ):
+        executables.append(executable)
+
+if len(executables) != 1:
+    raise SystemExit(
+        "expected one mesh_transport_resource_e2e executable, found "
+        f"{len(executables)}"
+    )
+print(executables[0])
+'
+  )"
+  echo "cargo_phase=resource_test_build duration_secs=$((SECONDS - cargo_phase_started))"
   if [ -z "$resource_test_bin" ]; then
     echo "resource workload test binary was not built" >&2
     exit 1
   fi
+  case "$resource_test_bin" in
+    "$candidate_resource_target"/*) ;;
+    *)
+      echo "resource workload test binary escaped the candidate target directory" >&2
+      exit 1
+      ;;
+  esac
+  cp "$resource_test_bin" "$REMOTE_RUN/mesh_transport_resource_e2e"
+  resource_test_bin="$REMOTE_RUN/mesh_transport_resource_e2e"
   if [ "$MESH_RESOURCE_SUMMARY_ONLY" = "1" ]; then
     echo "running source journal resource workload in the actual XP process (XP memory=128MiB, swap=0)"
     env \
