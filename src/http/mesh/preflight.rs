@@ -1,5 +1,5 @@
 use super::*;
-use crate::control_plane_mesh::{DirectValidationState, MeshRequestError};
+use crate::control_plane_mesh::MeshRequestError;
 
 const MAX_MESH_PREFLIGHT_RESPONSE_BYTES: usize = 64 * 1024;
 const MESH_PREFLIGHT_TOTAL_BUDGET: Duration = Duration::from_secs(30);
@@ -292,7 +292,7 @@ async fn run_direct_health_preflight(
         state.mesh_client.direct_validation_snapshot(target).await;
     let result = state
         .mesh_client
-        .send_peer_direct_preflight(
+        .send_peer_direct_preflight_for_reenable(
             target,
             MeshRequest {
                 method: Method::GET,
@@ -311,22 +311,7 @@ async fn run_direct_health_preflight(
             &state.cluster_ca_pem,
         )
         .await;
-    let response = match result {
-        Ok(response) => response,
-        Err(error) => {
-            let validation_state = match error {
-                MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => {
-                    DirectValidationState::ProtocolRejected
-                }
-                _ => DirectValidationState::TransportFailed,
-            };
-            state
-                .mesh_client
-                .mark_direct_validation_failure_at(target, validation_state, validation_revision)
-                .await;
-            return Err(error);
-        }
-    };
+    let response = result?;
     drop(response);
     state
         .mesh_client

@@ -282,6 +282,24 @@ impl MeshAwareHttpClient {
             request,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
+            false,
+        )
+        .await
+    }
+
+    pub(crate) async fn send_peer_direct_preflight_for_reenable(
+        &self,
+        peer: &MeshPeerTarget,
+        request: MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+    ) -> Result<reqwest::Response, MeshRequestError> {
+        self.send_peer_direct_preflight_with_admission(
+            peer,
+            request,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            true,
         )
         .await
     }

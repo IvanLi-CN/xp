@@ -59,6 +59,40 @@ async fn mesh_attempt_is_rejected_after_gate_closes() {
 }
 
 #[tokio::test]
+async fn normal_direct_preflight_obeys_closed_mesh_gate() {
+    let gate = Arc::new(AtomicBool::new(false));
+    let epoch = Arc::new(AtomicU64::new(0));
+    let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_mesh_gate_epoch(gate, epoch);
+    let peer = primary_reverse_target(None, xp_test_fixtures::primary_api_url().to_string());
+    let error = client
+        .send_peer_direct_preflight(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: false,
+                request_id: crate::id::new_ulid_string(),
+                route: InternalRoute::HealthV2,
+                cluster_id: "cluster".to_owned(),
+                sender_id: "sender".to_owned(),
+                updates_active_path: false,
+            },
+            "unused",
+            "unused",
+        )
+        .await
+        .expect_err("normal health probes must not bypass a closed Mesh gate");
+    assert!(matches!(
+        error,
+        MeshRequestError::InvalidTarget(message)
+            if message == "Mesh is disabled by the cluster gate"
+    ));
+}
+
+#[tokio::test]
 async fn mesh_gate_transition_waits_for_an_inflight_send_boundary() {
     let reconcile = ReconcileHandle::noop();
     let gate = reconcile.mesh_gate();

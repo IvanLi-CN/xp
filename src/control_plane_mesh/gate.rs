@@ -413,9 +413,16 @@ impl MeshAwareHttpClient {
         request: MeshRequest,
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
+        allow_mesh_when_disabled: bool,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        let (_, validation_revision, _membership_guard) =
+            self.direct_validation_snapshot(peer).await;
         let (decision, epoch) = self
-            .before_mesh_request(&peer.node_id, true, InternalRoute::HealthV2)
+            .before_mesh_request(
+                &peer.node_id,
+                allow_mesh_when_disabled,
+                InternalRoute::HealthV2,
+            )
             .await;
         if matches!(
             decision,
@@ -433,11 +440,33 @@ impl MeshAwareHttpClient {
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
                 None,
-                true,
+                allow_mesh_when_disabled,
             )
             .await;
         if matches!(decision, MeshAttemptDecision::Probe) {
             self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
+                .await;
+        }
+        if let Err(error) = &result {
+            let validation_state = match error {
+                MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => {
+                    DirectValidationState::ProtocolRejected
+                }
+                MeshRequestError::InvalidTarget(_) | MeshRequestError::CircuitOpen { .. } => {
+                    return result;
+                }
+                _ => DirectValidationState::TransportFailed,
+            };
+            match validation_state {
+                DirectValidationState::ProtocolRejected => {
+                    self.circuits.record_protocol_failure(&peer.node_id).await;
+                }
+                DirectValidationState::TransportFailed => {
+                    self.circuits.record_retryable_failure(&peer.node_id).await;
+                }
+                _ => unreachable!("preflight failure state is classified above"),
+            }
+            self.mark_direct_validation_failure_at(peer, validation_state, validation_revision)
                 .await;
         }
         result
