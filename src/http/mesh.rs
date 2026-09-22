@@ -1530,7 +1530,8 @@ async fn run_mesh_health_probe(
             .await
             .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
     } else {
-        let validation_revision = client.direct_validation_revision().await;
+        let (_, validation_revision, _membership_guard) =
+            client.direct_validation_snapshot(&peer).await;
         client
             .send_peer_direct_preflight(&peer, request, ca_key_pem, &state.cluster_ca_pem)
             .await

@@ -1,16 +1,20 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
 pub(super) fn endpoint_fingerprint(
     endpoint: &Endpoint,
     access_host: &str,
     endpoint_transport: Option<&str>,
 ) -> String {
+    let metadata = serde_json::to_vec(&endpoint.meta).unwrap_or_default();
+    let metadata_digest = Sha256::digest(metadata);
     format!(
-        "{}|{}|{}|{}",
+        "{}|{}|{}|{}|{:x}",
         endpoint.endpoint_id,
         endpoint.port,
         access_host,
-        endpoint_transport.unwrap_or("")
+        endpoint_transport.unwrap_or(""),
+        metadata_digest
     )
 }
 
@@ -68,8 +72,10 @@ impl DirectValidationStore {
         *current = revision;
     }
 
-    pub(super) async fn membership_revision(&self) -> Option<String> {
-        self.membership_revision.read().await.clone()
+    pub(super) async fn membership_revision_guard(
+        &self,
+    ) -> tokio::sync::OwnedRwLockReadGuard<Option<String>> {
+        self.membership_revision.clone().read_owned().await
     }
 
     #[cfg(test)]
@@ -108,12 +114,6 @@ impl DirectValidationStore {
             return DirectValidationState::ConfiguredUnverified;
         }
         record.state
-    }
-
-    pub(super) async fn record(&self, peer: &MeshPeerTarget, state: DirectValidationState) {
-        let membership_revision = self.membership_revision().await;
-        self.record_at(peer, state, membership_revision.as_deref())
-            .await;
     }
 
     pub(super) async fn record_at(
@@ -368,5 +368,21 @@ mod tests {
             store.state(&peer, true).await,
             DirectValidationState::ConfiguredUnverified
         );
+    }
+
+    #[test]
+    fn endpoint_fingerprint_changes_when_metadata_changes() {
+        let mut endpoint = Endpoint {
+            endpoint_id: "endpoint".to_owned(),
+            node_id: "peer".to_owned(),
+            tag: "vless".to_owned(),
+            kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::json!({"reality": {"fingerprint": "chrome"}}),
+        };
+        let first = endpoint_fingerprint(&endpoint, "peer.example", Some("vision_tcp"));
+        endpoint.meta["reality"]["fingerprint"] = serde_json::json!("firefox");
+        let second = endpoint_fingerprint(&endpoint, "peer.example", Some("vision_tcp"));
+        assert_ne!(first, second);
     }
 }

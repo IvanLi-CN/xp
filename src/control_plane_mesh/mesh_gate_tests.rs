@@ -220,9 +220,18 @@ async fn stale_epoch_protocol_failure_does_not_quarantine_current_circuit() {
     let epoch = Arc::new(AtomicU64::new(0));
     let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_mesh_gate_epoch(gate, epoch);
     let peer = primary_reverse_target(None, xp_test_fixtures::primary_api_url().to_string());
+    let gate_guard = client
+        .mesh_direct_read_guard()
+        .await
+        .expect("mesh gate is enabled");
     assert!(
         client
-            .record_protocol_failure_for_epoch(&peer, 1, Some("stale-membership".to_owned()),)
+            .record_protocol_failure_for_epoch(
+                &peer,
+                1,
+                Some("stale-membership".to_owned()),
+                &gate_guard,
+            )
             .await
             .is_none()
     );

@@ -21,11 +21,16 @@ pub(super) enum MeshAttemptResult {
 }
 
 impl MeshAwareHttpClient {
-    pub(super) async fn direct_validation_snapshot(
+    pub(crate) async fn direct_validation_snapshot(
         &self,
         peer: &MeshPeerTarget,
-    ) -> (DirectValidationState, Option<String>) {
-        let membership_revision = self.direct_validation.membership_revision().await;
+    ) -> (
+        DirectValidationState,
+        Option<String>,
+        tokio::sync::OwnedRwLockReadGuard<Option<String>>,
+    ) {
+        let membership_guard = self.direct_validation.membership_revision_guard().await;
+        let membership_revision = membership_guard.clone();
         let state = self
             .direct_validation
             .state_at(
@@ -34,7 +39,7 @@ impl MeshAwareHttpClient {
                 membership_revision.as_deref(),
             )
             .await;
-        (state, membership_revision)
+        (state, membership_revision, membership_guard)
     }
 
     pub async fn direct_validation_state_for(
@@ -42,16 +47,6 @@ impl MeshAwareHttpClient {
         peer: &MeshPeerTarget,
     ) -> DirectValidationState {
         self.direct_validation_snapshot(peer).await.0
-    }
-
-    pub async fn mark_direct_validation_success(&self, peer: &MeshPeerTarget) {
-        self.direct_validation
-            .record(peer, DirectValidationState::Verified)
-            .await;
-    }
-
-    pub async fn direct_validation_revision(&self) -> Option<String> {
-        self.direct_validation.membership_revision().await
     }
 
     pub async fn mark_direct_validation_success_at(
@@ -66,14 +61,6 @@ impl MeshAwareHttpClient {
                 membership_revision.as_deref(),
             )
             .await;
-    }
-
-    pub async fn mark_direct_validation_failure(
-        &self,
-        peer: &MeshPeerTarget,
-        state: DirectValidationState,
-    ) {
-        self.direct_validation.record(peer, state).await;
     }
 
     pub async fn mark_direct_validation_failure_at(
@@ -103,6 +90,7 @@ impl MeshAwareHttpClient {
         budget: Duration,
         mesh_epoch: u64,
         validation_revision: Option<String>,
+        _membership_guard: Option<tokio::sync::OwnedRwLockReadGuard<Option<String>>>,
         started: Instant,
         allow_unsigned_not_found: bool,
         cluster_ca_key_pem: &str,
@@ -318,15 +306,16 @@ impl MeshAwareHttpClient {
         error: MeshRequestError,
     ) -> MeshRequestError {
         drop(response);
-        drop(gate_guard);
         self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
             .await;
         let Some(breaker_state) = self
-            .record_protocol_failure_for_epoch(peer, epoch, validation_revision)
+            .record_protocol_failure_for_epoch(peer, epoch, validation_revision, &gate_guard)
             .await
         else {
+            drop(gate_guard);
             return error;
         };
+        drop(gate_guard);
         self.record_mesh_protocol_failure(peer, epoch).await;
         if let Some(telemetry) = &self.telemetry {
             let _ = telemetry
@@ -346,6 +335,7 @@ impl MeshAwareHttpClient {
         peer: &MeshPeerTarget,
         epoch: u64,
         validation_revision: Option<String>,
+        _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
     ) -> Option<BreakerState> {
         if !self.mesh_gate_matches(epoch) {
             return None;

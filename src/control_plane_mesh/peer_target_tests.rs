@@ -553,6 +553,7 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
     assert!(ambiguous.mesh_base_url.is_none());
     assert_eq!(ambiguous.mesh_reason, MeshPeerReason::AmbiguousEndpoint);
 }
+
 #[tokio::test]
 async fn reverse_only_request_respects_the_local_readiness_gate() {
     let gate = Arc::new(AtomicBool::new(false));

@@ -464,7 +464,9 @@ impl MeshAwareHttpClient {
         let mut allow_public_fallback = public_fallback_policy.allows(cluster_mesh_enabled)
             || (request.path_and_query == LEGACY_CAPABILITIES_PROBE_PATH
                 && !matches!(peer.mesh_reason, MeshPeerReason::MeshAvailable));
-        let (direct_validation, validation_revision) = self.direct_validation_snapshot(peer).await;
+        let (direct_validation, validation_revision, membership_read_guard) =
+            self.direct_validation_snapshot(peer).await;
+        let mut membership_read_guard = Some(membership_read_guard);
         if cluster_mesh_enabled
             && peer.mesh_base_url.is_some()
             && direct_validation == DirectValidationState::ProtocolRejected
@@ -520,6 +522,7 @@ impl MeshAwareHttpClient {
                     budget,
                     mesh_epoch,
                     validation_revision.clone(),
+                    membership_read_guard.take(),
                     started,
                     allow_unsigned_not_found,
                     cluster_ca_key_pem,
@@ -534,6 +537,8 @@ impl MeshAwareHttpClient {
                 gate::MeshAttemptResult::Response(response) => return Ok(response),
             }
         }
+
+        drop(membership_read_guard);
 
         let should_try_reverse = cluster_mesh_enabled
             && !request.path_and_query.contains("/mesh/reverse-relay")
