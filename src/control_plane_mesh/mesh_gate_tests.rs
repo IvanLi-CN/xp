@@ -125,6 +125,37 @@ async fn mesh_epoch_change_releases_half_open_probe_without_resetting_backoff() 
 }
 
 #[tokio::test]
+async fn stale_mesh_probe_releases_its_half_open_slot_before_public_fallback() {
+    let gate = Arc::new(AtomicBool::new(true));
+    let epoch = Arc::new(AtomicU64::new(0));
+    let client =
+        MeshAwareHttpClient::new(reqwest::Client::new()).with_mesh_gate_epoch(gate, epoch.clone());
+    {
+        let circuits = client.circuits();
+        let mut peers = circuits.peers.lock().await;
+        let circuit = peers.entry("peer".to_owned()).or_default();
+        circuit.failures = MESH_FAILURES_BEFORE_OPEN;
+        circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+    }
+    let (decision, stale_epoch) = client
+        .before_mesh_request("peer", true, InternalRoute::HealthV2)
+        .await;
+    assert_eq!(decision, MeshAttemptDecision::Probe);
+    epoch.store(stale_epoch + 1, Ordering::Release);
+    assert!(!client.mesh_attempt_is_current(stale_epoch).await);
+    client
+        .release_half_open_probe_for_epoch("peer", stale_epoch)
+        .await;
+    assert_eq!(
+        client
+            .before_mesh_request("peer", true, InternalRoute::HealthV2)
+            .await
+            .0,
+        MeshAttemptDecision::Probe
+    );
+}
+
+#[tokio::test]
 async fn public_circuit_isolates_after_one_failed_request() {
     let circuits = PeerCircuitBreakers::default();
     assert_eq!(

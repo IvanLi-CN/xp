@@ -2,6 +2,7 @@ use super::*;
 use crate::control_plane_mesh::{DirectValidationState, MeshRequestError};
 
 const MAX_MESH_PREFLIGHT_RESPONSE_BYTES: usize = 64 * 1024;
+const MESH_PREFLIGHT_TOTAL_BUDGET: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -48,9 +49,25 @@ pub(crate) async fn admin_internal_mesh_preflight(
     {
         return Err(ApiError::unauthorized("mesh preflight identity is invalid"));
     }
-    let voter_node_ids = current_voter_node_ids(&state).await?;
     let requested = request.voter_node_ids.into_iter().collect::<BTreeSet<_>>();
-    if requested != voter_node_ids || !requested.contains(&verified.context.sender_id) {
+    match tokio::time::timeout(
+        MESH_PREFLIGHT_TOTAL_BUDGET,
+        run_internal_mesh_preflight(state.clone(), requested, verified.context.sender_id.clone()),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(ApiError::conflict("mesh preflight deadline exceeded")),
+    }
+}
+
+async fn run_internal_mesh_preflight(
+    state: AppState,
+    requested: BTreeSet<String>,
+    sender_node_id: String,
+) -> Result<Json<MeshPreflightResponse>, ApiError> {
+    let voter_node_ids = current_voter_node_ids(&state).await?;
+    if requested != voter_node_ids || !requested.contains(&sender_node_id) {
         return Err(ApiError::conflict(
             "mesh preflight voter set changed; retry against current membership",
         ));
@@ -70,6 +87,7 @@ pub(crate) async fn admin_internal_mesh_preflight(
             });
         }
     }
+
     Ok(Json(MeshPreflightResponse {
         sender_node_id: state.cluster.node_id.clone(),
         failures,
@@ -77,9 +95,25 @@ pub(crate) async fn admin_internal_mesh_preflight(
 }
 
 pub(crate) async fn run_mesh_enable_preflight(
-    state: &AppState,
+    state: AppState,
 ) -> Result<(), Vec<MeshPreflightFailure>> {
-    let voter_node_ids = current_voter_node_ids(state).await.map_err(|_error| {
+    match tokio::time::timeout(
+        MESH_PREFLIGHT_TOTAL_BUDGET,
+        run_mesh_enable_preflight_inner(state.clone()),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(vec![MeshPreflightFailure {
+            sender_node_id: state.cluster.node_id.clone(),
+            target_node_id: state.cluster.node_id.clone(),
+            kind: MeshPreflightFailureKind::Transport,
+        }]),
+    }
+}
+
+async fn run_mesh_enable_preflight_inner(state: AppState) -> Result<(), Vec<MeshPreflightFailure>> {
+    let voter_node_ids = current_voter_node_ids(&state).await.map_err(|_error| {
         vec![MeshPreflightFailure {
             sender_node_id: state.cluster.node_id.clone(),
             target_node_id: state.cluster.node_id.clone(),
@@ -92,9 +126,9 @@ pub(crate) async fn run_mesh_enable_preflight(
         if target_node_id == &state.cluster.node_id {
             continue;
         }
-        let target = match mesh_peer_target(state, target_node_id).await {
+        let target = match mesh_peer_target(&state, target_node_id).await {
             Ok(target) => target,
-            Err(_error) => {
+            Err(_) => {
                 failures.push(MeshPreflightFailure {
                     sender_node_id: state.cluster.node_id.clone(),
                     target_node_id: target_node_id.clone(),
@@ -103,7 +137,7 @@ pub(crate) async fn run_mesh_enable_preflight(
                 continue;
             }
         };
-        if let Err(error) = run_direct_health_preflight(state, &target).await {
+        if let Err(error) = run_direct_health_preflight(&state, &target).await {
             failures.push(MeshPreflightFailure {
                 sender_node_id: state.cluster.node_id.clone(),
                 target_node_id: target_node_id.clone(),
@@ -121,8 +155,9 @@ pub(crate) async fn run_mesh_enable_preflight(
         .iter()
         .filter(|node_id| node_id.as_str() != state.cluster.node_id.as_str())
     {
-        remote_results
-            .push(run_remote_preflight(state, target_node_id, body.clone(), &voter_node_ids).await);
+        remote_results.push(
+            run_remote_preflight(&state, target_node_id, body.clone(), &voter_node_ids).await,
+        );
     }
     for result in remote_results {
         match result {

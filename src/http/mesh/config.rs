@@ -15,7 +15,7 @@ pub(crate) async fn admin_update_mesh_config(
         .await;
     super::join_capability::require_mesh_gate_on_voters(&state).await?;
     if request.enabled
-        && let Err(failures) = super::run_mesh_enable_preflight(&state).await
+        && let Err(failures) = super::run_mesh_enable_preflight(state.clone()).await
     {
         let mut error = ApiError::new(
             "mesh_preflight_failed",

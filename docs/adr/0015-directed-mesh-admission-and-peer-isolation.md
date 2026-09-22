@@ -10,7 +10,8 @@ overlay, or user-session reuse. Native Reverse remains quarantined and is not a 
 The durable `mesh_enabled` value records only the cluster's routing intent. Enabling it requires
 a bounded, server-enforced re-enable preflight: each current voter performs a Direct-only signed
 `health-v2` request to every other current voter. The preflight runs while the gate remains
-disabled, has no Public fallback, and succeeds only when every directed edge returns an HTTP/2
+disabled, has no Public fallback, is limited to 30 seconds per enable operation with at most
+four concurrent directions per node, and succeeds only when every directed edge returns an HTTP/2
 response with a valid signed acknowledgement. A failed edge rejects the enable request without a
 Raft write and identifies only the peer pair and classified failure; it does not expose socket,
 address, certificate, or user traffic data.

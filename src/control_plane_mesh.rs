@@ -495,6 +495,10 @@ impl MeshAwareHttpClient {
             MeshAttemptDecision::Attempt | MeshAttemptDecision::Probe
         ) && !self.mesh_attempt_is_current(mesh_epoch).await
         {
+            if matches!(decision, MeshAttemptDecision::Probe) {
+                self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
+                    .await;
+            }
             fallback = true;
         }
         if matches!(
