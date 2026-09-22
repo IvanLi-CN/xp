@@ -232,7 +232,6 @@ impl PeerCircuitBreakers {
         let now = Instant::now();
         let mut peers = self.peers.lock().await;
         let circuit = peers.entry(peer_id.to_string()).or_default();
-        circuit.failures = MESH_FAILURES_BEFORE_OPEN;
         let backoff = MESH_BACKOFF[circuit.open_count.min(MESH_BACKOFF.len() - 1)];
         circuit.open_count = circuit.open_count.saturating_add(1);
         circuit.retry_at = Some(now + backoff);

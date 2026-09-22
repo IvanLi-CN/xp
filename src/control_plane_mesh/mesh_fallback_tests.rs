@@ -9,6 +9,27 @@ use std::sync::{
 };
 use tokio::sync::Notify;
 
+#[test]
+fn direct_mesh_requires_a_fresh_verified_receipt() {
+    let mut peer = primary_reverse_target(None, "https://public.example".to_owned());
+    peer.mesh_base_url = Some("https://mesh.example".to_owned());
+    assert!(direct_mesh_is_eligible(
+        &peer,
+        true,
+        DirectValidationState::Verified
+    ));
+    assert!(!direct_mesh_is_eligible(
+        &peer,
+        true,
+        DirectValidationState::TransportFailed
+    ));
+    assert!(!direct_mesh_is_eligible(
+        &peer,
+        true,
+        DirectValidationState::ConfiguredUnverified
+    ));
+}
+
 #[tokio::test]
 async fn capability_probe_rechecks_public_fallback_after_gate_closes() {
     let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())

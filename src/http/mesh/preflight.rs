@@ -1,20 +1,32 @@
 use super::*;
 use crate::control_plane_mesh::{DirectValidationState, MeshRequestError};
 
+const MAX_MESH_PREFLIGHT_RESPONSE_BYTES: usize = 64 * 1024;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MeshPreflightRequest {
     pub voter_node_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(crate) struct MeshPreflightFailure {
-    pub sender_node_id: String,
-    pub target_node_id: String,
-    pub kind: String,
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum MeshPreflightFailureKind {
+    InvalidTarget,
+    Transport,
+    Protocol,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MeshPreflightFailure {
+    pub sender_node_id: String,
+    pub target_node_id: String,
+    pub kind: MeshPreflightFailureKind,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct MeshPreflightResponse {
     pub sender_node_id: String,
     pub failures: Vec<MeshPreflightFailure>,
@@ -54,7 +66,7 @@ pub(crate) async fn admin_internal_mesh_preflight(
             failures.push(MeshPreflightFailure {
                 sender_node_id: state.cluster.node_id.clone(),
                 target_node_id,
-                kind: classify_preflight_error(&error).to_string(),
+                kind: classify_preflight_error(&error),
             });
         }
     }
@@ -71,7 +83,7 @@ pub(crate) async fn run_mesh_enable_preflight(
         vec![MeshPreflightFailure {
             sender_node_id: state.cluster.node_id.clone(),
             target_node_id: state.cluster.node_id.clone(),
-            kind: "invalid_target".to_string(),
+            kind: MeshPreflightFailureKind::InvalidTarget,
         }]
     })?;
     let mut failures = Vec::new();
@@ -86,7 +98,7 @@ pub(crate) async fn run_mesh_enable_preflight(
                 failures.push(MeshPreflightFailure {
                     sender_node_id: state.cluster.node_id.clone(),
                     target_node_id: target_node_id.clone(),
-                    kind: "invalid_target".to_string(),
+                    kind: MeshPreflightFailureKind::InvalidTarget,
                 });
                 continue;
             }
@@ -95,7 +107,7 @@ pub(crate) async fn run_mesh_enable_preflight(
             failures.push(MeshPreflightFailure {
                 sender_node_id: state.cluster.node_id.clone(),
                 target_node_id: target_node_id.clone(),
-                kind: classify_preflight_error(&error).to_string(),
+                kind: classify_preflight_error(&error),
             });
         }
     }
@@ -109,7 +121,8 @@ pub(crate) async fn run_mesh_enable_preflight(
         .iter()
         .filter(|node_id| node_id.as_str() != state.cluster.node_id.as_str())
     {
-        remote_results.push(run_remote_preflight(state, target_node_id, body.clone()).await);
+        remote_results
+            .push(run_remote_preflight(state, target_node_id, body.clone(), &voter_node_ids).await);
     }
     for result in remote_results {
         match result {
@@ -133,17 +146,21 @@ async fn run_remote_preflight(
     state: &AppState,
     target_node_id: &str,
     body: Vec<u8>,
-) -> Result<MeshPreflightResponse, (String, String)> {
-    let mut target = mesh_peer_target(state, target_node_id)
-        .await
-        .map_err(|_| (target_node_id.to_string(), "invalid_target".to_string()))?;
+    expected_voters: &BTreeSet<String>,
+) -> Result<MeshPreflightResponse, (String, MeshPreflightFailureKind)> {
+    let mut target = mesh_peer_target(state, target_node_id).await.map_err(|_| {
+        (
+            target_node_id.to_string(),
+            MeshPreflightFailureKind::InvalidTarget,
+        )
+    })?;
     // The gate is intentionally closed during preflight. Force this coordination request over
     // the registered Public Path; the remote node performs its own Direct-only checks.
     target.mesh_base_url = None;
     let ca_key_pem = state.cluster_ca_key_pem.as_deref().ok_or_else(|| {
         (
             target_node_id.to_string(),
-            "transport:cluster_ca_unavailable".into(),
+            MeshPreflightFailureKind::Transport,
         )
     })?;
     let response = state
@@ -167,22 +184,65 @@ async fn run_remote_preflight(
             &state.cluster_ca_pem,
         )
         .await
-        .map_err(|error| {
+        .map_err(|error| (target_node_id.to_string(), classify_preflight_error(&error)))?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_MESH_PREFLIGHT_RESPONSE_BYTES as u64)
+    {
+        return Err((
+            target_node_id.to_string(),
+            MeshPreflightFailureKind::Protocol,
+        ));
+    }
+    let mut bytes = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(MAX_MESH_PREFLIGHT_RESPONSE_BYTES as u64) as usize,
+    );
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| {
             (
                 target_node_id.to_string(),
-                classify_preflight_error(&error).into(),
+                MeshPreflightFailureKind::Transport,
             )
         })?;
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|_| (target_node_id.to_string(), "transport:response_body".into()))?;
-    serde_json::from_slice(&bytes).map_err(|_| {
+        if bytes.len().saturating_add(chunk.len()) > MAX_MESH_PREFLIGHT_RESPONSE_BYTES {
+            return Err((
+                target_node_id.to_string(),
+                MeshPreflightFailureKind::Protocol,
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let response: MeshPreflightResponse = serde_json::from_slice(&bytes).map_err(|_| {
         (
             target_node_id.to_string(),
-            "protocol:invalid_response".into(),
+            MeshPreflightFailureKind::Protocol,
         )
-    })
+    })?;
+    if !validate_remote_preflight_response(&response, target_node_id, expected_voters) {
+        return Err((
+            target_node_id.to_string(),
+            MeshPreflightFailureKind::Protocol,
+        ));
+    }
+    Ok(response)
+}
+
+fn validate_remote_preflight_response(
+    response: &MeshPreflightResponse,
+    expected_sender: &str,
+    expected_voters: &BTreeSet<String>,
+) -> bool {
+    response.sender_node_id == expected_sender
+        && response.failures.len() <= expected_voters.len()
+        && response.failures.iter().all(|failure| {
+            failure.sender_node_id == expected_sender
+                && failure.target_node_id != expected_sender
+                && expected_voters.contains(&failure.target_node_id)
+        })
 }
 
 async fn run_direct_health_preflight(
@@ -245,14 +305,16 @@ async fn run_direct_health_preflight(
     Ok(())
 }
 
-fn classify_preflight_error(error: &MeshRequestError) -> &'static str {
+fn classify_preflight_error(error: &MeshRequestError) -> MeshPreflightFailureKind {
     match error {
-        MeshRequestError::InvalidTarget(_) => "invalid_target",
-        MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => "protocol",
+        MeshRequestError::InvalidTarget(_) => MeshPreflightFailureKind::InvalidTarget,
+        MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => {
+            MeshPreflightFailureKind::Protocol
+        }
         MeshRequestError::CircuitOpen { .. }
         | MeshRequestError::OutcomeUnknown
         | MeshRequestError::Public(_)
-        | MeshRequestError::Reverse(_) => "transport",
+        | MeshRequestError::Reverse(_) => MeshPreflightFailureKind::Transport,
     }
 }
 
@@ -281,4 +343,66 @@ async fn current_voter_node_ids(state: &AppState) -> Result<BTreeSet<String>, Ap
         ));
     }
     Ok(node_ids)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn voters() -> BTreeSet<String> {
+        ["node-a", "node-b", "node-c"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn remote_preflight_requires_expected_sender_and_targets() {
+        let expected = voters();
+        let response = MeshPreflightResponse {
+            sender_node_id: "node-b".to_owned(),
+            failures: vec![MeshPreflightFailure {
+                sender_node_id: "node-b".to_owned(),
+                target_node_id: "node-a".to_owned(),
+                kind: MeshPreflightFailureKind::Transport,
+            }],
+        };
+        assert!(validate_remote_preflight_response(
+            &response, "node-b", &expected
+        ));
+
+        let mut wrong_sender = response.clone();
+        wrong_sender.sender_node_id = "node-c".to_owned();
+        assert!(!validate_remote_preflight_response(
+            &wrong_sender,
+            "node-b",
+            &expected,
+        ));
+
+        let mut wrong_target = response;
+        wrong_target.failures[0].target_node_id = "unknown".to_owned();
+        assert!(!validate_remote_preflight_response(
+            &wrong_target,
+            "node-b",
+            &expected,
+        ));
+    }
+
+    #[test]
+    fn remote_preflight_bounds_failure_count() {
+        let expected = voters();
+        let response = MeshPreflightResponse {
+            sender_node_id: "node-b".to_owned(),
+            failures: (0..=expected.len())
+                .map(|_| MeshPreflightFailure {
+                    sender_node_id: "node-b".to_owned(),
+                    target_node_id: "node-a".to_owned(),
+                    kind: MeshPreflightFailureKind::Protocol,
+                })
+                .collect(),
+        };
+        assert!(!validate_remote_preflight_response(
+            &response, "node-b", &expected
+        ));
+    }
 }

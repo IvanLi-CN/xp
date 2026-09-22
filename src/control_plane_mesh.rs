@@ -476,12 +476,7 @@ impl MeshAwareHttpClient {
                 path: "Direct Mesh",
             });
         }
-        let mesh_enabled = peer.mesh_base_url.is_some()
-            && cluster_mesh_enabled
-            && matches!(
-                direct_validation,
-                DirectValidationState::Verified | DirectValidationState::TransportFailed
-            );
+        let mesh_enabled = direct_mesh_is_eligible(peer, cluster_mesh_enabled, direct_validation);
         let (decision, mesh_epoch) = self
             .before_mesh_request(&peer.node_id, mesh_enabled, request.route)
             .await;
@@ -1025,6 +1020,16 @@ fn public_transport_error(
     } else {
         MeshRequestError::OutcomeUnknown
     }
+}
+
+fn direct_mesh_is_eligible(
+    peer: &MeshPeerTarget,
+    cluster_mesh_enabled: bool,
+    validation: DirectValidationState,
+) -> bool {
+    peer.mesh_base_url.is_some()
+        && cluster_mesh_enabled
+        && validation == DirectValidationState::Verified
 }
 
 async fn signed_send(

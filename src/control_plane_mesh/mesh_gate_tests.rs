@@ -171,10 +171,15 @@ async fn half_open_circuit_rejects_non_health_requests() {
 #[tokio::test]
 async fn direct_protocol_failure_quarantines_without_public_fallback() {
     let circuits = PeerCircuitBreakers::default();
+    {
+        let mut peers = circuits.peers.lock().await;
+        peers.entry("peer".to_owned()).or_default().failures = 1;
+    }
     assert_eq!(
         circuits.record_protocol_failure("peer").await,
         BreakerState::Open
     );
+    assert_eq!(circuits.peers.lock().await["peer"].failures, 1);
     assert_eq!(
         circuits
             .before_attempt_with_probe("peer", true, false)
