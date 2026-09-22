@@ -443,6 +443,9 @@ impl MeshAwareHttpClient {
             self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
                 .await;
         }
+        if !self.mesh_epoch_is_current(epoch).await {
+            return result;
+        }
         if let Err(error) = &result {
             let validation_state = match error {
                 MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => {
@@ -464,6 +467,10 @@ impl MeshAwareHttpClient {
             }
             self.mark_direct_validation_failure_at(peer, validation_state, validation_revision)
                 .await;
+        } else {
+            self.circuits.record_success(&peer.node_id).await;
+            self.mark_direct_validation_success_at(peer, validation_revision)
+                .await;
         }
         result
     }
@@ -471,6 +478,11 @@ impl MeshAwareHttpClient {
     pub(super) async fn mesh_attempt_is_current(&self, epoch: u64) -> bool {
         let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
         self.mesh_gate_matches(epoch)
+    }
+
+    pub(super) async fn mesh_epoch_is_current(&self, epoch: u64) -> bool {
+        let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
+        self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch
     }
 
     pub(super) fn mesh_gate_matches(&self, epoch: u64) -> bool {
