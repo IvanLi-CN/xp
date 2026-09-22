@@ -309,6 +309,16 @@ Latest real AppShell route evidence:
 
 ![Real AppShell System Status mobile peer actions](./assets/system-status-appshell-route-mobile.png)
 
+Current candidate browser viewport evidence:
+
+- Source: local login-free `/ui-demo/system-status` served by the candidate Web shell.
+- Bound implementation commit: `61ab9a76`.
+- Capture metadata: `source_type=ui_demo`, `target_program=Playwright Chromium`,
+  `capture_scope=browser-viewport`, `requested_viewport=1280x900`,
+  `evidence_surface=full-page`, `sensitive_exclusion=N/A`.
+- The viewport shows the actual System Status page, including separate Native Reverse internal
+  diagnostics, external user inbound accounting, and per-peer Direct/Public transport state.
+
 ## 参考
 
 - `docs/specs/nbs5f-xray-control-plane-relay/SPEC.md`
