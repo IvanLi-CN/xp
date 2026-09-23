@@ -519,6 +519,16 @@ async fn assert_reality_fallback_reuses_one_h2_connection(transport: VlessRealit
     let client =
         build_mesh_http_client_through_socks(&ca.cert_pem, &node_cert, &csr.key_pem, socks_port);
     client
+        .send_peer_direct_request(
+            &target,
+            xp::control_plane_mesh::PeerDirectPath::RealityMesh,
+            mesh_request(0),
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await
+        .expect("direct Mesh request through Reality fallback");
+    client
         .mark_direct_validation_success_at(&target, None)
         .await;
 
