@@ -33,7 +33,9 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   `/api/admin/mesh/config` endpoint replicates the setting, and every process-wide Mesh client
   observes the same gate. State-machine apply and snapshot installation publish the persisted
   value immediately, before any deferred reconcile work; disabled clusters use only registered
-  public HTTPS peer origins. The write barrier probes every current voter and learner so an older
+  public HTTPS peer origins. The write barrier probes every current voter and learner using each
+  target's permitted route: Direct Mesh for eligible managed endpoints and signed registered API
+  requests for owner-approved private Docker voters without an endpoint. An older
   learner cannot reject the replicated command; stale learners must be upgraded or retired first.
   Mesh and Reverse requests share a read-side admission barrier and remain concurrent; gate
   transitions take the exclusive write side and wait for admitted requests to finish.

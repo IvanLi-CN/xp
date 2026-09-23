@@ -23,8 +23,9 @@
 - Mesh 请求在共享读准入边界内并发执行；集群 gate 切换取得独占写屏障，等待已准入请求完成后才改变状态，避免关闭后的新请求越过公网-only 边界。
 - 用 internal-auth v2、稳定 request ID 和 durable dedupe 保护内部调用。
 - 提供本地持久遥测、管理 API 与 `/system-status`。
-- Direct Mesh 启用前必须通过 current voter 的全有向 Direct-only `health-v2` 预检；预检失败
-  不得写入 `mesh_enabled=true`。
+- Direct Mesh 启用前必须通过 current voter 的全有向 `health-v2` 预检：有合格 managed
+  endpoint 的目标必须走 Direct-only；无 endpoint 的 owner-approved private Docker voter
+  必须走其注册的 `api_base_url`。预检失败不得写入 `mesh_enabled=true`。
 - Direct validation、Public circuit、active route 和 endpoint 资格必须作为独立事实显示；
   5 分钟没有有效 Direct ACK、成员或 endpoint fingerprint 变化、或进程重启后，受影响 peer
   进入 `configured_unverified` 并暂走 Public。
@@ -71,6 +72,9 @@
   发送既有签名 HTTP/2 控制面流量，不复用用户 XHTTP session。
 - 无端点、多个 endpoint、不可用的 `access_host` 或不支持控制面 Mesh 的 transport 时，使用
   `Node.api_base_url`；已选择 Mesh 路径后，health ack 的认证或协议无效必须拒绝，不能降级到公网。
+- owner-approved private Docker voter 可以合法无 endpoint；它仍参与完整 voter 预检，但只通过
+  注册的 `api_base_url` 验证和承载控制面请求。该例外不允许跳过 voter，也不改变其他已有
+  managed endpoint 的 Direct-only 认证和协议失败边界。
 - `health-v2` 与 `mesh-v2` 使用同一个 v2 认证协议。
 - canonical 覆盖版本、route、method、原始 URI、content metadata、body hash、
   cluster、sender、target、request ID 和 issued-at。

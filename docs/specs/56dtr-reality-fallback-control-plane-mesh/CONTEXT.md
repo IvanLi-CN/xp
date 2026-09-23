@@ -44,8 +44,16 @@ _Avoid_: second control-plane endpoint, separate tunnel, user ingress contract
 
 **Mesh Re-enable Preflight**:
 The operator-visible, all-voter directed verification performed while the cluster Mesh gate is
-off. It proves the Direct Ingress Contract before a durable request can enable Direct Mesh.
-_Avoid_: local canary check, public-path availability, automatic recovery
+off. It proves the Direct Ingress Contract for endpoint-bearing targets and the signed registered
+API path for an owner-approved private Docker voter without an endpoint before a durable request
+can enable Direct Mesh.
+_Avoid_: local canary check, unsigned public-path availability, automatic recovery
+
+**Private-Voter Public Target**:
+An owner-approved private Docker voter that intentionally has no managed user endpoint. It remains
+part of the voter set and uses its registered `api_base_url` for signed control-plane requests;
+other voters with eligible endpoints still use Direct Mesh toward one another.
+_Avoid_: skipped voter, external-service primary, managed endpoint fallback
 
 **Peer Isolation**:
 The local outcome in which a route's circuit is cooling down. Calls fail locally with a retry

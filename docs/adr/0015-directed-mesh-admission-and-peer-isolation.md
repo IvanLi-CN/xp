@@ -8,13 +8,15 @@ endpoint's TLS canary reserved route; it does not add a hostname, port, XP-local
 overlay, or user-session reuse. Native Reverse remains quarantined and is not a recovery option.
 
 The durable `mesh_enabled` value records only the cluster's routing intent. Enabling it requires
-a bounded, server-enforced re-enable preflight: each current voter performs a Direct-only signed
-`health-v2` request to every other current voter. The preflight runs while the gate remains
-disabled, has no Public fallback, is limited to 30 seconds per enable operation with a bounded
-serialized direction schedule, and succeeds only when every directed edge returns an HTTP/2
-response with a valid signed acknowledgement. A failed edge rejects the enable request without a
-Raft write and identifies only the peer pair and classified failure; it does not expose socket,
-address, certificate, or user traffic data.
+a bounded, server-enforced re-enable preflight: each current voter validates every other current
+voter over the route permitted by the target. A voter with an eligible managed endpoint requires a
+Direct-only signed `health-v2` request; an owner-approved private Docker voter without that
+endpoint requires the same signed request over its registered `api_base_url`. The preflight runs
+while the gate remains disabled, is limited to 30 seconds per enable operation with a bounded
+serialized direction schedule, and succeeds only when every directed edge returns an HTTP response
+with a valid signed acknowledgement. A failed edge rejects the enable request without a Raft write
+and identifies only the peer pair and classified failure; it does not expose socket, address,
+certificate, or user traffic data.
 
 Each node retains local path evidence and two separate circuit concerns. The Direct circuit keeps
 its bounded transport failure policy. A new Peer Public Circuit prevents a failed Public Path

@@ -4,6 +4,20 @@ use crate::control_plane_mesh::MeshRequestError;
 const MAX_MESH_PREFLIGHT_RESPONSE_BYTES: usize = 64 * 1024;
 const MESH_PREFLIGHT_TOTAL_BUDGET: Duration = Duration::from_secs(30);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MeshPreflightRoute {
+    Direct,
+    RegisteredApi,
+}
+
+fn mesh_preflight_route(target: &MeshPeerTarget) -> MeshPreflightRoute {
+    if target.mesh_base_url.is_some() {
+        MeshPreflightRoute::Direct
+    } else {
+        MeshPreflightRoute::RegisteredApi
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MeshPreflightRequest {
@@ -79,7 +93,7 @@ async fn run_internal_mesh_preflight(
             continue;
         }
         let target = mesh_peer_target(&state, &target_node_id).await?;
-        if let Err(error) = run_direct_health_preflight(&state, &target).await {
+        if let Err(error) = run_peer_health_preflight(&state, &target).await {
             failures.push(MeshPreflightFailure {
                 sender_node_id: state.cluster.node_id.clone(),
                 target_node_id,
@@ -137,7 +151,7 @@ async fn run_mesh_enable_preflight_inner(state: AppState) -> Result<(), Vec<Mesh
                 continue;
             }
         };
-        if let Err(error) = run_direct_health_preflight(&state, &target).await {
+        if let Err(error) = run_peer_health_preflight(&state, &target).await {
             failures.push(MeshPreflightFailure {
                 sender_node_id: state.cluster.node_id.clone(),
                 target_node_id: target_node_id.clone(),
@@ -280,7 +294,13 @@ fn validate_remote_preflight_response(
         })
 }
 
-async fn run_direct_health_preflight(
+/// Validate the route that this target is allowed to use when Mesh is enabled.
+///
+/// Nodes without a managed endpoint are the supported private-container
+/// exception: they remain voters, but their signed control-plane path is the
+/// registered API base URL. Endpoint-bearing nodes must still pass Direct Mesh
+/// preflight and never use this public path as a substitute.
+async fn run_peer_health_preflight(
     state: &AppState,
     target: &MeshPeerTarget,
 ) -> Result<(), MeshRequestError> {
@@ -288,27 +308,38 @@ async fn run_direct_health_preflight(
         .cluster_ca_key_pem
         .as_deref()
         .ok_or_else(|| MeshRequestError::InvalidTarget("cluster CA is unavailable".into()))?;
-    let result = state
-        .mesh_client
-        .send_peer_direct_preflight_for_reenable(
-            target,
-            MeshRequest {
-                method: Method::GET,
-                path_and_query: "/api/admin/_internal/mesh/health".to_string(),
-                content_type: None,
-                body: Vec::new(),
-                total_budget: Duration::from_secs(5),
-                allow_ambiguous_fallback: false,
-                request_id: crate::id::new_ulid_string(),
-                route: internal_auth::InternalRoute::HealthV2,
-                cluster_id: state.cluster.cluster_id.clone(),
-                sender_id: state.cluster.node_id.clone(),
-                updates_active_path: false,
-            },
-            ca_key_pem,
-            &state.cluster_ca_pem,
-        )
-        .await;
+    let request = MeshRequest {
+        method: Method::GET,
+        path_and_query: "/api/admin/_internal/mesh/health".to_string(),
+        content_type: None,
+        body: Vec::new(),
+        total_budget: Duration::from_secs(5),
+        allow_ambiguous_fallback: false,
+        request_id: crate::id::new_ulid_string(),
+        route: internal_auth::InternalRoute::HealthV2,
+        cluster_id: state.cluster.cluster_id.clone(),
+        sender_id: state.cluster.node_id.clone(),
+        updates_active_path: false,
+    };
+    let result = match mesh_preflight_route(target) {
+        MeshPreflightRoute::Direct => {
+            state
+                .mesh_client
+                .send_peer_direct_preflight_for_reenable(
+                    target,
+                    request,
+                    ca_key_pem,
+                    &state.cluster_ca_pem,
+                )
+                .await
+        }
+        MeshPreflightRoute::RegisteredApi => {
+            state
+                .mesh_client
+                .send_peer_request(target, request, ca_key_pem, &state.cluster_ca_pem)
+                .await
+        }
+    };
     let response = result?;
     drop(response);
     Ok(())
@@ -357,6 +388,42 @@ async fn current_voter_node_ids(state: &AppState) -> Result<BTreeSet<String>, Ap
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mesh_telemetry::MeshPeerReason;
+
+    #[test]
+    fn private_voter_without_endpoint_uses_registered_api_preflight() {
+        let target = MeshPeerTarget {
+            node_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+            node_name: xp_test_fixtures::tertiary_node_name().to_owned(),
+            mesh_base_url: xp_test_fixtures::none(),
+            endpoint_transport: None,
+            endpoint_fingerprint: None,
+            mesh_reason: MeshPeerReason::MissingEndpoint,
+            public_base_url: xp_test_fixtures::tertiary_api_url().to_owned(),
+        };
+
+        assert_eq!(
+            mesh_preflight_route(&target),
+            MeshPreflightRoute::RegisteredApi
+        );
+    }
+
+    #[test]
+    fn endpoint_bearing_voter_keeps_direct_preflight() {
+        let target = MeshPeerTarget {
+            node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+            node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+            mesh_base_url: Some(xp_test_fixtures::url_https_public_peer_afixture_test().to_owned()),
+            endpoint_transport: Some("xhttp_reality_fallback"),
+            endpoint_fingerprint: Some(
+                xp_test_fixtures::mesh_fingerprint_primary_xhttp().to_owned(),
+            ),
+            mesh_reason: MeshPeerReason::MeshAvailable,
+            public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+        };
+
+        assert_eq!(mesh_preflight_route(&target), MeshPreflightRoute::Direct);
+    }
 
     fn voters() -> BTreeSet<String> {
         ["node-a", "node-b", "node-c"]
