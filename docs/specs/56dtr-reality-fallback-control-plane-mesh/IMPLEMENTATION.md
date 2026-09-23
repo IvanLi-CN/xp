@@ -114,12 +114,12 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
 - The locked 15-minute comparison completed with 50 persistent H2 connections: candidate XP total
-  PSS was 31,260 KiB versus 32,311 KiB for the baseline; anonymous PSS was 14,496 KiB versus
-  16,024 KiB, with 50 TLS accepts, zero non-H2 requests, one active connection per peer, and CPU
-  ticks 180 versus 170. The repository summary peak was 28,747 KiB and the source journal peak was
-  26,587 KiB; source-journal CPU p95 was 0%, additional read bytes were 0, and the journal remained
+  PSS was 30,567 KiB versus 31,758 KiB for the baseline; anonymous PSS was 14,760 KiB versus
+  15,516 KiB, with 50 TLS accepts, zero non-H2 requests, one active connection per peer, and CPU
+  ticks 188 versus 172. The repository summary peak was 27,870 KiB and the source journal peak was
+  27,919 KiB; source-journal CPU p95 was 1%, additional read bytes were 0, and the journal remained
   in `journal_capacity_guard` at 19,971 pending segments. Candidate and baseline Cargo builds and
-  the resource-test build were refreshed for the new candidate and completed in 368, 397, and 434
+  the resource-test build were refreshed for the new candidate and completed in 357, 364, and 403
   seconds respectively. The exact run and archive hashes are in
   `./evidence/mesh-resource-f2d79399.md`.
 - Rustls 0.23 uses the ring provider for both the server and Mesh client. Keeping one provider
