@@ -393,13 +393,13 @@ mod tests {
     #[test]
     fn private_voter_without_endpoint_uses_registered_api_preflight() {
         let target = MeshPeerTarget {
-            node_id: "private-voter".to_string(),
-            node_name: "101".to_string(),
-            mesh_base_url: None,
+            node_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+            node_name: xp_test_fixtures::tertiary_node_name().to_owned(),
+            mesh_base_url: xp_test_fixtures::none(),
             endpoint_transport: None,
             endpoint_fingerprint: None,
             mesh_reason: MeshPeerReason::MissingEndpoint,
-            public_base_url: "https://private-voter.example".to_string(),
+            public_base_url: xp_test_fixtures::tertiary_api_url().to_owned(),
         };
 
         assert_eq!(
@@ -411,13 +411,15 @@ mod tests {
     #[test]
     fn endpoint_bearing_voter_keeps_direct_preflight() {
         let target = MeshPeerTarget {
-            node_id: "public-voter".to_string(),
-            node_name: "us".to_string(),
-            mesh_base_url: Some("https://us-ep.example:44444".to_string()),
+            node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+            node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+            mesh_base_url: Some(xp_test_fixtures::url_https_public_peer_afixture_test().to_owned()),
             endpoint_transport: Some("xhttp_reality_fallback"),
-            endpoint_fingerprint: Some("fingerprint".to_string()),
+            endpoint_fingerprint: Some(
+                xp_test_fixtures::mesh_fingerprint_primary_xhttp().to_owned(),
+            ),
             mesh_reason: MeshPeerReason::MeshAvailable,
-            public_base_url: "https://us-xp.example".to_string(),
+            public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
         };
 
         assert_eq!(mesh_preflight_route(&target), MeshPreflightRoute::Direct);
