@@ -114,13 +114,14 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
 - The locked 15-minute comparison completed with 50 persistent H2 connections: candidate XP total
-  PSS was 32,046 KiB versus 32,425 KiB for the baseline; anonymous PSS was 14,948 KiB versus
-  15,404 KiB, with 50 TLS accepts, zero non-H2 requests, one active connection per peer, and CPU
-  ticks 182 versus 173. The repository summary peak was 28,288 KiB and the source journal peak was
-  27,032 KiB; source-journal CPU p95 was 0%, additional read bytes were 0, and the journal remained
+  PSS was 31,260 KiB versus 32,311 KiB for the baseline; anonymous PSS was 14,496 KiB versus
+  16,024 KiB, with 50 TLS accepts, zero non-H2 requests, one active connection per peer, and CPU
+  ticks 180 versus 170. The repository summary peak was 28,747 KiB and the source journal peak was
+  26,587 KiB; source-journal CPU p95 was 0%, additional read bytes were 0, and the journal remained
   in `journal_capacity_guard` at 19,971 pending segments. Candidate and baseline Cargo builds and
-  the resource-test build were cache hits completing in 1 second each. The exact run and archive
-  hashes are in `./evidence/mesh-resource-f2d79399.md`.
+  the resource-test build were refreshed for the new candidate and completed in 368, 397, and 434
+  seconds respectively. The exact run and archive hashes are in
+  `./evidence/mesh-resource-f2d79399.md`.
 - Rustls 0.23 uses the ring provider for both the server and Mesh client. Keeping one provider
   removes the unused AWS-LC implementation from the release binary while preserving TLS 1.2/1.3
   and P-256 support. ACME still carries its older HTTP/DNS dependency stack; replacing that stack is
