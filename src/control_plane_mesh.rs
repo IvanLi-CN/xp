@@ -688,7 +688,15 @@ impl MeshAwareHttpClient {
             | MeshAttemptDecision::Probe
             | MeshAttemptDecision::Disabled => {}
         }
-        let public_url = join_url(&peer.public_base_url, &request.path_and_query, false)?;
+        let public_url = match join_url(&peer.public_base_url, &request.path_and_query, false) {
+            Ok(url) => url,
+            Err(error) => {
+                self.circuits
+                    .release_public_half_open_probe(&peer.node_id)
+                    .await;
+                return Err(error);
+            }
+        };
         let response = match self
             .send_public_signed(
                 &public_url,

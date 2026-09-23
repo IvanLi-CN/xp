@@ -375,3 +375,41 @@ async fn stale_epoch_transport_failure_does_not_overwrite_current_validation() {
         DirectValidationState::Verified
     );
 }
+
+#[tokio::test]
+async fn invalid_public_target_releases_half_open_probe() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    let mut peer = primary_reverse_target(None, "not-a-url".to_owned());
+    peer.mesh_base_url = None;
+    client
+        .circuits()
+        .set_public_probe_ready_for_test(&peer.node_id)
+        .await;
+
+    let error = client
+        .send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/health".to_owned(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: true,
+                request_id: "invalid-public-target-probe".to_owned(),
+                route: InternalRoute::HealthV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+                sender_id: xp_test_fixtures::primary_node_id().to_owned(),
+                updates_active_path: false,
+            },
+            "unused",
+            "unused",
+        )
+        .await
+        .expect_err("invalid public URL should fail before dispatch");
+    assert!(matches!(error, MeshRequestError::InvalidTarget(_)));
+    assert_eq!(
+        client.circuits().before_public_attempt(&peer.node_id).await,
+        MeshAttemptDecision::Probe
+    );
+}

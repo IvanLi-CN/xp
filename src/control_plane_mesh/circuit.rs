@@ -261,6 +261,13 @@ impl PeerCircuitBreakers {
         self.before_public_attempt_with_probe(peer_id, true).await
     }
 
+    #[cfg(test)]
+    pub(super) async fn set_public_probe_ready_for_test(&self, peer_id: &str) {
+        let mut peers = self.public_peers.lock().await;
+        let circuit = peers.entry(peer_id.to_owned()).or_default();
+        circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+    }
+
     pub(super) async fn before_public_attempt_with_probe(
         &self,
         peer_id: &str,
