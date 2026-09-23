@@ -1,7 +1,5 @@
 use std::{
     net::SocketAddr,
-    path::Path,
-    process::Stdio,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -20,32 +18,24 @@ use axum::{
 use futures_util::future::join_all;
 use rand::rngs::OsRng;
 use rcgen::{CertificateParams, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256};
-use serde_yaml::Value;
 use tokio::{
     io::copy_bidirectional,
     net::TcpListener,
-    process::{Child, Command},
     sync::broadcast,
     task::JoinHandle,
     time::{Instant, sleep},
 };
 
 use xp::{
-    control_plane_mesh::{
-        MESH_POOL_IDLE_TIMEOUT, MeshAwareHttpClient, MeshPeerTarget, MeshRequest,
-    },
-    credentials,
-    domain::{
-        Endpoint, EndpointKind, Node, NodeQuotaReset, User, UserPriorityTier, UserQuotaReset,
-    },
+    control_plane_mesh::{MeshPeerTarget, MeshRequest, build_mesh_http_client},
+    domain::{Endpoint, EndpointKind},
     internal_auth::{self, InternalRoute},
     mesh_telemetry::MeshPeerReason,
     protocol::{
         MihomoSmuxConfig, RealityConfig, RealityKeys, RealityServerNamesSource,
         VlessRealityTransport, VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
     },
-    state::{NodeUserEndpointMembership, membership_xray_email},
-    subscription, xray,
+    xray,
 };
 
 const HEALTH_PATH: &str = "/api/admin/_internal/mesh/health";
@@ -59,28 +49,6 @@ struct SignedServerState {
 struct TestServer {
     addr: SocketAddr,
     task: JoinHandle<()>,
-}
-
-struct MihomoProcess {
-    child: Option<Child>,
-    _home: tempfile::TempDir,
-}
-
-impl MihomoProcess {
-    async fn stop(mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-        }
-    }
-}
-
-impl Drop for MihomoProcess {
-    fn drop(&mut self) {
-        if let Some(child) = self.child.as_mut() {
-            let _ = child.start_kill();
-        }
-    }
 }
 
 impl Drop for TestServer {
@@ -115,132 +83,6 @@ impl CountingProxy {
         .await
         .expect("proxied connections close");
     }
-}
-
-async fn spawn_mihomo(binary: &Path, config_yaml: &str, socks_port: u16) -> MihomoProcess {
-    let home = tempfile::tempdir().expect("Mihomo temp directory");
-    let config_path = home.path().join("config.yaml");
-    std::fs::write(&config_path, config_yaml).expect("write Mihomo config");
-    let mut child = Command::new(binary)
-        .arg("-d")
-        .arg(home.path())
-        .arg("-f")
-        .arg(&config_path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .expect("spawn Mihomo");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        if tokio::net::TcpStream::connect(("127.0.0.1", socks_port))
-            .await
-            .is_ok()
-        {
-            return MihomoProcess {
-                child: Some(child),
-                _home: home,
-            };
-        }
-        if let Some(status) = child.try_wait().expect("poll Mihomo") {
-            panic!("Mihomo exited during startup: {status}");
-        }
-        if Instant::now() >= deadline {
-            panic!("Mihomo SOCKS listener did not become ready");
-        }
-        sleep(Duration::from_millis(50)).await;
-    }
-}
-
-async fn free_loopback_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("free loopback port");
-    listener.local_addr().expect("free loopback address").port()
-}
-
-fn render_mihomo_config(endpoint: &Endpoint, external_port: u16, socks_port: u16) -> String {
-    let user = User {
-        user_id: xp_test_fixtures::primary_user_id().to_owned(),
-        display_name: "mesh-e2e".to_string(),
-        subscription_token: xp_test_fixtures::primary_token().to_owned(),
-        credential_epoch: 0,
-        priority_tier: UserPriorityTier::P2,
-        quota_reset: UserQuotaReset::default(),
-    };
-    let node = Node {
-        node_id: xp_test_fixtures::primary_node_id().to_owned(),
-        node_name: xp_test_fixtures::primary_node_name().to_owned(),
-        access_host: xp_test_fixtures::address_loopback().to_owned(),
-        api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
-        quota_limit_bytes: 0,
-        quota_reset: NodeQuotaReset::default(),
-    };
-    let membership = NodeUserEndpointMembership {
-        user_id: xp_test_fixtures::primary_user_id().to_owned(),
-        node_id: xp_test_fixtures::primary_node_id().to_owned(),
-        endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
-    };
-    let mut advertised_endpoint = endpoint.clone();
-    advertised_endpoint.port = external_port;
-    let rendered = subscription::build_clash_yaml(
-        xp_test_fixtures::primary_token(),
-        &user,
-        &[membership],
-        &[advertised_endpoint],
-        &[node],
-    )
-    .expect("render Mihomo Reality subscription");
-    let mut root: serde_yaml::Mapping = serde_yaml::from_str(&rendered).expect("subscription YAML");
-    let proxy_name = root
-        .get("proxies")
-        .and_then(Value::as_sequence)
-        .and_then(|proxies| proxies.first())
-        .and_then(|proxy| proxy.get("name"))
-        .and_then(Value::as_str)
-        .expect("generated proxy name")
-        .to_string();
-    root.insert("socks-port".into(), (socks_port as u64).into());
-    root.insert("allow-lan".into(), false.into());
-    root.insert("mode".into(), "rule".into());
-    root.insert("log-level".into(), "warning".into());
-    root.insert("ipv6".into(), false.into());
-    root.insert("find-process-mode".into(), "off".into());
-    root.insert(
-        "rules".into(),
-        Value::Sequence(vec![format!("MATCH,{proxy_name}").into()]),
-    );
-    serde_yaml::to_string(&root).expect("serialize Mihomo config")
-}
-
-fn build_mesh_http_client_through_socks(
-    cluster_ca_pem: &str,
-    node_cert_pem: &str,
-    node_key_pem: &str,
-    socks_port: u16,
-) -> MeshAwareHttpClient {
-    let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes()).expect("cluster CA");
-    let identity =
-        reqwest::Identity::from_pem(format!("{node_cert_pem}\n{node_key_pem}").as_bytes())
-            .expect("node identity");
-    let proxy = reqwest::Proxy::all(format!("socks5h://127.0.0.1:{socks_port}"))
-        .expect("Mihomo SOCKS proxy");
-    let mesh = reqwest::Client::builder()
-        .add_root_certificate(ca.clone())
-        .identity(identity.clone())
-        .proxy(proxy)
-        .http2_prior_knowledge()
-        .http2_adaptive_window(true)
-        .pool_max_idle_per_host(1)
-        .pool_idle_timeout(MESH_POOL_IDLE_TIMEOUT)
-        .build()
-        .expect("Mesh client through Mihomo");
-    let public = reqwest::Client::builder()
-        .add_root_certificate(ca)
-        .identity(identity)
-        .build()
-        .expect("public fallback client");
-    MeshAwareHttpClient::from_transport_clients(mesh, public).with_direct_validation_required()
 }
 
 async fn signed_health(
@@ -376,13 +218,14 @@ fn mesh_request(index: usize) -> MeshRequest {
     }
 }
 
-fn mesh_target(canary: &TestServer, transport: VlessRealityTransport) -> MeshPeerTarget {
+fn mesh_target(proxy: &CountingProxy, transport: VlessRealityTransport) -> MeshPeerTarget {
     MeshPeerTarget {
         node_id: xp_test_fixtures::primary_node_id().to_owned(),
         node_name: xp_test_fixtures::primary_node_name().to_owned(),
         mesh_base_url: Some(format!(
-            "https://host.docker.internal:{}",
-            canary.addr.port()
+            "https://{}:{}",
+            xp_test_fixtures::loopback_address(),
+            proxy.addr.port()
         )),
         endpoint_transport: Some(match transport {
             VlessRealityTransport::VisionTcp => "vision_tcp",
@@ -409,7 +252,7 @@ fn reality_mesh_endpoint(
         meta: serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
             reality: RealityConfig {
                 dest: format!("host.docker.internal:{}", canary.addr.port()),
-                server_names: vec!["host.docker.internal".to_string()],
+                server_names: xp_test_fixtures::loopback_server_names(),
                 server_names_source: RealityServerNamesSource::Manual,
                 fingerprint: "chrome".to_string(),
             },
@@ -471,53 +314,22 @@ async fn assert_reality_fallback_reuses_one_h2_connection(transport: VlessRealit
     let canary = spawn_signed_tls_server(
         &ca.key_pem,
         &ca.cert_pem,
-        vec!["host.docker.internal".to_string()],
+        xp_test_fixtures::loopback_server_names(),
     )
     .await;
     let endpoint = reality_mesh_endpoint(vless_port, &canary, transport);
-    let uuid = credentials::derive_vless_uuid(
-        xp_test_fixtures::primary_token(),
-        xp_test_fixtures::primary_user_id(),
-        0,
-    )
-    .expect("derive VLESS UUID");
     let mut xray = xray::connect(xray_api_addr)
         .await
         .expect("connect Xray API");
     xray.add_inbound(xp::xray::builder::build_add_inbound_request(&endpoint).unwrap())
         .await
         .expect("add Xray Reality inbound");
-    xray.alter_inbound(
-        xp::xray::proto::xray::app::proxyman::command::AlterInboundRequest {
-            tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
-            operation: Some(
-                xp::xray::builder::build_add_user_operation(
-                    &endpoint,
-                    &membership_xray_email(
-                        xp_test_fixtures::primary_user_id(),
-                        &endpoint.endpoint_id,
-                    ),
-                    Some(&uuid),
-                    None,
-                )
-                .expect("build Reality Mesh VLESS user"),
-            ),
-        },
-    )
-    .await
-    .expect("add Reality Mesh VLESS user");
     wait_for_inbound(SocketAddr::from(([127, 0, 0, 1], vless_port))).await;
 
     let proxy = spawn_counting_proxy(SocketAddr::from(([127, 0, 0, 1], vless_port))).await;
-    let socks_port = free_loopback_port().await;
-    let mihomo_binary =
-        Path::new(&std::env::var("XP_E2E_MIHOMO_BIN").expect("XP_E2E_MIHOMO_BIN from E2E harness"))
-            .to_owned();
-    let mihomo_config = render_mihomo_config(&endpoint, proxy.addr.port(), socks_port);
-    let mihomo = spawn_mihomo(&mihomo_binary, &mihomo_config, socks_port).await;
-    let target = mesh_target(&canary, transport);
+    let target = mesh_target(&proxy, transport);
     let client =
-        build_mesh_http_client_through_socks(&ca.cert_pem, &node_cert, &csr.key_pem, socks_port);
+        build_mesh_http_client(&ca.cert_pem, &node_cert, &csr.key_pem).expect("Mesh client");
     client
         .send_peer_direct_request(
             &target,
@@ -570,7 +382,6 @@ async fn assert_reality_fallback_reuses_one_h2_connection(transport: VlessRealit
     assert!(proxy.peak_active.load(Ordering::SeqCst) <= 2);
     assert_eq!(proxy.active.load(Ordering::SeqCst), 1);
 
-    mihomo.stop().await;
     xray.remove_inbound(
         xp::xray::proto::xray::app::proxyman::command::RemoveInboundRequest { tag: endpoint.tag },
     )
