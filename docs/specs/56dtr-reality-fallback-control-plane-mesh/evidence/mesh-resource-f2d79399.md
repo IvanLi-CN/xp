@@ -8,7 +8,7 @@
 - Testbox run: `20260923_021043_807e2d7b5c57_727ae71e`
 - Environment: actual release XP process and Xray, Linux `MemoryMax=128MiB`,
   `MemorySwapMax=0`, 50-peer workload for 900 seconds
-- Baseline commit: `origin/main@4ed26f58daef74705064282c828a82bc9d75f564`
+- Baseline commit: `origin/main@6491df193f015db6ef8e384e376f72d7890d5b21`
 - Source archive SHA-256: `9e000051692f6d11b545dc6547868d8c6532523534e059fd528329cf18e58233`
 - Generated Web archive SHA-256: `8f689d8ba0c54d21504dfc1ae97c203415b1eaeab8347eca9e91e7658f8d4dd5`
 - Baseline archive SHA-256: `eaf35858e8e657269bf8454fbb92b21f869b5bb0a0e11dffae166f1b12cd721e`
