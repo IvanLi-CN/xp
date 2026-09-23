@@ -413,3 +413,46 @@ async fn invalid_public_target_releases_half_open_probe() {
         MeshAttemptDecision::Probe
     );
 }
+
+#[tokio::test]
+async fn invalid_mesh_target_releases_half_open_probe() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    let peer = primary_reverse_target(
+        Some("not-a-url".to_owned()),
+        "https://public.example".to_owned(),
+    );
+    let circuits = client.circuits();
+    {
+        let mut peers = circuits.peers.lock().await;
+        let circuit = peers.entry(peer.node_id.clone()).or_default();
+        circuit.failures = MESH_FAILURES_BEFORE_OPEN;
+        circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+    }
+
+    let error = client
+        .send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/health".to_owned(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: true,
+                request_id: "invalid-mesh-target-probe".to_owned(),
+                route: InternalRoute::HealthV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+                sender_id: xp_test_fixtures::primary_node_id().to_owned(),
+                updates_active_path: false,
+            },
+            "unused",
+            "unused",
+        )
+        .await
+        .expect_err("invalid Mesh URL should fail before dispatch");
+    assert!(matches!(error, MeshRequestError::InvalidTarget(_)));
+    assert_eq!(
+        circuits.before_attempt(&peer.node_id, true).await,
+        MeshAttemptDecision::Probe
+    );
+}

@@ -524,11 +524,20 @@ impl MeshAwareHttpClient {
             MeshAttemptDecision::Attempt | MeshAttemptDecision::Probe
         ) && !fallback
         {
-            let mesh_url = join_url(
+            let mesh_url = match join_url(
                 peer.mesh_base_url.as_deref().expect("checked enabled"),
                 &request.path_and_query,
                 false,
-            )?;
+            ) {
+                Ok(url) => url,
+                Err(error) => {
+                    if matches!(decision, MeshAttemptDecision::Probe) {
+                        self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
+                            .await;
+                    }
+                    return Err(error);
+                }
+            };
             let budget = mesh_attempt_budget(request.total_budget);
             match self
                 .attempt_mesh_request(
