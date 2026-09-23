@@ -360,7 +360,9 @@ mod tests {
             node_name: xp_test_fixtures::primary_node_name().to_owned(),
             mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
             endpoint_transport: Some("vision_tcp"),
-            endpoint_fingerprint: Some("endpoint-a|443|node-a.fixture.test|vision_tcp".to_owned()),
+            endpoint_fingerprint: Some(
+                xp_test_fixtures::mesh_fingerprint_primary_vision().to_owned(),
+            ),
             mesh_reason: MeshPeerReason::MeshAvailable,
             public_base_url: xp_test_fixtures::primary_api_url().to_owned(),
         };
@@ -370,7 +372,7 @@ mod tests {
             DirectValidationState::Verified
         );
         peer.endpoint_fingerprint =
-            Some("endpoint-b|443|node-a.fixture.test|vision_tcp".to_owned());
+            Some(xp_test_fixtures::mesh_fingerprint_primary_vision_changed().to_owned());
         assert_eq!(
             store.state(&peer, true).await,
             DirectValidationState::ConfiguredUnverified
@@ -386,7 +388,7 @@ mod tests {
             mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
             endpoint_transport: Some("xhttp_reality_fallback"),
             endpoint_fingerprint: Some(
-                "endpoint-a|443|node-a.fixture.test|xhttp_reality_fallback".to_owned(),
+                xp_test_fixtures::mesh_fingerprint_primary_xhttp().to_owned(),
             ),
             mesh_reason: MeshPeerReason::MeshAvailable,
             public_base_url: xp_test_fixtures::primary_api_url().to_owned(),

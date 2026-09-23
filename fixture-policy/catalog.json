@@ -1100,7 +1100,10 @@
 				"fixture586": "endpoint-fixture-586",
 				"fixture589": "endpoint-fixture-589",
 				"fixtureinlineA": "endpoint-fixture-inline-a",
-				"fixtureinlineB": "endpoint-fixture-inline-b"
+				"fixtureinlineB": "endpoint-fixture-inline-b",
+				"fixtureMeshFingerprintVision": "endpoint-fingerprint-a",
+				"fixtureMeshFingerprintVisionChanged": "endpoint-fingerprint-b",
+				"fixtureMeshFingerprintXhttp": "endpoint-fingerprint-xhttp"
 			}
 		},
 		"numbers": {
