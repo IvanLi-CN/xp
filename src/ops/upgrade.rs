@@ -880,6 +880,7 @@ fn preserve_control_plane_listeners(
         changed |= replace_inbound_by_tag(&mut current, &existing, "api");
     }
     changed |= xray_cleanup::remove_inbound_and_rules_by_tag(&mut current, "mesh-proxy");
+    changed |= xray_cleanup::remove_xp_owned_reverse_artifacts(&mut current);
 
     if !changed {
         return Ok(());
@@ -988,7 +989,6 @@ fn read_xp_env_value(paths: &Paths, key: &str) -> Option<String> {
     }
     None
 }
-
 fn unquote_env_value(value: &str) -> String {
     let quoted = (value.starts_with('"') && value.ends_with('"'))
         || (value.starts_with('\'') && value.ends_with('\''));

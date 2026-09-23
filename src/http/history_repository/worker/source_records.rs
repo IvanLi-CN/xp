@@ -387,6 +387,7 @@ mod tests {
             node_name: xp_test_fixtures::secondary_node_name().to_owned(),
             mesh_base_url: xp_test_fixtures::none(),
             endpoint_transport: None,
+            endpoint_fingerprint: None,
             mesh_reason: MeshPeerReason::MissingEndpoint,
             public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
         };
@@ -419,6 +420,7 @@ mod tests {
             node_name: xp_test_fixtures::secondary_node_name().to_owned(),
             mesh_base_url: xp_test_fixtures::none(),
             endpoint_transport: None,
+            endpoint_fingerprint: None,
             mesh_reason: MeshPeerReason::MissingEndpoint,
             public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
         };

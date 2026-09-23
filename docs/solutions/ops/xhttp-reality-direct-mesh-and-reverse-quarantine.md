@@ -27,6 +27,10 @@ remain established after route removal.
 
 - A node has one valid managed XHTTP/Reality endpoint but its Mesh target is reported as
   unsupported and traffic uses the public path.
+- A deployed peer accepts TCP on its managed XHTTP/Reality port but returns TLS EOF before the
+  signed control-plane acknowledgement.
+- Repeated public fallback requests continue after an unsigned edge response and inflate Raft
+  retry, CPU, and socket counts.
 - Generic control-plane requests create or select Native Reverse relay routes.
 - Removing a Reverse outbound reports success while an established physical socket remains.
 - User-facing connection counts mix internal Reverse underlays with external user sessions.
@@ -35,8 +39,9 @@ remain established after route removal.
 
 XHTTP was incorrectly treated as a user-session transport requirement for control-plane
 traffic. The control plane does not need to speak VLESS/XHTTP: it can send its existing
-signed HTTP/2 request through the endpoint's Reality fallback. Native Reverse also lacked
-an enforceable proof that dynamic removal closed every physical underlay.
+signed HTTP/2 request through the endpoint's Reality fallback. Production TCP reachability alone
+did not prove that the deployed Reality-to-canary path completed TLS and returned an ACK. Native
+Reverse also lacked an enforceable proof that dynamic removal closed every physical underlay.
 
 ## Resolution
 
@@ -46,6 +51,12 @@ an enforceable proof that dynamic removal closed every physical underlay.
 - Route generic control-plane requests Direct Mesh first, then bounded Public HTTPS. Only
   transport setup failures may fall back; signed ACK, authentication, protocol, and
   response-start failures remain terminal. History Repository traffic stays public-only.
+- Require all-voter directed Direct-only `health-v2` validation before enabling the durable Mesh
+  gate. Keep a five-minute validation freshness window and move changed or restarted peers to
+  Public-only until they prove the path again.
+- Keep a separate Public circuit for unsigned/invalid acknowledgements and exhausted transport
+  retries. Use one half-open health request per `30/60/120/240/300s` cooldown so Raft cannot turn
+  a failed edge into an unbounded connection loop.
 - Keep Native Reverse assignment and epoch data read-only for diagnosis, but mark it
   `disabled_pending_rework`. Do not reconcile, probe, create Xray dynamic artifacts, or
   route requests through it.
@@ -61,6 +72,8 @@ an enforceable proof that dynamic removal closed every physical underlay.
 - Keep internal Reverse underlay accounting separate from external user inbound accounting.
 - Validate Vision and XHTTP with real Xray, then validate the actual XP control plane under
   packet loss, delay, half-open connections, signed rejection, and public fallback.
+- A successful TCP connect, local canary readiness, or public-path success is not Direct proof;
+  the evidence must show the signed HTTP/2 ACK on the actual directed edge.
 - Re-enable Native Reverse only through a new specification, physical-underlay closure
   evidence, bounded resource proof, and a new release.
 

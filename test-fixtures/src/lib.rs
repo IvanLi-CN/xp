@@ -622,6 +622,15 @@ pub fn endpoint_tag_reverse_spike_vision() -> &'static str {
 pub fn endpoint_tag_reverse_spike_xhttp() -> &'static str {
     &catalog().fixtures.strings["endpointTag"]["fixtureReverseSpikeXhttp"]
 }
+pub fn mesh_fingerprint_primary_vision() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixtureMeshFingerprintVision"]
+}
+pub fn mesh_fingerprint_primary_vision_changed() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixtureMeshFingerprintVisionChanged"]
+}
+pub fn mesh_fingerprint_primary_xhttp() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixtureMeshFingerprintXhttp"]
+}
 pub fn timestamp_at20260729_t080000_z() -> &'static str {
     &catalog().fixtures.strings["timestamp"]["t20260729T080000"]
 }

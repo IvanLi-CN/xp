@@ -3,10 +3,6 @@ use super::*;
 const PUBLIC_GATEWAY_RETRY_DELAYS: [Duration; 2] =
     [Duration::from_millis(200), Duration::from_millis(500)];
 
-pub(super) fn is_retryable_public_gateway_status(status: reqwest::StatusCode) -> bool {
-    matches!(status.as_u16(), 502 | 503 | 504 | 520 | 522 | 523 | 524)
-}
-
 fn is_retryable_public_transport_error(error: &reqwest::Error) -> bool {
     // These errors happen before a response acknowledgement exists. Retrying is safe only
     // for the request classes admitted by `request_allows_public_gateway_retry` below.
@@ -74,19 +70,6 @@ pub(super) async fn signed_send_with_public_gateway_retries(
                 return Err(MeshRequestError::OutcomeUnknown);
             }
         };
-        let missing_ack = !response
-            .headers()
-            .contains_key(internal_auth::INTERNAL_ACK_HEADER);
-        if allow_retry
-            && missing_ack
-            && is_retryable_public_gateway_status(response.status())
-            && let Some(delay) = next_retry_delay(started, budget, retry)
-        {
-            drop(response);
-            tokio::time::sleep(delay).await;
-            retry += 1;
-            continue;
-        }
         return Ok((response, verified));
     }
 }

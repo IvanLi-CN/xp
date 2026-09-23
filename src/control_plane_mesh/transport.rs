@@ -104,8 +104,8 @@ pub(crate) fn build_mesh_http_client_with_policy(
         policy,
     )?;
     let public_direct = authenticated_client_builder(cluster_ca_pem, &identity_pem)?.build()?;
-    Ok(MeshAwareHttpClient::from_transport_clients(
-        mesh,
-        public_direct,
-    ))
+    let client = MeshAwareHttpClient::from_transport_clients(mesh, public_direct);
+    #[cfg(not(test))]
+    let client = client.with_direct_validation_required();
+    Ok(client)
 }

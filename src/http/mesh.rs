@@ -7,6 +7,8 @@ mod config;
 mod etag;
 #[path = "mesh/liveness.rs"]
 mod liveness;
+#[path = "mesh/preflight.rs"]
+mod preflight;
 #[path = "mesh/status.rs"]
 mod status;
 
@@ -16,6 +18,7 @@ pub(super) use config::admin_update_mesh_config;
 pub(super) use liveness::{
     admin_internal_mesh_health, admin_internal_reverse_probe, spawn_reverse_link_probe_worker,
 };
+pub(super) use preflight::{admin_internal_mesh_preflight, run_mesh_enable_preflight};
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
     generated_at: String,
@@ -57,6 +60,8 @@ struct AdminMeshPeerStatus {
     quality: MeshQuality,
     stale: bool,
     breaker: BreakerState,
+    direct_validation: String,
+    public_circuit: BreakerState,
     last_sample_at: Option<String>,
     last_transition_at: Option<String>,
     availability_1h: Option<f64>,
@@ -1025,93 +1030,96 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         &egress_probes,
         reverse_mesh_bootstrap.as_ref(),
     );
-    let peers = nodes
+    let mut peers = Vec::new();
+    for node in nodes
         .into_iter()
         .filter(|node| node.node_id != state.cluster.node_id)
-        .map(|node| {
-            let target = crate::control_plane_mesh::peer_target_from_node(&node, &endpoints);
-            let mesh_url = target.mesh_base_url.clone();
-            let local_mesh_enabled = cluster_mesh_enabled && local_mesh_gate_enabled;
-            let mesh_enabled = mesh_url.is_some() && local_mesh_enabled;
-            let peer = telemetry_by_peer.get(node.node_id.as_str()).copied();
-            let mesh_reason = if !local_mesh_enabled {
-                Some(crate::mesh_telemetry::MeshPeerReason::FallbackActive)
-            } else if mesh_enabled {
-                Some(
-                    peer.and_then(|peer| peer.last_mesh_reason)
-                        .filter(|_| {
-                            peer.and_then(|peer| peer.last_mesh_target.as_deref())
-                                == target.mesh_base_url.as_deref()
-                        })
-                        .unwrap_or(crate::mesh_telemetry::MeshPeerReason::NoSample),
-                )
-            } else {
-                Some(target.mesh_reason)
-            }
-            .map(status::status_mesh_reason);
-            let (
-                availability_1h,
-                availability_24h,
-                mesh_availability_24h,
-                latency_p50_ms,
-                latency_p95_ms,
-            ) = peer.map_or((None, None, None, None, None), |peer| {
-                let (p50, p95) = latency_percentiles_for(peer, 24 * 60, now);
-                (
-                    availability_for(peer, 60, now),
-                    availability_for(peer, 24 * 60, now),
-                    mesh_availability_for(peer, now),
-                    p50,
-                    p95,
-                )
-            });
-            AdminMeshPeerStatus {
-                node_id: node.node_id.clone(),
-                node_name: node.node_name,
-                api_base_url: node.api_base_url,
-                mesh_url,
-                endpoint_transport: target.endpoint_transport,
-                mesh_capability: Some(
-                    if mesh_enabled { "enabled" } else { "disabled" }.to_string(),
-                ),
-                mesh_reason,
-                current_path: local_mesh_enabled
-                    .then(|| peer.and_then(|peer| peer.last_path))
-                    .flatten()
-                    .or_else(|| (!local_mesh_enabled).then_some(TelemetryPath::Public)),
-                active_route: local_mesh_enabled
-                    .then(|| {
-                        status::with_assignment(
-                            peer.and_then(|peer| peer.active_route.clone()),
-                            assignments.get(&node.node_id),
-                        )
+    {
+        let target = crate::control_plane_mesh::peer_target_from_node(&node, &endpoints);
+        let mesh_url = target.mesh_base_url.clone();
+        let local_mesh_enabled = cluster_mesh_enabled && local_mesh_gate_enabled;
+        let mesh_enabled = mesh_url.is_some() && local_mesh_enabled;
+        let peer = telemetry_by_peer.get(node.node_id.as_str()).copied();
+        let direct_validation = state.mesh_client.direct_validation_state_for(&target).await;
+        let mesh_reason = if !local_mesh_enabled {
+            Some(crate::mesh_telemetry::MeshPeerReason::FallbackActive)
+        } else if mesh_enabled {
+            Some(
+                peer.and_then(|peer| peer.last_mesh_reason)
+                    .filter(|_| {
+                        peer.and_then(|peer| peer.last_mesh_target.as_deref())
+                            == target.mesh_base_url.as_deref()
                     })
-                    .flatten()
-                    .filter(|route| {
-                        crate::reverse_mesh::NATIVE_REVERSE_ENABLED
-                            || route.kind != crate::mesh_telemetry::ActiveRouteKind::ReverseRelay
-                    }),
-                quality: peer.map_or(MeshQuality::Unknown, |peer| quality_for_peer(peer, now)),
-                stale: status::is_mesh_peer_stale(peer, now),
-                breaker: breaker_for_mesh_target(mesh_enabled, peer.and_then(|peer| peer.breaker)),
-                last_sample_at: peer.and_then(|peer| peer.last_sample_at.clone()),
-                last_transition_at: peer.and_then(|peer| peer.last_transition_at.clone()),
-                availability_1h,
-                availability_24h,
-                mesh_availability_24h,
-                latency_p50_ms,
-                latency_p95_ms,
-                mesh_transport: status::mesh_transport_status_for(mesh_enabled, peer, now),
-                reverse_underlay: connection_usage.reverse_by_peer.get(&node.node_id).cloned(),
-                reverse_relay_state: assignments
-                    .contains_key(&node.node_id)
-                    .then_some("disabled_pending_rework"),
-                buckets: peer.map_or_else(Vec::new, |peer| {
-                    crate::mesh_telemetry::buckets_for_last_24_hours(peer, now)
+                    .unwrap_or(crate::mesh_telemetry::MeshPeerReason::NoSample),
+            )
+        } else {
+            Some(target.mesh_reason)
+        }
+        .map(status::status_mesh_reason);
+        let (
+            availability_1h,
+            availability_24h,
+            mesh_availability_24h,
+            latency_p50_ms,
+            latency_p95_ms,
+        ) = peer.map_or((None, None, None, None, None), |peer| {
+            let (p50, p95) = latency_percentiles_for(peer, 24 * 60, now);
+            (
+                availability_for(peer, 60, now),
+                availability_for(peer, 24 * 60, now),
+                mesh_availability_for(peer, now),
+                p50,
+                p95,
+            )
+        });
+        peers.push(AdminMeshPeerStatus {
+            node_id: node.node_id.clone(),
+            node_name: node.node_name,
+            api_base_url: node.api_base_url,
+            mesh_url,
+            endpoint_transport: target.endpoint_transport,
+            mesh_capability: Some(if mesh_enabled { "enabled" } else { "disabled" }.to_string()),
+            mesh_reason,
+            current_path: local_mesh_enabled
+                .then(|| peer.and_then(|peer| peer.last_path))
+                .flatten()
+                .or_else(|| (!local_mesh_enabled).then_some(TelemetryPath::Public)),
+            active_route: local_mesh_enabled
+                .then(|| {
+                    status::with_assignment(
+                        peer.and_then(|peer| peer.active_route.clone()),
+                        assignments.get(&node.node_id),
+                    )
+                })
+                .flatten()
+                .filter(|route| {
+                    crate::reverse_mesh::NATIVE_REVERSE_ENABLED
+                        || route.kind != crate::mesh_telemetry::ActiveRouteKind::ReverseRelay
                 }),
-            }
-        })
-        .collect();
+            quality: peer.map_or(MeshQuality::Unknown, |peer| quality_for_peer(peer, now)),
+            stale: status::is_mesh_peer_stale(peer, now),
+            breaker: breaker_for_mesh_target(mesh_enabled, peer.and_then(|peer| peer.breaker)),
+            direct_validation: direct_validation_label(direct_validation).to_string(),
+            public_circuit: peer
+                .and_then(|peer| peer.public_breaker)
+                .unwrap_or(BreakerState::Closed),
+            last_sample_at: peer.and_then(|peer| peer.last_sample_at.clone()),
+            last_transition_at: peer.and_then(|peer| peer.last_transition_at.clone()),
+            availability_1h,
+            availability_24h,
+            mesh_availability_24h,
+            latency_p50_ms,
+            latency_p95_ms,
+            mesh_transport: status::mesh_transport_status_for(mesh_enabled, peer, now),
+            reverse_underlay: connection_usage.reverse_by_peer.get(&node.node_id).cloned(),
+            reverse_relay_state: assignments
+                .contains_key(&node.node_id)
+                .then_some("disabled_pending_rework"),
+            buckets: peer.map_or_else(Vec::new, |peer| {
+                crate::mesh_telemetry::buckets_for_last_24_hours(peer, now)
+            }),
+        });
+    }
     let metrics = raft_metrics(state);
     AdminMeshStatusResponse {
         generated_at: telemetry.generated_at,
@@ -1145,6 +1153,24 @@ fn breaker_for_mesh_target(mesh_enabled: bool, recorded: Option<BreakerState>) -
         BreakerState::Disabled
     }
 }
+
+fn direct_validation_label(
+    state: crate::control_plane_mesh::DirectValidationState,
+) -> &'static str {
+    match state {
+        crate::control_plane_mesh::DirectValidationState::ConfiguredUnverified => {
+            "configured_unverified"
+        }
+        crate::control_plane_mesh::DirectValidationState::Verified => "verified",
+        crate::control_plane_mesh::DirectValidationState::TransportFailed => "transport_failed",
+        crate::control_plane_mesh::DirectValidationState::ProtocolRejected => "protocol_rejected",
+    }
+}
+
+fn health_probe_public_only(requested_public_only: bool, mesh_enabled: bool) -> bool {
+    requested_public_only || !mesh_enabled
+}
+
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
@@ -1158,6 +1184,13 @@ mod tests {
         );
         assert_eq!(breaker_for_mesh_target(false, None), BreakerState::Disabled);
         assert_eq!(breaker_for_mesh_target(true, None), BreakerState::Closed);
+    }
+
+    #[test]
+    fn health_probe_follows_the_mesh_gate() {
+        assert!(health_probe_public_only(false, false));
+        assert!(!health_probe_public_only(false, true));
+        assert!(health_probe_public_only(true, true));
     }
     #[test]
     fn mesh_availability_uses_only_the_last_24_hours() {
@@ -1471,31 +1504,37 @@ async fn run_mesh_health_probe(
     let Some(ca_key_pem) = state.cluster_ca_key_pem.as_deref() else {
         return Err(ApiError::internal("cluster CA key is not available"));
     };
+    let public_only = health_probe_public_only(
+        public_only,
+        state.reconcile.mesh_gate().load(Ordering::Acquire),
+    );
     let mut peer = mesh_peer_target(state, node_id).await?;
+    let client = state.mesh_client.clone();
+    let request = MeshRequest {
+        method: Method::GET,
+        path_and_query: "/api/admin/_internal/mesh/health".to_string(),
+        content_type: None,
+        body: Vec::new(),
+        total_budget: Duration::from_secs(5),
+        allow_ambiguous_fallback: false,
+        request_id: crate::id::new_ulid_string(),
+        route: internal_auth::InternalRoute::HealthV2,
+        cluster_id: state.cluster.cluster_id.clone(),
+        sender_id: state.cluster.node_id.clone(),
+        updates_active_path: !public_only,
+    };
     if public_only {
         peer.mesh_base_url = None;
+        client
+            .send_peer_request(&peer, request, ca_key_pem, &state.cluster_ca_pem)
+            .await
+            .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+    } else {
+        let result = client
+            .send_peer_direct_preflight(&peer, request, ca_key_pem, &state.cluster_ca_pem)
+            .await;
+        let response = result.map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+        drop(response);
     }
-    let client = state.mesh_client.clone();
-    client
-        .send_peer_request(
-            &peer,
-            MeshRequest {
-                method: Method::GET,
-                path_and_query: "/api/admin/_internal/mesh/health".to_string(),
-                content_type: None,
-                body: Vec::new(),
-                total_budget: Duration::from_secs(5),
-                allow_ambiguous_fallback: true,
-                request_id: crate::id::new_ulid_string(),
-                route: internal_auth::InternalRoute::HealthV2,
-                cluster_id: state.cluster.cluster_id.clone(),
-                sender_id: state.cluster.node_id.clone(),
-                updates_active_path: !public_only,
-            },
-            ca_key_pem,
-            &state.cluster_ca_pem,
-        )
-        .await
-        .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
     Ok(())
 }

@@ -22,7 +22,7 @@ use std::{
     time::Instant as StdInstant,
 };
 use tokio::{
-    sync::{Mutex, mpsc},
+    sync::{Mutex, Semaphore, mpsc},
     time::Duration,
 };
 mod embedded_ui;
@@ -37,10 +37,10 @@ mod status_events;
 mod unreachable_voter_eviction;
 use mesh::{
     MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_mesh_health,
-    admin_internal_raft_client_write, admin_internal_reverse_probe, admin_internal_reverse_relay,
-    admin_run_mesh_probes, admin_update_mesh_config, send_mesh_internal_capability_read,
-    send_mesh_internal_read, send_mesh_internal_request, spawn_mesh_probe_worker,
-    spawn_reverse_assignment_worker, spawn_reverse_link_probe_worker,
+    admin_internal_mesh_preflight, admin_internal_raft_client_write, admin_internal_reverse_probe,
+    admin_internal_reverse_relay, admin_run_mesh_probes, admin_update_mesh_config,
+    send_mesh_internal_capability_read, send_mesh_internal_read, send_mesh_internal_request,
+    spawn_mesh_probe_worker, spawn_reverse_assignment_worker, spawn_reverse_link_probe_worker,
 };
 use node_delete::AdminNodeDeletePreviewEndpoint;
 use resource_alerts::admin_get_alerts_response;
@@ -149,6 +149,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub store: Arc<Mutex<JsonSnapshotStore>>,
     pub(crate) repository_replica: Arc<Mutex<RepositoryReplicaRuntime>>,
+    pub(crate) repository_summary_gate: Arc<Semaphore>,
     pub reconcile: ReconcileHandle,
     pub xray_health: XrayHealthHandle,
     pub cloudflared_health: CloudflaredHealthHandle,
@@ -205,23 +206,18 @@ impl ApiError {
     pub fn unauthorized(message: impl Into<String>) -> Self {
         Self::new("unauthorized", StatusCode::UNAUTHORIZED, message)
     }
-
     pub fn not_implemented(message: impl Into<String>) -> Self {
         Self::new("not_implemented", StatusCode::NOT_IMPLEMENTED, message)
     }
-
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::new("conflict", StatusCode::CONFLICT, message)
     }
-
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new("internal", StatusCode::INTERNAL_SERVER_ERROR, message)
     }
-
     pub fn gateway_timeout(message: impl Into<String>) -> Self {
         Self::new("timeout", StatusCode::GATEWAY_TIMEOUT, message)
     }
-
     pub fn too_many_requests(message: impl Into<String>) -> Self {
         Self::new("auth_busy", StatusCode::TOO_MANY_REQUESTS, message)
     }
@@ -279,7 +275,6 @@ impl From<StoreError> for ApiError {
 struct ErrorResponse {
     error: ErrorBody,
 }
-
 #[derive(Serialize)]
 struct ErrorBody {
     code: String,
@@ -1058,6 +1053,7 @@ pub fn build_router_with_mesh_telemetry(
         config: Arc::new(config),
         store,
         repository_replica: Arc::new(Mutex::new(repository_replica)),
+        repository_summary_gate: Arc::new(Semaphore::new(1)),
         reconcile,
         xray_health,
         cloudflared_health,
@@ -1116,6 +1112,10 @@ pub fn build_router_with_mesh_telemetry(
             post(node_metadata::admin_internal_update_node_metadata),
         )
         .route("/_internal/mesh/health", get(admin_internal_mesh_health))
+        .route(
+            "/_internal/mesh/preflight",
+            post(admin_internal_mesh_preflight),
+        )
         .route(
             "/_internal/mesh/reverse-readiness",
             get(admin_internal_reverse_readiness),

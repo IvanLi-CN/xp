@@ -403,6 +403,7 @@ pub(super) fn primary_reverse_target(
         node_name: xp_test_fixtures::primary_node_name().to_owned(),
         mesh_base_url,
         endpoint_transport: Some("vision_tcp"),
+        endpoint_fingerprint: None,
         mesh_reason: MeshPeerReason::MeshAvailable,
         public_base_url,
     }
@@ -417,6 +418,7 @@ pub(super) fn secondary_reverse_target(
         node_name: xp_test_fixtures::secondary_node_name().to_owned(),
         mesh_base_url,
         endpoint_transport: Some("vision_tcp"),
+        endpoint_fingerprint: None,
         mesh_reason: MeshPeerReason::MeshAvailable,
         public_base_url,
     }
@@ -431,6 +433,7 @@ pub(super) fn tertiary_reverse_target(
         node_name: xp_test_fixtures::tertiary_node_name().to_owned(),
         mesh_base_url,
         endpoint_transport: Some("vision_tcp"),
+        endpoint_fingerprint: None,
         mesh_reason: MeshPeerReason::MeshAvailable,
         public_base_url,
     }
@@ -550,6 +553,7 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
     assert!(ambiguous.mesh_base_url.is_none());
     assert_eq!(ambiguous.mesh_reason, MeshPeerReason::AmbiguousEndpoint);
 }
+
 #[tokio::test]
 async fn reverse_only_request_respects_the_local_readiness_gate() {
     let gate = Arc::new(AtomicBool::new(false));

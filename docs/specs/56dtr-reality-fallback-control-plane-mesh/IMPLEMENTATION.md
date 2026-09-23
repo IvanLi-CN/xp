@@ -4,9 +4,21 @@
 
 ## Current Status
 
-- Implementation: complete pending final review.
+- Implementation: the ADR 0015 directed admission, per-peer Direct/Public isolation,
+  membership-bound validation receipts, and Native Reverse quarantine are implemented.
 - Lifecycle: active.
 - Catalog: supersedes `nbs5f`.
+
+## Confirmed Recovery Gap
+
+A deployed `101 -> us` Direct XHTTP/Reality request established TCP but reached TLS EOF before
+the peer's signed acknowledgement. The existing real-Xray test topology did not prove this
+deployment-level directed edge, so it is insufficient evidence that Direct Mesh is ready to
+enable. While the durable cluster Mesh gate remains disabled, control-plane traffic uses the
+registered Public Path. The remediation now enforces the ADR 0015 Direct Ingress Contract,
+server-enforced all-voter re-enable preflight, bounded Direct/Public circuits, and
+membership-bound validation receipts. Direct Mesh remains disabled until a separately
+authorized production enablement window.
 
 For the current release, Native Reverse is a retained diagnostic schema only: its historical
 assignment, probe, and runtime notes below are not active. The production path does not select,
@@ -90,6 +102,8 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
 - Shared testbox real-Xray validation passed the Reality fallback suite, including repeated and
   concurrent signed Mesh requests over one external TCP connection and successful reconnect after
   an intentional disconnect.
+- Mesh re-enable preflight is server-bounded to 30 seconds with a bounded serialized direction
+  schedule; cancellation and deadline expiry fail closed before any Raft write.
 - The 50-peer resource comparison records XP anonymous and total PSS separately. Anonymous PSS has
   an 18 MiB absolute ceiling; XP total PSS and the isolated XP-plus-Xray stack each have a 1 MiB
   regression ceiling against the locked baseline. File-backed executable pages remain included in
@@ -99,10 +113,15 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   copies the resolved executables into the disposable run before measurement, so build scripts and
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
-- The locked 15-minute comparison completed with 50 persistent H2 connections: TLS accepts fell
-  from 921 to 50, XP total PSS from 30,660 KiB to 24,469 KiB, XP anonymous PSS from 17,624 KiB to
-  12,464 KiB, the isolated stack from 53,564 KiB to 47,337 KiB, and XP CPU ticks from 1,378 to 218.
-  Every candidate peer remained at one active connection with a peak of one and no non-H2 request.
+- The locked 15-minute comparison completed with 50 persistent H2 connections: candidate XP total
+  PSS was 32,727 KiB versus 31,820 KiB for the baseline; anonymous PSS was 15,836 KiB versus
+  15,484 KiB, with 50 TLS accepts, zero non-H2 requests, one active connection per peer, and CPU
+  ticks 186 versus 177. The repository summary peak was 28,846 KiB and the source journal peak was
+  26,495 KiB; source-journal CPU p95 was 1%, additional read bytes were 0, and the journal remained
+  in `journal_capacity_guard` at 19,971 pending segments. Candidate and baseline Cargo builds and
+  the resource-test build were refreshed for the new candidate and completed in 408, 447, and 479
+  seconds respectively. The exact run and archive hashes are in
+  `./evidence/mesh-resource-f2d79399.md`.
 - Rustls 0.23 uses the ring provider for both the server and Mesh client. Keeping one provider
   removes the unused AWS-LC implementation from the release binary while preserving TLS 1.2/1.3
   and P-256 support. ACME still carries its older HTTP/DNS dependency stack; replacing that stack is

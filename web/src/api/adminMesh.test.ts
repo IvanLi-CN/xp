@@ -18,6 +18,8 @@ function peerFixture() {
 		quality: "good",
 		stale: false,
 		breaker: "closed",
+		direct_validation: "verified",
+		public_circuit: "closed",
 		last_sample_at: fixtureCatalog.timestamp.recent(),
 		last_transition_at: fixtureCatalog.timestamp.baseline(),
 		availability_1h: fixtureCatalog.metric.availabilityFull(),
@@ -66,6 +68,8 @@ describe("AdminMeshPeerSchema", () => {
 		expect(parsed.mesh_transport).toBeUndefined();
 		expect(parsed.buckets[0]?.mesh_h2_requests).toBe(0);
 		expect(parsed.buckets[0]?.mesh_connection_starts).toBe(0);
+		expect(parsed.direct_validation).toBe("verified");
+		expect(parsed.public_circuit).toBe("closed");
 	});
 
 	it("accepts a persisted reverse route without new assignment fields", () => {

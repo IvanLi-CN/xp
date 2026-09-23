@@ -393,6 +393,28 @@ rule:
         all:
           - has:
               field: field
+              regex: '^server_names$'
+          - has:
+              field: value
+              pattern: vec!["host.docker.internal".to_string()]
+          - inside:
+              stopBy: end
+              pattern: RealityConfig { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^mesh_base_url$'
+          - has:
+              field: value
+              pattern: Some(format!("https://host.docker.internal:{}", canary.addr.port()))
+          - inside:
+              stopBy: end
+              pattern: MeshPeerTarget { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
               regex: '^mesh_base_url$'
           - has:
               field: value

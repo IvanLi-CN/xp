@@ -13,6 +13,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 
 use tokio::sync::{Mutex, watch};
 use tokio::time::{Duration, Instant};
+use xp::raft::app::RaftFacade;
 
 fn reject_legacy_relay_probe_env() -> Result<()> {
     if xp::ops::process_env_has_legacy_relay_probe_vars() {
@@ -436,6 +437,23 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         raft_network,
     )
     .await?;
+
+    let mut membership_metrics = raft.metrics();
+    let membership_mesh_client = mesh_client.clone();
+    tokio::spawn(async move {
+        loop {
+            let revision = xp::raft_membership_guard::membership_revision(
+                &membership_metrics.borrow().clone(),
+            )
+            .ok();
+            membership_mesh_client
+                .set_membership_revision(revision)
+                .await;
+            if membership_metrics.changed().await.is_err() {
+                break;
+            }
+        }
+    });
 
     let raft_node_meta = xp::raft::types::NodeMeta {
         name: cluster.node_name.clone(),

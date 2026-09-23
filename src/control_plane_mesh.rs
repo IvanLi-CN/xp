@@ -19,11 +19,23 @@ use crate::{
     reverse_mesh::{ReverseMeshAssignment, ReverseRelayEnvelope, ReverseRole, route_budget},
 };
 
+mod circuit;
+mod error;
 mod gate;
+mod request;
 mod retry;
 mod reverse;
 mod telemetry;
 mod transport;
+pub use circuit::DirectValidationState;
+use circuit::{
+    DirectValidationStore, MeshAttemptDecision, PeerCircuitBreakers, endpoint_fingerprint,
+    mesh_attempt_budget,
+};
+pub use error::MeshRequestError;
+pub(crate) use request::CapabilityProbeResponse;
+use request::PeerRequestResponse;
+pub use request::{MeshRequest, PeerDirectPath};
 #[cfg(test)]
 pub(crate) use transport::build_mesh_http_client_with_policy;
 pub(crate) use transport::build_unauthenticated_mesh_http_client;
@@ -37,100 +49,15 @@ pub const MESH_BACKOFF: [Duration; 5] = [
     Duration::from_secs(240),
     Duration::from_secs(300),
 ];
+pub const DIRECT_VALIDATION_TTL: Duration = Duration::from_secs(5 * 60);
 const LEGACY_CAPABILITIES_PROBE_PATH: &str = "/api/admin/_internal/capabilities";
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MeshAttemptDecision {
-    Attempt,
-    Probe,
-    SkipOpen,
-    Disabled,
-}
-#[derive(Debug, Clone, Default)]
-struct PeerCircuit {
-    failures: u8,
-    open_count: usize,
-    retry_at: Option<Instant>,
-    half_open_in_flight: bool,
-}
-#[derive(Clone, Default)]
-pub struct PeerCircuitBreakers {
-    peers: Arc<Mutex<BTreeMap<String, PeerCircuit>>>,
-    reverse_in_flight: reverse::ReverseInFlight,
-}
-
-impl PeerCircuitBreakers {
-    pub async fn before_attempt(&self, peer_id: &str, enabled: bool) -> MeshAttemptDecision {
-        if !enabled {
-            return MeshAttemptDecision::Disabled;
-        }
-        let now = Instant::now();
-        let mut peers = self.peers.lock().await;
-        let circuit = peers.entry(peer_id.to_string()).or_default();
-        match circuit.retry_at {
-            None => MeshAttemptDecision::Attempt,
-            Some(retry_at) if now < retry_at => MeshAttemptDecision::SkipOpen,
-            Some(_) if circuit.half_open_in_flight => MeshAttemptDecision::SkipOpen,
-            Some(_) => {
-                circuit.half_open_in_flight = true;
-                MeshAttemptDecision::Probe
-            }
-        }
-    }
-    pub async fn record_success(&self, peer_id: &str) -> BreakerState {
-        let mut peers = self.peers.lock().await;
-        let circuit = peers.entry(peer_id.to_string()).or_default();
-        circuit.failures = 0;
-        circuit.open_count = 0;
-        circuit.retry_at = None;
-        circuit.half_open_in_flight = false;
-        BreakerState::Closed
-    }
-    pub async fn release_half_open_probe(&self, peer_id: &str) {
-        let mut peers = self.peers.lock().await;
-        if let Some(circuit) = peers.get_mut(peer_id) {
-            circuit.half_open_in_flight = false;
-        }
-    }
-    /// Only retryable transport errors may alter the breaker.
-    pub async fn record_retryable_failure(&self, peer_id: &str) -> BreakerState {
-        let now = Instant::now();
-        let mut peers = self.peers.lock().await;
-        let circuit = peers.entry(peer_id.to_string()).or_default();
-        circuit.half_open_in_flight = false;
-        circuit.failures = circuit.failures.saturating_add(1);
-        if circuit.failures < MESH_FAILURES_BEFORE_OPEN {
-            return BreakerState::Closed;
-        }
-        let backoff = MESH_BACKOFF[circuit.open_count.min(MESH_BACKOFF.len() - 1)];
-        circuit.open_count = circuit.open_count.saturating_add(1);
-        circuit.retry_at = Some(now + backoff);
-        BreakerState::Open
-    }
-    pub async fn state(&self, peer_id: &str, enabled: bool) -> BreakerState {
-        if !enabled {
-            return BreakerState::Disabled;
-        }
-        let peers = self.peers.lock().await;
-        let Some(circuit) = peers.get(peer_id) else {
-            return BreakerState::Closed;
-        };
-        match circuit.retry_at {
-            None => BreakerState::Closed,
-            Some(retry_at) if Instant::now() < retry_at => BreakerState::Open,
-            Some(_) => BreakerState::HalfOpen,
-        }
-    }
-}
-pub fn mesh_attempt_budget(total: Duration) -> Duration {
-    let third = total / 3;
-    third.clamp(Duration::from_millis(500), Duration::from_secs(5))
-}
 #[derive(Debug, Clone)]
 pub struct MeshPeerTarget {
     pub node_id: String,
     pub node_name: String,
     pub mesh_base_url: Option<String>,
     pub endpoint_transport: Option<&'static str>,
+    pub endpoint_fingerprint: Option<String>,
     pub mesh_reason: MeshPeerReason,
     pub public_base_url: String,
 }
@@ -179,80 +106,16 @@ pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTar
         })
         .flatten()
         .map(|meta| meta.transport.mesh_label());
+    let endpoint_fingerprint = (mesh_reason == MeshPeerReason::MeshAvailable)
+        .then(|| endpoint_fingerprint(managed[0], access_host, endpoint_transport));
     MeshPeerTarget {
         node_id: node.node_id.clone(),
         node_name: node.node_name.clone(),
         mesh_base_url,
         endpoint_transport,
+        endpoint_fingerprint,
         mesh_reason,
         public_base_url: node.api_base_url.clone(),
-    }
-}
-#[derive(Debug, Clone)]
-pub struct MeshRequest {
-    pub method: reqwest::Method,
-    pub path_and_query: String,
-    pub content_type: Option<String>,
-    pub body: Vec<u8>,
-    pub total_budget: Duration,
-    pub allow_ambiguous_fallback: bool,
-    pub request_id: String,
-    pub route: InternalRoute,
-    pub cluster_id: String,
-    pub sender_id: String,
-    pub updates_active_path: bool,
-}
-/// The only compatibility result accepted from the signed capability probe.
-pub(crate) enum CapabilityProbeResponse {
-    Verified(reqwest::Response),
-    PredecessorNotFound,
-}
-
-enum PeerRequestResponse {
-    Verified(reqwest::Response),
-    PredecessorNotFound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PeerDirectPath {
-    RealityMesh,
-    ApiBaseUrl,
-}
-#[derive(Debug)]
-pub enum MeshRequestError {
-    InvalidTarget(String),
-    Auth(internal_auth::AuthError),
-    OutcomeUnknown,
-    Protocol(String),
-    Reverse(String),
-    Public(reqwest::Error),
-}
-impl From<internal_auth::AuthError> for MeshRequestError {
-    fn from(value: internal_auth::AuthError) -> Self {
-        Self::Auth(value)
-    }
-}
-impl std::fmt::Display for MeshRequestError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidTarget(value) => write!(f, "invalid Mesh peer target: {value}"),
-            Self::Auth(value) => write!(f, "internal authentication error: {value}"),
-            Self::OutcomeUnknown => {
-                f.write_str("Mesh request outcome is unknown; it may already have been applied")
-            }
-            Self::Protocol(value) => write!(f, "Mesh protocol error: {value}"),
-            Self::Reverse(value) => write!(f, "reverse relay failed: {value}"),
-            Self::Public(value) => write!(f, "public fallback failed: {value}"),
-        }
-    }
-}
-impl std::error::Error for MeshRequestError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Auth(value) => Some(value),
-            Self::Public(value) => Some(value),
-            _ => None,
-        }
     }
 }
 #[derive(Clone)]
@@ -260,6 +123,8 @@ pub struct MeshAwareHttpClient {
     mesh: reqwest::Client,
     public_direct: reqwest::Client,
     circuits: PeerCircuitBreakers,
+    direct_validation: DirectValidationStore,
+    enforce_direct_validation: bool,
     cluster_mesh_enabled: Arc<AtomicBool>,
     cluster_mesh_epoch: Arc<std::sync::atomic::AtomicU64>,
     mesh_epoch_reset_lock: Arc<Mutex<u64>>,
@@ -271,7 +136,6 @@ pub struct MeshAwareHttpClient {
     #[cfg(test)]
     mesh_observation_pause: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
-
 impl MeshAwareHttpClient {
     pub fn new(direct: reqwest::Client) -> Self {
         Self::from_transport_clients(direct.clone(), direct)
@@ -281,6 +145,8 @@ impl MeshAwareHttpClient {
             mesh,
             public_direct,
             circuits: PeerCircuitBreakers::default(),
+            direct_validation: DirectValidationStore::default(),
+            enforce_direct_validation: false,
             cluster_mesh_enabled: Arc::new(AtomicBool::new(true)),
             cluster_mesh_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             mesh_epoch_reset_lock: Arc::new(Mutex::new(0)),
@@ -304,7 +170,10 @@ impl MeshAwareHttpClient {
         self.circuits = circuits;
         self
     }
-
+    pub fn with_direct_validation_required(mut self) -> Self {
+        self.enforce_direct_validation = true;
+        self
+    }
     pub fn circuits(&self) -> PeerCircuitBreakers {
         self.circuits.clone()
     }
@@ -347,7 +216,6 @@ impl MeshAwareHttpClient {
     pub async fn clear_reverse_route(&self, target_node_id: &str) {
         self.reverse_routes.write().await.remove(target_node_id);
     }
-
     /// Sends over exactly one peer-direct transport. It never uses a configured proxy.
     pub async fn send_peer_direct_request(
         &self,
@@ -380,7 +248,6 @@ impl MeshAwareHttpClient {
         )
         .await
     }
-
     /// Sends over one direct path with a caller-owned Mesh admission guard. The guard may
     /// span asynchronous target preparation for dedicated probes and is never reacquired.
     pub(crate) async fn send_peer_direct_request_with_gate(
@@ -392,12 +259,73 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
         mesh_gate_read: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        self.send_peer_direct_request_with_options(
+            peer,
+            path,
+            request,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            mesh_gate_read,
+            false,
+        )
+        .await
+    }
+    pub(crate) async fn send_peer_direct_preflight(
+        &self,
+        peer: &MeshPeerTarget,
+        request: MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+    ) -> Result<reqwest::Response, MeshRequestError> {
+        self.send_peer_direct_preflight_with_admission(
+            peer,
+            request,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            false,
+        )
+        .await
+    }
+
+    pub(crate) async fn send_peer_direct_preflight_for_reenable(
+        &self,
+        peer: &MeshPeerTarget,
+        request: MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+    ) -> Result<reqwest::Response, MeshRequestError> {
+        self.send_peer_direct_preflight_with_admission(
+            peer,
+            request,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            true,
+        )
+        .await
+    }
+    #[allow(clippy::too_many_arguments)]
+    async fn send_peer_direct_request_with_options(
+        &self,
+        peer: &MeshPeerTarget,
+        path: PeerDirectPath,
+        request: MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+        mesh_gate_read: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+        allow_mesh_when_disabled: bool,
+    ) -> Result<reqwest::Response, MeshRequestError> {
         let mesh_gate_read = if path == PeerDirectPath::RealityMesh && mesh_gate_read.is_none() {
-            Some(self.mesh_direct_read_guard().await?)
+            if allow_mesh_when_disabled {
+                None
+            } else {
+                Some(self.mesh_direct_read_guard().await?)
+            }
         } else {
             mesh_gate_read
         };
-        if path == PeerDirectPath::RealityMesh && !self.cluster_mesh_enabled.load(Ordering::Acquire)
+        if path == PeerDirectPath::RealityMesh
+            && !allow_mesh_when_disabled
+            && !self.cluster_mesh_enabled.load(Ordering::Acquire)
         {
             return Err(MeshRequestError::InvalidTarget(
                 "Mesh is disabled by the cluster gate".into(),
@@ -466,7 +394,6 @@ impl MeshAwareHttpClient {
         )?;
         Ok(response)
     }
-
     /// Sends through Mesh first, then public only after a retryable transport failure.
     pub async fn send_peer_request(
         &self,
@@ -492,7 +419,6 @@ impl MeshAwareHttpClient {
             )),
         }
     }
-
     /// Allows a predecessor's unsigned 404 only for an explicit compatibility probe.
     pub(crate) async fn send_peer_request_allowing_legacy_not_found(
         &self,
@@ -556,16 +482,41 @@ impl MeshAwareHttpClient {
         let mut allow_public_fallback = public_fallback_policy.allows(cluster_mesh_enabled)
             || (request.path_and_query == LEGACY_CAPABILITIES_PROBE_PATH
                 && !matches!(peer.mesh_reason, MeshPeerReason::MeshAvailable));
-        let mesh_enabled = peer.mesh_base_url.is_some() && cluster_mesh_enabled;
-        let (decision, mesh_epoch) = self.before_mesh_attempt(&peer.node_id, mesh_enabled).await;
+        let (direct_validation, validation_revision, membership_read_guard) =
+            self.direct_validation_snapshot(peer).await;
+        let mut membership_read_guard = Some(membership_read_guard);
+        if cluster_mesh_enabled
+            && peer.mesh_base_url.is_some()
+            && direct_validation == DirectValidationState::ProtocolRejected
+        {
+            self.record_terminal_failure(peer).await;
+            return Err(MeshRequestError::CircuitOpen {
+                path: "Direct Mesh",
+            });
+        }
+        let mesh_enabled = direct_mesh_is_eligible(peer, cluster_mesh_enabled, direct_validation);
+        let (decision, mesh_epoch) = self
+            .before_mesh_request(&peer.node_id, mesh_enabled, request.route)
+            .await;
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
         let mut mesh_outcome_ambiguous = false;
+
+        if matches!(decision, MeshAttemptDecision::Quarantined) {
+            self.record_terminal_failure(peer).await;
+            return Err(MeshRequestError::CircuitOpen {
+                path: "Direct Mesh",
+            });
+        }
 
         if matches!(
             decision,
             MeshAttemptDecision::Attempt | MeshAttemptDecision::Probe
         ) && !self.mesh_attempt_is_current(mesh_epoch).await
         {
+            if matches!(decision, MeshAttemptDecision::Probe) {
+                self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
+                    .await;
+            }
             fallback = true;
         }
         if matches!(
@@ -573,11 +524,20 @@ impl MeshAwareHttpClient {
             MeshAttemptDecision::Attempt | MeshAttemptDecision::Probe
         ) && !fallback
         {
-            let mesh_url = join_url(
+            let mesh_url = match join_url(
                 peer.mesh_base_url.as_deref().expect("checked enabled"),
                 &request.path_and_query,
                 false,
-            )?;
+            ) {
+                Ok(url) => url,
+                Err(error) => {
+                    if matches!(decision, MeshAttemptDecision::Probe) {
+                        self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
+                            .await;
+                    }
+                    return Err(error);
+                }
+            };
             let budget = mesh_attempt_budget(request.total_budget);
             match self
                 .attempt_mesh_request(
@@ -587,6 +547,8 @@ impl MeshAwareHttpClient {
                     &mesh_url,
                     budget,
                     mesh_epoch,
+                    validation_revision.clone(),
+                    membership_read_guard.take(),
                     started,
                     allow_unsigned_not_found,
                     cluster_ca_key_pem,
@@ -601,6 +563,8 @@ impl MeshAwareHttpClient {
                 gate::MeshAttemptResult::Response(response) => return Ok(response),
             }
         }
+
+        drop(membership_read_guard);
 
         let should_try_reverse = cluster_mesh_enabled
             && !request.path_and_query.contains("/mesh/reverse-relay")
@@ -721,7 +685,27 @@ impl MeshAwareHttpClient {
             self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::OutcomeUnknown);
         }
-        let public_url = join_url(&peer.public_base_url, &request.path_and_query, false)?;
+        match self
+            .before_public_request(&peer.node_id, request.route)
+            .await
+        {
+            MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined => {
+                self.record_terminal_failure(peer).await;
+                return Err(MeshRequestError::CircuitOpen { path: "Public" });
+            }
+            MeshAttemptDecision::Attempt
+            | MeshAttemptDecision::Probe
+            | MeshAttemptDecision::Disabled => {}
+        }
+        let public_url = match join_url(&peer.public_base_url, &request.path_and_query, false) {
+            Ok(url) => url,
+            Err(error) => {
+                self.circuits
+                    .release_public_half_open_probe(&peer.node_id)
+                    .await;
+                return Err(error);
+            }
+        };
         let response = match self
             .send_public_signed(
                 &public_url,
@@ -736,6 +720,16 @@ impl MeshAwareHttpClient {
         {
             Ok(response) => response,
             Err(error) => {
+                let public_breaker = self.circuits.record_public_failure(&peer.node_id).await;
+                if let Some(telemetry) = &self.telemetry {
+                    let _ = telemetry
+                        .set_public_breaker(
+                            &peer.node_id,
+                            public_breaker,
+                            Some(format!("Public circuit opened: {error}")),
+                        )
+                        .await;
+                }
                 self.record_public_outcome_for_epoch(
                     peer,
                     started,
@@ -754,7 +748,14 @@ impl MeshAwareHttpClient {
                 .headers()
                 .contains_key(internal_auth::INTERNAL_ACK_HEADER)
         {
+            self.circuits.record_public_success(&peer.node_id).await;
             return Ok(PeerRequestResponse::PredecessorNotFound);
+        }
+        let public_breaker = self.circuits.record_public_success(&peer.node_id).await;
+        if let Some(telemetry) = &self.telemetry {
+            let _ = telemetry
+                .set_public_breaker(&peer.node_id, public_breaker, None)
+                .await;
         }
         self.record_public_outcome_for_epoch(
             peer,
@@ -766,55 +767,6 @@ impl MeshAwareHttpClient {
         )
         .await;
         Ok(PeerRequestResponse::Verified(response))
-    }
-
-    async fn record_mesh_success(
-        &self,
-        peer: &MeshPeerTarget,
-        started: Instant,
-        request: &MeshRequest,
-        transport: MeshTransportObservation,
-        epoch: u64,
-        _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
-    ) {
-        if !self.mesh_gate_matches(epoch) {
-            return;
-        }
-        let breaker_state = self.circuits.record_success(&peer.node_id).await;
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .set_breaker(&peer.node_id, breaker_state, None)
-                .await;
-        }
-        self.record_sample(
-            peer,
-            telemetry_sample(
-                TelemetryPath::Mesh,
-                true,
-                started.elapsed(),
-                false,
-                request.updates_active_path,
-                Some(transport),
-            ),
-        )
-        .await;
-    }
-
-    async fn reject_mesh_response(
-        &self,
-        peer: &MeshPeerTarget,
-        epoch: u64,
-        response: reqwest::Response,
-        gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
-        error: MeshRequestError,
-    ) -> MeshRequestError {
-        drop(response);
-        drop(gate_guard);
-        self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
-            .await;
-        self.record_mesh_protocol_failure(peer, epoch).await;
-        self.record_terminal_failure_for_epoch(peer, epoch).await;
-        error
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1107,6 +1059,16 @@ fn public_transport_error(
     } else {
         MeshRequestError::OutcomeUnknown
     }
+}
+
+fn direct_mesh_is_eligible(
+    peer: &MeshPeerTarget,
+    cluster_mesh_enabled: bool,
+    validation: DirectValidationState,
+) -> bool {
+    peer.mesh_base_url.is_some()
+        && cluster_mesh_enabled
+        && validation == DirectValidationState::Verified
 }
 
 async fn signed_send(

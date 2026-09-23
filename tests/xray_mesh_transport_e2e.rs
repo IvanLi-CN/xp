@@ -118,11 +118,15 @@ async fn signed_health(
         .expect("response")
 }
 
-async fn spawn_signed_tls_server(ca_key_pem: &str, ca_cert_pem: &str) -> TestServer {
+async fn spawn_signed_tls_server(
+    ca_key_pem: &str,
+    ca_cert_pem: &str,
+    server_names: Vec<String>,
+) -> TestServer {
     let ca_key = KeyPair::from_pem(ca_key_pem).expect("CA key");
     let ca_cert = Issuer::from_ca_cert_pem(ca_cert_pem, ca_key).expect("CA certificate");
     let cert_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("server key");
-    let cert = CertificateParams::new(xp_test_fixtures::loopback_server_names())
+    let cert = CertificateParams::new(server_names)
         .expect("certificate params")
         .signed_by(&cert_key, &ca_cert)
         .expect("server certificate");
@@ -214,7 +218,7 @@ fn mesh_request(index: usize) -> MeshRequest {
     }
 }
 
-fn mesh_target(proxy: &CountingProxy) -> MeshPeerTarget {
+fn mesh_target(proxy: &CountingProxy, transport: VlessRealityTransport) -> MeshPeerTarget {
     MeshPeerTarget {
         node_id: xp_test_fixtures::primary_node_id().to_owned(),
         node_name: xp_test_fixtures::primary_node_name().to_owned(),
@@ -223,7 +227,11 @@ fn mesh_target(proxy: &CountingProxy) -> MeshPeerTarget {
             xp_test_fixtures::loopback_address(),
             proxy.addr.port()
         )),
-        endpoint_transport: Some("vision_tcp"),
+        endpoint_transport: Some(match transport {
+            VlessRealityTransport::VisionTcp => "vision_tcp",
+            VlessRealityTransport::Xhttp => "xhttp_reality_fallback",
+        }),
+        endpoint_fingerprint: None,
         mesh_reason: MeshPeerReason::MeshAvailable,
         public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
     }
@@ -303,7 +311,12 @@ async fn assert_reality_fallback_reuses_one_h2_connection(transport: VlessRealit
         &csr.csr_pem,
     )
     .expect("node certificate");
-    let canary = spawn_signed_tls_server(&ca.key_pem, &ca.cert_pem).await;
+    let canary = spawn_signed_tls_server(
+        &ca.key_pem,
+        &ca.cert_pem,
+        xp_test_fixtures::loopback_server_names(),
+    )
+    .await;
     let endpoint = reality_mesh_endpoint(vless_port, &canary, transport);
     let mut xray = xray::connect(xray_api_addr)
         .await
@@ -314,9 +327,22 @@ async fn assert_reality_fallback_reuses_one_h2_connection(transport: VlessRealit
     wait_for_inbound(SocketAddr::from(([127, 0, 0, 1], vless_port))).await;
 
     let proxy = spawn_counting_proxy(SocketAddr::from(([127, 0, 0, 1], vless_port))).await;
-    let target = mesh_target(&proxy);
+    let target = mesh_target(&proxy, transport);
     let client =
         build_mesh_http_client(&ca.cert_pem, &node_cert, &csr.key_pem).expect("Mesh client");
+    client
+        .send_peer_direct_request(
+            &target,
+            xp::control_plane_mesh::PeerDirectPath::RealityMesh,
+            mesh_request(0),
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await
+        .expect("direct Mesh request through Reality fallback");
+    client
+        .mark_direct_validation_success_at(&target, None)
+        .await;
 
     for index in 0..32 {
         let response = client

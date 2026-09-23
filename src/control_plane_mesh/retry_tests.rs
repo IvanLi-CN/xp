@@ -93,7 +93,7 @@ async fn spawn_gateway(
     (format!("http://{address}"), requests, task)
 }
 #[tokio::test]
-async fn public_gateway_timeout_retries_before_reporting_unknown() {
+async fn public_gateway_missing_ack_is_terminal_without_retry() {
     let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
         .expect("cluster CA");
     let (public_base_url, public_requests, public_task) =
@@ -123,8 +123,8 @@ async fn public_gateway_timeout_retries_before_reporting_unknown() {
         )
         .await;
 
-    assert!(result.is_ok(), "gateway retry should recover: {result:?}");
-    assert_eq!(public_requests.load(Ordering::SeqCst), 2);
+    assert!(matches!(result, Err(MeshRequestError::Protocol(_))));
+    assert_eq!(public_requests.load(Ordering::SeqCst), 1);
     public_task.abort();
 }
 

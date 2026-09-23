@@ -9,6 +9,10 @@
   snapshot apply; peer paths remain public during that bootstrap window.
 - Returns local node state, remote peer routes, availability, breaker, RTT,
   stale state, 24h buckets and local events.
+- Additive peer fields expose `direct_validation` and `public_circuit`. The former is
+  `configured_unverified`, `verified`, `transport_failed`, or `protocol_rejected`; the latter
+  uses the existing `closed`, `open`, `half_open`, or `disabled` breaker states. They are path
+  facts from the current node, not cluster membership or user-inbound state.
 - Peer quality is good, slow, unstable, down or unknown.
 - `current_path` and bucket `fallback_success` distinguish public fallback.
 - Computes ETag from the complete stable response representation (without its generated-at time)
@@ -50,6 +54,10 @@
 - Writes the cluster-wide Mesh setting through Raft. Before a new mutation is
   accepted, every current voter and learner must expose the required Mesh
   capability.
+- When `enabled=true`, the leader additionally runs a Direct-only `health-v2` preflight for every
+  directed current-voter edge while the gate remains closed. A failed preflight returns HTTP `409`
+  with `error.code=mesh_preflight_failed` and bounded `failures[]` entries containing only
+  `sender_node_id`, `target_node_id`, and `kind`; it does not write Raft state.
 - Disabling Mesh keeps existing public paths available. Enabling only takes
   effect for new Mesh attempts after the replicated state is applied locally.
 

@@ -139,7 +139,16 @@ cargo test --test xray_e2e -- --ignored
 XP_E2E_XRAY_MODE=external \
 XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
 XP_E2E_VLESS_PORT="${XP_E2E_VLESS_PORT}" \
-cargo test --test xray_mesh_transport_e2e -- --ignored
+cargo test --test xray_mesh_transport_e2e -- --ignored --exact \
+  reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect \
+  --test-threads=1
+
+XP_E2E_XRAY_MODE=external \
+XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
+XP_E2E_VLESS_PORT="${XP_E2E_VLESS_PORT}" \
+cargo test --test xray_mesh_transport_e2e -- --ignored --exact \
+  xhttp_endpoint_reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect \
+  --test-threads=1
 
 XP_E2E_XRAY_MODE=external \
 XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \

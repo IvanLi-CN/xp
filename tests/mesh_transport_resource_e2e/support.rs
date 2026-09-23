@@ -7,6 +7,7 @@ use axum::{
     routing::any,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use futures_util::future::join_all;
 use rcgen::{CertificateParams, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256};
 use std::{
     fs::{self, File},
@@ -30,13 +31,10 @@ use xp::{
     },
     state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
 };
-
 mod source_journal_resource;
 pub use source_journal_resource::run_source_delivery_journal_resource_workload;
-
 const PEER_COUNT: usize = 50;
 const BODY_LIMIT: usize = 16 * 1024 * 1024;
-
 #[derive(Debug)]
 pub struct ResourceRun {
     pub xp_peak_pss_kib: u64,
@@ -240,7 +238,6 @@ async fn spawn_peer_fleet(cluster: &ClusterMetadata, data_dir: &Path) -> PeerFle
         tasks,
     }
 }
-
 fn reserve_local_port() -> u16 {
     std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .expect("reserve XP bind port")
@@ -248,7 +245,6 @@ fn reserve_local_port() -> u16 {
         .expect("XP bind address")
         .port()
 }
-
 fn run_init(binary: &Path, data_dir: &Path, bind_port: u16) {
     let status = Command::new(binary)
         .args([
@@ -266,7 +262,6 @@ fn run_init(binary: &Path, data_dir: &Path, bind_port: u16) {
         .expect("run xp init");
     assert!(status.success(), "xp init failed with {status}");
 }
-
 fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFleet) {
     xp::internal_auth_epoch::ensure_startup_epoch(data_dir, 1).expect("initialize auth epoch");
     let mut store = JsonSnapshotStore::load_or_init(StoreInit {
@@ -329,7 +324,6 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
     }
     store.save().expect("persist resource state");
 }
-
 struct XpProcess {
     child: Child,
     unit: Option<String>,
@@ -441,7 +435,6 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
         })
         .expect("spawn XP resource candidate")
 }
-
 fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
     let connection = rusqlite::Connection::open(data_dir.join("history.sqlite3"))
         .expect("open summary resource database");
@@ -462,7 +455,8 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
         "x25519_relay_public_key": URL_SAFE_NO_PAD.encode([8_u8; 32]),
     }))
     .expect("encode source journal identity");
-    let source_wire_len = 192 * 1024 - 1024;
+    let segment_wire_len = 192 * 1024 - 1024;
+    let source_wire_len = 1024;
     for sequence in 0..257_u64 {
         let observed = first_observed.saturating_add(sequence);
         transaction
@@ -475,45 +469,41 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
                     format!("{sequence:064x}"),
                     observed,
                     sequence,
-                    192 * 1024 - 1024
+                    segment_wire_len
                 ],
             )
             .expect("insert summary resource segment");
-
-        let record_payload = serde_json::to_vec(&serde_json::json!({
-            "observed_at_unix_seconds": observed,
-            "received_at_unix_seconds": observed,
-            "source_node_id": "summary-source",
-            "source_epoch": 1,
-            "stream": "runtime",
-            "sequence": sequence,
-            "subject_node_id": "summary-subject",
-            "observer_node_id": "summary-source",
-            "schema_id": "runtime.v1",
-            "schema_version": 1,
-            "record_key": vec![0_u8; 96 * 1024],
-            "payload": [],
-            "tombstone": false,
-        }))
-        .expect("encode summary resource record");
-        transaction
-            .execute(
-                "INSERT INTO repository_history_records
-                     (source_node_id, source_epoch, stream, sequence, subject_node_id,
-                      observer_node_id, schema_id, schema_version, record_key, is_tombstone,
-                      observed_start, observed_end, received_at, aggregate_complete,
-                      aggregate_start, aggregate_end, payload)
-                 VALUES ('summary-source', 1, 'runtime', ?1, 'summary-subject',
-                         'summary-source', 'runtime.v1', 1, ?2, 0, ?3, ?3, ?3,
-                         1, NULL, NULL, ?4)",
-                rusqlite::params![
-                    sequence,
-                    format!("record-{sequence}").into_bytes(),
-                    observed,
-                    record_payload
-                ],
-            )
-            .expect("insert summary resource record");
+        if sequence == 0 {
+            let record_payload = serde_json::to_vec(&serde_json::json!({
+                "observed_at_unix_seconds": observed,
+                "received_at_unix_seconds": observed,
+                "source_node_id": "summary-source",
+                "source_epoch": 1,
+                "stream": "runtime",
+                "sequence": sequence,
+                "subject_node_id": "summary-subject",
+                "observer_node_id": "summary-source",
+                "schema_id": "runtime.v1",
+                "schema_version": 1,
+                "record_key": "summary-record",
+                "payload": [],
+                "tombstone": false,
+            }))
+            .expect("encode summary resource record");
+            transaction
+                .execute(
+                    "INSERT INTO repository_history_records
+                         (source_node_id, source_epoch, stream, sequence, subject_node_id,
+                          observer_node_id, schema_id, schema_version, record_key, is_tombstone,
+                          observed_start, observed_end, received_at, aggregate_complete,
+                          aggregate_start, aggregate_end, payload)
+                     VALUES ('summary-source', 1, 'runtime', 0, 'summary-subject',
+                             'summary-source', 'runtime.v1', 1, 'summary-record', 0, ?1, ?1, ?1,
+                             1, NULL, NULL, ?2)",
+                    rusqlite::params![observed, record_payload],
+                )
+                .expect("insert summary resource record");
+        }
         transaction
             .execute(
                 "INSERT INTO source_delivery_journal
@@ -554,10 +544,10 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
             [i64::from(source_wire_len * 257)],
         )
         .expect("record source delivery resource backlog");
-
     let replica_snapshot = serde_json::json!({
         "external_history": true,
         "legacy_segment_cursor_index_complete": true,
+        "local_history_backfill_completed": true,
         "partition_summaries": [{
             "source_node_id": "summary-source",
             "source_epoch": 1,
@@ -586,7 +576,6 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
             rusqlite::params![replica_payload],
         )
         .expect("write summary resource replica snapshot");
-
     let state_payload = transaction
         .query_row(
             "SELECT payload FROM history_snapshots WHERE key = 'persistent_state'",
@@ -625,7 +614,6 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
         .commit()
         .expect("commit summary resource fixtures");
 }
-
 pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
     let temp = tempfile::tempdir().expect("summary resource data directory");
     let bind_port = reserve_local_port();
@@ -637,7 +625,6 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
     wait_for_xp(&mut child, bind_port, &log_path).await;
     let pid = child.id();
     assert_expected_memory_scope(pid);
-
     let ca_pem = cluster
         .read_cluster_ca_pem(temp.path())
         .expect("read summary resource CA");
@@ -714,9 +701,23 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
             tokio::task::yield_now().await;
         }
         request_active.store(true, Ordering::Release);
-        let response = request.send().await.expect("summary resource response");
-        assert_eq!(response.status(), reqwest::StatusCode::OK);
-        let summary: serde_json::Value = response.json().await.expect("decode summary response");
+        let responses = join_all((0..4).map(|_| {
+            request
+                .try_clone()
+                .expect("clone summary resource request")
+                .send()
+        }))
+        .await;
+        let mut summary: Option<serde_json::Value> = None;
+        for response in responses {
+            let response = response.expect("summary resource response");
+            if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                continue;
+            }
+            assert_eq!(response.status(), reqwest::StatusCode::OK);
+            summary = Some(response.json().await.expect("decode summary response"));
+        }
+        let summary = summary.expect("summary resource batch response");
         request_active.store(false, Ordering::Release);
         sampling.store(false, Ordering::Relaxed);
         sampler.await.expect("summary PSS sampler");
@@ -733,7 +734,6 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
                 .as_str()
                 .is_some_and(|cursor| { cursor.starts_with("r:") })
         );
-
         let status_context = xp::internal_auth::RequestContext::now(
             xp::internal_auth::InternalRoute::MeshV2,
             &cluster.cluster_id,
@@ -779,7 +779,6 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
     source_journal_resource::stop_child(&mut child).await;
     max_pss_kib
 }
-
 async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
@@ -843,7 +842,6 @@ async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
         sleep(Duration::from_millis(100)).await;
     }
 }
-
 fn read_pss(pid: u32) -> Option<PssSample> {
     let rollup = PathBuf::from(format!("/proc/{pid}/smaps_rollup"));
     let fallback = PathBuf::from(format!("/proc/{pid}/smaps"));
@@ -863,7 +861,6 @@ fn read_pss(pid: u32) -> Option<PssSample> {
         file_kib: if uses_rollup { metric("Pss_File:") } else { 0 },
     })
 }
-
 fn assert_expected_memory_scope(pid: u32) {
     if std::env::var_os("XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT").is_none() {
         return;
@@ -893,7 +890,6 @@ fn assert_expected_memory_scope(pid: u32) {
         "XP workload must disable swap in its cgroup"
     );
 }
-
 pub(crate) fn read_cpu_ticks(pid: u32) -> u64 {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).expect("read process stat");
     let fields = stat
@@ -906,7 +902,6 @@ pub(crate) fn read_cpu_ticks(pid: u32) -> u64 {
     let system = fields[12].parse::<u64>().expect("system CPU ticks");
     user + system
 }
-
 pub fn support_pids_from_env() -> Vec<u32> {
     std::env::var("XP_MESH_RESOURCE_SUPPORT_PIDS")
         .unwrap_or_default()

@@ -1,7 +1,9 @@
-use axum::http::StatusCode;
+use axum::body::Body;
+use axum::http::{StatusCode, header};
 use axum::{
     Json,
     extract::{Extension, Query},
+    response::Response,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
@@ -23,8 +25,8 @@ use crate::{
         query::{HistoryQuery, QueryCandidate, QuerySelector},
         replica::{
             LocalQueryMetadata, RepositoryHistoryQueryResponse, RepositoryRepairBatch,
-            RepositoryReplicaGap, RepositoryReplicaSummary, RepositoryRuntimeError,
-            RepositoryRuntimeStatus, RepositorySyncReceipt, RepositoryTombstoneAcknowledgement,
+            RepositoryReplicaGap, RepositoryRuntimeError, RepositoryRuntimeStatus,
+            RepositorySyncReceipt, RepositoryTombstoneAcknowledgement,
         },
     },
 };
@@ -346,7 +348,7 @@ pub(super) async fn admin_internal_history_repository_summary(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
     Query(query): Query<RepositorySummaryQuery>,
-) -> Result<Json<RepositoryReplicaSummary>, ApiError> {
+) -> Result<Response, ApiError> {
     ensure_syncing_or_ready_repository_sender(&state, internal).await?;
     if query
         .after_segment_id
@@ -357,13 +359,35 @@ pub(super) async fn admin_internal_history_repository_summary(
             "invalid repository summary cursor",
         ));
     }
+    let summary_permit = state
+        .repository_summary_gate
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            ApiError::new(
+                "resource_busy",
+                StatusCode::TOO_MANY_REQUESTS,
+                "repository summary is busy; retry shortly",
+            )
+        })?;
     let summary = state
         .repository_replica
         .lock()
         .await
         .replication_summary_after(query.after_segment_id.as_deref(), query.deep_verification)
         .map_err(repository_error)?;
-    Ok(Json(summary))
+    // Encode while the permit is held; Axum's Json response defers serialization until body poll.
+    let payload = serde_json::to_vec(&summary)
+        .map_err(|error| ApiError::internal(format!("serialize repository summary: {error}")))?;
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(payload))
+        .map_err(|error| {
+            ApiError::internal(format!("build repository summary response: {error}"))
+        })?;
+    drop(summary_permit);
+    Ok(response)
 }
 
 pub(super) async fn admin_internal_history_repository_status(

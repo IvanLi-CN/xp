@@ -6,6 +6,7 @@
 ## Related ADRs
 
 - [0014-xhttp-endpoint-direct-mesh](../../adr/0014-xhttp-endpoint-direct-mesh.md)
+- [ADR 0015](../../adr/0015-directed-mesh-admission-and-peer-isolation.md)
 
 ## 背景
 
@@ -22,6 +23,11 @@
 - Mesh 请求在共享读准入边界内并发执行；集群 gate 切换取得独占写屏障，等待已准入请求完成后才改变状态，避免关闭后的新请求越过公网-only 边界。
 - 用 internal-auth v2、稳定 request ID 和 durable dedupe 保护内部调用。
 - 提供本地持久遥测、管理 API 与 `/system-status`。
+- Direct Mesh 启用前必须通过 current voter 的全有向 Direct-only `health-v2` 预检；预检失败
+  不得写入 `mesh_enabled=true`。
+- Direct validation、Public circuit、active route 和 endpoint 资格必须作为独立事实显示；
+  5 分钟没有有效 Direct ACK、成员或 endpoint fingerprint 变化、或进程重启后，受影响 peer
+  进入 `configured_unverified` 并暂走 Public。
 - `PersistedState.mesh_enabled` 是集群级开关，默认开启；关闭时控制面只访问 peer 注册的
   公网 `api_base_url`，不改用私网或 Reverse Mesh。能力探测也使用同一签名的公网请求并保留
   predecessor 404 兼容；专用 Reverse health/link probe 在当前发布中固定停用，即使集群
@@ -103,6 +109,9 @@
   请求在响应头之前遇到连接、DNS、TLS 或超时错误时，对同一组幂等请求使用相同的有界重试；
   认证错误、协议错误和带签名响应不得重试。
 - auth、protocol error 与 headers 后的流中断不得触发公网降级。
+- Direct protocol/auth failure 必须隔离 Direct；Public transport failure 或无签名 ACK 不得
+  无限触发 Raft 网络请求。Public circuit 在一次有界请求预算耗尽后进入 `30/60/120/240/300s`
+  冷却，半开只允许一个 bodyless `health-v2`。
 - 只读、Raft RPC 与 durable idempotency mutation 才可模糊超时后 fallback；这里的 public
   transport 指注册的公网 `api_base_url`，不等同于 Bearer 管理 API。
 - 其他 mutation 必须返回 `outcome_unknown`。
@@ -156,6 +165,13 @@
   `current_connection_requests`、5m/1h 请求数与建连数、`last_connection_started_at`。
 - `health` 固定为：无传输样本时 unknown；HTTP/2 且最近 5 分钟建连不超过两次时 healthy；
   协议异常或最近 5 分钟建连超过两次时 churning。public fallback 保留最近一次 Mesh 复用证据。
+- status peer additive 返回 `direct_validation`、`public_circuit`。
+  `direct_validation` 的值为 `configured_unverified`、`verified`、`transport_failed` 或
+  `protocol_rejected`；旧客户端缺失字段按 unknown/closed 兼容解析。
+- `PUT /api/admin/mesh/config` 的 `enabled=true` 在 Raft 写入前执行有向预检。失败返回
+  `409 mesh_preflight_failed`，仅返回 sender、target 和 `invalid_target|transport|protocol`，
+  不返回 socket、IP、证书或 endpoint URL 细节。整个预检由服务端 30 秒截止时间约束，
+  节点方向检查按有界串行顺序执行；截止或取消时不得写入 Raft。
 
 ## Web
 
@@ -293,6 +309,20 @@ Latest real AppShell route evidence:
 ![Real AppShell System Status desktop geometry](./assets/system-status-appshell-route-desktop.png)
 
 ![Real AppShell System Status mobile peer actions](./assets/system-status-appshell-route-mobile.png)
+
+Current candidate browser viewport evidence:
+
+- Source: local login-free `/ui-demo/system-status` served by the candidate Web shell.
+- Bound implementation commit: `f6353357`.
+- Capture metadata: `source_type=ui_demo`, `target_program=Playwright Chromium`,
+  `capture_scope=browser-viewport`, `requested_viewport=1280x900`,
+  `rendered_assets=1280x900`, `viewport_strategy=explicit-fixed-viewport`,
+  `margin_policy=visible-browser-viewport`, `evidence_surface=full-page`,
+  `sensitive_exclusion=N/A`, `submission_gate=approved`.
+- The viewport shows the actual System Status page, including separate Native Reverse internal
+  diagnostics, external user inbound accounting, and per-peer Direct/Public transport state.
+
+![Current candidate System Status browser viewport](./assets/system-status-current-1280x900.png)
 
 ## 参考
 
