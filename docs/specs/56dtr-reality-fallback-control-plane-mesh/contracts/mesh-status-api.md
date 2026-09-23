@@ -54,8 +54,10 @@
 - Writes the cluster-wide Mesh setting through Raft. Before a new mutation is
   accepted, every current voter and learner must expose the required Mesh
   capability.
-- When `enabled=true`, the leader additionally runs a Direct-only `health-v2` preflight for every
-  directed current-voter edge while the gate remains closed. A failed preflight returns HTTP `409`
+- When `enabled=true`, the leader additionally runs a route-qualified `health-v2` preflight for
+  every directed current-voter edge while the gate remains closed. Targets with an eligible managed
+  endpoint use Direct-only; an owner-approved private Docker target without that endpoint uses its
+  registered `api_base_url`. A failed preflight returns HTTP `409`
   with `error.code=mesh_preflight_failed` and bounded `failures[]` entries containing only
   `sender_node_id`, `target_node_id`, and `kind`; it does not write Raft state.
 - Disabling Mesh keeps existing public paths available. Enabling only takes

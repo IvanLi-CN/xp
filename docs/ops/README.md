@@ -288,11 +288,13 @@ Fresh non-bootstrap nodes use public-only control-plane requests until authentic
 applied; this prevents a local default from overriding a disabled cluster switch during join.
 
 Enabling Mesh also requires a server-side directed preflight while the gate remains closed. Each
-current voter performs a Direct-only signed `health-v2` request to every other voter through the
-existing managed endpoint. `PUT /api/admin/mesh/config` returns `409 mesh_preflight_failed` and
-does not write Raft state when any edge fails. A peer whose endpoint fingerprint changes, whose
-five-minute Direct validation becomes stale, or which has restarted remains `configured_unverified`
-and uses Public until that edge validates again.
+current voter validates every other voter through the target's permitted route: a target with an
+eligible managed endpoint uses a Direct-only signed `health-v2` request, while an owner-approved
+private Docker target without that endpoint uses its registered `api_base_url` with the same signed
+request. `PUT /api/admin/mesh/config` returns `409 mesh_preflight_failed` and does not write Raft
+state when any edge fails. A peer whose endpoint fingerprint changes, whose five-minute Direct
+validation becomes stale, or which has restarted remains `configured_unverified` and uses Public
+until that edge validates again.
 
 When a peer has exactly one managed-default VLESS/REALITY endpoint and a valid access host, XP derives
 `https://<access_host>:<vless_port>` as a signed control-plane Mesh route. The API reports
