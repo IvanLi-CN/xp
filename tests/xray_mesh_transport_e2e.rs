@@ -409,7 +409,7 @@ fn reality_mesh_endpoint(
         meta: serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
             reality: RealityConfig {
                 dest: format!("host.docker.internal:{}", canary.addr.port()),
-                server_names: xp_test_fixtures::loopback_server_names(),
+                server_names: vec!["host.docker.internal".to_string()],
                 server_names_source: RealityServerNamesSource::Manual,
                 fingerprint: "chrome".to_string(),
             },
