@@ -396,6 +396,17 @@ rule:
               regex: '^mesh_base_url$'
           - has:
               field: value
+              pattern: Some(format!("https://host.docker.internal:{}", canary.addr.port()))
+          - inside:
+              stopBy: end
+              pattern: MeshPeerTarget { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^mesh_base_url$'
+          - has:
+              field: value
               pattern: Some(format!("https://{addr}"))
           - inside:
               stopBy: end
