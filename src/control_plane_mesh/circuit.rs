@@ -356,20 +356,21 @@ mod tests {
     async fn endpoint_identity_change_invalidates_direct_validation() {
         let store = DirectValidationStore::default();
         let mut peer = MeshPeerTarget {
-            node_id: "peer".to_owned(),
-            node_name: "peer".to_owned(),
-            mesh_base_url: Some("https://peer.example:443".to_owned()),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
             endpoint_transport: Some("vision_tcp"),
-            endpoint_fingerprint: Some("endpoint-a|443|peer.example|vision_tcp".to_owned()),
+            endpoint_fingerprint: Some("endpoint-a|443|node-a.fixture.test|vision_tcp".to_owned()),
             mesh_reason: MeshPeerReason::MeshAvailable,
-            public_base_url: "https://peer.example/api".to_owned(),
+            public_base_url: xp_test_fixtures::primary_api_url().to_owned(),
         };
         store.record(&peer, DirectValidationState::Verified).await;
         assert_eq!(
             store.state(&peer, true).await,
             DirectValidationState::Verified
         );
-        peer.endpoint_fingerprint = Some("endpoint-b|443|peer.example|vision_tcp".to_owned());
+        peer.endpoint_fingerprint =
+            Some("endpoint-b|443|node-a.fixture.test|vision_tcp".to_owned());
         assert_eq!(
             store.state(&peer, true).await,
             DirectValidationState::ConfiguredUnverified
@@ -380,15 +381,15 @@ mod tests {
     async fn membership_revision_change_invalidates_direct_validation() {
         let store = DirectValidationStore::default();
         let peer = MeshPeerTarget {
-            node_id: "peer".to_owned(),
-            node_name: "peer".to_owned(),
-            mesh_base_url: Some("https://peer.example:443".to_owned()),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
             endpoint_transport: Some("xhttp_reality_fallback"),
             endpoint_fingerprint: Some(
-                "endpoint-a|443|peer.example|xhttp_reality_fallback".to_owned(),
+                "endpoint-a|443|node-a.fixture.test|xhttp_reality_fallback".to_owned(),
             ),
             mesh_reason: MeshPeerReason::MeshAvailable,
-            public_base_url: "https://peer.example/api".to_owned(),
+            public_base_url: xp_test_fixtures::primary_api_url().to_owned(),
         };
         store
             .set_membership_revision(Some("membership-a".to_owned()))
@@ -410,16 +411,24 @@ mod tests {
     #[test]
     fn endpoint_fingerprint_changes_when_metadata_changes() {
         let mut endpoint = Endpoint {
-            endpoint_id: "endpoint".to_owned(),
-            node_id: "peer".to_owned(),
-            tag: "vless".to_owned(),
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
             kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
             port: 443,
             meta: serde_json::json!({"reality": {"fingerprint": "chrome"}}),
         };
-        let first = endpoint_fingerprint(&endpoint, "peer.example", Some("vision_tcp"));
+        let first = endpoint_fingerprint(
+            &endpoint,
+            xp_test_fixtures::primary_host(),
+            Some("vision_tcp"),
+        );
         endpoint.meta["reality"]["fingerprint"] = serde_json::json!("firefox");
-        let second = endpoint_fingerprint(&endpoint, "peer.example", Some("vision_tcp"));
+        let second = endpoint_fingerprint(
+            &endpoint,
+            xp_test_fixtures::primary_host(),
+            Some("vision_tcp"),
+        );
         assert_ne!(first, second);
     }
 }
