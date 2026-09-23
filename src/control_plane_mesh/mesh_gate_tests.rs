@@ -349,3 +349,29 @@ async fn stale_epoch_protocol_failure_does_not_quarantine_current_circuit() {
         BreakerState::Closed
     );
 }
+
+#[tokio::test]
+async fn stale_epoch_transport_failure_does_not_overwrite_current_validation() {
+    let gate = Arc::new(AtomicBool::new(true));
+    let epoch = Arc::new(AtomicU64::new(0));
+    let client = MeshAwareHttpClient::new(reqwest::Client::new())
+        .with_direct_validation_required()
+        .with_mesh_gate_epoch(gate, epoch.clone());
+    let peer = primary_reverse_target(None, xp_test_fixtures::primary_api_url().to_string());
+
+    client.mark_direct_validation_success_at(&peer, None).await;
+    epoch.store(1, Ordering::Release);
+    client
+        .mark_direct_validation_failure_for_epoch(
+            &peer,
+            DirectValidationState::TransportFailed,
+            None,
+            0,
+        )
+        .await;
+
+    assert_eq!(
+        client.direct_validation_state_for(&peer).await,
+        DirectValidationState::Verified
+    );
+}

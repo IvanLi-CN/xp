@@ -74,6 +74,21 @@ impl MeshAwareHttpClient {
             .await;
     }
 
+    pub(super) async fn mark_direct_validation_failure_for_epoch(
+        &self,
+        peer: &MeshPeerTarget,
+        state: DirectValidationState,
+        membership_revision: Option<String>,
+        epoch: u64,
+    ) {
+        let _gate_lock = self.mesh_gate_lock.read().await;
+        if !self.mesh_gate_matches(epoch) {
+            return;
+        }
+        self.mark_direct_validation_failure_at(peer, state, membership_revision)
+            .await;
+    }
+
     pub async fn set_membership_revision(&self, revision: Option<String>) {
         self.direct_validation
             .set_membership_revision(revision)
@@ -222,10 +237,11 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                 )
                 .await;
-                self.mark_direct_validation_failure_at(
+                self.mark_direct_validation_failure_for_epoch(
                     peer,
                     DirectValidationState::TransportFailed,
                     validation_revision,
+                    mesh_epoch,
                 )
                 .await;
                 Ok(MeshAttemptResult::Fallback { ambiguous: true })
@@ -239,10 +255,11 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                 )
                 .await;
-                self.mark_direct_validation_failure_at(
+                self.mark_direct_validation_failure_for_epoch(
                     peer,
                     DirectValidationState::TransportFailed,
                     validation_revision,
+                    mesh_epoch,
                 )
                 .await;
                 Ok(MeshAttemptResult::Fallback { ambiguous: true })
