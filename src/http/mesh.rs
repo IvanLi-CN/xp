@@ -1,4 +1,6 @@
+use super::resource_mesh_error::resource_mesh_error;
 use super::*;
+use crate::control_plane_mesh::MeshRequestError;
 use crate::http::join_capability::require_reverse_assignment_on_voters;
 use sha2::{Digest, Sha256};
 #[path = "mesh/bootstrap.rs"]
@@ -1400,6 +1402,33 @@ pub(super) async fn send_mesh_internal_read(
     )
     .await
 }
+
+pub(super) async fn send_mesh_internal_resource_read(
+    state: &AppState,
+    client: &MeshAwareHttpClient,
+    node: &Node,
+    path_and_query: String,
+    budget: Duration,
+) -> Result<reqwest::Response, ApiError> {
+    let support_id = crate::id::new_ulid_string();
+    let response = send_mesh_internal_request_raw(
+        state,
+        client,
+        node,
+        Method::GET,
+        path_and_query,
+        Vec::new(),
+        None,
+        budget,
+        true,
+        support_id.clone(),
+    )
+    .await?;
+    match response {
+        Ok(response) => Ok(response),
+        Err(error) => Err(resource_mesh_error(client, &node.node_id, support_id, error).await),
+    }
+}
 /// Reads the one predecessor-compatible capability route.
 pub(super) enum MeshCapabilityProbeResponse {
     Verified {
@@ -1464,6 +1493,35 @@ pub(super) async fn send_mesh_internal_request(
     allow_ambiguous_fallback: bool,
     request_id: String,
 ) -> Result<reqwest::Response, ApiError> {
+    let response = send_mesh_internal_request_raw(
+        state,
+        client,
+        node,
+        method,
+        path_and_query,
+        body,
+        content_type,
+        budget,
+        allow_ambiguous_fallback,
+        request_id,
+    )
+    .await?;
+    response.map_err(|error| ApiError::gateway_timeout(error.to_string()))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn send_mesh_internal_request_raw(
+    state: &AppState,
+    client: &MeshAwareHttpClient,
+    node: &Node,
+    method: Method,
+    path_and_query: String,
+    body: Vec<u8>,
+    content_type: Option<String>,
+    budget: Duration,
+    allow_ambiguous_fallback: bool,
+    request_id: String,
+) -> Result<Result<reqwest::Response, MeshRequestError>, ApiError> {
     let ca_key_pem = state
         .cluster_ca_key_pem
         .as_deref()
@@ -1482,11 +1540,11 @@ pub(super) async fn send_mesh_internal_request(
         sender_id: state.cluster.node_id.clone(),
         updates_active_path: true,
     };
-    client
+    Ok(client
         .send_peer_request(&peer, request, ca_key_pem, &state.cluster_ca_pem)
-        .await
-        .map_err(|error| ApiError::gateway_timeout(error.to_string()))
+        .await)
 }
+
 pub(super) async fn probe_mesh_peer(state: &AppState, node_id: &str) -> Result<(), ApiError> {
     run_mesh_health_probe(state, node_id, false).await
 }

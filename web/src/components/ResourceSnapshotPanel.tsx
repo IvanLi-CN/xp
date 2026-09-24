@@ -4,7 +4,7 @@ import { LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import * as echarts from "echarts/core";
 import { SVGRenderer } from "echarts/renderers";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
 	NodeResourceHistoryMetric,
@@ -12,10 +12,9 @@ import type {
 	ResourceSnapshot,
 	RuntimeResourceHistoryMetric,
 } from "../api/adminResources";
-import { formatBackendError as formatErrorMessage } from "../utils/backendErrorMessage";
+import { classifyResourceError } from "../utils/resourceError";
 import { Icon } from "./Icon";
 import { CapabilityUnavailableState, PageState } from "./PageState";
-import { QueryErrorState } from "./QueryErrorState";
 import {
 	type EChartsThemePalette,
 	STATIC_LINE_SERIES_EMPHASIS,
@@ -23,6 +22,7 @@ import {
 	useEChartsThemePalette,
 } from "./echarts-theme";
 import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
 
 echarts.use([GridComponent, TooltipComponent, LineChart, SVGRenderer]);
 
@@ -134,6 +134,128 @@ export const RUNTIME_RESOURCE_HISTORY_CHARTS = [
 		series: [{ metric: "thread_count", name: "Threads" }],
 	},
 ] as const satisfies readonly ResourceHistoryChart[];
+
+function useRetryCooldown(error: unknown, isOnline: boolean) {
+	const diagnostic = classifyResourceError(error, { isOnline });
+	const [retryAt, setRetryAt] = useState<number | null>(null);
+	const [now, setNow] = useState(() => Date.now());
+
+	useEffect(() => {
+		if (!error || !diagnostic.retryAfterSeconds) {
+			setRetryAt(null);
+			return;
+		}
+		setRetryAt(Date.now() + diagnostic.retryAfterSeconds * 1000);
+	}, [diagnostic.retryAfterSeconds, error]);
+
+	useEffect(() => {
+		if (!retryAt) return;
+		const timer = window.setInterval(() => setNow(Date.now()), 1000);
+		return () => window.clearInterval(timer);
+	}, [retryAt]);
+
+	const remainingSeconds = retryAt
+		? Math.max(0, Math.ceil((retryAt - now) / 1000))
+		: 0;
+	return { diagnostic, remainingSeconds };
+}
+
+function formatResourceTimestamp(timestamp: number): string {
+	if (!timestamp) return "unavailable";
+	const date = new Date(timestamp);
+	return Number.isNaN(date.getTime()) ? "unavailable" : date.toLocaleString();
+}
+
+function formatResourceAge(timestamp: number): string {
+	if (!timestamp) return "unknown";
+	const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+	if (seconds < 60) return "less than a minute";
+	if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
+	return `${Math.floor(seconds / 3600)} hr`;
+}
+
+function ResourceDiagnosticBanner(props: {
+	error: unknown;
+	isOnline: boolean;
+	isFetching: boolean;
+	snapshot?: ResourceSnapshot;
+	dataUpdatedAt?: number;
+	onRetry: () => void;
+	onOpenMeshStatus?: () => void;
+}) {
+	const { diagnostic, remainingSeconds } = useRetryCooldown(
+		props.error,
+		props.isOnline,
+	);
+	const canRetry =
+		props.isOnline && diagnostic.retryable && remainingSeconds === 0;
+	const isPeerLayer = [
+		"peer_transport",
+		"peer_protocol",
+		"circuit_breaker",
+	].includes(diagnostic.layer);
+
+	return (
+		<div
+			className="rounded-lg border border-warning/40 bg-warning/10 p-4"
+			role="alert"
+		>
+			<div className="flex flex-wrap items-start justify-between gap-3">
+				<div className="min-w-0 space-y-1">
+					<div className="flex flex-wrap items-center gap-2">
+						<p className="font-semibold">{diagnostic.title}</p>
+						<Badge variant="warning">{diagnostic.layer}</Badge>
+					</div>
+					<p className="max-w-3xl text-sm text-muted-foreground">
+						{diagnostic.description}
+					</p>
+					{props.snapshot ? (
+						<p className="text-xs text-muted-foreground">
+							Showing the last successful snapshot. Observed{" "}
+							{props.snapshot.observed_at}, last successful read{" "}
+							{formatResourceTimestamp(props.dataUpdatedAt ?? 0)}, age{" "}
+							{formatResourceAge(props.dataUpdatedAt ?? 0)}.
+						</p>
+					) : null}
+				</div>
+				<div className="flex shrink-0 flex-wrap gap-2">
+					<Button
+						aria-label="Retry resource read"
+						disabled={!canRetry || props.isFetching}
+						onClick={props.onRetry}
+						size="sm"
+						variant="outline"
+					>
+						<Icon name="tabler:refresh" size={15} />
+						{remainingSeconds > 0
+							? `Retry in ${remainingSeconds}s`
+							: props.isFetching
+								? "Retrying"
+								: "Retry"}
+					</Button>
+					{isPeerLayer && props.onOpenMeshStatus ? (
+						<Button
+							aria-label="Open Mesh status"
+							onClick={props.onOpenMeshStatus}
+							size="sm"
+							variant="ghost"
+						>
+							<Icon name="tabler:activity" size={15} />
+							Mesh status
+						</Button>
+					) : null}
+				</div>
+			</div>
+			<div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+				<span>Dispatch: {diagnostic.dispatchState}</span>
+				<span>Confidence: {diagnostic.confidence}</span>
+				{diagnostic.supportId ? (
+					<span>Support: {diagnostic.supportId}</span>
+				) : null}
+			</div>
+		</div>
+	);
+}
 
 type ResourceHistoryPoint = {
 	observed_at: string;
@@ -263,8 +385,15 @@ export function buildResourceHistoryChartOption(
 function ResourceHistoryChart(props: {
 	chart: ResourceHistoryChart;
 	historyByMetric: Partial<Record<string, ResourceHistoryPoint[]>>;
+	error?: unknown;
+	isOnline: boolean;
+	onRetry?: () => void;
 }) {
 	const palette = useEChartsThemePalette();
+	const { diagnostic, remainingSeconds } = useRetryCooldown(
+		props.error,
+		props.isOnline,
+	);
 	const option = useMemo(
 		() =>
 			buildResourceHistoryChartOption(
@@ -281,6 +410,31 @@ function ResourceHistoryChart(props: {
 	);
 
 	if (!hasSamples) {
+		if (props.error) {
+			return (
+				<div className="space-y-2 py-7" role="alert">
+					<p className="text-sm font-medium">History unavailable</p>
+					<p className="text-xs text-muted-foreground">
+						{diagnostic.description}
+					</p>
+					{props.onRetry ? (
+						<Button
+							disabled={
+								!props.isOnline || !diagnostic.retryable || remainingSeconds > 0
+							}
+							onClick={props.onRetry}
+							size="sm"
+							variant="outline"
+						>
+							<Icon name="tabler:refresh" size={15} />
+							{remainingSeconds > 0
+								? `Retry in ${remainingSeconds}s`
+								: "Retry history"}
+						</Button>
+					) : null}
+				</div>
+			);
+		}
 		return (
 			<p className="py-10 text-xs text-muted-foreground">
 				{props.chart.emptyMessage}
@@ -289,23 +443,50 @@ function ResourceHistoryChart(props: {
 	}
 
 	return (
-		<div aria-label={props.chart.ariaLabel} className="w-full">
-			<ReactEChartsCore
-				echarts={echarts}
-				option={option}
-				notMerge
-				lazyUpdate
-				autoResize
-				style={{ height: RESOURCE_HISTORY_CHART_HEIGHT, width: "100%" }}
-				opts={{ renderer: "svg" }}
-			/>
-		</div>
+		<>
+			<div aria-label={props.chart.ariaLabel} className="w-full">
+				<ReactEChartsCore
+					echarts={echarts}
+					option={option}
+					notMerge
+					lazyUpdate
+					autoResize
+					style={{ height: RESOURCE_HISTORY_CHART_HEIGHT, width: "100%" }}
+					opts={{ renderer: "svg" }}
+				/>
+			</div>
+			{props.error ? (
+				<p className="flex flex-wrap items-center gap-2 text-xs text-warning">
+					<span>Refresh failed; showing the last successful points.</span>
+					{props.onRetry ? (
+						<button
+							className={[
+								"font-medium underline underline-offset-2",
+								"disabled:cursor-not-allowed disabled:no-underline disabled:opacity-60",
+							].join(" ")}
+							disabled={
+								!props.isOnline || !diagnostic.retryable || remainingSeconds > 0
+							}
+							onClick={props.onRetry}
+							type="button"
+						>
+							{remainingSeconds > 0
+								? `Retry in ${remainingSeconds}s`
+								: "Retry history"}
+						</button>
+					) : null}
+				</p>
+			) : null}
+		</>
 	);
 }
 
 function ResourceHistoryCard(props: {
 	chart: ResourceHistoryChart;
 	historyByMetric: Partial<Record<string, ResourceHistoryPoint[]>>;
+	error?: unknown;
+	isOnline: boolean;
+	onRetry?: () => void;
 }) {
 	const palette = useEChartsThemePalette();
 	return (
@@ -340,7 +521,10 @@ function ResourceHistoryCard(props: {
 			</div>
 			<ResourceHistoryChart
 				chart={props.chart}
+				error={props.error}
 				historyByMetric={props.historyByMetric}
+				isOnline={props.isOnline}
+				onRetry={props.onRetry}
 			/>
 		</div>
 	);
@@ -395,10 +579,18 @@ export function ResourceSnapshotPanel(props: {
 			Array<{ observed_at: string; value?: number | null }>
 		>
 	>;
+	historyErrorByMetric?: Partial<Record<NodeResourceHistoryMetric, unknown>>;
+	runtimeHistoryErrorByMetric?: Partial<
+		Record<RuntimeResourceHistoryMetric, unknown>
+	>;
+	isOnline?: boolean;
+	onRetryHistory?: (metric: NodeResourceHistoryMetric) => void;
+	onRetryRuntimeHistory?: (metric: RuntimeResourceHistoryMetric) => void;
 	selectedRuntimeRole: ResourceRole | null;
 	onRuntimeDetailsChange: (role: ResourceRole | null) => void;
 }) {
 	const { snapshot } = props;
+	const isOnline = props.isOnline ?? true;
 	return (
 		<div className="space-y-4">
 			<div className="flex flex-wrap items-center justify-between gap-2">
@@ -470,7 +662,18 @@ export function ResourceSnapshotPanel(props: {
 				{RESOURCE_HISTORY_CHARTS.map((chart) => (
 					<ResourceHistoryCard
 						chart={chart}
+						error={chart.series
+							.map((series) => props.historyErrorByMetric?.[series.metric])
+							.find(Boolean)}
 						historyByMetric={props.historyByMetric}
+						isOnline={isOnline}
+						onRetry={() => {
+							for (const series of chart.series) {
+								props.onRetryHistory?.(
+									series.metric as NodeResourceHistoryMetric,
+								);
+							}
+						}}
 						key={chart.key}
 					/>
 				))}
@@ -536,6 +739,9 @@ export function ResourceSnapshotPanel(props: {
 			{props.selectedRuntimeRole ? (
 				<RuntimeResourceDetails
 					historyByMetric={props.runtimeHistoryByMetric}
+					historyErrorByMetric={props.runtimeHistoryErrorByMetric}
+					isOnline={isOnline}
+					onRetryHistory={props.onRetryRuntimeHistory}
 					role={props.selectedRuntimeRole}
 				/>
 			) : null}
@@ -551,6 +757,9 @@ function RuntimeResourceDetails(props: {
 			Array<{ observed_at: string; value?: number | null }>
 		>
 	>;
+	historyErrorByMetric?: Partial<Record<RuntimeResourceHistoryMetric, unknown>>;
+	isOnline: boolean;
+	onRetryHistory?: (metric: RuntimeResourceHistoryMetric) => void;
 }) {
 	return (
 		<section aria-labelledby="runtime-resource-history-heading">
@@ -567,7 +776,23 @@ function RuntimeResourceDetails(props: {
 				{RUNTIME_RESOURCE_HISTORY_CHARTS.map((chart) => (
 					<ResourceHistoryCard
 						chart={chart}
+						error={chart.series
+							.map(
+								(series) =>
+									props.historyErrorByMetric?.[
+										series.metric as RuntimeResourceHistoryMetric
+									],
+							)
+							.find(Boolean)}
 						historyByMetric={props.historyByMetric}
+						isOnline={props.isOnline}
+						onRetry={() => {
+							for (const series of chart.series) {
+								props.onRetryHistory?.(
+									series.metric as RuntimeResourceHistoryMetric,
+								);
+							}
+						}}
 						key={chart.key}
 					/>
 				))}
@@ -585,6 +810,8 @@ export function ResourceTabContent(props: {
 	isFetching: boolean;
 	isOnline: boolean;
 	onRetry: () => void;
+	onOpenMeshStatus?: () => void;
+	dataUpdatedAt?: number;
 	snapshot?: ResourceSnapshot;
 	historyByMetric: Partial<
 		Record<
@@ -592,6 +819,12 @@ export function ResourceTabContent(props: {
 			Array<{ observed_at: string; value?: number | null }>
 		>
 	>;
+	historyErrorByMetric?: Partial<Record<NodeResourceHistoryMetric, unknown>>;
+	runtimeHistoryErrorByMetric?: Partial<
+		Record<RuntimeResourceHistoryMetric, unknown>
+	>;
+	onRetryHistory?: (metric: NodeResourceHistoryMetric) => void;
+	onRetryRuntimeHistory?: (metric: RuntimeResourceHistoryMetric) => void;
 	runtimeHistoryByMetric: Partial<
 		Record<
 			RuntimeResourceHistoryMetric,
@@ -620,25 +853,49 @@ export function ResourceTabContent(props: {
 	}
 	if (props.isError && !props.snapshot) {
 		return (
-			<QueryErrorState
-				title="Failed to load resources"
-				description={formatErrorMessage(props.error)}
-				error={props.error}
-				loading={props.isFetching}
-				disabled={!props.isOnline}
-				onRetry={props.onRetry}
-			/>
+			<div className="space-y-4">
+				<ResourceDiagnosticBanner
+					error={props.error}
+					isFetching={props.isFetching}
+					isOnline={props.isOnline}
+					onOpenMeshStatus={props.onOpenMeshStatus}
+					onRetry={props.onRetry}
+				/>
+				<PageState
+					variant="empty"
+					title="No resource snapshot available"
+					description="There is no successful snapshot to retain for this page session."
+				/>
+			</div>
 		);
 	}
 	if (props.snapshot) {
 		return (
-			<ResourceSnapshotPanel
-				snapshot={props.snapshot}
-				historyByMetric={props.historyByMetric}
-				runtimeHistoryByMetric={props.runtimeHistoryByMetric}
-				selectedRuntimeRole={props.selectedRuntimeRole}
-				onRuntimeDetailsChange={props.onRuntimeDetailsChange}
-			/>
+			<div className="space-y-4">
+				{props.isError ? (
+					<ResourceDiagnosticBanner
+						dataUpdatedAt={props.dataUpdatedAt}
+						error={props.error}
+						isFetching={props.isFetching}
+						isOnline={props.isOnline}
+						onOpenMeshStatus={props.onOpenMeshStatus}
+						onRetry={props.onRetry}
+						snapshot={props.snapshot}
+					/>
+				) : null}
+				<ResourceSnapshotPanel
+					historyByMetric={props.historyByMetric}
+					historyErrorByMetric={props.historyErrorByMetric}
+					isOnline={props.isOnline}
+					onRetryHistory={props.onRetryHistory}
+					onRetryRuntimeHistory={props.onRetryRuntimeHistory}
+					onRuntimeDetailsChange={props.onRuntimeDetailsChange}
+					runtimeHistoryByMetric={props.runtimeHistoryByMetric}
+					runtimeHistoryErrorByMetric={props.runtimeHistoryErrorByMetric}
+					selectedRuntimeRole={props.selectedRuntimeRole}
+					snapshot={props.snapshot}
+				/>
+			</div>
 		);
 	}
 	return (

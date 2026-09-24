@@ -50,6 +50,7 @@ root 常驻服务来解决可观测性问题。
 ## Related ADRs
 
 - [ADR 0009](../../adr/0009-bounded-resource-monitoring-history.md)
+- [ADR 0016](../../adr/0016-node-resource-failure-status-contract.md)
 
 ## Visual Evidence
 
@@ -61,6 +62,38 @@ root 常驻服务来解决可观测性问题。
   right-aligned colored line keys.
   image:
   ![Xray runtime resource history](./assets/node-details-xray-runtime-history.png)
+
+- source_type: storybook_canvas
+  story_id_or_title: Components/ResourceSnapshotPanel/CircuitOpen
+  state: circuit-open at 393x852
+  evidence_note: Confirms the bounded cooldown countdown, disabled retry action, safe diagnostic
+  copy, and no-snapshot empty state on a narrow viewport.
+  image:
+  ![Resource circuit-open mobile state](./assets/node-resource-circuit-open-mobile.png)
+
+- source_type: storybook_canvas
+  story_id_or_title: Components/ResourceSnapshotPanel/UnknownError
+  state: unknown error at 393x852
+  evidence_note: Confirms that an unstructured failure uses the unknown fallback without exposing
+  the backend error text and keeps the retry action safe.
+  image:
+  ![Resource unknown mobile state](./assets/node-resource-unknown-mobile.png)
+
+- source_type: storybook_canvas
+  story_id_or_title: Components/ResourceSnapshotPanel/StaleSnapshot
+  state: stale snapshot at 1600x1200
+  evidence_note: Confirms retained current data with separate observed time, last successful read,
+  stale age, and peer failure diagnostics.
+  image:
+  ![Resource stale snapshot desktop state](./assets/node-resource-stale-desktop.png)
+
+- source_type: storybook_canvas
+  story_id_or_title: Components/ResourceSnapshotPanel/HistoryRefreshError
+  state: one history chart refresh failure at 1600x1200
+  evidence_note: Confirms that a chart keeps its last successful points while exposing a scoped
+  refresh failure and retry action.
+  image:
+  ![Resource history refresh error desktop state](./assets/node-resource-history-error-desktop.png)
 
 ## 需求（Requirements）
 
@@ -138,6 +171,12 @@ root 常驻服务来解决可观测性问题。
 - 历史由专用 Resource History API 从最完整健康的 ready History Repository 查询；不得让 Web 解释 generic `unknown[]`
   Repository records 或扫描所有 schema。
 - Web 提供集群资源总览与 Node Details 的 Resources Tab。当前值每 15 秒轮询，历史每 30 秒轮询；不通过 SSE 传输 15 秒原始样本。
+- Node Details Resources Tab 的 current 与每个 history query 在失败后暂停自身自动轮询；只有该 query 成功 refetch 后才恢复正常轮询。
+  资源快照只在当前页面会话中保留，不写入浏览器离线缓存或其他资源数据持久化。
+- Resources Tab 的失败诊断只消费 API contract 中的结构化字段。它必须区分浏览器请求、XP API、peer transport、peer protocol、circuit
+  breaker、verified remote node 和 unknown failure；不得把一次资源读取失败显示为节点 down、成员故障或自动修复建议。
+- 当 current 请求失败但页面会话内存在上一份成功快照时，UI 必须继续显示该快照，并同时显示 `observed_at`、最后成功读取时间和
+  stale age。history query 的错误必须独立显示；已有图表点不能被错误状态替换为空数据。
 - Node Details Resources Tab 的既有标题、说明、指标卡、文件系统与运行角色区块保持原有布局。历史区固定显示四张
   Domain 图表：CPU busy、available memory、root filesystem use 和 I/O wait；不得按 PID、任意挂载点或标签扩展图表。
   运行角色仍只限 `xp`、`xray`、`cloudflared`、`canary` 四张现有角色卡。点击任一角色卡只能在该区块后展开或收起该角色的
@@ -189,6 +228,12 @@ root 常驻服务来解决可观测性问题。
 - 远端节点不可达时，current 总览保留最后可用节点数据并报告 partial；历史 Repository 不可达时返回 local_only 或 partial，绝不假定
   complete。
 - 旧节点、旧仓库或不认识资源 schema 的节点保持原有行为；新 Web 根据 capability 隐藏交互，而不是将其视为零或错误。
+- Node Details 的资源 peer 读取使用结构化失败合同：circuit open 返回 503 `peer_circuit_open` 并带有界
+  `Retry-After`，已派发但没有 verified response 的 timeout 返回 504，signed acknowledgement 无效返回 502；已验证的远端业务
+  错误保留其 status 并标记 `failure_layer=remote_node`。仅 capability route 的 verified 404 映射为 `unsupported`。
+- 诊断 details 只允许稳定枚举、目标节点 ID、受限 path/state、布尔 retryability、有界
+  cooldown、target status 与 support ID；不得包含完整 URL、IP、凭据、请求头、签名、堆栈
+  或未截断的第三方错误文本。前端对 legacy/unstructured error 使用 `unknown` fallback。
 
 ## 接口契约（Interfaces & Contracts）
 

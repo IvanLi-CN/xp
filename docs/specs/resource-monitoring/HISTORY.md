@@ -14,3 +14,11 @@
 - 本主题取代“通过运行状态、连接数或发布验收脚本间接判断资源压力”的做法；它不取代 Service Monitoring、Traffic Monitoring 或 Uptime
   Monitoring。
 - 资源历史使用 History Repository 的有界交付机制，但采用专用数值 reducer，避免通用 reducer 丢失资源语义。
+
+## Failure diagnostics
+
+- Node Details resource reads use a typed failure contract so circuit cooldown, transport
+  uncertainty, protocol rejection, verified remote application errors, XP API failures, and
+  browser offline state remain distinguishable without exposing transport internals.
+- The current-page snapshot is a view fallback only. It is not added to offline persistence, and its
+  observed time, last successful fetch time, and stale age remain separate from the failure state.

@@ -137,3 +137,71 @@
 - `resource_payload_budget_exceeded`
 - `revision_conflict`
 - `invalid_request`
+
+## Node Details resource failure contract
+
+The current, recent, and history routes preserve the existing capability compatibility
+behavior while adding a structured error body for a failed peer read. The body remains the
+standard API envelope:
+
+```json
+{
+  "error": {
+    "code": "peer_circuit_open",
+    "message": "resource request is cooling down",
+    "details": {
+      "failure_layer": "circuit_breaker",
+      "cause": "circuit_open",
+      "confidence": "confirmed",
+      "target_node_id": "node-a",
+      "attempted_path": "direct",
+      "dispatch_state": "not_dispatched",
+      "retryable": true,
+      "retry_after_seconds": 12,
+      "support_id": "01JRESOURCEFAILURE"
+    }
+  }
+}
+```
+
+The `details` keys are bounded and diagnostic-only:
+
+- `failure_layer` is one of `frontend_request`, `xp_api`, `peer_transport`, `peer_protocol`,
+  `circuit_breaker`, `remote_node`, or `unknown`.
+- `cause`, `confidence`, `attempted_path`, and `dispatch_state` are stable server-defined
+  enumerations. `target_node_id` identifies the requested node; `support_id` is a bounded opaque
+  correlation ID. These fields never contain a URL, IP, credential, header, signature, stack, or
+  unbounded third-party text.
+- `retryable` is a boolean. `retry_after_seconds`, when present, is an integer from 1 through
+  300 and is authoritative; the browser must not infer a cooldown. The same value is emitted as
+  the HTTP `Retry-After` header for circuit-open responses.
+- `target_status`, when present, is the verified status returned by the target node. It is not a
+  substitute for the API response status.
+
+The status mapping is fixed:
+
+- Circuit open before dispatch: `503 / peer_circuit_open`, dispatch state
+  `not_dispatched`; include bounded `Retry-After` and send no request.
+- Dispatched request times out without a verified response:
+  - API: `504 / peer_transport_timeout`.
+  - Dispatch state: `dispatched_no_verified_response`.
+- Signed acknowledgement or peer authentication is invalid:
+  - API: `502 / peer_protocol_rejected`; ignore the body.
+  - Dispatch state: `dispatched_no_verified_response`.
+- Verified target application error: preserve the target status with
+  `remote_node_error` and `failure_layer=remote_node`, dispatch state
+  `verified_remote_response`.
+- Verified capability route returns 404: keep the old-node compatibility result as an
+  unsupported snapshot (or `501 / resource_monitoring_unsupported`).
+
+Other transport failures use the `peer_transport` layer and a safe 502/504 status appropriate to
+whether dispatch and outcome are known. Existing generic mesh callers retain their previous
+gateway-timeout mapping; this structured contract is scoped to resource reads.
+
+The Web client keeps a successful current snapshot only for the current page session. A failed
+refresh does not erase it and does not create offline persistence. The UI displays the snapshot's
+`observed_at`, the query's last successful fetch time, and stale age separately. Current and
+each history query stop automatic polling after an error and resume only after that query succeeds.
+An error without a retained snapshot is not represented as empty resource data. Legacy or
+unstructured errors are shown as `unknown` without their raw message, and no resource error can
+trigger a restart, configuration mutation, endpoint change, or diagnostic probe.

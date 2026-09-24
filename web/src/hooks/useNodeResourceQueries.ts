@@ -2,8 +2,10 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 
 import {
 	NODE_RESOURCE_HISTORY_METRICS,
+	type NodeResourceHistoryMetric,
 	RUNTIME_RESOURCE_HISTORY_METRICS,
 	type ResourceRole,
+	type RuntimeResourceHistoryMetric,
 	fetchAdminNodeResourceHistory,
 	fetchAdminNodeResources,
 } from "../api/adminResources";
@@ -27,7 +29,8 @@ export function useNodeResourceQueries(props: {
 		enabled,
 		queryFn: ({ signal }) =>
 			fetchAdminNodeResources(props.adminToken, props.nodeId, signal),
-		refetchInterval: props.isOnline ? 15_000 : false,
+		refetchInterval: (query: { state: { status: string } }) =>
+			props.isOnline && query.state.status !== "error" ? 15_000 : false,
 	});
 	const resourceHistoryQueries = useQueries({
 		queries: NODE_RESOURCE_HISTORY_METRICS.map((metric) => ({
@@ -45,7 +48,8 @@ export function useNodeResourceQueries(props: {
 					metric,
 					signal,
 				),
-			refetchInterval: props.isOnline ? 30_000 : false,
+			refetchInterval: (query: { state: { status: string } }) =>
+				props.isOnline && query.state.status !== "error" ? 30_000 : false,
 		})),
 	});
 	const resourceHistoryByMetric = Object.fromEntries(
@@ -54,6 +58,12 @@ export function useNodeResourceQueries(props: {
 			resourceHistoryQueries[index]?.data?.points ?? [],
 		]),
 	);
+	const resourceHistoryErrorByMetric = Object.fromEntries(
+		NODE_RESOURCE_HISTORY_METRICS.map((metric, index) => [
+			metric,
+			resourceHistoryQueries[index]?.error,
+		]),
+	) as Partial<Record<NodeResourceHistoryMetric, unknown>>;
 	const runtimeHistoryQueries = useQueries({
 		queries: RUNTIME_RESOURCE_HISTORY_METRICS.map((metric) => ({
 			queryKey: [
@@ -75,7 +85,8 @@ export function useNodeResourceQueries(props: {
 					signal,
 					props.selectedRuntimeRole ?? undefined,
 				),
-			refetchInterval: props.isOnline ? 30_000 : false,
+			refetchInterval: (query: { state: { status: string } }) =>
+				props.isOnline && query.state.status !== "error" ? 30_000 : false,
 		})),
 	});
 	const runtimeHistoryByMetric = Object.fromEntries(
@@ -84,10 +95,28 @@ export function useNodeResourceQueries(props: {
 			runtimeHistoryQueries[index]?.data?.points ?? [],
 		]),
 	);
+	const runtimeHistoryErrorByMetric = Object.fromEntries(
+		RUNTIME_RESOURCE_HISTORY_METRICS.map((metric, index) => [
+			metric,
+			runtimeHistoryQueries[index]?.error,
+		]),
+	) as Partial<Record<RuntimeResourceHistoryMetric, unknown>>;
+	const retryResourceHistory = (metric: NodeResourceHistoryMetric) => {
+		const index = NODE_RESOURCE_HISTORY_METRICS.indexOf(metric);
+		void resourceHistoryQueries[index]?.refetch();
+	};
+	const retryRuntimeHistory = (metric: RuntimeResourceHistoryMetric) => {
+		const index = RUNTIME_RESOURCE_HISTORY_METRICS.indexOf(metric);
+		void runtimeHistoryQueries[index]?.refetch();
+	};
 	return {
 		resourceCapability,
 		resourceQuery,
 		resourceHistoryByMetric,
+		resourceHistoryErrorByMetric,
+		retryResourceHistory,
 		runtimeHistoryByMetric,
+		runtimeHistoryErrorByMetric,
+		retryRuntimeHistory,
 	};
 }

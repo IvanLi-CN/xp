@@ -25,12 +25,14 @@ use tokio::{
     sync::{Mutex, Semaphore, mpsc},
     time::Duration,
 };
+mod api_error;
 mod embedded_ui;
 mod endpoint_requests;
 mod mesh;
 mod node_delete;
 mod resource_alerts;
 mod resource_history_capacity;
+mod resource_mesh_error;
 mod resource_monitoring;
 mod stale_learner_retirement;
 mod status_events;
@@ -268,37 +270,6 @@ impl From<StoreError> for ApiError {
             StoreError::ResourcePolicyInvalid { message } => ApiError::invalid_request(message),
             StoreError::Io(_) | StoreError::SerdeJson(_) => ApiError::internal(value.to_string()),
         }
-    }
-}
-
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: ErrorBody,
-}
-#[derive(Serialize)]
-struct ErrorBody {
-    code: String,
-    message: String,
-    details: Map<String, Value>,
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let retry_after = self.status == StatusCode::TOO_MANY_REQUESTS;
-        let body = ErrorResponse {
-            error: ErrorBody {
-                code: self.code.to_string(),
-                message: self.message,
-                details: self.details,
-            },
-        };
-        let mut response = (self.status, Json(body)).into_response();
-        if retry_after {
-            response
-                .headers_mut()
-                .insert(header::RETRY_AFTER, "1".parse().expect("valid header"));
-        }
-        response
     }
 }
 

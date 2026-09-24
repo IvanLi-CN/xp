@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
+import { BackendApiError } from "../api/backendError";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	RESOURCE_HISTORY_CHARTS,
 	RUNTIME_RESOURCE_HISTORY_CHARTS,
+	ResourceTabContent,
 	buildResourceHistoryChartOption,
 } from "./ResourceSnapshotPanel";
 import type { EChartsThemePalette } from "./echarts-theme";
@@ -97,6 +100,46 @@ describe("buildResourceHistoryChartOption", () => {
 				expect(option.yAxis).not.toMatchObject({ max: 100 });
 			}
 		}
+	});
+});
+
+describe("ResourceTabContent diagnostics", () => {
+	it("does not use raw backend text and disables retry during cooldown", () => {
+		const onRetry = vi.fn();
+		render(
+			<ResourceTabContent
+				capabilityUnavailable={false}
+				isLoading={false}
+				isError
+				error={
+					new BackendApiError({
+						status: 503,
+						code: "peer_circuit_open",
+						message: "raw mesh details must stay hidden",
+						details: {
+							failure_layer: "circuit_breaker",
+							retryable: true,
+							retry_after_seconds: 30,
+						},
+					})
+				}
+				isFetching={false}
+				isOnline
+				onRetry={onRetry}
+				historyByMetric={{}}
+				runtimeHistoryByMetric={{}}
+				selectedRuntimeRole={null}
+				onRuntimeDetailsChange={() => undefined}
+			/>,
+		);
+
+		expect(screen.getByText("Peer path is cooling down")).toBeInTheDocument();
+		expect(
+			screen.queryByText(/raw mesh details must stay hidden/),
+		).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Retry resource read" }),
+		).toBeDisabled();
 	});
 });
 

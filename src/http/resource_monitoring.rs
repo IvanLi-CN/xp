@@ -8,7 +8,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ApiError, ApiJson, AppState, CLUSTER_RUNTIME_FANOUT_TIMEOUT, mesh::send_mesh_internal_read,
+    ApiError, ApiJson, AppState, CLUSTER_RUNTIME_FANOUT_TIMEOUT,
+    mesh::send_mesh_internal_resource_read,
 };
 use crate::resource_monitoring::{
     ResourceGap, ResourceHistoryResponse, ResourcePolicy, ResourceRecentSeries, ResourceRole,
@@ -59,7 +60,7 @@ pub(super) async fn admin_list_nodes_resources(
             items.push(state.resource_monitoring.current().await);
             continue;
         }
-        let response = send_mesh_internal_read(
+        let response = send_mesh_internal_resource_read(
             &state,
             &state.mesh_client,
             &node,
@@ -103,7 +104,7 @@ pub(super) async fn admin_get_node_resources(
     if node.node_id == state.cluster.node_id {
         return Ok(Json(state.resource_monitoring.current().await));
     }
-    let response = send_mesh_internal_read(
+    let response = send_mesh_internal_resource_read(
         &state,
         &state.mesh_client,
         &node,
@@ -115,11 +116,7 @@ pub(super) async fn admin_get_node_resources(
         return Ok(Json(unsupported_snapshot(&node_id)));
     }
     if !response.status().is_success() {
-        return Err(ApiError::new(
-            "resource_monitoring_unsupported",
-            StatusCode::NOT_IMPLEMENTED,
-            "node does not expose resource monitoring",
-        ));
+        return Err(remote_resource_error(&node_id, response.status()));
     }
     response
         .json::<ResourceSnapshot>()
@@ -156,7 +153,7 @@ pub(super) async fn admin_get_node_resources_recent(
         path.push_str("&role=");
         path.push_str(role.as_str());
     }
-    let response = send_mesh_internal_read(
+    let response = send_mesh_internal_resource_read(
         &state,
         &state.mesh_client,
         &node,
@@ -164,12 +161,11 @@ pub(super) async fn admin_get_node_resources_recent(
         CLUSTER_RUNTIME_FANOUT_TIMEOUT,
     )
     .await?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Ok(Json(unsupported_recent_series(&query.metric, query.role)));
+    }
     if !response.status().is_success() {
-        return Err(ApiError::new(
-            "resource_monitoring_unsupported",
-            StatusCode::NOT_IMPLEMENTED,
-            "node does not expose resource monitoring",
-        ));
+        return Err(remote_resource_error(&node_id, response.status()));
     }
     response
         .json::<ResourceRecentSeries>()
@@ -280,7 +276,7 @@ pub(super) async fn admin_get_node_resources_history(
         path.push_str("&resolution=");
         path.push_str(&resolution);
     }
-    let response = send_mesh_internal_read(
+    let response = send_mesh_internal_resource_read(
         &state,
         &state.mesh_client,
         &node,
@@ -296,17 +292,43 @@ pub(super) async fn admin_get_node_resources_history(
         ));
     }
     if !response.status().is_success() {
-        return Err(ApiError::new(
-            "resource_history_unavailable",
-            StatusCode::SERVICE_UNAVAILABLE,
-            "resource history is unavailable",
-        ));
+        return Err(remote_resource_error(&node_id, response.status()));
     }
     response
         .json::<ResourceHistoryResponse>()
         .await
         .map(Json)
         .map_err(|error| ApiError::internal(error.to_string()))
+}
+
+fn remote_resource_error(node_id: &str, target_status: StatusCode) -> ApiError {
+    ApiError::new(
+        "remote_node_error",
+        target_status,
+        "the target node returned a resource error",
+    )
+    .with_detail("failure_layer", "remote_node")
+    .with_detail("cause", "remote_resource_error")
+    .with_detail("confidence", "confirmed")
+    .with_detail("target_node_id", node_id)
+    .with_detail("attempted_path", "mesh")
+    .with_detail("dispatch_state", "verified_remote_response")
+    .with_detail(
+        "retryable",
+        target_status == StatusCode::TOO_MANY_REQUESTS || target_status.is_server_error(),
+    )
+    .with_detail("target_status", target_status.as_u16())
+    .with_detail("support_id", crate::id::new_ulid_string())
+}
+
+fn unsupported_recent_series(metric: &str, role: Option<ResourceRole>) -> ResourceRecentSeries {
+    ResourceRecentSeries {
+        metric: metric.to_string(),
+        role,
+        resolution: "15s".to_string(),
+        points: Vec::new(),
+        truncated: false,
+    }
 }
 
 pub(super) async fn admin_get_resource_policy(

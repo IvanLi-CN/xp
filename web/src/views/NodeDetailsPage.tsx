@@ -472,7 +472,11 @@ export function NodeDetailsPage() {
 		resourceCapability,
 		resourceQuery,
 		resourceHistoryByMetric,
+		resourceHistoryErrorByMetric,
+		retryResourceHistory,
 		runtimeHistoryByMetric,
+		runtimeHistoryErrorByMetric,
+		retryRuntimeHistory,
 	} = useNodeResourceQueries({
 		adminToken,
 		nodeId,
@@ -962,12 +966,18 @@ export function NodeDetailsPage() {
 								error={resourceQuery.error}
 								isFetching={resourceQuery.isFetching}
 								isOnline={appRuntime.isOnline}
+								dataUpdatedAt={resourceQuery.dataUpdatedAt}
 								onRetry={() => resourceQuery.refetch()}
+								onOpenMeshStatus={() => navigate({ to: "/system-status" })}
+								onRetryHistory={retryResourceHistory}
+								onRetryRuntimeHistory={retryRuntimeHistory}
 								onRuntimeDetailsChange={setSelectedRuntimeRole}
 								selectedRuntimeRole={selectedRuntimeRole}
 								snapshot={resourceQuery.data}
 								historyByMetric={resourceHistoryByMetric}
+								historyErrorByMetric={resourceHistoryErrorByMetric}
 								runtimeHistoryByMetric={runtimeHistoryByMetric}
+								runtimeHistoryErrorByMetric={runtimeHistoryErrorByMetric}
 							/>
 						</section>
 					</ModuleTabsPanel>

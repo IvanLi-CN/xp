@@ -1,9 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import type { ReactNode } from "react";
 
 import type {
 	NodeResourceHistoryMetric,
 	ResourceSnapshot,
 } from "../api/adminResources";
+import { BackendApiError } from "../api/backendError";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	ResourceSnapshotPanel,
@@ -277,6 +279,14 @@ function takeRecentHistory(pointCount: number) {
 	);
 }
 
+function EvidenceFrame({ children }: { children: ReactNode }) {
+	return (
+		<div className="bg-background p-6" data-visual-evidence-surface>
+			<div data-visual-evidence-target>{children}</div>
+		</div>
+	);
+}
+
 export const Supported: Story = {
 	args: {
 		snapshot: supportedSnapshot,
@@ -344,5 +354,234 @@ export const Loading: Story = {
 			selectedRuntimeRole={null}
 			onRuntimeDetailsChange={() => undefined}
 		/>
+	),
+};
+
+const resourceTabProps = {
+	capabilityUnavailable: false,
+	isLoading: false,
+	isError: false,
+	error: null,
+	isFetching: false,
+	isOnline: true,
+	onRetry: () => undefined,
+	historyByMetric,
+	runtimeHistoryByMetric,
+	selectedRuntimeRole: null,
+	onRuntimeDetailsChange: () => undefined,
+};
+
+const resourcePanelStoryArgs = {
+	snapshot: supportedSnapshot,
+	historyByMetric: {},
+	runtimeHistoryByMetric: {},
+	selectedRuntimeRole: null,
+	onRuntimeDetailsChange: () => undefined,
+};
+
+export const Offline: Story = {
+	args: resourcePanelStoryArgs,
+	render: () => (
+		<EvidenceFrame>
+			<ResourceTabContent
+				{...resourceTabProps}
+				isError
+				isOnline={false}
+				error={new TypeError("network request failed")}
+				historyByMetric={{}}
+				runtimeHistoryByMetric={{}}
+			/>
+		</EvidenceFrame>
+	),
+};
+
+export const UnknownError: Story = {
+	args: resourcePanelStoryArgs,
+	render: () => (
+		<EvidenceFrame>
+			<ResourceTabContent
+				{...resourceTabProps}
+				isError
+				error={new Error("unstructured backend detail must stay hidden")}
+				historyByMetric={{}}
+				runtimeHistoryByMetric={{}}
+			/>
+		</EvidenceFrame>
+	),
+};
+
+export const XpApiError: Story = {
+	args: resourcePanelStoryArgs,
+	render: () => (
+		<ResourceTabContent
+			{...resourceTabProps}
+			isError
+			error={
+				new BackendApiError({
+					status: 500,
+					code: "internal",
+					message: "internal diagnostics are not shown",
+					details: { failure_layer: "xp_api", retryable: true },
+				})
+			}
+			historyByMetric={{}}
+			runtimeHistoryByMetric={{}}
+		/>
+	),
+};
+
+export const PeerTransport: Story = {
+	args: resourcePanelStoryArgs,
+	render: () => (
+		<ResourceTabContent
+			{...resourceTabProps}
+			isError
+			error={
+				new BackendApiError({
+					status: 504,
+					code: "peer_transport_timeout",
+					message: "transport details are not shown",
+					details: {
+						failure_layer: "peer_transport",
+						dispatch_state: "dispatched_no_verified_response",
+						retryable: true,
+					},
+				})
+			}
+			historyByMetric={{}}
+			runtimeHistoryByMetric={{}}
+		/>
+	),
+};
+
+export const PeerProtocol: Story = {
+	args: resourcePanelStoryArgs,
+	render: () => (
+		<ResourceTabContent
+			{...resourceTabProps}
+			isError
+			error={
+				new BackendApiError({
+					status: 502,
+					code: "peer_protocol_rejected",
+					message: "signature details are not shown",
+					details: {
+						failure_layer: "peer_protocol",
+						cause: "protocol_rejected",
+						retryable: true,
+					},
+				})
+			}
+			historyByMetric={{}}
+			runtimeHistoryByMetric={{}}
+		/>
+	),
+};
+
+export const CircuitOpen: Story = {
+	args: resourcePanelStoryArgs,
+	parameters: {
+		viewport: {
+			defaultViewport: "resourceMobile",
+			viewports: {
+				resourceMobile: {
+					name: "Resource mobile (393x852)",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	render: () => (
+		<EvidenceFrame>
+			<ResourceTabContent
+				{...resourceTabProps}
+				isError
+				error={
+					new BackendApiError({
+						status: 503,
+						code: "peer_circuit_open",
+						message: "circuit details are not shown",
+						details: {
+							failure_layer: "circuit_breaker",
+							dispatch_state: "not_dispatched",
+							retryable: true,
+							retry_after_seconds: 18,
+							support_id: "01JRESOURCECIRCUIT",
+						},
+					})
+				}
+				historyByMetric={{}}
+				runtimeHistoryByMetric={{}}
+			/>
+		</EvidenceFrame>
+	),
+};
+
+export const RemoteError: Story = {
+	args: resourcePanelStoryArgs,
+	render: () => (
+		<ResourceTabContent
+			{...resourceTabProps}
+			isError
+			error={
+				new BackendApiError({
+					status: 429,
+					code: "remote_node_error",
+					message: "remote body is not shown",
+					details: {
+						failure_layer: "remote_node",
+						target_status: 429,
+						retryable: true,
+					},
+				})
+			}
+			historyByMetric={{}}
+			runtimeHistoryByMetric={{}}
+		/>
+	),
+};
+
+export const StaleSnapshot: Story = {
+	args: resourcePanelStoryArgs,
+	render: () => (
+		<EvidenceFrame>
+			<ResourceTabContent
+				{...resourceTabProps}
+				dataUpdatedAt={Date.now() - 45 * 60 * 1000}
+				isError
+				error={
+					new BackendApiError({
+						status: 504,
+						code: "peer_transport_timeout",
+						message: "timeout details are not shown",
+						details: { failure_layer: "peer_transport", retryable: true },
+					})
+				}
+				snapshot={supportedSnapshot}
+			/>
+		</EvidenceFrame>
+	),
+};
+
+export const HistoryRefreshError: Story = {
+	args: resourcePanelStoryArgs,
+	render: () => (
+		<EvidenceFrame>
+			<ResourceTabContent
+				{...resourceTabProps}
+				isError={false}
+				error={null}
+				historyErrorByMetric={{
+					cpu_busy_percent: new BackendApiError({
+						status: 504,
+						code: "peer_transport_timeout",
+						message: "history details are not shown",
+						details: { failure_layer: "peer_transport", retryable: true },
+					}),
+				}}
+				snapshot={supportedSnapshot}
+			/>
+		</EvidenceFrame>
 	),
 };
