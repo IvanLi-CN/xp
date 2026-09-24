@@ -29,6 +29,7 @@ const SAFE_CAUSES = new Set([
 	"offline",
 	"circuit_open",
 	"peer_timeout",
+	"transport_error",
 	"outcome_unknown",
 	"protocol_rejected",
 	"peer_authentication_failed",

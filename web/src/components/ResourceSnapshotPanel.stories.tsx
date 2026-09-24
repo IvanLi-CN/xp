@@ -22,7 +22,7 @@ const measurement = (
 	...(reason_code ? { reason_code } : {}),
 });
 
-const supportedSnapshot: ResourceSnapshot = {
+export const supportedSnapshot: ResourceSnapshot = {
 	node_id: fixtureCatalog.identifier.nodePrimary(),
 	observed_at: fixtureCatalog.timestamp.t20260901T000000(),
 	resource_domain: "host",

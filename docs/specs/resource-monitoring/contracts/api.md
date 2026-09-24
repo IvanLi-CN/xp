@@ -185,6 +185,9 @@ The status mapping is fixed:
 - Dispatched request times out without a verified response:
   - API: `504 / peer_transport_timeout`.
   - Dispatch state: `dispatched_no_verified_response`.
+- A non-timeout transport failure without a verified response:
+  - API: `502 / peer_transport_error`.
+  - Dispatch state: `dispatched_no_verified_response`.
 - Signed acknowledgement or peer authentication is invalid:
   - API: `502 / peer_protocol_rejected`; ignore the body.
   - Dispatch state: `dispatched_no_verified_response`.

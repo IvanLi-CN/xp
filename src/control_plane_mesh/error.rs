@@ -7,6 +7,7 @@ pub enum MeshRequestError {
     OutcomeUnknown,
     Protocol(String),
     Reverse(String),
+    ReverseTimeout,
     Public(reqwest::Error),
     CircuitOpen { path: &'static str },
 }
@@ -27,6 +28,7 @@ impl std::fmt::Display for MeshRequestError {
             }
             Self::Protocol(value) => write!(f, "Mesh protocol error: {value}"),
             Self::Reverse(value) => write!(f, "reverse relay failed: {value}"),
+            Self::ReverseTimeout => f.write_str("reverse relay timed out before response headers"),
             Self::Public(value) => write!(f, "public fallback failed: {value}"),
             Self::CircuitOpen { path } => write!(f, "{path} circuit is cooling down"),
         }

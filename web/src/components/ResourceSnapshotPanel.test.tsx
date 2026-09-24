@@ -9,6 +9,7 @@ import {
 	ResourceTabContent,
 	buildResourceHistoryChartOption,
 } from "./ResourceSnapshotPanel";
+import { supportedSnapshot } from "./ResourceSnapshotPanel.stories";
 import type { EChartsThemePalette } from "./echarts-theme";
 
 const resourceHistoryBase = Date.parse(
@@ -140,6 +141,84 @@ describe("ResourceTabContent diagnostics", () => {
 		expect(
 			screen.getByRole("button", { name: "Retry resource read" }),
 		).toBeDisabled();
+	});
+
+	it("retains stale snapshots with distinct read and age labels", () => {
+		render(
+			<ResourceTabContent
+				capabilityUnavailable={false}
+				isLoading={false}
+				isError
+				error={
+					new BackendApiError({
+						status: 504,
+						code: "peer_transport_timeout",
+						message: "raw timeout details must stay hidden",
+						details: { failure_layer: "peer_transport", retryable: true },
+					})
+				}
+				isFetching={false}
+				isOnline
+				onRetry={() => undefined}
+				dataUpdatedAt={Date.now() - 2 * 60 * 60 * 1000}
+				snapshot={supportedSnapshot}
+				historyByMetric={{}}
+				runtimeHistoryByMetric={{}}
+				selectedRuntimeRole={null}
+				onRuntimeDetailsChange={() => undefined}
+			/>,
+		);
+
+		expect(
+			screen.getByText(/Showing the last successful snapshot/),
+		).toBeInTheDocument();
+		expect(screen.getByText(/last successful read/)).toBeInTheDocument();
+		expect(screen.getByText(/age 2 hr/)).toBeInTheDocument();
+		expect(
+			screen.queryByText(/raw timeout details must stay hidden/),
+		).not.toBeInTheDocument();
+	});
+
+	it("keeps chart points while showing a scoped history refresh failure", () => {
+		render(
+			<ResourceTabContent
+				capabilityUnavailable={false}
+				isLoading={false}
+				isError={false}
+				error={null}
+				isFetching={false}
+				isOnline
+				onRetry={() => undefined}
+				snapshot={supportedSnapshot}
+				historyByMetric={{
+					cpu_busy_percent: [
+						{
+							observed_at: catalogTimestampOffset(0),
+							value: fixtureCatalog.number.value20(),
+						},
+					],
+				}}
+				historyErrorByMetric={{
+					cpu_busy_percent: new BackendApiError({
+						status: 504,
+						code: "peer_transport_timeout",
+						message: "raw history details must stay hidden",
+						details: { failure_layer: "peer_transport", retryable: true },
+					}),
+				}}
+				runtimeHistoryByMetric={{}}
+				selectedRuntimeRole={null}
+				onRuntimeDetailsChange={() => undefined}
+			/>,
+		);
+
+		expect(
+			screen.getByText("Refresh failed; showing the last successful points."),
+		).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Retry history" })).toBeEnabled();
+		expect(
+			screen.queryByText(/raw history details must stay hidden/),
+		).not.toBeInTheDocument();
 	});
 });
 

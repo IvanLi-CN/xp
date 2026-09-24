@@ -58,19 +58,9 @@ pub(super) async fn resource_mesh_error(
             node_id,
             support_id,
         ),
-        MeshRequestError::Public(_) => response(
-            "peer_transport_timeout",
-            StatusCode::GATEWAY_TIMEOUT,
-            "target node did not return a verified response in time",
-            "peer_transport",
-            "peer_timeout",
-            "confirmed",
-            "public",
-            "dispatched_no_verified_response",
-            true,
-            node_id,
-            support_id,
-        ),
+        MeshRequestError::Public(error) => {
+            public_transport_error(error.is_timeout(), node_id, support_id)
+        }
         MeshRequestError::OutcomeUnknown => response(
             "peer_transport_unknown",
             StatusCode::GATEWAY_TIMEOUT,
@@ -97,6 +87,19 @@ pub(super) async fn resource_mesh_error(
             node_id,
             support_id,
         ),
+        MeshRequestError::ReverseTimeout => response(
+            "peer_transport_timeout",
+            StatusCode::GATEWAY_TIMEOUT,
+            "target node did not return a verified response in time",
+            "peer_transport",
+            "peer_timeout",
+            "confirmed",
+            "reverse",
+            "dispatched_no_verified_response",
+            true,
+            node_id,
+            support_id,
+        ),
         MeshRequestError::Reverse(_) => response(
             "peer_route_unavailable",
             StatusCode::BAD_GATEWAY,
@@ -110,6 +113,38 @@ pub(super) async fn resource_mesh_error(
             node_id,
             support_id,
         ),
+    }
+}
+
+fn public_transport_error(is_timeout: bool, node_id: &str, support_id: String) -> ApiError {
+    if is_timeout {
+        response(
+            "peer_transport_timeout",
+            StatusCode::GATEWAY_TIMEOUT,
+            "target node did not return a verified response in time",
+            "peer_transport",
+            "peer_timeout",
+            "confirmed",
+            "public",
+            "dispatched_no_verified_response",
+            true,
+            node_id,
+            support_id,
+        )
+    } else {
+        response(
+            "peer_transport_error",
+            StatusCode::BAD_GATEWAY,
+            "target node transport failed before a verified response",
+            "peer_transport",
+            "transport_error",
+            "confirmed",
+            "public",
+            "dispatched_no_verified_response",
+            true,
+            node_id,
+            support_id,
+        )
     }
 }
 
@@ -136,4 +171,104 @@ fn response(
         .with_detail("dispatch_state", dispatch)
         .with_detail("retryable", retryable)
         .with_detail("support_id", support_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_client() -> MeshAwareHttpClient {
+        MeshAwareHttpClient::new(reqwest::Client::new())
+    }
+
+    fn assert_mapping(
+        error: &ApiError,
+        code: &str,
+        status: StatusCode,
+        dispatch: &str,
+        retryable: bool,
+    ) {
+        assert_eq!(error.code, code);
+        assert_eq!(error.status, status);
+        assert_eq!(error.details["dispatch_state"], dispatch);
+        assert_eq!(error.details["retryable"], retryable);
+        assert_eq!(error.details["target_node_id"], "node-a");
+        assert_eq!(error.details["support_id"], "support-a");
+    }
+
+    #[tokio::test]
+    async fn resource_mesh_errors_keep_branch_contracts() {
+        let client = test_client();
+        let cases = [
+            (
+                MeshRequestError::Protocol("ignored".to_string()),
+                "peer_protocol_rejected",
+                StatusCode::BAD_GATEWAY,
+                "dispatched_no_verified_response",
+                true,
+            ),
+            (
+                MeshRequestError::Auth(crate::internal_auth::AuthError::Invalid("ignored")),
+                "peer_protocol_rejected",
+                StatusCode::BAD_GATEWAY,
+                "dispatched_no_verified_response",
+                false,
+            ),
+            (
+                MeshRequestError::OutcomeUnknown,
+                "peer_transport_unknown",
+                StatusCode::GATEWAY_TIMEOUT,
+                "dispatched_no_verified_response",
+                true,
+            ),
+            (
+                MeshRequestError::InvalidTarget("ignored".to_string()),
+                "peer_target_invalid",
+                StatusCode::BAD_GATEWAY,
+                "not_dispatched",
+                false,
+            ),
+            (
+                MeshRequestError::Reverse("ignored".to_string()),
+                "peer_route_unavailable",
+                StatusCode::BAD_GATEWAY,
+                "not_dispatched",
+                true,
+            ),
+            (
+                MeshRequestError::ReverseTimeout,
+                "peer_transport_timeout",
+                StatusCode::GATEWAY_TIMEOUT,
+                "dispatched_no_verified_response",
+                true,
+            ),
+        ];
+
+        for (mesh_error, code, status, dispatch, retryable) in cases {
+            let mapped =
+                resource_mesh_error(&client, "node-a", "support-a".to_string(), mesh_error).await;
+            assert_mapping(&mapped, code, status, dispatch, retryable);
+        }
+    }
+
+    #[test]
+    fn public_transport_mapping_distinguishes_timeout() {
+        let timeout = public_transport_error(true, "node-a", "support-a".to_string());
+        assert_mapping(
+            &timeout,
+            "peer_transport_timeout",
+            StatusCode::GATEWAY_TIMEOUT,
+            "dispatched_no_verified_response",
+            true,
+        );
+
+        let transport = public_transport_error(false, "node-a", "support-a".to_string());
+        assert_mapping(
+            &transport,
+            "peer_transport_error",
+            StatusCode::BAD_GATEWAY,
+            "dispatched_no_verified_response",
+            true,
+        );
+    }
 }

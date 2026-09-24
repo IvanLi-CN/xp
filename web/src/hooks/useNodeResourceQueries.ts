@@ -11,6 +11,14 @@ import {
 } from "../api/adminResources";
 import { useApiCapability } from "../api/useApiCompatibility";
 
+export function resourceQueryRefetchInterval(
+	isOnline: boolean,
+	status: string,
+	intervalMs: number,
+): number | false {
+	return isOnline && status !== "error" ? intervalMs : false;
+}
+
 export function useNodeResourceQueries(props: {
 	adminToken: string;
 	nodeId: string;
@@ -30,7 +38,7 @@ export function useNodeResourceQueries(props: {
 		queryFn: ({ signal }) =>
 			fetchAdminNodeResources(props.adminToken, props.nodeId, signal),
 		refetchInterval: (query: { state: { status: string } }) =>
-			props.isOnline && query.state.status !== "error" ? 15_000 : false,
+			resourceQueryRefetchInterval(props.isOnline, query.state.status, 15_000),
 	});
 	const resourceHistoryQueries = useQueries({
 		queries: NODE_RESOURCE_HISTORY_METRICS.map((metric) => ({
@@ -49,7 +57,11 @@ export function useNodeResourceQueries(props: {
 					signal,
 				),
 			refetchInterval: (query: { state: { status: string } }) =>
-				props.isOnline && query.state.status !== "error" ? 30_000 : false,
+				resourceQueryRefetchInterval(
+					props.isOnline,
+					query.state.status,
+					30_000,
+				),
 		})),
 	});
 	const resourceHistoryByMetric = Object.fromEntries(
@@ -86,7 +98,11 @@ export function useNodeResourceQueries(props: {
 					props.selectedRuntimeRole ?? undefined,
 				),
 			refetchInterval: (query: { state: { status: string } }) =>
-				props.isOnline && query.state.status !== "error" ? 30_000 : false,
+				resourceQueryRefetchInterval(
+					props.isOnline,
+					query.state.status,
+					30_000,
+				),
 		})),
 	});
 	const runtimeHistoryByMetric = Object.fromEntries(

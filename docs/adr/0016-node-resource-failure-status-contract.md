@@ -21,6 +21,8 @@ The status contract is:
   honor this value and must not guess a cooldown.
 - A dispatched transport timeout without a verified response remains 504
   `peer_transport_timeout`.
+- A non-timeout transport failure with no verified response is 502
+  `peer_transport_error`; it remains in the `peer_transport` layer.
 - An invalid or missing signed acknowledgement, including peer authentication rejection, is 502
   `peer_protocol_rejected`.
 - A verified target application error preserves the target HTTP status and uses
