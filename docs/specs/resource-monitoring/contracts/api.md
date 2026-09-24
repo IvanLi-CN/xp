@@ -185,6 +185,9 @@ The status mapping is fixed:
 - Dispatched request times out without a verified response:
   - API: `504 / peer_transport_timeout`.
   - Dispatch state: `dispatched_no_verified_response`.
+- A local deadline expires before transport evidence can confirm dispatch:
+  - API: `502 / peer_transport_error` with `cause=outcome_unknown`.
+  - Dispatch state: `unknown`; the client must not present this as a confirmed timeout.
 - A non-timeout transport failure without a verified response:
   - API: `502 / peer_transport_error`.
   - Dispatch state: `dispatched_no_verified_response`.

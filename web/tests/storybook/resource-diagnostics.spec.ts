@@ -39,12 +39,14 @@ test("keeps stale snapshot age and history errors visible", async ({
 
 	await page.goto(
 		storyUrl(
-			"pages-nodedetailspage--resources-history-error",
+			"components-resourcesnapshotpanel--history-refresh-error",
 			"theme:light;density:comfortable",
 		),
 		{ waitUntil: "networkidle" },
 	);
-	await expect(page.getByText("History unavailable")).toBeVisible({
+	await expect(
+		page.getByText("Refresh failed; showing the last successful points."),
+	).toBeVisible({
 		timeout: 15_000,
 	});
 	await expect(

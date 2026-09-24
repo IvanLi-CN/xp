@@ -68,9 +68,11 @@ pub(super) async fn resource_mesh_error(
             node_id,
             support_id,
         ),
-        MeshRequestError::Public(error) => {
-            public_transport_error(error.is_timeout(), node_id, support_id)
-        }
+        MeshRequestError::Public(error) => public_transport_error(
+            error.is_timeout() && !error.is_connect(),
+            node_id,
+            support_id,
+        ),
         MeshRequestError::OutcomeUnknown => response(
             "peer_transport_error",
             StatusCode::BAD_GATEWAY,
@@ -79,7 +81,7 @@ pub(super) async fn resource_mesh_error(
             "outcome_unknown",
             "unknown",
             "unknown",
-            "dispatched_no_verified_response",
+            "unknown",
             true,
             node_id,
             support_id,
@@ -241,7 +243,7 @@ mod tests {
                 MeshRequestError::OutcomeUnknown,
                 "peer_transport_error",
                 StatusCode::BAD_GATEWAY,
-                "dispatched_no_verified_response",
+                "unknown",
                 true,
             ),
             (

@@ -21,6 +21,9 @@ The status contract is:
   honor this value and must not guess a cooldown.
 - A dispatched transport timeout without a verified response remains 504
   `peer_transport_timeout`.
+- If the local deadline expires before transport evidence can confirm dispatch, the resource
+  route returns 502 `peer_transport_error` with `cause=outcome_unknown` and
+  `dispatch_state=unknown`; it must not claim a confirmed timeout.
 - A non-timeout transport failure with no verified response is 502
   `peer_transport_error`; it remains in the `peer_transport` layer.
 - An invalid or missing signed acknowledgement, including peer authentication rejection, is 502

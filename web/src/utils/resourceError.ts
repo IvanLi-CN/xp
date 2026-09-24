@@ -22,6 +22,7 @@ export type ResourceDiagnostic = {
 	dispatchState: string;
 	retryable: boolean;
 	retryAfterSeconds?: number;
+	retryDeadlineAt?: number;
 	targetStatus?: number;
 	supportId?: string;
 };
@@ -232,6 +233,7 @@ export function classifyResourceError(
 		dispatchState: safeDetail(details, "dispatch_state", SAFE_DISPATCH_STATES),
 		retryable,
 		retryAfterSeconds: boundedRetryAfter(details, backendError),
+		retryDeadlineAt: backendError?.retryAfterDeadline,
 		targetStatus: detailNumber(details, "target_status"),
 		supportId: safeSupportId(details),
 	};

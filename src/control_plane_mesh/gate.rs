@@ -249,7 +249,7 @@ impl MeshAwareHttpClient {
                 .await;
                 Ok(MeshAttemptResult::Fallback {
                     ambiguous: true,
-                    timed_out: error.is_timeout(),
+                    timed_out: error.is_timeout() && !error.is_connect(),
                 })
             }
             Some((Err(_), gate_guard)) => {
@@ -270,7 +270,7 @@ impl MeshAwareHttpClient {
                 .await;
                 Ok(MeshAttemptResult::Fallback {
                     ambiguous: true,
-                    timed_out: true,
+                    timed_out: false,
                 })
             }
         }

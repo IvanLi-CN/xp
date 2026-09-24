@@ -15,6 +15,7 @@ export class BackendApiError extends Error {
 	readonly code?: string;
 	readonly details?: Record<string, unknown>;
 	readonly retryAfterSeconds?: number;
+	readonly retryAfterDeadline?: number;
 
 	constructor(args: {
 		status: number;
@@ -22,6 +23,7 @@ export class BackendApiError extends Error {
 		code?: string;
 		details?: Record<string, unknown>;
 		retryAfterSeconds?: number;
+		retryAfterDeadline?: number;
 	}) {
 		super(args.message);
 		this.name = "BackendApiError";
@@ -29,6 +31,17 @@ export class BackendApiError extends Error {
 		this.code = args.code;
 		this.details = args.details;
 		this.retryAfterSeconds = args.retryAfterSeconds;
+		const detailRetryAfter = args.details?.retry_after_seconds;
+		const retryAfterSeconds =
+			args.retryAfterSeconds ??
+			(typeof detailRetryAfter === "number" &&
+			Number.isInteger(detailRetryAfter) &&
+			detailRetryAfter > 0
+				? Math.min(detailRetryAfter, 300)
+				: undefined);
+		this.retryAfterDeadline =
+			args.retryAfterDeadline ??
+			(retryAfterSeconds ? Date.now() + retryAfterSeconds * 1000 : undefined);
 	}
 }
 

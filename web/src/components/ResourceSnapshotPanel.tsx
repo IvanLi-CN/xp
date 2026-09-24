@@ -137,16 +137,8 @@ export const RUNTIME_RESOURCE_HISTORY_CHARTS = [
 
 function useRetryCooldown(error: unknown, isOnline: boolean) {
 	const diagnostic = classifyResourceError(error, { isOnline });
-	const [retryAt, setRetryAt] = useState<number | null>(null);
 	const [now, setNow] = useState(() => Date.now());
-
-	useEffect(() => {
-		if (!error || !diagnostic.retryAfterSeconds) {
-			setRetryAt(null);
-			return;
-		}
-		setRetryAt(Date.now() + diagnostic.retryAfterSeconds * 1000);
-	}, [diagnostic.retryAfterSeconds, error]);
+	const retryAt = diagnostic.retryDeadlineAt ?? null;
 
 	useEffect(() => {
 		if (!retryAt) return;

@@ -191,6 +191,50 @@ describe("ResourceTabContent diagnostics", () => {
 		).toBeDisabled();
 	});
 
+	it("keeps the cooldown deadline when the panel remounts", () => {
+		vi.useFakeTimers();
+		try {
+			vi.setSystemTime(new Date("2026-09-24T12:00:00.000Z"));
+			const error = new BackendApiError({
+				status: 503,
+				code: "peer_circuit_open",
+				message: "cooldown",
+				details: {
+					failure_layer: "circuit_breaker",
+					retryable: true,
+					retry_after_seconds: 45,
+				},
+			});
+			const props = {
+				capabilityUnavailable: false,
+				isLoading: false,
+				isError: true,
+				error,
+				isFetching: false,
+				isOnline: true,
+				onRetry: () => undefined,
+				historyByMetric: {},
+				runtimeHistoryByMetric: {},
+				selectedRuntimeRole: null,
+				onRuntimeDetailsChange: () => undefined,
+			};
+
+			const view = render(<ResourceTabContent {...props} />);
+			expect(
+				screen.getByRole("button", { name: "Retry resource read" }),
+			).toHaveTextContent("Retry in 45s");
+			act(() => vi.advanceTimersByTime(10_000));
+			view.unmount();
+			render(<ResourceTabContent {...props} />);
+
+			expect(
+				screen.getByRole("button", { name: "Retry resource read" }),
+			).toHaveTextContent("Retry in 35s");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("retains stale snapshots with distinct read and age labels", () => {
 		render(
 			<ResourceTabContent

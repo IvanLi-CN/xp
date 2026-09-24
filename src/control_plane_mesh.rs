@@ -981,9 +981,12 @@ impl MeshAwareHttpClient {
             .await
             {
                 Ok(mesh_response) => response = Some(mesh_response),
-                Err(
-                    error @ (MeshRequestError::OutcomeUnknown | MeshRequestError::TransportTimeout),
-                ) => {
+                Err(error @ MeshRequestError::TransportTimeout) => {
+                    return Err(error);
+                }
+                Err(error @ MeshRequestError::OutcomeUnknown)
+                    if !request.allow_ambiguous_fallback =>
+                {
                     return Err(error);
                 }
                 Err(MeshRequestError::Public(_)) if !request.allow_ambiguous_fallback => {
@@ -1084,7 +1087,7 @@ fn public_transport_error(
 ) -> MeshRequestError {
     if allow_ambiguous_fallback {
         MeshRequestError::Public(error)
-    } else if error.is_timeout() {
+    } else if error.is_timeout() && !error.is_connect() {
         MeshRequestError::TransportTimeout
     } else {
         MeshRequestError::OutcomeUnknown
