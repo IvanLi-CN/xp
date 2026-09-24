@@ -75,4 +75,14 @@ describe("parseResourcePeerDiagnostic", () => {
 			),
 		).toBeNull();
 	});
+
+	it("rejects route records with a different correlation id", () => {
+		const error = errorFor("pre_response_timeout");
+		const diagnostic = error.details?.diagnostic as Record<string, unknown>;
+		(
+			diagnostic.route_attempts as Array<Record<string, unknown>>
+		)[0].request_id = "01M0C1SJ5M1JWE6CCKMXNXPZ79";
+
+		expect(parseResourcePeerDiagnostic(error)).toBeNull();
+	});
 });

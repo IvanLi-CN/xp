@@ -210,4 +210,44 @@ describe("ResourcePeerDiagnosticState", () => {
 		expect(screen.getByText("01M0C1SJ5M1JWE6CCKMXNXPZ78")).toBeVisible();
 		expect(screen.getByRole("button", { name: "复制 ID" })).toBeVisible();
 	});
+
+	it("does not describe a Direct Mesh circuit as a Public circuit", () => {
+		render(
+			<ResourcePeerDiagnosticState
+				error={
+					new BackendApiError({
+						status: 504,
+						code: "resource_peer_unavailable",
+						message: "resource snapshot is unavailable from the target node",
+						details: {
+							diagnostic: {
+								origin: { node_id: "101", node_name: "101" },
+								target: { node_id: "us", node_name: "us" },
+								route_attempts: [
+									{
+										route: "direct_mesh",
+										failure: "circuit_open",
+										acknowledgement: "not_observed",
+										dispatch: "not_dispatched",
+										observed_at: "2026-09-24T00:00:00Z",
+										request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+										elapsed_ms: 0,
+										retry_count: 0,
+									},
+								],
+								public_circuit: "closed",
+								request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+							},
+						},
+					})
+				}
+				isFetching={false}
+				isOnline
+				onRetry={() => undefined}
+			/>,
+		);
+
+		expect(screen.getByText(/Direct Mesh 断路器当前处于冷却中/)).toBeVisible();
+		expect(screen.queryByText(/Public 备用路径未发送/)).not.toBeInTheDocument();
+	});
 });

@@ -119,6 +119,13 @@ pub(crate) fn failure_for_error(error: &MeshRequestError) -> MeshAttemptFailure 
             retry_count: 0,
             http_status: None,
         },
+        MeshRequestError::Auth(_) => MeshAttemptFailure {
+            failure: MeshFailureClass::AcknowledgementInvalid,
+            acknowledgement: MeshAcknowledgementState::Invalid,
+            dispatch: MeshDispatchState::DispatchedNoVerifiedResponse,
+            retry_count: 0,
+            http_status: None,
+        },
         MeshRequestError::Public(error) => MeshAttemptFailure {
             failure: if error.is_timeout() {
                 MeshFailureClass::PreResponseTimeout

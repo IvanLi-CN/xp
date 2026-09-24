@@ -34,9 +34,19 @@ const routeLabels: Record<string, string> = {
 	public: "Public",
 };
 
-function boundaryText(failure: string, originName: string): string {
+function boundaryText(
+	failure: string,
+	originName: string,
+	route?: string,
+): string {
 	switch (failure) {
 		case "circuit_open":
+			if (route === "direct_mesh") {
+				return `${originName} 的 Direct Mesh 断路器当前处于冷却中，本次请求未通过 Direct Mesh。`;
+			}
+			if (route === "reverse_relay") {
+				return "Reverse relay 路径当前不可用，本次请求未通过该路径。";
+			}
 			return [
 				`${originName} 的 Public 备用路径当前处于冷却中，`,
 				"本次 Public 请求未发送。",
@@ -159,6 +169,7 @@ export function ResourcePeerDiagnosticState({
 						{boundaryText(
 							lastAttempt?.failure ?? "outcome_unknown",
 							diagnostic.origin.node_name,
+							lastAttempt?.route,
 						)}
 					</div>
 					{publicWasNotSent ? (

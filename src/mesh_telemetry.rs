@@ -503,7 +503,12 @@ impl MeshTelemetryHandle {
             });
         peer.last_public_failure = Some(failure);
         state.persisted.revision += 1;
-        self.persist_immediately(&mut state, Instant::now())
+        let deferred_flush = self.persist_sample_if_due(&mut state, Instant::now())?;
+        drop(state);
+        if let Some(delay) = deferred_flush {
+            self.spawn_deferred_flush(delay);
+        }
+        Ok(())
     }
 
     pub async fn last_public_failure(&self, peer_id: &str) -> Option<MeshPublicFailure> {

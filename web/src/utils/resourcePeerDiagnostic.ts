@@ -53,5 +53,20 @@ export function parseResourcePeerDiagnostic(
 ): ResourcePeerDiagnostic | null {
 	if (!isBackendApiError(error) || error.status !== 504) return null;
 	if (error.code !== "resource_peer_unavailable") return null;
-	return diagnosticSchema.safeParse(error.details?.diagnostic).data ?? null;
+	const parsed = diagnosticSchema.safeParse(error.details?.diagnostic);
+	if (!parsed.success) return null;
+	if (
+		!parsed.data.route_attempts.every(
+			(attempt) => attempt.request_id === parsed.data.request_id,
+		)
+	) {
+		return null;
+	}
+	if (
+		parsed.data.last_public_failure &&
+		parsed.data.last_public_failure.request_id !== parsed.data.request_id
+	) {
+		return null;
+	}
+	return parsed.data;
 }
