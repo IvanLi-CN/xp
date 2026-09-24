@@ -30,7 +30,11 @@ The status contract is:
 - A verified target application error preserves the target HTTP status and uses
   `remote_node_error` with `failure_layer=remote_node`.
 - A verified capability-route 404 retains the existing unsupported behavior. It is not a node
-  outage and is not converted into a peer transport error.
+  outage and is not converted into a peer transport error. When the history route exposes this
+  result as `501 / resource_monitoring_unsupported`, its bounded details use
+  `failure_layer=unknown`, `cause=capability_unsupported`, `confidence=confirmed`,
+  `dispatch_state=verified_remote_response`, and `retryable=false`; the Web client does not
+  offer a retry action for this capability state.
 
 This typed mapping is scoped to resource reads. Existing generic Mesh callers retain their current
 gateway-timeout mapping until a separate API contract is approved.

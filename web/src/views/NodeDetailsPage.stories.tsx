@@ -205,7 +205,7 @@ function resourceHistory(
 	return {
 		metric,
 		role: null,
-		resolution: "15s",
+		resolution: "1m",
 		quality: "complete",
 		coverage: [1_788_256_800, 1_788_257_145],
 		watermark: 1_788_257_145,

@@ -165,7 +165,7 @@ const partialSnapshot: ResourceSnapshot = {
 const unsupportedSnapshot: ResourceSnapshot = {
 	...supportedSnapshot,
 	resource_domain: "cgroup",
-	capture_state: "unsupported",
+	capture_state: "active",
 	capability: "unsupported",
 	domain: {
 		...supportedSnapshot.domain,

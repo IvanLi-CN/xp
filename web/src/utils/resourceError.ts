@@ -7,6 +7,7 @@ export type ResourceFailureLayer =
 	| "peer_protocol"
 	| "circuit_breaker"
 	| "remote_node"
+	| "unsupported"
 	| "unknown";
 
 export type ResourceDiagnostic = {
@@ -37,6 +38,22 @@ const SAFE_CAUSES = new Set([
 	"route_unavailable",
 	"remote_resource_error",
 	"api_error",
+	"capability_unsupported",
+]);
+const SAFE_CONFIDENCES = new Set(["confirmed", "unknown"]);
+const SAFE_ATTEMPTED_PATHS = new Set([
+	"direct",
+	"public",
+	"reverse",
+	"mesh",
+	"none",
+	"unknown",
+]);
+const SAFE_DISPATCH_STATES = new Set([
+	"not_dispatched",
+	"dispatched_no_verified_response",
+	"verified_remote_response",
+	"unknown",
 ]);
 
 function detailString(
@@ -63,6 +80,20 @@ function detailNumber(
 	return typeof value === "number" && Number.isFinite(value)
 		? value
 		: undefined;
+}
+
+function safeDetail(
+	details: Record<string, unknown>,
+	key: string,
+	allowed: Set<string>,
+): string {
+	const value = detailString(details, key);
+	return value && allowed.has(value) ? value : "unknown";
+}
+
+function safeSupportId(details: Record<string, unknown>): string | undefined {
+	const value = detailString(details, "support_id");
+	return value && /^[A-Za-z0-9_-]{8,80}$/.test(value) ? value : undefined;
 }
 
 function boundedRetryAfter(
@@ -120,6 +151,12 @@ function copyForLayer(
 					"The target node returned a verified application error. This does " +
 					"not by itself indicate that the node is down.",
 			};
+		case "unsupported":
+			return {
+				title: "Resource monitoring is unavailable",
+				description:
+					"The target node does not expose resource monitoring. No retry is scheduled.",
+			};
 		default:
 			return {
 				title: "Resource read failed",
@@ -136,6 +173,12 @@ function inferLayer(
 ): ResourceFailureLayer {
 	if (!isOnline) return "frontend_request";
 	const declared = detailString(details, "failure_layer");
+	if (
+		isBackendApiError(error) &&
+		error.code === "resource_monitoring_unsupported"
+	) {
+		return "unsupported";
+	}
 	if (
 		declared === "frontend_request" ||
 		declared === "xp_api" ||
@@ -175,19 +218,21 @@ export function classifyResourceError(
 		backendError?.code ??
 		(layer === "frontend_request" ? "offline" : "unknown");
 	const cause = detailString(details, "cause");
+	const retryable =
+		detailBoolean(details, "retryable") ??
+		(layer !== "frontend_request" && layer !== "unsupported");
 	return {
 		...copy,
 		layer,
 		code,
 		status: backendError?.status,
 		cause: cause && SAFE_CAUSES.has(cause) ? cause : undefined,
-		confidence: detailString(details, "confidence") ?? "unknown",
-		attemptedPath: detailString(details, "attempted_path") ?? "unknown",
-		dispatchState: detailString(details, "dispatch_state") ?? "unknown",
-		retryable:
-			detailBoolean(details, "retryable") ?? layer !== "frontend_request",
+		confidence: safeDetail(details, "confidence", SAFE_CONFIDENCES),
+		attemptedPath: safeDetail(details, "attempted_path", SAFE_ATTEMPTED_PATHS),
+		dispatchState: safeDetail(details, "dispatch_state", SAFE_DISPATCH_STATES),
+		retryable,
 		retryAfterSeconds: boundedRetryAfter(details, backendError),
 		targetStatus: detailNumber(details, "target_status"),
-		supportId: detailString(details, "support_id"),
+		supportId: safeSupportId(details),
 	};
 }

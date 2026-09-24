@@ -78,4 +78,49 @@ describe("classifyResourceError", () => {
 		expect(diagnostic.title).toBe("Resource reads paused");
 		expect(diagnostic.retryable).toBe(false);
 	});
+
+	it("treats unsupported monitoring as a confirmed non-retryable state", () => {
+		const diagnostic = classifyResourceError(
+			new BackendApiError({
+				status: 501,
+				code: "resource_monitoring_unsupported",
+				message: "unsupported",
+				details: {
+					failure_layer: "unknown",
+					cause: "capability_unsupported",
+					retryable: false,
+				},
+			}),
+			{ isOnline: true },
+		);
+
+		expect(diagnostic.layer).toBe("unsupported");
+		expect(diagnostic.retryable).toBe(false);
+		expect(diagnostic.title).toBe("Resource monitoring is unavailable");
+	});
+
+	it("falls back to safe values for untrusted diagnostic fields", () => {
+		const diagnostic = classifyResourceError(
+			new BackendApiError({
+				status: 502,
+				code: "peer_protocol_rejected",
+				message: "hidden",
+				details: {
+					failure_layer: "peer_protocol",
+					cause: "https://secret.invalid",
+					confidence: "guess",
+					attempted_path: "https://10.0.0.1",
+					dispatch_state: "stack trace",
+					support_id: "not an opaque id",
+				},
+			}),
+			{ isOnline: true },
+		);
+
+		expect(diagnostic.cause).toBeUndefined();
+		expect(diagnostic.confidence).toBe("unknown");
+		expect(diagnostic.attemptedPath).toBe("unknown");
+		expect(diagnostic.dispatchState).toBe("unknown");
+		expect(diagnostic.supportId).toBeUndefined();
+	});
 });

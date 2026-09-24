@@ -268,6 +268,42 @@ describe("ResourceTabContent diagnostics", () => {
 			screen.queryByText(/raw history details must stay hidden/),
 		).not.toBeInTheDocument();
 	});
+
+	it("does not offer retry for unsupported remote history", () => {
+		render(
+			<ResourceTabContent
+				capabilityUnavailable={false}
+				isLoading={false}
+				isError={false}
+				error={null}
+				isFetching={false}
+				isOnline
+				onRetry={() => undefined}
+				snapshot={supportedSnapshot}
+				historyByMetric={{}}
+				historyErrorByMetric={{
+					cpu_busy_percent: new BackendApiError({
+						status: 501,
+						code: "resource_monitoring_unsupported",
+						message: "unsupported",
+						details: { retryable: false },
+					}),
+				}}
+				runtimeHistoryByMetric={{}}
+				selectedRuntimeRole={null}
+				onRuntimeDetailsChange={() => undefined}
+			/>,
+		);
+
+		expect(
+			screen.getAllByText(
+				"The target node does not expose resource monitoring. No retry is scheduled.",
+			).length,
+		).toBeGreaterThan(0);
+		expect(
+			screen.queryByRole("button", { name: "Retry history" }),
+		).not.toBeInTheDocument();
+	});
 });
 
 describe("runtime resource charts", () => {

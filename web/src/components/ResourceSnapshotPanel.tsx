@@ -417,7 +417,7 @@ function ResourceHistoryChart(props: {
 					<p className="text-xs text-muted-foreground">
 						{diagnostic.description}
 					</p>
-					{props.onRetry ? (
+					{props.onRetry && diagnostic.layer !== "unsupported" ? (
 						<Button
 							disabled={
 								!props.isOnline || !diagnostic.retryable || remainingSeconds > 0
@@ -458,7 +458,7 @@ function ResourceHistoryChart(props: {
 			{props.error ? (
 				<p className="flex flex-wrap items-center gap-2 text-xs text-warning">
 					<span>Refresh failed; showing the last successful points.</span>
-					{props.onRetry ? (
+					{props.onRetry && diagnostic.layer !== "unsupported" ? (
 						<button
 							className={[
 								"font-medium underline underline-offset-2",

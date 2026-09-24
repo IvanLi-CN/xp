@@ -140,11 +140,14 @@ pub(super) async fn admin_get_node_resources(
         }
         ResourceResponseDisposition::Success => {}
     }
-    response
+    let snapshot = response
         .json::<ResourceSnapshot>()
         .await
-        .map(Json)
-        .map_err(|_| malformed_resource_response_error(&node_id))
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    snapshot
+        .validate_wire_shape()
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    Ok(Json(snapshot))
 }
 
 pub(super) async fn admin_get_node_resources_recent(
@@ -197,11 +200,14 @@ pub(super) async fn admin_get_node_resources_recent(
         }
         ResourceResponseDisposition::Success => {}
     }
-    response
+    let series = response
         .json::<ResourceRecentSeries>()
         .await
-        .map(Json)
-        .map_err(|_| malformed_resource_response_error(&node_id))
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    series
+        .validate_wire_shape(&query.metric, query.role)
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    Ok(Json(series))
 }
 
 pub(super) async fn admin_get_node_resources_history(
@@ -325,18 +331,29 @@ pub(super) async fn admin_get_node_resources_history(
                 "resource_monitoring_unsupported",
                 StatusCode::NOT_IMPLEMENTED,
                 "node does not expose resource monitoring",
-            ));
+            )
+            .with_detail("failure_layer", "unknown")
+            .with_detail("cause", "capability_unsupported")
+            .with_detail("confidence", "confirmed")
+            .with_detail("target_node_id", node_id.as_str())
+            .with_detail("attempted_path", "mesh")
+            .with_detail("dispatch_state", "verified_remote_response")
+            .with_detail("retryable", false)
+            .with_detail("support_id", crate::id::new_ulid_string()));
         }
         ResourceResponseDisposition::Remote(status) => {
             return Err(remote_resource_error(&node_id, status));
         }
         ResourceResponseDisposition::Success => {}
     }
-    response
+    let history = response
         .json::<ResourceHistoryResponse>()
         .await
-        .map(Json)
-        .map_err(|_| malformed_resource_response_error(&node_id))
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    history
+        .validate_wire_shape(&query.metric, query.role)
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    Ok(Json(history))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

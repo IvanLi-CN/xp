@@ -199,6 +199,9 @@ The status mapping is fixed:
   `verified_remote_response`.
 - Verified capability route returns 404: keep the old-node compatibility result as an
   unsupported snapshot (or `501 / resource_monitoring_unsupported`).
+  The 501 response uses `failure_layer=unknown`, `cause=capability_unsupported`,
+  `confidence=confirmed`, `dispatch_state=verified_remote_response`, and `retryable=false`;
+  the Web client must present it as unsupported capability rather than a retryable failure.
 
 Other transport failures use the `peer_transport` layer and a safe 502/504 status appropriate to
 whether dispatch and outcome are known. Existing generic mesh callers retain their previous

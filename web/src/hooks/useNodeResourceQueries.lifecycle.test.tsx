@@ -145,6 +145,79 @@ describe("useNodeResourceQueries lifecycle", () => {
 		);
 	});
 
+	it("pauses and resumes runtime history independently", async () => {
+		mocks.fetchAdminNodeResources
+			.mockReset()
+			.mockResolvedValue(supportedSnapshot);
+		mocks.fetchAdminNodeResourceHistory.mockReset();
+		let runtimeFailed = false;
+		const runtimePoint = {
+			observed_at: "2026-09-01T00:00:00.000Z",
+			value: 8,
+		};
+		mocks.fetchAdminNodeResourceHistory.mockImplementation(
+			(
+				_token: string,
+				_nodeId: string,
+				metric: string,
+				_signal: AbortSignal | undefined,
+				role: string | undefined,
+			) =>
+				role === "xray" && metric === "cpu_percent" && runtimeFailed
+					? Promise.reject(new Error("runtime history refresh failed"))
+					: Promise.resolve({
+							points:
+								role === "xray" && metric === "cpu_percent"
+									? [runtimePoint]
+									: [],
+						}),
+		);
+		const queryClient = new QueryClient({
+			defaultOptions: {
+				queries: { retry: false, gcTime: Number.POSITIVE_INFINITY },
+			},
+		});
+
+		const { result } = renderHook(
+			() =>
+				useNodeResourceQueries({
+					adminToken: "admin-token",
+					nodeId: "node-a",
+					nodesAvailable: true,
+					isOnline: true,
+					activeTab: "resources",
+					selectedRuntimeRole: "xray",
+				}),
+			{ wrapper: wrapperFor(queryClient) },
+		);
+
+		await waitFor(() =>
+			expect(result.current.runtimeHistoryByMetric.cpu_percent).toHaveLength(1),
+		);
+		runtimeFailed = true;
+		await act(async () => {
+			await queryClient.refetchQueries({
+				queryKey: ["adminNodeRuntimeResourceHistory"],
+			});
+		});
+		await waitFor(() =>
+			expect(
+				result.current.runtimeHistoryErrorByMetric.cpu_percent,
+			).toBeDefined(),
+		);
+		expect(result.current.runtimeHistoryByMetric.cpu_percent).toHaveLength(1);
+
+		runtimeFailed = false;
+		await act(async () => {
+			await queryClient.refetchQueries({
+				queryKey: ["adminNodeRuntimeResourceHistory"],
+			});
+		});
+		await waitFor(() =>
+			expect(result.current.runtimeHistoryErrorByMetric.cpu_percent).toBeNull(),
+		);
+	});
+
 	it("does not reuse a snapshot after the page session unmounts", async () => {
 		mocks.fetchAdminNodeResources
 			.mockReset()
