@@ -3,9 +3,11 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { supportedSnapshot } from "../components/ResourceSnapshotPanel.stories";
 import { fixtureCatalog } from "../fixture-policy/catalog";
+import * as resourceMonitoringFixtures from "../fixture-policy/resourceMonitoring";
 import { useNodeResourceQueries } from "./useNodeResourceQueries";
+
+const supportedSnapshot = resourceMonitoringFixtures.supportedResourceSnapshot;
 
 const mocks = vi.hoisted(() => ({
 	fetchAdminNodeResourceHistory: vi.fn(),

@@ -3,14 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import { BackendApiError, throwIfNotOk } from "../api/backendError";
 import { fixtureCatalog } from "../fixture-policy/catalog";
+import * as resourceMonitoringFixtures from "../fixture-policy/resourceMonitoring";
 import {
 	RESOURCE_HISTORY_CHARTS,
 	RUNTIME_RESOURCE_HISTORY_CHARTS,
 	ResourceTabContent,
 	buildResourceHistoryChartOption,
 } from "./ResourceSnapshotPanel";
-import { supportedSnapshot } from "./ResourceSnapshotPanel.stories";
 import type { EChartsThemePalette } from "./echarts-theme";
+
+const supportedSnapshot = resourceMonitoringFixtures.supportedResourceSnapshot;
 
 const resourceHistoryBase = Date.parse(
 	fixtureCatalog.timestamp.t20260901T000000(),
