@@ -51,4 +51,4 @@ caller-owned summary。
 
 ## Related ADRs
 
-- None
+None
