@@ -9,6 +9,8 @@ mod etag;
 mod liveness;
 #[path = "mesh/preflight.rs"]
 mod preflight;
+#[path = "mesh/resource_diagnostics.rs"]
+mod resource_diagnostics;
 #[path = "mesh/status.rs"]
 mod status;
 
@@ -19,6 +21,7 @@ pub(super) use liveness::{
     admin_internal_mesh_health, admin_internal_reverse_probe, spawn_reverse_link_probe_worker,
 };
 pub(super) use preflight::{admin_internal_mesh_preflight, run_mesh_enable_preflight};
+pub(super) use resource_diagnostics::send_mesh_internal_resource_read;
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
     generated_at: String,
@@ -62,6 +65,8 @@ struct AdminMeshPeerStatus {
     breaker: BreakerState,
     direct_validation: String,
     public_circuit: BreakerState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_public_failure: Option<crate::mesh_telemetry::MeshPublicFailure>,
     last_sample_at: Option<String>,
     last_transition_at: Option<String>,
     availability_1h: Option<f64>,
@@ -1103,6 +1108,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
             public_circuit: peer
                 .and_then(|peer| peer.public_breaker)
                 .unwrap_or(BreakerState::Closed),
+            last_public_failure: peer.and_then(|peer| peer.last_public_failure.clone()),
             last_sample_at: peer.and_then(|peer| peer.last_sample_at.clone()),
             last_transition_at: peer.and_then(|peer| peer.last_transition_at.clone()),
             availability_1h,
@@ -1400,6 +1406,7 @@ pub(super) async fn send_mesh_internal_read(
     )
     .await
 }
+
 /// Reads the one predecessor-compatible capability route.
 pub(super) enum MeshCapabilityProbeResponse {
     Verified {

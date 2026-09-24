@@ -153,6 +153,10 @@ root 常驻服务来解决可观测性问题。
   History API 响应不得含多条 series，避免 UI 查询引入任意 fan-out 或无界响应。
 - capability `admin.resource-monitoring` 是 additive。未升级或不支持的节点显示 `unsupported`，不把整个集群标记为
   down/degraded。没有历史回填，采样从新二进制首次成功 tick 后开始。
+- 节点 current snapshot 的跨节点 504 使用专用 `resource_peer_unavailable` 错误，并在
+  `details.diagnostic` 中显示来源、目标、实际尝试的 Direct/Public 路径、Public 断路器、签名确认结论、
+  时间和可复制关联 ID；非结构化或其他端点错误继续使用通用错误态。Public 冷却中只表示来源 XP 的
+  本地断路器打开，不推断目标节点、Tunnel 或 Cloudflare 故障。
 - host-managed systemd、OpenRC 与官方单镜像 Docker/Compose 的升级都必须保留
   `${XP_DATA_DIR}/resource_metrics.sqlite3`。数据库缺失、迁移失败或字段不可读必须可见，且只能降级资源监控本身。
 

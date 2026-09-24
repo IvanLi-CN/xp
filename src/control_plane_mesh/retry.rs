@@ -27,11 +27,17 @@ pub(super) async fn signed_send_with_public_gateway_retries(
 ) -> Result<(reqwest::Response, internal_auth::VerifiedRequest), MeshRequestError> {
     let allow_retry = allow_retry && request_allows_public_gateway_retry(request);
     let started = Instant::now();
-    let mut retry = 0;
+    let mut retry = 0usize;
     loop {
         let remaining = budget.saturating_sub(started.elapsed());
         if remaining.is_zero() {
-            return Err(MeshRequestError::OutcomeUnknown);
+            return Err(if request.allow_ambiguous_fallback {
+                MeshRequestError::PublicTimeout {
+                    retry_count: retry.min(u8::MAX as usize) as u8,
+                }
+            } else {
+                MeshRequestError::OutcomeUnknown
+            });
         }
         let sent = tokio::time::timeout(
             remaining,
@@ -59,6 +65,7 @@ pub(super) async fn signed_send_with_public_gateway_retries(
                 return Err(public_transport_error(
                     error,
                     request.allow_ambiguous_fallback,
+                    retry.min(u8::MAX as usize) as u8,
                 ));
             }
             Err(_) => {
@@ -67,7 +74,13 @@ pub(super) async fn signed_send_with_public_gateway_retries(
                     retry += 1;
                     continue;
                 }
-                return Err(MeshRequestError::OutcomeUnknown);
+                return Err(if request.allow_ambiguous_fallback {
+                    MeshRequestError::PublicTimeout {
+                        retry_count: retry.min(u8::MAX as usize) as u8,
+                    }
+                } else {
+                    MeshRequestError::OutcomeUnknown
+                });
             }
         };
         return Ok((response, verified));

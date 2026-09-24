@@ -8,7 +8,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ApiError, ApiJson, AppState, CLUSTER_RUNTIME_FANOUT_TIMEOUT, mesh::send_mesh_internal_read,
+    ApiError, ApiJson, AppState, CLUSTER_RUNTIME_FANOUT_TIMEOUT,
+    mesh::{send_mesh_internal_read, send_mesh_internal_resource_read},
 };
 use crate::resource_monitoring::{
     ResourceGap, ResourceHistoryResponse, ResourcePolicy, ResourceRecentSeries, ResourceRole,
@@ -103,7 +104,7 @@ pub(super) async fn admin_get_node_resources(
     if node.node_id == state.cluster.node_id {
         return Ok(Json(state.resource_monitoring.current().await));
     }
-    let response = send_mesh_internal_read(
+    let response = send_mesh_internal_resource_read(
         &state,
         &state.mesh_client,
         &node,

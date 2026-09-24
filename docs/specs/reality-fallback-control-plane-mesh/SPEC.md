@@ -27,6 +27,9 @@
   endpoint 的目标必须走 Direct-only；无 endpoint 的 owner-approved private Docker voter
   必须走其注册的 `api_base_url`。预检失败不得写入 `mesh_enabled=true`。
 - Direct validation、Public circuit、active route 和 endpoint 资格必须作为独立事实显示；
+- 面向节点资源 current snapshot 的跨节点失败必须保留同一请求的有序路径追踪、来源/目标节点、
+  Public circuit 状态和签名确认结论；诊断只能使用稳定枚举、时间、关联 ID、受控重试次数和可选
+  HTTP 状态，不暴露 URL、IP、端口、正文、签名、ACK 内容、证书或底层传输原文。
   5 分钟没有有效 Direct ACK、成员或 endpoint fingerprint 变化、或进程重启后，受影响 peer
   进入 `configured_unverified` 并暂走 Public。
 - `PersistedState.mesh_enabled` 是集群级开关，默认开启；关闭时控制面只访问 peer 注册的

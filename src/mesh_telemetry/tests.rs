@@ -194,6 +194,37 @@ async fn persists_bounded_buckets_and_events() {
 }
 
 #[tokio::test]
+async fn persists_the_latest_bounded_public_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+    telemetry
+        .record_public_failure(
+            "peer-us",
+            MeshPublicFailure {
+                observed_at: xp_test_fixtures::baseline_timestamp().to_owned(),
+                request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78".to_owned(),
+                failure: MeshFailureClass::PreResponseTimeout,
+                acknowledgement: MeshAcknowledgementState::NotObserved,
+                dispatch: MeshDispatchState::DispatchedNoVerifiedResponse,
+                elapsed_ms: 5_000,
+                retry_count: 2,
+                http_status: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let restored = MeshTelemetryHandle::load(temp.path()).unwrap();
+    let failure = restored
+        .last_public_failure("peer-us")
+        .await
+        .expect("public failure should persist");
+    assert_eq!(failure.failure, MeshFailureClass::PreResponseTimeout);
+    assert_eq!(failure.retry_count, 2);
+    assert_eq!(failure.request_id, "01M0C1SJ5M1JWE6CCKMXNXPZ78");
+}
+
+#[tokio::test]
 async fn throttles_regular_samples_and_persists_immediate_events() {
     let temp = tempfile::tempdir().unwrap();
     let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();

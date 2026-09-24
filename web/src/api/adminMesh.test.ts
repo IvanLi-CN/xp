@@ -106,6 +106,23 @@ describe("AdminMeshPeerSchema", () => {
 		expect(parsed.mesh_transport?.connection_starts_5m).toBe(1);
 	});
 
+	it("parses optional bounded Public failure evidence", () => {
+		const parsed = AdminMeshPeerSchema.parse({
+			...peerFixture(),
+			last_public_failure: {
+				observed_at: fixtureCatalog.timestamp.recent(),
+				request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+				failure: "pre_response_timeout",
+				acknowledgement: "not_observed",
+				dispatch: "dispatched_no_verified_response",
+				elapsed_ms: 5000,
+				retry_count: 2,
+			},
+		});
+
+		expect(parsed.last_public_failure?.retry_count).toBe(2);
+	});
+
 	it("parses separate Reverse underlay and user inbound evidence", () => {
 		const parsed = AdminMeshPeerSchema.parse({
 			...peerFixture(),

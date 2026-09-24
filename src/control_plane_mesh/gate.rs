@@ -16,7 +16,10 @@ impl PublicFallbackPolicy {
 }
 
 pub(super) enum MeshAttemptResult {
-    Fallback { ambiguous: bool },
+    Fallback {
+        ambiguous: bool,
+        failure: Option<MeshAttemptFailure>,
+    },
     Response(PeerRequestResponse),
 }
 
@@ -129,7 +132,10 @@ impl MeshAwareHttpClient {
             .await;
         match send_result {
             // The gate rejected admission before dispatch, so the request outcome is known.
-            None => Ok(MeshAttemptResult::Fallback { ambiguous: false }),
+            None => Ok(MeshAttemptResult::Fallback {
+                ambiguous: false,
+                failure: None,
+            }),
             Some((Ok(Ok((response, verified))), gate_guard)) => {
                 let transport = mesh_transport_observation(&response);
                 if transport.protocol != MeshTransportProtocol::H2 {
@@ -157,22 +163,21 @@ impl MeshAwareHttpClient {
                                     response,
                                     gate_guard,
                                     validation_revision.clone(),
-                                    MeshRequestError::Protocol(
-                                        "Mesh response carries a malformed signed acknowledgement"
-                                            .into(),
-                                    ),
+                                    MeshRequestError::AcknowledgementInvalid,
                                 )
                                 .await);
                         }
                     };
-                    if let Err(error) = internal_auth::verify_ack_v2(
+                    if internal_auth::verify_ack_v2(
                         cluster_ca_key_pem,
                         cluster_ca_cert_pem,
                         &verified,
                         &peer.node_id,
                         response.status().as_u16(),
                         ack,
-                    ) {
+                    )
+                    .is_err()
+                    {
                         return Err(self
                             .reject_mesh_response(
                                 peer,
@@ -180,7 +185,7 @@ impl MeshAwareHttpClient {
                                 response,
                                 gate_guard,
                                 validation_revision.clone(),
-                                error.into(),
+                                MeshRequestError::AcknowledgementInvalid,
                             )
                             .await);
                     }
@@ -215,6 +220,7 @@ impl MeshAwareHttpClient {
                         PeerRequestResponse::PredecessorNotFound,
                     ));
                 }
+                let status = response.status().as_u16();
                 Err(self
                     .reject_mesh_response(
                         peer,
@@ -222,9 +228,7 @@ impl MeshAwareHttpClient {
                         response,
                         gate_guard,
                         validation_revision,
-                        MeshRequestError::Protocol(
-                            "Mesh response did not carry a valid signed acknowledgement".into(),
-                        ),
+                        MeshRequestError::UnsignedResponse { status },
                     )
                     .await)
             }
@@ -244,7 +248,16 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                 )
                 .await;
-                Ok(MeshAttemptResult::Fallback { ambiguous: true })
+                Ok(MeshAttemptResult::Fallback {
+                    ambiguous: true,
+                    failure: Some(MeshAttemptFailure {
+                        failure: MeshFailureClass::PreResponseTransport,
+                        acknowledgement: MeshAcknowledgementState::NotObserved,
+                        dispatch: MeshDispatchState::DispatchedNoVerifiedResponse,
+                        retry_count: 0,
+                        http_status: None,
+                    }),
+                })
             }
             Some((Err(_), gate_guard)) => {
                 drop(gate_guard);
@@ -262,7 +275,16 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                 )
                 .await;
-                Ok(MeshAttemptResult::Fallback { ambiguous: true })
+                Ok(MeshAttemptResult::Fallback {
+                    ambiguous: true,
+                    failure: Some(MeshAttemptFailure {
+                        failure: MeshFailureClass::PreResponseTimeout,
+                        acknowledgement: MeshAcknowledgementState::NotObserved,
+                        dispatch: MeshDispatchState::DispatchedNoVerifiedResponse,
+                        retry_count: 0,
+                        http_status: None,
+                    }),
+                })
             }
         }
     }
@@ -465,7 +487,11 @@ impl MeshAwareHttpClient {
         }
         if let Err(error) = &result {
             let validation_state = match error {
-                MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => {
+                MeshRequestError::Auth(_)
+                | MeshRequestError::Protocol(_)
+                | MeshRequestError::UnsignedResponse { .. }
+                | MeshRequestError::AcknowledgementMissing { .. }
+                | MeshRequestError::AcknowledgementInvalid => {
                     DirectValidationState::ProtocolRejected
                 }
                 MeshRequestError::InvalidTarget(_) | MeshRequestError::CircuitOpen { .. } => {

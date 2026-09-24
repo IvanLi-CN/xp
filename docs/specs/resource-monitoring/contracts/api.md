@@ -66,6 +66,15 @@
   - `items` 是每个可达节点的 `ResourceSnapshot` 摘要，不包含近期 raw series。
 - `GET /api/admin/nodes/:node_id/resources`
   - 返回一个完整 current `ResourceSnapshot`。
+  - 当跨节点签名控制面无法取得可验证结果时返回 HTTP `504`，错误码为
+    `resource_peer_unavailable`。`error.details.diagnostic` 只包含来源/目标节点 ID 与名称、
+    本次有序 `route_attempts`、当前 `public_circuit`、可选最近一次 `last_public_failure` 和
+    本次 `request_id`。路径记录的稳定失败分类为 `circuit_open`、`pre_response_timeout`、
+    `pre_response_transport`、`unsigned_response`、`acknowledgement_missing`、
+    `acknowledgement_invalid`、`outcome_unknown`；每次记录还可带 UTC 时间、受控重试次数和
+    HTTP 状态码。不得包含 URL、IP、端口、正文、签名、ACK 内容、证书或底层传输原文。
+  - `circuit_open` 只表示来源节点的本地断路器状态；当 Public 记录为该分类时，表示 Public
+    备用路径未发送，不能据此归因目标节点、Tunnel 或 Cloudflare。
 - `GET /api/admin/nodes/:node_id/resources/recent`
   - query：`metric=<name>` 与可选的 `role=<role?>`。
   - 返回一个指定 measurement 的最多 240 个 15 秒点。`role` 只用于 runtime measurement；每次请求只能返回一个 series，以保持响应有界。
@@ -131,6 +140,7 @@
 
 ## Stable errors
 
+- `resource_peer_unavailable`
 - `resource_monitoring_unsupported`
 - `resource_history_capacity_rejected`
 - `resource_history_unavailable`

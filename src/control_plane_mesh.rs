@@ -12,14 +12,16 @@ use crate::{
     internal_auth::{self, InternalRoute, RequestContext},
     managed_default_endpoints::managed_default_vless_endpoint,
     mesh_telemetry::{
-        BreakerState, MeshConnectionFingerprint, MeshPeerReason, MeshTelemetryHandle,
-        MeshTelemetrySample, MeshTransportObservation, MeshTransportProtocol, TelemetryPath,
+        BreakerState, MeshAcknowledgementState, MeshConnectionFingerprint, MeshDispatchState,
+        MeshFailureClass, MeshPeerReason, MeshRouteKind, MeshTelemetryHandle, MeshTelemetrySample,
+        MeshTransportObservation, MeshTransportProtocol, TelemetryPath,
     },
     protocol::validate_reality_server_name,
     reverse_mesh::{ReverseMeshAssignment, ReverseRelayEnvelope, ReverseRole, route_budget},
 };
 
 mod circuit;
+mod diagnostics;
 mod error;
 mod gate;
 mod request;
@@ -32,6 +34,9 @@ use circuit::{
     DirectValidationStore, MeshAttemptDecision, PeerCircuitBreakers, endpoint_fingerprint,
     mesh_attempt_budget,
 };
+pub(super) use diagnostics::MeshAttemptFailure;
+pub(crate) use diagnostics::{MeshRequestDiagnostics, MeshRequestFailure};
+use diagnostics::{MeshRequestOptions, failure_for_error};
 pub use error::MeshRequestError;
 pub(crate) use request::CapabilityProbeResponse;
 use request::PeerRequestResponse;
@@ -51,6 +56,7 @@ pub const MESH_BACKOFF: [Duration; 5] = [
 ];
 pub const DIRECT_VALIDATION_TTL: Duration = Duration::from_secs(5 * 60);
 const LEGACY_CAPABILITIES_PROBE_PATH: &str = "/api/admin/_internal/capabilities";
+
 #[derive(Debug, Clone)]
 pub struct MeshPeerTarget {
     pub node_id: String,
@@ -375,15 +381,12 @@ impl MeshAwareHttpClient {
                 "Mesh response did not use HTTP/2".to_string(),
             ));
         }
+        let status = response.status().as_u16();
         let ack = response
             .headers()
             .get(internal_auth::INTERNAL_ACK_HEADER)
             .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| {
-                MeshRequestError::Protocol(
-                    "peer response has no signed acknowledgement".to_string(),
-                )
-            })?;
+            .ok_or(MeshRequestError::UnsignedResponse { status })?;
         internal_auth::verify_ack_v2(
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
@@ -391,80 +394,23 @@ impl MeshAwareHttpClient {
             &peer.node_id,
             response.status().as_u16(),
             ack,
-        )?;
+        )
+        .map_err(|_| MeshRequestError::AcknowledgementInvalid)?;
         Ok(response)
     }
-    /// Sends through Mesh first, then public only after a retryable transport failure.
-    pub async fn send_peer_request(
-        &self,
-        peer: &MeshPeerTarget,
-        request: MeshRequest,
-        cluster_ca_key_pem: &str,
-        cluster_ca_cert_pem: &str,
-    ) -> Result<reqwest::Response, MeshRequestError> {
-        match self
-            .send_peer_request_with_legacy_not_found(
-                peer,
-                request,
-                cluster_ca_key_pem,
-                cluster_ca_cert_pem,
-                false,
-                gate::PublicFallbackPolicy::Always,
-            )
-            .await?
-        {
-            PeerRequestResponse::Verified(response) => Ok(response),
-            PeerRequestResponse::PredecessorNotFound => Err(MeshRequestError::Protocol(
-                "unexpected predecessor capability response".to_string(),
-            )),
-        }
-    }
-    /// Allows a predecessor's unsigned 404 only for an explicit compatibility probe.
-    pub(crate) async fn send_peer_request_allowing_legacy_not_found(
-        &self,
-        peer: &MeshPeerTarget,
-        request: MeshRequest,
-        cluster_ca_key_pem: &str,
-        cluster_ca_cert_pem: &str,
-    ) -> Result<CapabilityProbeResponse, MeshRequestError> {
-        if request.method != reqwest::Method::GET
-            || request.path_and_query != LEGACY_CAPABILITIES_PROBE_PATH
-            || request.content_type.is_some()
-            || !request.body.is_empty()
-            || request.route != InternalRoute::MeshV2
-        {
-            return Err(MeshRequestError::Protocol(
-                "legacy capability response policy is only valid for the capability probe"
-                    .to_string(),
-            ));
-        }
-        let response = self
-            .send_peer_request_with_legacy_not_found(
-                peer,
-                request,
-                cluster_ca_key_pem,
-                cluster_ca_cert_pem,
-                true,
-                gate::PublicFallbackPolicy::WhenMeshDisabled,
-            )
-            .await?;
-        Ok(match response {
-            PeerRequestResponse::Verified(response) => CapabilityProbeResponse::Verified(response),
-            PeerRequestResponse::PredecessorNotFound => {
-                CapabilityProbeResponse::PredecessorNotFound
-            }
-        })
-    }
-
     async fn send_peer_request_with_legacy_not_found(
         &self,
         peer: &MeshPeerTarget,
         request: MeshRequest,
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
-        allow_unsigned_not_found: bool,
-        public_fallback_policy: gate::PublicFallbackPolicy,
+        options: MeshRequestOptions<'_>,
     ) -> Result<PeerRequestResponse, MeshRequestError> {
+        let MeshRequestOptions {
+            allow_unsigned_not_found,
+            public_fallback_policy,
+            diagnostics,
+        } = options;
         let started = Instant::now();
         let context = RequestContext::now(
             request.route,
@@ -490,6 +436,18 @@ impl MeshAwareHttpClient {
             && direct_validation == DirectValidationState::ProtocolRejected
         {
             self.record_terminal_failure(peer).await;
+            diagnostics.record(
+                MeshRouteKind::DirectMesh,
+                &request.request_id,
+                started,
+                MeshAttemptFailure {
+                    failure: MeshFailureClass::CircuitOpen,
+                    acknowledgement: MeshAcknowledgementState::NotObserved,
+                    dispatch: MeshDispatchState::NotDispatched,
+                    retry_count: 0,
+                    http_status: None,
+                },
+            );
             return Err(MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
             });
@@ -503,9 +461,35 @@ impl MeshAwareHttpClient {
 
         if matches!(decision, MeshAttemptDecision::Quarantined) {
             self.record_terminal_failure(peer).await;
+            diagnostics.record(
+                MeshRouteKind::DirectMesh,
+                &request.request_id,
+                started,
+                MeshAttemptFailure {
+                    failure: MeshFailureClass::CircuitOpen,
+                    acknowledgement: MeshAcknowledgementState::NotObserved,
+                    dispatch: MeshDispatchState::NotDispatched,
+                    retry_count: 0,
+                    http_status: None,
+                },
+            );
             return Err(MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
             });
+        }
+        if matches!(decision, MeshAttemptDecision::SkipOpen) {
+            diagnostics.record(
+                MeshRouteKind::DirectMesh,
+                &request.request_id,
+                started,
+                MeshAttemptFailure {
+                    failure: MeshFailureClass::CircuitOpen,
+                    acknowledgement: MeshAcknowledgementState::NotObserved,
+                    dispatch: MeshDispatchState::NotDispatched,
+                    retry_count: 0,
+                    http_status: None,
+                },
+            );
         }
 
         if matches!(
@@ -554,13 +538,32 @@ impl MeshAwareHttpClient {
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
                 )
-                .await?
+                .await
             {
-                gate::MeshAttemptResult::Fallback { ambiguous } => {
-                    fallback = true;
-                    mesh_outcome_ambiguous |= ambiguous;
+                Ok(result) => match result {
+                    gate::MeshAttemptResult::Fallback { ambiguous, failure } => {
+                        fallback = true;
+                        mesh_outcome_ambiguous |= ambiguous;
+                        if let Some(failure) = failure {
+                            diagnostics.record(
+                                MeshRouteKind::DirectMesh,
+                                &request.request_id,
+                                started,
+                                failure,
+                            );
+                        }
+                    }
+                    gate::MeshAttemptResult::Response(response) => return Ok(response),
+                },
+                Err(error) => {
+                    diagnostics.record(
+                        MeshRouteKind::DirectMesh,
+                        &request.request_id,
+                        started,
+                        failure_for_error(&error),
+                    );
+                    return Err(error);
                 }
-                gate::MeshAttemptResult::Response(response) => return Ok(response),
             }
         }
 
@@ -629,6 +632,12 @@ impl MeshAwareHttpClient {
                             ?error,
                             "reverse relay attempt failed"
                         );
+                        diagnostics.record(
+                            MeshRouteKind::ReverseRelay,
+                            &request.request_id,
+                            started,
+                            failure_for_error(&error),
+                        );
                         if !request.allow_ambiguous_fallback
                             && matches!(error, MeshRequestError::OutcomeUnknown)
                         {
@@ -691,6 +700,18 @@ impl MeshAwareHttpClient {
         {
             MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined => {
                 self.record_terminal_failure(peer).await;
+                diagnostics.record(
+                    MeshRouteKind::Public,
+                    &request.request_id,
+                    started,
+                    MeshAttemptFailure {
+                        failure: MeshFailureClass::CircuitOpen,
+                        acknowledgement: MeshAcknowledgementState::NotObserved,
+                        dispatch: MeshDispatchState::NotDispatched,
+                        retry_count: 0,
+                        http_status: None,
+                    },
+                );
                 return Err(MeshRequestError::CircuitOpen { path: "Public" });
             }
             MeshAttemptDecision::Attempt
@@ -720,8 +741,19 @@ impl MeshAwareHttpClient {
         {
             Ok(response) => response,
             Err(error) => {
+                diagnostics.record(
+                    MeshRouteKind::Public,
+                    &request.request_id,
+                    started,
+                    failure_for_error(&error),
+                );
                 let public_breaker = self.circuits.record_public_failure(&peer.node_id).await;
                 if let Some(telemetry) = &self.telemetry {
+                    if let Some(failure) = diagnostics.latest_public_failure() {
+                        let _ = telemetry
+                            .record_public_failure(&peer.node_id, failure)
+                            .await;
+                    }
                     let _ = telemetry
                         .set_public_breaker(
                             &peer.node_id,
@@ -796,24 +828,24 @@ impl MeshAwareHttpClient {
             if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
                 return Ok(response);
             }
-            return Err(MeshRequestError::Protocol(
-                "public response has no signed acknowledgement".to_string(),
-            ));
+            return Err(MeshRequestError::AcknowledgementMissing {
+                status: response.status().as_u16(),
+            });
         };
-        let ack = acknowledgement.to_str().map_err(|_| {
-            MeshRequestError::Protocol(
-                "public response carries a malformed signed acknowledgement".to_string(),
-            )
-        })?;
-        if let Err(error) = internal_auth::verify_ack_v2(
+        let ack = acknowledgement
+            .to_str()
+            .map_err(|_| MeshRequestError::AcknowledgementInvalid)?;
+        if internal_auth::verify_ack_v2(
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
             &verified,
             &context.target_id,
             response.status().as_u16(),
             ack,
-        ) {
-            return Err(error.into());
+        )
+        .is_err()
+        {
+            return Err(MeshRequestError::AcknowledgementInvalid);
         }
         Ok(response)
     }
@@ -958,7 +990,9 @@ impl MeshAwareHttpClient {
                 Err(MeshRequestError::OutcomeUnknown) => {
                     return Err(MeshRequestError::OutcomeUnknown);
                 }
-                Err(MeshRequestError::Public(_)) if !request.allow_ambiguous_fallback => {
+                Err(MeshRequestError::Public(_) | MeshRequestError::PublicTransport { .. })
+                    if !request.allow_ambiguous_fallback =>
+                {
                     return Err(MeshRequestError::OutcomeUnknown);
                 }
                 Err(_) => {}
@@ -1053,9 +1087,10 @@ fn mesh_transport_observation(response: &reqwest::Response) -> MeshTransportObse
 fn public_transport_error(
     error: reqwest::Error,
     allow_ambiguous_fallback: bool,
+    retry_count: u8,
 ) -> MeshRequestError {
     if allow_ambiguous_fallback {
-        MeshRequestError::Public(error)
+        MeshRequestError::PublicTransport { error, retry_count }
     } else {
         MeshRequestError::OutcomeUnknown
     }

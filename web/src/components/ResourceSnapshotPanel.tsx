@@ -13,9 +13,11 @@ import type {
 	RuntimeResourceHistoryMetric,
 } from "../api/adminResources";
 import { formatBackendError as formatErrorMessage } from "../utils/backendErrorMessage";
+import { parseResourcePeerDiagnostic } from "../utils/resourcePeerDiagnostic";
 import { Icon } from "./Icon";
 import { CapabilityUnavailableState, PageState } from "./PageState";
 import { QueryErrorState } from "./QueryErrorState";
+import { ResourcePeerDiagnosticState } from "./ResourcePeerDiagnosticState";
 import {
 	type EChartsThemePalette,
 	STATIC_LINE_SERIES_EMPHASIS,
@@ -619,6 +621,16 @@ export function ResourceTabContent(props: {
 		);
 	}
 	if (props.isError && !props.snapshot) {
+		if (parseResourcePeerDiagnostic(props.error)) {
+			return (
+				<ResourcePeerDiagnosticState
+					error={props.error}
+					isFetching={props.isFetching}
+					isOnline={props.isOnline}
+					onRetry={props.onRetry}
+				/>
+			);
+		}
 		return (
 			<QueryErrorState
 				title="Failed to load resources"

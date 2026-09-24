@@ -33,6 +33,34 @@ export const MeshBreakerStateSchema = z.enum([
 	"half_open",
 	"disabled",
 ]);
+export const MeshFailureClassSchema = z.enum([
+	"circuit_open",
+	"pre_response_timeout",
+	"pre_response_transport",
+	"unsigned_response",
+	"acknowledgement_missing",
+	"acknowledgement_invalid",
+	"outcome_unknown",
+]);
+export const MeshAcknowledgementStateSchema = z.enum([
+	"not_observed",
+	"missing",
+	"invalid",
+]);
+export const MeshDispatchStateSchema = z.enum([
+	"not_dispatched",
+	"dispatched_no_verified_response",
+]);
+export const AdminMeshPublicFailureSchema = z.object({
+	observed_at: z.string(),
+	request_id: z.string(),
+	failure: MeshFailureClassSchema,
+	acknowledgement: MeshAcknowledgementStateSchema,
+	dispatch: MeshDispatchStateSchema,
+	elapsed_ms: z.number().int().nonnegative(),
+	retry_count: z.number().int().nonnegative(),
+	http_status: z.number().int().min(100).max(599).optional(),
+});
 export const MeshPeerReasonSchema = z.enum([
 	"mesh_available",
 	"missing_endpoint",
@@ -148,6 +176,7 @@ export const AdminMeshPeerSchema = z.object({
 		])
 		.optional(),
 	public_circuit: MeshBreakerStateSchema.optional(),
+	last_public_failure: AdminMeshPublicFailureSchema.optional(),
 	last_sample_at: z.string().nullable(),
 	last_transition_at: z.string().nullable(),
 	availability_1h: z.number().nullable(),

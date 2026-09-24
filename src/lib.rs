@@ -22,6 +22,7 @@ pub mod join_coordinator;
 pub mod join_session;
 pub mod login_token;
 pub mod managed_default_endpoints;
+pub mod mesh_diagnostics;
 pub mod mesh_telemetry;
 pub mod mihomo_policy;
 pub mod mihomo_redact;

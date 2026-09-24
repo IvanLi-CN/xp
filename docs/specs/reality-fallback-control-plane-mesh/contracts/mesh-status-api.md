@@ -13,6 +13,10 @@
   `configured_unverified`, `verified`, `transport_failed`, or `protocol_rejected`; the latter
   uses the existing `closed`, `open`, `half_open`, or `disabled` breaker states. They are path
   facts from the current node, not cluster membership or user-inbound state.
+- A peer may include additive `last_public_failure` telemetry. It contains only the stable
+  `failure`, `acknowledgement`, `dispatch`, timestamp, bounded retry count, optional HTTP status,
+  elapsed milliseconds and correlation ID for the most recent Public failure. It is not a live
+  probe and does not imply that the target node, Tunnel or Cloudflare is the cause.
 - Peer quality is good, slow, unstable, down or unknown.
 - `current_path` and bucket `fallback_success` distinguish public fallback.
 - Computes ETag from the complete stable response representation (without its generated-at time)

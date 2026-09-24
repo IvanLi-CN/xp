@@ -49,6 +49,7 @@ mod tests {
                     breaker: BreakerState::Closed,
                     direct_validation: "verified".to_string(),
                     public_circuit: BreakerState::Closed,
+                    last_public_failure: None,
                     last_sample_at: None,
                     last_transition_at: None,
                     availability_1h: Some(1.0),

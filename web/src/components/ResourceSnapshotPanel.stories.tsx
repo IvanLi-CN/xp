@@ -4,6 +4,7 @@ import type {
 	NodeResourceHistoryMetric,
 	ResourceSnapshot,
 } from "../api/adminResources";
+import { BackendApiError } from "../api/backendError";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	ResourceSnapshotPanel,
@@ -188,6 +189,51 @@ const unsupportedSnapshot: ResourceSnapshot = {
 	runtimes: [],
 };
 
+const resourcePeerUnavailable = new BackendApiError({
+	status: 504,
+	code: "resource_peer_unavailable",
+	message: "resource snapshot is unavailable from the target node",
+	details: {
+		diagnostic: {
+			origin: { node_id: "node-101", node_name: "101" },
+			target: { node_id: "node-us", node_name: "us" },
+			route_attempts: [
+				{
+					route: "direct_mesh",
+					failure: "pre_response_timeout",
+					acknowledgement: "not_observed",
+					dispatch: "dispatched_no_verified_response",
+					observed_at: "2026-09-24T00:20:00.000Z",
+					request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+					elapsed_ms: 5000,
+					retry_count: 0,
+				},
+				{
+					route: "public",
+					failure: "circuit_open",
+					acknowledgement: "not_observed",
+					dispatch: "not_dispatched",
+					observed_at: "2026-09-24T00:20:05.000Z",
+					request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+					elapsed_ms: 5000,
+					retry_count: 0,
+				},
+			],
+			last_public_failure: {
+				failure: "pre_response_transport",
+				acknowledgement: "not_observed",
+				dispatch: "dispatched_no_verified_response",
+				observed_at: "2026-09-24T00:18:00.000Z",
+				request_id: "01M0C1SJ5M1JWE6CCKMXNXP7Z6",
+				elapsed_ms: 2500,
+				retry_count: 1,
+			},
+			public_circuit: "open",
+			request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+		},
+	},
+});
+
 const meta = {
 	title: "Components/ResourceSnapshotPanel",
 	component: ResourceSnapshotPanel,
@@ -345,4 +391,49 @@ export const Loading: Story = {
 			onRuntimeDetailsChange={() => undefined}
 		/>
 	),
+};
+
+export const PeerUnavailableWithRouteTrace: Story = {
+	args: {
+		snapshot: supportedSnapshot,
+		historyByMetric: {},
+		runtimeHistoryByMetric: {},
+		selectedRuntimeRole: null,
+		onRuntimeDetailsChange: () => undefined,
+	},
+	render: () => (
+		<div className="bg-background p-6" data-visual-evidence-surface>
+			<div data-visual-evidence-target>
+				<ResourceTabContent
+					capabilityUnavailable={false}
+					isLoading={false}
+					isError
+					error={resourcePeerUnavailable}
+					isFetching={false}
+					isOnline
+					onRetry={() => undefined}
+					historyByMetric={{}}
+					runtimeHistoryByMetric={{}}
+					selectedRuntimeRole={null}
+					onRuntimeDetailsChange={() => undefined}
+				/>
+			</div>
+		</div>
+	),
+};
+
+export const PeerUnavailableWithRouteTraceMobile: Story = {
+	...PeerUnavailableWithRouteTrace,
+	parameters: {
+		viewport: {
+			defaultViewport: "resourceDiagnosticMobile",
+			viewports: {
+				resourceDiagnosticMobile: {
+					name: "Resource diagnostic mobile (393x852)",
+					styles: { height: "852px", width: "393px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
 };

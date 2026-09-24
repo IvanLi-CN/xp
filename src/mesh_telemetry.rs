@@ -29,6 +29,10 @@ const SAMPLE_PERSIST_INTERVAL: StdDuration = StdDuration::from_secs(5);
 
 mod reverse;
 mod transport;
+pub use crate::mesh_diagnostics::{
+    MeshAcknowledgementState, MeshDispatchState, MeshFailureClass, MeshPublicFailure,
+    MeshRouteAttempt, MeshRouteKind,
+};
 pub use reverse::ReverseRelayTelemetrySample;
 use transport::MeshConnectionTrackers;
 pub(crate) use transport::{MeshConnectionFingerprint, MeshTransportObservation};
@@ -141,6 +145,8 @@ pub struct MeshPeerTelemetry {
     pub breaker: Option<BreakerState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_breaker: Option<BreakerState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_public_failure: Option<MeshPublicFailure>,
     pub last_mesh_reason: Option<MeshPeerReason>,
     pub last_mesh_protocol: Option<MeshTransportProtocol>,
     pub connection_generation: u64,
@@ -480,6 +486,35 @@ impl MeshTelemetryHandle {
         Ok(())
     }
 
+    pub async fn record_public_failure(
+        &self,
+        peer_id: impl Into<String>,
+        failure: MeshPublicFailure,
+    ) -> anyhow::Result<()> {
+        let peer_id = peer_id.into();
+        let mut state = self.state.lock().await;
+        let peer = state
+            .persisted
+            .peers
+            .entry(peer_id.clone())
+            .or_insert_with(|| MeshPeerTelemetry {
+                peer_id,
+                ..MeshPeerTelemetry::default()
+            });
+        peer.last_public_failure = Some(failure);
+        state.persisted.revision += 1;
+        self.persist_immediately(&mut state, Instant::now())
+    }
+
+    pub async fn last_public_failure(&self, peer_id: &str) -> Option<MeshPublicFailure> {
+        let state = self.state.lock().await;
+        state
+            .persisted
+            .peers
+            .get(peer_id)
+            .and_then(|peer| peer.last_public_failure.clone())
+    }
+
     pub async fn set_mesh_reason(
         &self,
         peer_id: impl Into<String>,
@@ -676,6 +711,7 @@ fn history_source_peer(peer: &MeshPeerTelemetry, max_buckets: usize) -> MeshPeer
         last_connection_started_at: history_source_option(&peer.last_connection_started_at),
         buckets: VecDeque::from(buckets),
         public_breaker: peer.public_breaker,
+        last_public_failure: peer.last_public_failure.clone(),
     }
 }
 

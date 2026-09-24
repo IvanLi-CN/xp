@@ -1,6 +1,9 @@
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { BackendApiError } from "../api/backendError";
 import { fixtureCatalog } from "../fixture-policy/catalog";
+import { ResourcePeerDiagnosticState } from "./ResourcePeerDiagnosticState";
 import {
 	RESOURCE_HISTORY_CHARTS,
 	RUNTIME_RESOURCE_HISTORY_CHARTS,
@@ -152,5 +155,59 @@ describe("runtime resource charts", () => {
 				lineStyle: { width: 2, color: "#3478c6", join: "round" },
 			},
 		]);
+	});
+});
+
+describe("ResourcePeerDiagnosticState", () => {
+	it("shows the source, target, route boundary, and copyable correlation id", () => {
+		render(
+			<ResourcePeerDiagnosticState
+				error={
+					new BackendApiError({
+						status: 504,
+						code: "resource_peer_unavailable",
+						message: "resource snapshot is unavailable from the target node",
+						details: {
+							diagnostic: {
+								origin: { node_id: "101", node_name: "101" },
+								target: { node_id: "us", node_name: "us" },
+								route_attempts: [
+									{
+										route: "direct_mesh",
+										failure: "pre_response_timeout",
+										acknowledgement: "not_observed",
+										dispatch: "dispatched_no_verified_response",
+										observed_at: "2026-09-24T00:00:00Z",
+										request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+										elapsed_ms: 5000,
+										retry_count: 0,
+									},
+									{
+										route: "public",
+										failure: "circuit_open",
+										acknowledgement: "not_observed",
+										dispatch: "not_dispatched",
+										observed_at: "2026-09-24T00:00:05Z",
+										request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+										elapsed_ms: 5000,
+										retry_count: 0,
+									},
+								],
+								public_circuit: "open",
+								request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+							},
+						},
+					})
+				}
+				isFetching={false}
+				isOnline
+				onRetry={() => undefined}
+			/>,
+		);
+
+		expect(screen.getByText("101 → us")).toBeVisible();
+		expect(screen.getByText(/Public 备用路径未发送/)).toBeVisible();
+		expect(screen.getByText("01M0C1SJ5M1JWE6CCKMXNXPZ78")).toBeVisible();
+		expect(screen.getByRole("button", { name: "复制 ID" })).toBeVisible();
 	});
 });

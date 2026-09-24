@@ -437,7 +437,7 @@ pub(super) async fn send_outer_request(
     match tokio::time::timeout(budget, builder.send()).await {
         Ok(result) => result
             .map(|response| attach_mesh_gate(response, gate_guard))
-            .map_err(|error| public_transport_error(error, allow_ambiguous_fallback)),
+            .map_err(|error| public_transport_error(error, allow_ambiguous_fallback, 0)),
         Err(_) if allow_ambiguous_fallback => Err(MeshRequestError::Reverse(
             "reverse outer request timed out before response headers".to_string(),
         )),

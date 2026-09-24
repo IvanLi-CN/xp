@@ -123,7 +123,10 @@ async fn public_gateway_missing_ack_is_terminal_without_retry() {
         )
         .await;
 
-    assert!(matches!(result, Err(MeshRequestError::Protocol(_))));
+    assert!(matches!(
+        result,
+        Err(MeshRequestError::AcknowledgementMissing { .. })
+    ));
     assert_eq!(public_requests.load(Ordering::SeqCst), 1);
     public_task.abort();
 }
