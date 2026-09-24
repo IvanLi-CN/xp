@@ -16,7 +16,7 @@ impl PublicFallbackPolicy {
 }
 
 pub(super) enum MeshAttemptResult {
-    Fallback { ambiguous: bool },
+    Fallback { ambiguous: bool, timed_out: bool },
     Response(PeerRequestResponse),
 }
 
@@ -129,7 +129,10 @@ impl MeshAwareHttpClient {
             .await;
         match send_result {
             // The gate rejected admission before dispatch, so the request outcome is known.
-            None => Ok(MeshAttemptResult::Fallback { ambiguous: false }),
+            None => Ok(MeshAttemptResult::Fallback {
+                ambiguous: false,
+                timed_out: false,
+            }),
             Some((Ok(Ok((response, verified))), gate_guard)) => {
                 let transport = mesh_transport_observation(&response);
                 if transport.protocol != MeshTransportProtocol::H2 {
@@ -244,7 +247,10 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                 )
                 .await;
-                Ok(MeshAttemptResult::Fallback { ambiguous: true })
+                Ok(MeshAttemptResult::Fallback {
+                    ambiguous: true,
+                    timed_out: error.is_timeout(),
+                })
             }
             Some((Err(_), gate_guard)) => {
                 drop(gate_guard);
@@ -262,7 +268,10 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                 )
                 .await;
-                Ok(MeshAttemptResult::Fallback { ambiguous: true })
+                Ok(MeshAttemptResult::Fallback {
+                    ambiguous: true,
+                    timed_out: true,
+                })
             }
         }
     }

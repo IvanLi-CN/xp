@@ -5,6 +5,7 @@ pub enum MeshRequestError {
     InvalidTarget(String),
     Auth(internal_auth::AuthError),
     OutcomeUnknown,
+    TransportTimeout,
     Protocol(String),
     Reverse(String),
     ReverseTimeout,
@@ -25,6 +26,9 @@ impl std::fmt::Display for MeshRequestError {
             Self::Auth(value) => write!(f, "internal authentication error: {value}"),
             Self::OutcomeUnknown => {
                 f.write_str("Mesh request outcome is unknown; it may already have been applied")
+            }
+            Self::TransportTimeout => {
+                f.write_str("Mesh request timed out before a verified response")
             }
             Self::Protocol(value) => write!(f, "Mesh protocol error: {value}"),
             Self::Reverse(value) => write!(f, "reverse relay failed: {value}"),

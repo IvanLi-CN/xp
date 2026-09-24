@@ -31,7 +31,7 @@ pub(super) async fn signed_send_with_public_gateway_retries(
     loop {
         let remaining = budget.saturating_sub(started.elapsed());
         if remaining.is_zero() {
-            return Err(MeshRequestError::OutcomeUnknown);
+            return Err(MeshRequestError::TransportTimeout);
         }
         let sent = tokio::time::timeout(
             remaining,
@@ -67,7 +67,7 @@ pub(super) async fn signed_send_with_public_gateway_retries(
                     retry += 1;
                     continue;
                 }
-                return Err(MeshRequestError::OutcomeUnknown);
+                return Err(MeshRequestError::TransportTimeout);
             }
         };
         return Ok((response, verified));

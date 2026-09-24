@@ -353,6 +353,7 @@ fn classify_preflight_error(error: &MeshRequestError) -> MeshPreflightFailureKin
         }
         MeshRequestError::CircuitOpen { .. }
         | MeshRequestError::OutcomeUnknown
+        | MeshRequestError::TransportTimeout
         | MeshRequestError::Public(_)
         | MeshRequestError::ReverseTimeout
         | MeshRequestError::Reverse(_) => MeshPreflightFailureKind::Transport,

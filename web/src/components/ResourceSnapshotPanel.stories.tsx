@@ -617,7 +617,9 @@ export const HistoryRefreshError: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			await canvas.findByText("History unavailable"),
+			await canvas.findByText(
+				"Refresh failed; showing the last successful points.",
+			),
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByRole("button", { name: "Retry history" }),

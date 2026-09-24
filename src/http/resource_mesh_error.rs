@@ -12,11 +12,21 @@ pub(super) async fn resource_mesh_error(
     match error {
         MeshRequestError::CircuitOpen { path } => {
             let attempted_path = if path == "Public" { "public" } else { "direct" };
-            let retry_after = client
+            let Some(retry_after) = client
                 .circuits()
                 .retry_after_seconds(node_id, attempted_path == "public")
                 .await
-                .expect("circuit-open resource errors must have a known cooldown");
+            else {
+                return ApiError::internal("resource circuit cooldown is unavailable")
+                    .with_detail("failure_layer", "circuit_breaker")
+                    .with_detail("cause", "cooldown_unavailable")
+                    .with_detail("confidence", "unknown")
+                    .with_detail("target_node_id", node_id)
+                    .with_detail("attempted_path", attempted_path)
+                    .with_detail("dispatch_state", "not_dispatched")
+                    .with_detail("retryable", false)
+                    .with_detail("support_id", support_id);
+            };
             ApiError::new(
                 "peer_circuit_open",
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -68,6 +78,19 @@ pub(super) async fn resource_mesh_error(
             "peer_transport",
             "outcome_unknown",
             "unknown",
+            "unknown",
+            "dispatched_no_verified_response",
+            true,
+            node_id,
+            support_id,
+        ),
+        MeshRequestError::TransportTimeout => response(
+            "peer_transport_timeout",
+            StatusCode::GATEWAY_TIMEOUT,
+            "target node did not return a verified response in time",
+            "peer_transport",
+            "peer_timeout",
+            "confirmed",
             "unknown",
             "dispatched_no_verified_response",
             true,
@@ -222,6 +245,13 @@ mod tests {
                 true,
             ),
             (
+                MeshRequestError::TransportTimeout,
+                "peer_transport_timeout",
+                StatusCode::GATEWAY_TIMEOUT,
+                "dispatched_no_verified_response",
+                true,
+            ),
+            (
                 MeshRequestError::InvalidTarget("ignored".to_string()),
                 "peer_target_invalid",
                 StatusCode::BAD_GATEWAY,
@@ -279,6 +309,33 @@ mod tests {
                 .as_u64()
                 .is_some_and(|seconds| (1..=300).contains(&seconds))
         );
+    }
+
+    #[tokio::test]
+    async fn circuit_open_without_available_cooldown_is_internal() {
+        let client = test_client();
+        let circuits = client.circuits();
+        {
+            let mut peers = circuits.peers.lock().await;
+            let circuit = peers.entry("node-a".to_string()).or_default();
+            circuit.retry_at = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+            circuit.half_open_in_flight = true;
+        }
+
+        let mapped = resource_mesh_error(
+            &client,
+            "node-a",
+            "support-a".to_string(),
+            MeshRequestError::CircuitOpen {
+                path: "Direct Mesh",
+            },
+        )
+        .await;
+
+        assert_eq!(mapped.code, "internal");
+        assert_eq!(mapped.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(mapped.details["cause"], "cooldown_unavailable");
+        assert!(mapped.details.get("retry_after_seconds").is_none());
     }
 
     #[test]
