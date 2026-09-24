@@ -31,7 +31,7 @@
 
 ## Related Changes
 
-- `k7m2n-node-history-fallback`
+- `node-history-fallback`
 
 ## References
 

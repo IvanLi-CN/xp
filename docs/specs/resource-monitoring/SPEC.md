@@ -292,6 +292,6 @@ root 常驻服务来解决可观测性问题。
 
 - `../cluster-history-repositories/SPEC.md`
 - `../uptime-monitoring/SPEC.md`
-- `../9vmap-node-service-observability/SPEC.md`
-- `../m4n7c-node-tcp-connection-count/SPEC.md`
-- `../nmgq8-managed-stack-64m-memory/SPEC.md`
+- `../node-service-observability/SPEC.md`
+- `../node-tcp-connection-count/SPEC.md`
+- `../managed-stack-64m-memory/SPEC.md`

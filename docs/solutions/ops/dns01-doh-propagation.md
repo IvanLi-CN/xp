@@ -5,7 +5,7 @@ problem_type: certificate issuance and renewal
 component: Cloudflare DNS-01 solver
 tags: [acme, dns-01, doh, cloudflare, vless-canary]
 status: active
-related_specs: [3e4q4-mihomo-provider-dual-track]
+related_specs: [docs/specs/mihomo-provider-dual-track/SPEC.md]
 ---
 
 # DNS-01 DoH Propagation Checks

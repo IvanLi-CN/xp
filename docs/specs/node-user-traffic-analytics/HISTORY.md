@@ -24,7 +24,7 @@
 
 ## Key Reasons / Replacements
 
-- 本 spec 扩展既有 `k7m2n` 节点历史 fallback 的 daily 数据来源，但不改变 runtime fallback 的职责。
+- 本 spec 扩展既有 `node-history-fallback` 节点历史 fallback 的 daily 数据来源，但不改变 runtime fallback 的职责。
 - ECharts tooltip 默认样式与 CSS token 字符串不能作为 SVG 主题契约；新静态图表
   必须使用共享 palette、tooltip surface 和 emphasis guard，并通过真实 pointer hover
   证明路径仍可见。
@@ -33,5 +33,5 @@
 
 - `./SPEC.md`
 - `./IMPLEMENTATION.md`
-- `../k7m2n-node-history-fallback/HISTORY.md`
+- `../node-history-fallback/HISTORY.md`
 - `../../solutions/web/echarts-svg-tooltip-theming-hover-stability.md`

@@ -13,5 +13,5 @@ None
 
 ## References
 
-- `../56dtr-reality-fallback-control-plane-mesh/SPEC.md`
+- `../reality-fallback-control-plane-mesh/SPEC.md`
 - `../cluster-history-repositories/SPEC.md`

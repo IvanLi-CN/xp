@@ -13,7 +13,7 @@ tags:
   - xp-ops
 status: active
 related_specs:
-  - 38wmj-cluster-node-onboarding
+  - docs/specs/cluster-node-onboarding/SPEC.md
 ---
 
 # Docker Testbox Validates Host-Managed Fresh Joins

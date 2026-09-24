@@ -74,8 +74,6 @@ None
 
 ## Visual Evidence
 
-PR: none
-
 本规格的变更仅涉及运行时配置、鉴权状态和部署路径，没有可独立验收的界面效果。
 
 ## 参考
@@ -84,5 +82,5 @@ PR: none
 - `docs/specs/cluster-node-onboarding/SPEC.md`
 - `docs/specs/xp-ops-admin-token-ops/SPEC.md`
 - `docs/solutions/ci/real-xray-e2e-runner-guardrails.md`
-- `../56dtr-reality-fallback-control-plane-mesh/SPEC.md`
+- `../reality-fallback-control-plane-mesh/SPEC.md`
 - `../resource-monitoring/SPEC.md`

@@ -20,10 +20,13 @@ Endpoint probe 的语义是“每个节点对每个 endpoint 走真实 ingress �
 ### Goals
 
 - 增加一个节点本地配置：`XP_ENDPOINT_PROBE_SKIP_SELF_TEST=true`（默认 false）。
-- 当开启该配置时，该节点对“自己托管的 endpoints”（`endpoint.node_id == local_node_id`）不执行真实探测：
+- 当开启该配置时，该节点对“自己托管且 `access_host` 非 loopback 的 endpoints”
+  （`endpoint.node_id == local_node_id`）不执行真实探测：
   - 不尝试连接 `access_host`；
   - 不启动 Xray client；
   - 写入一条样本 `skipped=true`，以表示“已上报但不参与成功/失败判断”。
+- loopback `access_host` 继续按既有规则被 probe 拒绝；skip 配置不为其写入
+  `skipped=true` 样本。
 - 聚合状态计算需把 `skipped` 视为第三态：
   - `Up`：所有非 skipped 的测试样本均 OK；
   - `Degraded/Down`：仍按非 skipped 样本的真实结果判断；
@@ -59,7 +62,9 @@ Endpoint probe 的语义是“每个节点对每个 endpoint 走真实 ingress �
 - Given 集群有 N 个 nodes / M 个 endpoints，
   When 某个 node 开启 `XP_ENDPOINT_PROBE_SKIP_SELF_TEST=true` 并触发一次 probe run，
   Then
-  - 该 node 对所有 `endpoint.node_id == local_node_id` 的 endpoints 上报样本 `skipped=true`；
+  - 该 node 对所有 `endpoint.node_id == local_node_id` 且 `access_host` 非 loopback 的
+    endpoints 上报样本 `skipped=true`；
+  - loopback `access_host` 仍按既有规则被拒绝，而不是上报 `skipped=true`；
   - 该小时 bucket 的 `sample_count` 仍可达到 `expected_nodes`（skipped 计入“已上报”）；
   - status 计算按 “tested_count = sample_count - skipped_count” 的规则执行：
     - tested_count==0 => Missing；

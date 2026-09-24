@@ -76,8 +76,9 @@ To avoid false negatives, you can explicitly disable self-test **on that node on
 
 Behavior:
 
-- For endpoints hosted on the local node (`endpoint.node_id == local_node_id`), the node reports a
-  sample with `skipped=true` (shown as `SKIP` in the Admin UI).
+- For non-loopback endpoints hosted on the local node (`endpoint.node_id == local_node_id`), the
+  node reports a sample with `skipped=true` (shown as `SKIP` in the Admin UI). Loopback
+  `access_host` values remain rejected rather than skipped.
 - Skipped samples count as "reported" but do not count as OK/FAIL. Aggregated status is computed from
   **tested** samples only.
 - If an hour bucket has only skipped samples (for example, a single-node cluster with self-test

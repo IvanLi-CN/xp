@@ -6,8 +6,8 @@ component: startup and node metadata reconciliation
 tags: [managed-endpoint, raft, bootstrap, reconciliation, xp-ops]
 status: active
 related_specs:
-  - 3e4q4-mihomo-provider-dual-track
-  - c8qtw-docker-single-image-cluster-node-deploy
+  - docs/specs/mihomo-provider-dual-track/SPEC.md
+  - docs/specs/docker-single-image-cluster-node-deploy/SPEC.md
 ---
 
 # Managed Default Endpoint Ports Have One Runtime Authority

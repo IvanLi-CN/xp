@@ -216,8 +216,6 @@ Storybook覆盖=通过
   state=light 31-day user traffic window
   evidence_note=验证用户详情 Traffic 视图在亮色主题下使用当前平顶阶梯曲线、参考序列与对齐后的窗口范围。
 
-PR: include
-
 ![User traffic window transition light](./assets/user-traffic-window-transition-light.png)
 
 ## Related PRs
@@ -232,7 +230,7 @@ PR: include
 
 ## 参考（References）
 
-- `../k7m2n-node-history-fallback/SPEC.md`
+- `../node-history-fallback/SPEC.md`
 - `../../desgin/quota.md`
 - `../../desgin/api.md`
 - `../../solutions/web/echarts-svg-tooltip-theming-hover-stability.md`
