@@ -191,6 +191,9 @@ The status mapping is fixed:
 - Signed acknowledgement or peer authentication is invalid:
   - API: `502 / peer_protocol_rejected`; ignore the body.
   - Dispatch state: `dispatched_no_verified_response`.
+- A signed peer response whose resource body cannot be decoded or fails the resource schema:
+  - API: `502 / peer_protocol_rejected`; discard the body and expose only bounded diagnostic fields.
+  - Dispatch state: `dispatched_no_verified_response`.
 - Verified target application error: preserve the target status with
   `remote_node_error` and `failure_layer=remote_node`, dispatch state
   `verified_remote_response`.

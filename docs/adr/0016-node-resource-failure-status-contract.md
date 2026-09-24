@@ -25,6 +25,8 @@ The status contract is:
   `peer_transport_error`; it remains in the `peer_transport` layer.
 - An invalid or missing signed acknowledgement, including peer authentication rejection, is 502
   `peer_protocol_rejected`.
+- A signed peer response with an invalid resource body or schema is also 502
+  `peer_protocol_rejected`; raw decoder text is never returned.
 - A verified target application error preserves the target HTTP status and uses
   `remote_node_error` with `failure_layer=remote_node`.
 - A verified capability-route 404 retains the existing unsupported behavior. It is not a node

@@ -79,12 +79,17 @@ pub(super) async fn admin_list_nodes_resources(
                 }
             }
             Ok(response) if response.status() == StatusCode::NOT_FOUND => {
-                if resource_not_found_is_unsupported(
-                    resource_capability_status(&state, &node).await,
+                match classify_resource_response(
+                    response.status(),
+                    Some(resource_capability_status(&state, &node).await),
                 ) {
-                    items.push(unsupported_snapshot(&node.node_id));
-                } else {
-                    unreachable_nodes.push(node.node_id);
+                    ResourceResponseDisposition::Unsupported => {
+                        items.push(unsupported_snapshot(&node.node_id));
+                    }
+                    ResourceResponseDisposition::Remote(_) => {
+                        unreachable_nodes.push(node.node_id);
+                    }
+                    ResourceResponseDisposition::Success => unreachable_nodes.push(node.node_id),
                 }
             }
             _ => unreachable_nodes.push(node.node_id),
@@ -121,19 +126,25 @@ pub(super) async fn admin_get_node_resources(
         CLUSTER_RUNTIME_FANOUT_TIMEOUT,
     )
     .await?;
-    if response.status() == StatusCode::NOT_FOUND
-        && resource_not_found_is_unsupported(resource_capability_status(&state, &node).await)
-    {
-        return Ok(Json(unsupported_snapshot(&node_id)));
-    }
-    if !response.status().is_success() {
-        return Err(remote_resource_error(&node_id, response.status()));
+    let capability_status = if response.status() == StatusCode::NOT_FOUND {
+        Some(resource_capability_status(&state, &node).await)
+    } else {
+        None
+    };
+    match classify_resource_response(response.status(), capability_status) {
+        ResourceResponseDisposition::Unsupported => {
+            return Ok(Json(unsupported_snapshot(&node_id)));
+        }
+        ResourceResponseDisposition::Remote(status) => {
+            return Err(remote_resource_error(&node_id, status));
+        }
+        ResourceResponseDisposition::Success => {}
     }
     response
         .json::<ResourceSnapshot>()
         .await
         .map(Json)
-        .map_err(|error| ApiError::internal(error.to_string()))
+        .map_err(|_| malformed_resource_response_error(&node_id))
 }
 
 pub(super) async fn admin_get_node_resources_recent(
@@ -172,19 +183,25 @@ pub(super) async fn admin_get_node_resources_recent(
         CLUSTER_RUNTIME_FANOUT_TIMEOUT,
     )
     .await?;
-    if response.status() == StatusCode::NOT_FOUND
-        && resource_not_found_is_unsupported(resource_capability_status(&state, &node).await)
-    {
-        return Ok(Json(unsupported_recent_series(&query.metric, query.role)));
-    }
-    if !response.status().is_success() {
-        return Err(remote_resource_error(&node_id, response.status()));
+    let capability_status = if response.status() == StatusCode::NOT_FOUND {
+        Some(resource_capability_status(&state, &node).await)
+    } else {
+        None
+    };
+    match classify_resource_response(response.status(), capability_status) {
+        ResourceResponseDisposition::Unsupported => {
+            return Ok(Json(unsupported_recent_series(&query.metric, query.role)));
+        }
+        ResourceResponseDisposition::Remote(status) => {
+            return Err(remote_resource_error(&node_id, status));
+        }
+        ResourceResponseDisposition::Success => {}
     }
     response
         .json::<ResourceRecentSeries>()
         .await
         .map(Json)
-        .map_err(|error| ApiError::internal(error.to_string()))
+        .map_err(|_| malformed_resource_response_error(&node_id))
 }
 
 pub(super) async fn admin_get_node_resources_history(
@@ -297,23 +314,29 @@ pub(super) async fn admin_get_node_resources_history(
         CLUSTER_RUNTIME_FANOUT_TIMEOUT,
     )
     .await?;
-    if response.status() == StatusCode::NOT_FOUND
-        && resource_not_found_is_unsupported(resource_capability_status(&state, &node).await)
-    {
-        return Err(ApiError::new(
-            "resource_monitoring_unsupported",
-            StatusCode::NOT_IMPLEMENTED,
-            "node does not expose resource monitoring",
-        ));
-    }
-    if !response.status().is_success() {
-        return Err(remote_resource_error(&node_id, response.status()));
+    let capability_status = if response.status() == StatusCode::NOT_FOUND {
+        Some(resource_capability_status(&state, &node).await)
+    } else {
+        None
+    };
+    match classify_resource_response(response.status(), capability_status) {
+        ResourceResponseDisposition::Unsupported => {
+            return Err(ApiError::new(
+                "resource_monitoring_unsupported",
+                StatusCode::NOT_IMPLEMENTED,
+                "node does not expose resource monitoring",
+            ));
+        }
+        ResourceResponseDisposition::Remote(status) => {
+            return Err(remote_resource_error(&node_id, status));
+        }
+        ResourceResponseDisposition::Success => {}
     }
     response
         .json::<ResourceHistoryResponse>()
         .await
         .map(Json)
-        .map_err(|error| ApiError::internal(error.to_string()))
+        .map_err(|_| malformed_resource_response_error(&node_id))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -363,8 +386,30 @@ async fn resource_capability_status(
     classify_resource_capability(status, Some(&body.capabilities))
 }
 
-fn resource_not_found_is_unsupported(status: ResourceCapabilityStatus) -> bool {
-    matches!(status, ResourceCapabilityStatus::Unsupported)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResourceResponseDisposition {
+    Success,
+    Unsupported,
+    Remote(StatusCode),
+}
+
+fn classify_resource_response(
+    status: StatusCode,
+    capability_status: Option<ResourceCapabilityStatus>,
+) -> ResourceResponseDisposition {
+    if status == StatusCode::NOT_FOUND
+        && matches!(
+            capability_status,
+            Some(ResourceCapabilityStatus::Unsupported)
+        )
+    {
+        return ResourceResponseDisposition::Unsupported;
+    }
+    if status.is_success() {
+        ResourceResponseDisposition::Success
+    } else {
+        ResourceResponseDisposition::Remote(status)
+    }
 }
 
 fn classify_resource_capability(
@@ -410,6 +455,22 @@ fn remote_resource_error(node_id: &str, target_status: StatusCode) -> ApiError {
     .with_detail("support_id", crate::id::new_ulid_string())
 }
 
+fn malformed_resource_response_error(node_id: &str) -> ApiError {
+    ApiError::new(
+        "peer_protocol_rejected",
+        StatusCode::BAD_GATEWAY,
+        "peer resource response could not be decoded",
+    )
+    .with_detail("failure_layer", "peer_protocol")
+    .with_detail("cause", "protocol_rejected")
+    .with_detail("confidence", "confirmed")
+    .with_detail("target_node_id", node_id)
+    .with_detail("attempted_path", "unknown")
+    .with_detail("dispatch_state", "dispatched_no_verified_response")
+    .with_detail("retryable", true)
+    .with_detail("support_id", crate::id::new_ulid_string())
+}
+
 fn unsupported_recent_series(metric: &str, role: Option<ResourceRole>) -> ResourceRecentSeries {
     ResourceRecentSeries {
         metric: metric.to_string(),
@@ -425,21 +486,33 @@ mod tests {
     use axum::http::StatusCode;
 
     use super::{
-        ResourceCapabilityStatus, classify_resource_capability, remote_resource_error,
-        resource_not_found_is_unsupported,
+        ResourceCapabilityStatus, ResourceResponseDisposition, classify_resource_capability,
+        classify_resource_response, remote_resource_error,
     };
 
     #[test]
     fn resource_404_is_unsupported_only_after_capability_probe() {
-        assert!(resource_not_found_is_unsupported(
-            ResourceCapabilityStatus::Unsupported
-        ));
-        assert!(!resource_not_found_is_unsupported(
-            ResourceCapabilityStatus::Supported
-        ));
-        assert!(!resource_not_found_is_unsupported(
-            ResourceCapabilityStatus::Unknown
-        ));
+        assert_eq!(
+            classify_resource_response(
+                StatusCode::NOT_FOUND,
+                Some(ResourceCapabilityStatus::Unsupported),
+            ),
+            ResourceResponseDisposition::Unsupported
+        );
+        assert_eq!(
+            classify_resource_response(
+                StatusCode::NOT_FOUND,
+                Some(ResourceCapabilityStatus::Supported),
+            ),
+            ResourceResponseDisposition::Remote(StatusCode::NOT_FOUND)
+        );
+        assert_eq!(
+            classify_resource_response(
+                StatusCode::NOT_FOUND,
+                Some(ResourceCapabilityStatus::Unknown),
+            ),
+            ResourceResponseDisposition::Remote(StatusCode::NOT_FOUND)
+        );
     }
 
     #[test]
@@ -469,6 +542,21 @@ mod tests {
         assert_eq!(remote.status, StatusCode::NOT_FOUND);
         assert_eq!(remote.details["failure_layer"], "remote_node");
         assert_eq!(remote.details["target_status"], 404);
+    }
+
+    #[test]
+    fn malformed_verified_resource_payload_is_safe_protocol_error() {
+        let error = super::malformed_resource_response_error("node-a");
+        assert_eq!(error.code, "peer_protocol_rejected");
+        assert_eq!(error.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(error.message, "peer resource response could not be decoded");
+        assert_eq!(error.details["failure_layer"], "peer_protocol");
+        assert_eq!(
+            error.details["dispatch_state"],
+            "dispatched_no_verified_response"
+        );
+        assert_eq!(error.details["target_node_id"], "node-a");
+        assert!(error.details["support_id"].as_str().is_some());
     }
 }
 
