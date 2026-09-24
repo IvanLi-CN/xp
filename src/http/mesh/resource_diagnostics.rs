@@ -102,14 +102,14 @@ mod tests {
     #[test]
     fn resource_peer_error_contains_only_the_bounded_diagnostic_contract() {
         let diagnostics = crate::control_plane_mesh::MeshRequestDiagnostics {
-            request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78".to_owned(),
+            request_id: xp_test_fixtures::primary_probe_run_id().to_owned(),
             route_attempts: vec![crate::mesh_telemetry::MeshRouteAttempt {
                 route: crate::mesh_telemetry::MeshRouteKind::DirectMesh,
                 failure: crate::mesh_telemetry::MeshFailureClass::PreResponseTimeout,
                 acknowledgement: crate::mesh_telemetry::MeshAcknowledgementState::NotObserved,
                 dispatch: crate::mesh_telemetry::MeshDispatchState::DispatchedNoVerifiedResponse,
-                observed_at: "2026-09-24T00:00:00Z".to_owned(),
-                request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78".to_owned(),
+                observed_at: xp_test_fixtures::baseline_timestamp().to_owned(),
+                request_id: xp_test_fixtures::primary_probe_run_id().to_owned(),
                 elapsed_ms: 5_000,
                 retry_count: 1,
                 http_status: None,
@@ -119,12 +119,12 @@ mod tests {
         };
         let error = resource_peer_unavailable_for(
             ResourceDiagnosticNode {
-                node_id: "node-101".to_owned(),
-                node_name: "101".to_owned(),
+                node_id: xp_test_fixtures::primary_node_id().to_owned(),
+                node_name: xp_test_fixtures::primary_node_name().to_owned(),
             },
             ResourceDiagnosticNode {
-                node_id: "node-us".to_owned(),
-                node_name: "us".to_owned(),
+                node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+                node_name: xp_test_fixtures::secondary_node_name().to_owned(),
             },
             diagnostics,
         );

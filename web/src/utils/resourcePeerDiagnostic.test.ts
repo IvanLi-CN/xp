@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { BackendApiError } from "../api/backendError";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { parseResourcePeerDiagnostic } from "./resourcePeerDiagnostic";
 
 const failures = [
@@ -20,22 +21,28 @@ function errorFor(failure: (typeof failures)[number]) {
 		message: "resource snapshot is unavailable from the target node",
 		details: {
 			diagnostic: {
-				origin: { node_id: "101", node_name: "101" },
-				target: { node_id: "us", node_name: "us" },
+				origin: {
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+					node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				},
+				target: {
+					node_id: fixtureCatalog.identifier.nodeSecondary(),
+					node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				},
 				route_attempts: [
 					{
 						route: "direct_mesh",
 						failure,
 						acknowledgement: "not_observed",
 						dispatch: "dispatched_no_verified_response",
-						observed_at: "2026-09-24T00:00:00.000Z",
-						request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+						observed_at: fixtureCatalog.timestamp.baseline(),
+						request_id: fixtureCatalog.identifier.ulidA(),
 						elapsed_ms: 100,
 						retry_count: 0,
 					},
 				],
 				public_circuit: "closed",
-				request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+				request_id: fixtureCatalog.identifier.ulidA(),
 			},
 		},
 	});
@@ -81,7 +88,7 @@ describe("parseResourcePeerDiagnostic", () => {
 		const diagnostic = error.details?.diagnostic as Record<string, unknown>;
 		(
 			diagnostic.route_attempts as Array<Record<string, unknown>>
-		)[0].request_id = "01M0C1SJ5M1JWE6CCKMXNXPZ79";
+		)[0].request_id = fixtureCatalog.identifier.ulidC();
 
 		expect(parseResourcePeerDiagnostic(error)).toBeNull();
 	});
@@ -93,14 +100,14 @@ describe("parseResourcePeerDiagnostic", () => {
 			failure: "pre_response_transport",
 			acknowledgement: "not_observed",
 			dispatch: "dispatched_no_verified_response",
-			observed_at: "2026-09-24T00:00:00Z",
-			request_id: "01M0C1SJ5M1JWE6CCKMXNXP7Z6",
+			observed_at: fixtureCatalog.timestamp.baseline(),
+			request_id: fixtureCatalog.identifier.ulidB(),
 			elapsed_ms: 200,
 			retry_count: 1,
 		};
 
 		expect(
 			parseResourcePeerDiagnostic(error)?.last_public_failure,
-		).toMatchObject({ request_id: "01M0C1SJ5M1JWE6CCKMXNXP7Z6" });
+		).toMatchObject({ request_id: fixtureCatalog.identifier.ulidB() });
 	});
 });

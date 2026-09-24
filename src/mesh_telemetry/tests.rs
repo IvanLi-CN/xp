@@ -202,7 +202,7 @@ async fn persists_the_latest_bounded_public_failure() {
             "peer-us",
             MeshPublicFailure {
                 observed_at: xp_test_fixtures::baseline_timestamp().to_owned(),
-                request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78".to_owned(),
+                request_id: xp_test_fixtures::primary_probe_run_id().to_owned(),
                 failure: MeshFailureClass::PreResponseTimeout,
                 acknowledgement: MeshAcknowledgementState::NotObserved,
                 dispatch: MeshDispatchState::DispatchedNoVerifiedResponse,
@@ -221,7 +221,7 @@ async fn persists_the_latest_bounded_public_failure() {
         .expect("public failure should persist");
     assert_eq!(failure.failure, MeshFailureClass::PreResponseTimeout);
     assert_eq!(failure.retry_count, 2);
-    assert_eq!(failure.request_id, "01M0C1SJ5M1JWE6CCKMXNXPZ78");
+    assert_eq!(failure.request_id, xp_test_fixtures::primary_probe_run_id());
 }
 
 #[tokio::test]
@@ -242,14 +242,20 @@ async fn does_not_replace_a_newer_public_failure_with_an_older_one() {
     telemetry
         .record_public_failure(
             "peer-us",
-            failure("2026-09-24T00:00:01.000Z", "01M0C1SJ5M1JWE6CCKMXNXPZ79"),
+            failure(
+                xp_test_fixtures::recent_timestamp(),
+                xp_test_fixtures::secondary_probe_run_id(),
+            ),
         )
         .await
         .unwrap();
     telemetry
         .record_public_failure(
             "peer-us",
-            failure("2026-09-24T00:00:00.000Z", "01M0C1SJ5M1JWE6CCKMXNXPZ78"),
+            failure(
+                xp_test_fixtures::baseline_timestamp(),
+                xp_test_fixtures::primary_probe_run_id(),
+            ),
         )
         .await
         .unwrap();
@@ -260,7 +266,7 @@ async fn does_not_replace_a_newer_public_failure_with_an_older_one() {
             .await
             .unwrap()
             .request_id,
-        "01M0C1SJ5M1JWE6CCKMXNXPZ79"
+        xp_test_fixtures::secondary_probe_run_id()
     );
 }
 
@@ -269,7 +275,7 @@ async fn orders_same_timestamp_public_failures_by_request_id() {
     let temp = tempfile::tempdir().unwrap();
     let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
     let failure = |request_id: &str| MeshPublicFailure {
-        observed_at: "2026-09-24T00:00:01.123456789Z".to_owned(),
+        observed_at: xp_test_fixtures::baseline_timestamp().to_owned(),
         request_id: request_id.to_owned(),
         failure: MeshFailureClass::PreResponseTimeout,
         acknowledgement: MeshAcknowledgementState::NotObserved,
@@ -280,11 +286,14 @@ async fn orders_same_timestamp_public_failures_by_request_id() {
     };
 
     telemetry
-        .record_public_failure("peer-us", failure("01M0C1SJ5M1JWE6CCKMXNXPZ79"))
+        .record_public_failure(
+            "peer-us",
+            failure(xp_test_fixtures::secondary_probe_run_id()),
+        )
         .await
         .unwrap();
     telemetry
-        .record_public_failure("peer-us", failure("01M0C1SJ5M1JWE6CCKMXNXPZ78"))
+        .record_public_failure("peer-us", failure(xp_test_fixtures::primary_probe_run_id()))
         .await
         .unwrap();
 
@@ -294,7 +303,7 @@ async fn orders_same_timestamp_public_failures_by_request_id() {
             .await
             .unwrap()
             .request_id,
-        "01M0C1SJ5M1JWE6CCKMXNXPZ79"
+        xp_test_fixtures::secondary_probe_run_id()
     );
 }
 

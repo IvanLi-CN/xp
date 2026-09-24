@@ -159,7 +159,7 @@ describe("runtime resource charts", () => {
 });
 
 describe("ResourcePeerDiagnosticState", () => {
-	const requestId = "01M0C1SJ5M1JWE6CCKMXNXPZ78";
+	const requestId = fixtureCatalog.identifier.ulidA();
 
 	function diagnosticError(
 		failure:
@@ -178,15 +178,21 @@ describe("ResourcePeerDiagnosticState", () => {
 			message: "resource snapshot is unavailable from the target node",
 			details: {
 				diagnostic: {
-					origin: { node_id: "101", node_name: "101" },
-					target: { node_id: "us", node_name: "us" },
+					origin: {
+						node_id: fixtureCatalog.identifier.nodePrimary(),
+						node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+					},
+					target: {
+						node_id: fixtureCatalog.identifier.nodeSecondary(),
+						node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+					},
 					route_attempts: [
 						{
 							route: "direct_mesh",
 							failure,
 							acknowledgement: "not_observed",
 							dispatch,
-							observed_at: "2026-09-24T00:00:00Z",
+							observed_at: fixtureCatalog.timestamp.baseline(),
 							request_id: requestId,
 							elapsed_ms: 100,
 							retry_count: 0,
@@ -222,16 +228,22 @@ describe("ResourcePeerDiagnosticState", () => {
 						message: "resource snapshot is unavailable from the target node",
 						details: {
 							diagnostic: {
-								origin: { node_id: "101", node_name: "101" },
-								target: { node_id: "us", node_name: "us" },
+								origin: {
+									node_id: fixtureCatalog.identifier.nodePrimary(),
+									node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+								},
+								target: {
+									node_id: fixtureCatalog.identifier.nodeSecondary(),
+									node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+								},
 								route_attempts: [
 									{
 										route: "direct_mesh",
 										failure: "pre_response_timeout",
 										acknowledgement: "not_observed",
 										dispatch: "dispatched_no_verified_response",
-										observed_at: "2026-09-24T00:00:00Z",
-										request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+										observed_at: fixtureCatalog.timestamp.baseline(),
+										request_id: fixtureCatalog.identifier.ulidA(),
 										elapsed_ms: 5000,
 										retry_count: 0,
 									},
@@ -240,14 +252,14 @@ describe("ResourcePeerDiagnosticState", () => {
 										failure: "circuit_open",
 										acknowledgement: "not_observed",
 										dispatch: "not_dispatched",
-										observed_at: "2026-09-24T00:00:05Z",
-										request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+										observed_at: fixtureCatalog.timestamp.recent(),
+										request_id: fixtureCatalog.identifier.ulidA(),
 										elapsed_ms: 5000,
 										retry_count: 0,
 									},
 								],
 								public_circuit: "open",
-								request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+								request_id: fixtureCatalog.identifier.ulidA(),
 							},
 						},
 					})
@@ -258,9 +270,17 @@ describe("ResourcePeerDiagnosticState", () => {
 			/>,
 		);
 
-		expect(screen.getByText("101 → us")).toBeVisible();
+		expect(
+			screen.getByText(
+				[
+					fixtureCatalog.identifier.nodeNamePrimary(),
+					" → ",
+					fixtureCatalog.identifier.nodeNameSecondary(),
+				].join(""),
+			),
+		).toBeVisible();
 		expect(screen.getByText(/Public 备用路径未发送/)).toBeVisible();
-		expect(screen.getByText("01M0C1SJ5M1JWE6CCKMXNXPZ78")).toBeVisible();
+		expect(screen.getByText(fixtureCatalog.identifier.ulidA())).toBeVisible();
 		expect(screen.getByRole("button", { name: "复制 ID" })).toBeVisible();
 	});
 
@@ -326,22 +346,28 @@ describe("ResourcePeerDiagnosticState", () => {
 						message: "resource snapshot is unavailable from the target node",
 						details: {
 							diagnostic: {
-								origin: { node_id: "101", node_name: "101" },
-								target: { node_id: "us", node_name: "us" },
+								origin: {
+									node_id: fixtureCatalog.identifier.nodePrimary(),
+									node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+								},
+								target: {
+									node_id: fixtureCatalog.identifier.nodeSecondary(),
+									node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+								},
 								route_attempts: [
 									{
 										route: "direct_mesh",
 										failure: "circuit_open",
 										acknowledgement: "not_observed",
 										dispatch: "not_dispatched",
-										observed_at: "2026-09-24T00:00:00Z",
-										request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+										observed_at: fixtureCatalog.timestamp.baseline(),
+										request_id: fixtureCatalog.identifier.ulidA(),
 										elapsed_ms: 0,
 										retry_count: 0,
 									},
 								],
 								public_circuit: "closed",
-								request_id: "01M0C1SJ5M1JWE6CCKMXNXPZ78",
+								request_id: fixtureCatalog.identifier.ulidA(),
 							},
 						},
 					})
