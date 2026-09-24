@@ -35,24 +35,34 @@ pub(super) fn verify_relay_ack(
     cluster_ca_key_pem: &str,
     cluster_ca_cert_pem: &str,
     header_name: &str,
-    missing_message: &str,
+    _missing_message: &str,
 ) -> Result<(), MeshRequestError> {
     let ack = response
         .headers()
         .get(header_name)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| {
-            dispatch_error(request, MeshRequestError::Protocol(missing_message.into()))
+            dispatch_error(
+                request,
+                MeshRequestError::AcknowledgementMissing {
+                    status: response.status().as_u16(),
+                },
+            )
         })?;
-    if let Err(error) = internal_auth::verify_ack_v2(
+    if internal_auth::verify_ack_v2(
         cluster_ca_key_pem,
         cluster_ca_cert_pem,
         verified,
         expected_node_id,
         response.status().as_u16(),
         ack,
-    ) {
-        return Err(dispatch_error(request, error.into()));
+    )
+    .is_err()
+    {
+        return Err(dispatch_error(
+            request,
+            MeshRequestError::AcknowledgementInvalid,
+        ));
     }
     Ok(())
 }
@@ -399,7 +409,12 @@ impl MeshAwareHttpClient {
                 Err(MeshRequestError::OutcomeUnknown) if !request.allow_ambiguous_fallback => {
                     return Err(MeshRequestError::OutcomeUnknown);
                 }
-                Err(error @ (MeshRequestError::Auth(_) | MeshRequestError::Protocol(_))) => {
+                Err(
+                    error @ (MeshRequestError::Auth(_)
+                    | MeshRequestError::Protocol(_)
+                    | MeshRequestError::AcknowledgementMissing { .. }
+                    | MeshRequestError::AcknowledgementInvalid),
+                ) => {
                     return Err(error);
                 }
                 Err(error) => last_error = Some(error),

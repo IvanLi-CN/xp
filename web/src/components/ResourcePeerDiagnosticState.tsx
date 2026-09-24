@@ -38,7 +38,11 @@ function boundaryText(
 	failure: string,
 	originName: string,
 	route?: string,
+	dispatch?: string,
 ): string {
+	if (failure === "pre_response_transport" && dispatch === "not_dispatched") {
+		return `${routeLabels[route ?? ""] ?? "该"} 路径未能发送请求，无法判断故障位于本地、网络、Tunnel 或目标 XP。`;
+	}
 	switch (failure) {
 		case "circuit_open":
 			if (route === "direct_mesh") {
@@ -170,6 +174,7 @@ export function ResourcePeerDiagnosticState({
 							lastAttempt?.failure ?? "outcome_unknown",
 							diagnostic.origin.node_name,
 							lastAttempt?.route,
+							lastAttempt?.dispatch,
 						)}
 					</div>
 					{publicWasNotSent ? (

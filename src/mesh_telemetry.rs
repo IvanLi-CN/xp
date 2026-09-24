@@ -501,7 +501,13 @@ impl MeshTelemetryHandle {
                 peer_id,
                 ..MeshPeerTelemetry::default()
             });
-        peer.last_public_failure = Some(failure);
+        if peer
+            .last_public_failure
+            .as_ref()
+            .is_none_or(|previous| public_failure_is_newer(&failure, previous))
+        {
+            peer.last_public_failure = Some(failure);
+        }
         state.persisted.revision += 1;
         let deferred_flush = self.persist_sample_if_due(&mut state, Instant::now())?;
         drop(state);
@@ -717,6 +723,18 @@ fn history_source_peer(peer: &MeshPeerTelemetry, max_buckets: usize) -> MeshPeer
         buckets: VecDeque::from(buckets),
         public_breaker: peer.public_breaker,
         last_public_failure: peer.last_public_failure.clone(),
+    }
+}
+
+fn public_failure_is_newer(candidate: &MeshPublicFailure, previous: &MeshPublicFailure) -> bool {
+    match (
+        DateTime::parse_from_rfc3339(&candidate.observed_at),
+        DateTime::parse_from_rfc3339(&previous.observed_at),
+    ) {
+        (Ok(candidate), Ok(previous)) => candidate >= previous,
+        (Ok(_), Err(_)) => true,
+        (Err(_), Ok(_)) => false,
+        (Err(_), Err(_)) => candidate.request_id >= previous.request_id,
     }
 }
 

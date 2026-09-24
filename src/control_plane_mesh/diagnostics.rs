@@ -162,6 +162,13 @@ pub(crate) fn failure_for_error(error: &MeshRequestError) -> MeshAttemptFailure 
             retry_count: 0,
             http_status: None,
         },
+        MeshRequestError::Reverse(_) | MeshRequestError::InvalidTarget(_) => MeshAttemptFailure {
+            failure: MeshFailureClass::PreResponseTransport,
+            acknowledgement: MeshAcknowledgementState::NotObserved,
+            dispatch: MeshDispatchState::NotDispatched,
+            retry_count: 0,
+            http_status: None,
+        },
         _ => MeshAttemptFailure {
             failure: MeshFailureClass::PreResponseTransport,
             acknowledgement: MeshAcknowledgementState::NotObserved,

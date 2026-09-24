@@ -646,7 +646,10 @@ impl MeshAwareHttpClient {
                         }
                         if matches!(
                             error,
-                            MeshRequestError::Auth(_) | MeshRequestError::Protocol(_)
+                            MeshRequestError::Auth(_)
+                                | MeshRequestError::Protocol(_)
+                                | MeshRequestError::AcknowledgementMissing { .. }
+                                | MeshRequestError::AcknowledgementInvalid
                         ) {
                             self.record_terminal_failure(peer).await;
                             return Err(error);

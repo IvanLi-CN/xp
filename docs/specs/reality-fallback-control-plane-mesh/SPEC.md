@@ -128,9 +128,10 @@
 ## 遥测与 API
 
 - 遥测原子保存在 `XP_DATA_DIR/mesh/telemetry.json`，不经过 Raft。
-- 常规 `record_sample` 与终态失败只更新内存，首次样本立即原子写入，之后每个节点最多每 5 秒
-  写入一次最新 revision；崩溃最多丢失该窗口内的普通诊断样本。路由原因、breaker 和显式事件
-  继续同步持久化；持久化失败保留 dirty 状态，并由后续样本重试。
+- 常规 `record_sample`、终态失败和最近一次 Public 故障只更新内存，首次样本立即原子写入，之后
+  每个节点最多每 5 秒写入一次最新 revision；崩溃最多丢失该窗口内的普通诊断样本或 Public
+  故障记录。路由状态变化、breaker 和显式事件继续同步持久化；持久化失败保留 dirty 状态，并由
+  后续样本重试。
 - 启动时优先读取 `mesh/telemetry.json`；文件缺失时只读提取 3.32 SQLite
   `history_snapshots.mesh_telemetry` BLOB，验证 schema 后原子创建 JSON。迁移不删除或修改旧 BLOB，
   无效 legacy 数据必须使启动失败而不是重置遥测；通用 history storage 不得清理该 JSON 文件。
