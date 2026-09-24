@@ -74,8 +74,9 @@ pub(super) async fn admin_list_nodes_resources(
         match response {
             Ok(response) if response.status().is_success() => {
                 match response.json::<ResourceSnapshot>().await {
-                    Ok(snapshot) => items.push(snapshot),
+                    Ok(snapshot) if snapshot.validate_wire_shape().is_ok() => items.push(snapshot),
                     Err(_) => unreachable_nodes.push(node.node_id),
+                    Ok(_) => unreachable_nodes.push(node.node_id),
                 }
             }
             Ok(response) if response.status() == StatusCode::NOT_FOUND => {

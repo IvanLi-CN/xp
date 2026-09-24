@@ -16,7 +16,7 @@ pub(super) async fn resource_mesh_error(
                 .circuits()
                 .retry_after_seconds(node_id, attempted_path == "public")
                 .await
-                .unwrap_or(1);
+                .expect("circuit-open resource errors must have a known cooldown");
             ApiError::new(
                 "peer_circuit_open",
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -254,6 +254,8 @@ mod tests {
     #[tokio::test]
     async fn circuit_open_mapping_is_bounded_and_not_dispatched() {
         let client = test_client();
+        let circuits = client.circuits();
+        circuits.record_protocol_failure("node-a").await;
         let mapped = resource_mesh_error(
             &client,
             "node-a",
@@ -272,7 +274,6 @@ mod tests {
             true,
         );
         assert_eq!(mapped.details["failure_layer"], "circuit_breaker");
-        assert_eq!(mapped.details["retry_after_seconds"], 1);
         assert!(
             mapped.details["retry_after_seconds"]
                 .as_u64()

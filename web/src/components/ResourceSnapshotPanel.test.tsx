@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { BackendApiError, throwIfNotOk } from "../api/backendError";
@@ -225,6 +225,47 @@ describe("ResourceTabContent diagnostics", () => {
 		expect(
 			screen.queryByText(/raw timeout details must stay hidden/),
 		).not.toBeInTheDocument();
+	});
+
+	it("updates stale age while the failed snapshot remains visible", () => {
+		vi.useFakeTimers();
+		const now = new Date("2026-09-24T12:00:00.000Z").getTime();
+		vi.setSystemTime(now);
+
+		render(
+			<ResourceTabContent
+				capabilityUnavailable={false}
+				isLoading={false}
+				isError
+				error={
+					new BackendApiError({
+						status: 504,
+						code: "peer_transport_timeout",
+						message: "timeout details must stay hidden",
+						details: {
+							failure_layer: "peer_transport",
+							retryable: true,
+						},
+					})
+				}
+				isFetching={false}
+				isOnline
+				onRetry={() => undefined}
+				dataUpdatedAt={now - 59 * 60 * 1000}
+				snapshot={supportedSnapshot}
+				historyByMetric={{}}
+				runtimeHistoryByMetric={{}}
+				selectedRuntimeRole={null}
+				onRuntimeDetailsChange={() => undefined}
+			/>,
+		);
+
+		expect(screen.getByText(/age 59 min/)).toBeInTheDocument();
+		act(() => {
+			vi.advanceTimersByTime(60_000);
+		});
+		expect(screen.getByText(/age 1 hr/)).toBeInTheDocument();
+		vi.useRealTimers();
 	});
 
 	it("keeps chart points while showing a scoped history refresh failure", () => {

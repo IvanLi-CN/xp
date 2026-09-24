@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { expect, within } from "@storybook/test";
 import type { ReactNode } from "react";
 
 import type {
@@ -408,6 +409,11 @@ export const UnknownError: Story = {
 			/>
 		</EvidenceFrame>
 	),
+	play: async ({ canvasElement }) => {
+		await expect(
+			await within(canvasElement).findByText("Resource read failed"),
+		).toBeInTheDocument();
+	},
 };
 
 export const XpApiError: Story = {
@@ -522,6 +528,15 @@ export const CircuitOpen: Story = {
 			/>
 		</EvidenceFrame>
 	),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText("Peer path is cooling down"),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("button", { name: /Retry resource read/i }),
+		).toBeDisabled();
+	},
 };
 
 export const RemoteError: Story = {
@@ -570,6 +585,13 @@ export const StaleSnapshot: Story = {
 			/>
 		</EvidenceFrame>
 	),
+	play: async ({ canvasElement }) => {
+		await expect(
+			await within(canvasElement).findByText(
+				/Showing the last successful snapshot/,
+			),
+		).toBeInTheDocument();
+	},
 };
 
 export const HistoryRefreshError: Story = {
@@ -592,4 +614,13 @@ export const HistoryRefreshError: Story = {
 			/>
 		</EvidenceFrame>
 	),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText("History unavailable"),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("button", { name: "Retry history" }),
+		).toBeInTheDocument();
+	},
 };

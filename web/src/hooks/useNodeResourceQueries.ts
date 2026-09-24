@@ -44,8 +44,12 @@ export function useNodeResourceQueries(props: {
 			props.nodeId,
 		],
 		enabled,
+		refetchOnMount: false,
+		refetchOnReconnect: false,
+		refetchOnWindowFocus: false,
 		queryFn: ({ signal }) =>
 			fetchAdminNodeResources(props.adminToken, props.nodeId, signal),
+		retry: false,
 		refetchInterval: (query: { state: { status: string } }) =>
 			resourceQueryRefetchInterval(props.isOnline, query.state.status, 15_000),
 	});
@@ -59,6 +63,9 @@ export function useNodeResourceQueries(props: {
 				metric,
 			],
 			enabled: enabled && props.activeTab === "resources",
+			refetchOnMount: false,
+			refetchOnReconnect: false,
+			refetchOnWindowFocus: false,
 			queryFn: ({ signal }: { signal: AbortSignal }) =>
 				fetchAdminNodeResourceHistory(
 					props.adminToken,
@@ -72,6 +79,7 @@ export function useNodeResourceQueries(props: {
 					query.state.status,
 					30_000,
 				),
+			retry: false,
 		})),
 	});
 	const resourceHistoryByMetric = Object.fromEntries(
@@ -100,6 +108,9 @@ export function useNodeResourceQueries(props: {
 				enabled &&
 				props.activeTab === "resources" &&
 				props.selectedRuntimeRole !== null,
+			refetchOnMount: false,
+			refetchOnReconnect: false,
+			refetchOnWindowFocus: false,
 			queryFn: ({ signal }: { signal: AbortSignal }) =>
 				fetchAdminNodeResourceHistory(
 					props.adminToken,
@@ -114,6 +125,7 @@ export function useNodeResourceQueries(props: {
 					query.state.status,
 					30_000,
 				),
+			retry: false,
 		})),
 	});
 	const runtimeHistoryByMetric = Object.fromEntries(

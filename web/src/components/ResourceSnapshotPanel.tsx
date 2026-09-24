@@ -166,9 +166,9 @@ function formatResourceTimestamp(timestamp: number): string {
 	return Number.isNaN(date.getTime()) ? "unavailable" : date.toLocaleString();
 }
 
-function formatResourceAge(timestamp: number): string {
+function formatResourceAge(timestamp: number, now = Date.now()): string {
 	if (!timestamp) return "unknown";
-	const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+	const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
 	if (seconds < 60) return "less than a minute";
 	if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
 	return `${Math.floor(seconds / 3600)} hr`;
@@ -189,6 +189,13 @@ function ResourceDiagnosticBanner(props: {
 	);
 	const canRetry =
 		props.isOnline && diagnostic.retryable && remainingSeconds === 0;
+	const [now, setNow] = useState(() => Date.now());
+
+	useEffect(() => {
+		if (!props.snapshot || !props.dataUpdatedAt) return;
+		const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+		return () => window.clearInterval(timer);
+	}, [props.dataUpdatedAt, props.snapshot]);
 	const isPeerLayer = [
 		"peer_transport",
 		"peer_protocol",
@@ -214,7 +221,7 @@ function ResourceDiagnosticBanner(props: {
 							Showing the last successful snapshot. Observed{" "}
 							{props.snapshot.observed_at}, last successful read{" "}
 							{formatResourceTimestamp(props.dataUpdatedAt ?? 0)}, age{" "}
-							{formatResourceAge(props.dataUpdatedAt ?? 0)}.
+							{formatResourceAge(props.dataUpdatedAt ?? 0, now)}.
 						</p>
 					) : null}
 				</div>
