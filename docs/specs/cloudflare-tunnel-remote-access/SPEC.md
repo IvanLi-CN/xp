@@ -1,5 +1,9 @@
 # Cloudflare Tunnel 远程访问
 
+## Related ADRs
+
+None
+
 ## 背景
 
 `xp-ops` 可以在已经由其他服务共享使用的 Cloudflare Tunnel 上配置 XP。此前 provision 会重写

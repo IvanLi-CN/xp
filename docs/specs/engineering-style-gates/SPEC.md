@@ -1,5 +1,9 @@
 # Engineering Style Gates
 
+## Related ADRs
+
+None
+
 ## Background
 
 The repository already had CI, hooks, formatters, and linters, but several gates could pass

@@ -1,5 +1,9 @@
 # Hard Cut: Remove Grants (membership-only access)
 
+## Related ADRs
+
+None
+
 ## Background
 
 - `grant-groups` 已下线，但 `grants` 仍是核心业务实体（订阅生成、Xray 下发、流量计量、配额状态都依赖）。

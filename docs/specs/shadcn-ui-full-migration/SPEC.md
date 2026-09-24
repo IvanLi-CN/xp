@@ -1,5 +1,9 @@
 # XP Web DaisyUI -> shadcn/ui 全量迁移
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - 当前 `web/` UI 基座是 DaisyUI v5 + 页面级手写 class 组合，缺少本地组件库边界，弹窗、按钮、表单、通知与表格存在重复骨架与重复状态语义。

@@ -1,5 +1,9 @@
 # CI workflow YAML 语法修复
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - `main` 在合入 PR #97 后，`ci` 工作流报错：`.github/workflows/ci.yml#L30` YAML 语法无效。

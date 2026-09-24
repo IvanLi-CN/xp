@@ -7,6 +7,10 @@ Reality Mesh and the peer public HTTPS origin remain supported peer-direct paths
 callers. Repository history synchronization is governed by the active cluster-history contract and
 uses the target node's public HTTPS `api_base_url` only; it does not use a dynamic relay.
 
+## Related ADRs
+
+None
+
 ## References
 
 - `../56dtr-reality-fallback-control-plane-mesh/SPEC.md`

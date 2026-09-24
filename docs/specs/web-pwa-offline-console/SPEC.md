@@ -1,5 +1,9 @@
 # Web PWA 化与离线状态控制台
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - Web 管理台现在交付可安装的 `site.webmanifest`、Service Worker 和独立的前端静态资源更新提示；

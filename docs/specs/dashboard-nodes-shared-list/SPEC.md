@@ -1,5 +1,9 @@
 # Dashboard/Nodes 共享节点列表与图标链接重构
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - `Dashboard` 与 `Nodes` 页当前使用不同节点数据源与不同列表结构，展示口径存在偏差。

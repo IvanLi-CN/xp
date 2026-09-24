@@ -1,5 +1,9 @@
 # Endpoint probe 按在线参与节点计分母
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - endpoint probe 的小时桶原先把“当前集群节点总数”当作固定分母。

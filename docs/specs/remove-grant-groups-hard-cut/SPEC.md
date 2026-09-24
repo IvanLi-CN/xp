@@ -1,5 +1,9 @@
 # 移除 Grant groups，切换为 user/node/endpoint 接入模型（硬切）
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - 现有系统仍暴露并依赖 `grant-groups` 作为 admin 侧接入配置核心。

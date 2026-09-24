@@ -2,6 +2,10 @@
 
 > 当前有效规范以本文为准；实现覆盖与当前状态见 `./IMPLEMENTATION.md`，关键演进原因见 `./HISTORY.md`。
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 现有节点历史只保留 90 天 daily traffic，并且 Web 仅在节点 runtime 失联时显示

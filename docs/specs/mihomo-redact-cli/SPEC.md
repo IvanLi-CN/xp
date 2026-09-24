@@ -1,5 +1,9 @@
 # Mihomo 订阅/配置脱敏 CLI
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - 线上排障时经常需要分享 Mihomo 订阅地址、raw/base64 订阅文本与 YAML 配置。

@@ -1,5 +1,9 @@
 # OpenRC low-memory runtime recovery
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 Alpine/OpenRC 节点可能运行在 `256MB` 且无 swap 的小容量服务器上。`xp + xray + cloudflared` 在资源抖动时容易出现短探活误判、重复 `rc-service restart`、`supervise-daemon` 残留多实例，最终导致 `xp` HTTP 端口能接 TCP 但不返回响应。

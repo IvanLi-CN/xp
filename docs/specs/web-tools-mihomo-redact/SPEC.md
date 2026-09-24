@@ -1,5 +1,9 @@
 # 前端 Tools 入口 + Mihomo 订阅脱敏
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - 现有 Web 管理端缺少统一的“工具入口”，零散的运维/排障能力只能依赖 CLI。

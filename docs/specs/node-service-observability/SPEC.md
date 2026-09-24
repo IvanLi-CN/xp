@@ -1,5 +1,9 @@
 # 节点服务可观测升级
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - 当前 Web 仅能看到节点静态元数据，缺少 `xp/xray/cloudflared` 运行态与近期趋势。

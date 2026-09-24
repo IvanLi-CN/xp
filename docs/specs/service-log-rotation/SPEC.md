@@ -1,5 +1,9 @@
 # xp-ops：服务日志保留与轮换
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - 目标运行环境适配：Arch/Debian（systemd）与 Alpine（OpenRC）。（见 `docs/desgin/requirements.md` 与 `src/ops/platform.rs`）

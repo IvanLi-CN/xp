@@ -1,5 +1,9 @@
 # Mihomo provider-only 动态链式订阅
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - 当前 `format=mihomo` 已支持系统动态节点 + 用户 mixin，但系统节点仍直接写入最终 `proxies`，一旦项目自己的入口地址、端口或节点集合变化，就需要整体刷新主配置。

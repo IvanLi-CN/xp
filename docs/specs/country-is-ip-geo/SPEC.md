@@ -1,5 +1,9 @@
 # country.is Hosted IP Geo hard cut
 
+## Related ADRs
+
+None
+
 ## 背景
 
 原先的入站 IP Geo 依赖本地 MMDB 文件与 DB-IP Lite 下载更新。该方案会占用本地磁盘，并在更新失败时留下临时文件，已经不适合作为默认方案。

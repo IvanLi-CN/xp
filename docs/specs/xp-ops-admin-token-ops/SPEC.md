@@ -1,5 +1,9 @@
 # xp-ops 管理员 Token 运维
 
+## Related ADRs
+
+None
+
 ## 背景
 
 管理员 Token 变更只有在服务重新读取环境后才生效。多节点集群还必须复制同一个 PHC；未经 shell 引用的 PHC 会被 `$` 展开破坏。

@@ -1,5 +1,9 @@
 # Grant groups 硬切下线与 Access 模型迁移
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 当前系统仍暴露并依赖 Grant groups（前端导航、后端 `/api/admin/grant-groups*`、领域命令分支）。用户接入关系已经具备 `user/node/endpoint` 语义（membership + grants），但实现仍夹带 group 概念，导致维护成本、认知成本与迁移成本升高。

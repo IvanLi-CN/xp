@@ -1,5 +1,9 @@
 # 用户订阅 Mihomo 混入配置
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - 当前订阅接口虽已支持 `format=mihomo`，但早期口径仍偏向“template + extra_*”自由拼装，容易把动态节点、provider 名称或落地组写死在用户输入里。

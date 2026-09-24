@@ -1,5 +1,9 @@
 # Endpoint probe：节点可跳过 self-test（hairpin 逃生舱）
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 Endpoint probe 的语义是“每个节点对每个 endpoint 走真实 ingress 路径发起 HTTPS 探测”，其中包含 self-test：

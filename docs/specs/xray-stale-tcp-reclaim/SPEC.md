@@ -1,5 +1,9 @@
 # Xray 业务入站 Stale TCP Reclaim 与升级落地
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - 现网节点的业务 TCP 会话在对端异常消失、WAN 状态切换或长时间半断开后，可能在 Xray / 内核侧停留过久，影响入站资源回收。

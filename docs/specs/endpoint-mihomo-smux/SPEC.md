@@ -3,6 +3,10 @@
 > 当前有效规范以本文为准。
 > 实现覆盖与当前状态见 `./IMPLEMENTATION.md`，关键演进原因见 `./HISTORY.md`。
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 一个客户端在同一 SS2022 接入点上建立大量独立 TCP 连接，

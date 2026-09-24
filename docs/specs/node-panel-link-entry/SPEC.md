@@ -1,5 +1,9 @@
 # Node panel icon-only entry for node lists
 
+## Related ADRs
+
+None
+
 ## Background
 
 - 节点列表的“打开节点面板”入口在视觉上不够明确：`Nodes` 页当前依赖名称/Node ID 文本链接，`Dashboard` 页节点表没有直达入口。

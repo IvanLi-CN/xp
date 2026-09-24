@@ -1,5 +1,9 @@
 # 节点 runtime fan-out 超时容忍
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - `/api/admin/nodes/runtime` 会从当前面板节点串行拉取远端节点的本地 runtime 概览。

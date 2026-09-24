@@ -1,5 +1,9 @@
 # Raft quorum 丢失：单节点 leader 灾难恢复（xp-ops）
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 当 Raft 集群失去多数派（quorum）时：

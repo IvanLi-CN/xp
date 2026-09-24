@@ -1,5 +1,9 @@
 # 完整托管栈 64 MiB 内存预算
 
+## Related ADRs
+
+None
+
 ## 背景
 
 小型节点需要在 `xp + xray + cloudflared + canary` 全部运行时保持低于 64 MiB

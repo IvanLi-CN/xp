@@ -1,5 +1,9 @@
 # Web 原地升级入口
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - `#n5mtq` 已经让 Web 顶栏展示当前 `xp` 版本并检查 stable GitHub Release，但更新发现后的行动仍需要离开 UI 手动执行。

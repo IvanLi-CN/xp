@@ -1,5 +1,9 @@
 # Prerelease E2E verification
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 仓库已实现 prerelease（rc）发布通道（通过 PR label `channel:prerelease`），并已修复 release workflow 的 YAML 语法问题。当前需要按“正规流程”（CI 通过后自动发版）做一次端到端验证，确认：
