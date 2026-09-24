@@ -140,17 +140,14 @@ None。该规范不改变后端接口，也不扩展 `ScrollArea` 的公开 Type
 
 Evidence target: `ui_demo`.
 
-PR: include
 Desktop `/demo`: the current web host uses cyan `server-bolt`, while ordinary
 nodes use the distinct `server-2` silhouette.
 ![Desktop resource navigation node icons](./assets/resource-navigation-node-icons.png)
 
-PR: include
 Desktop `/demo`: current-hosting-node endpoint uses cyan `plug-connected`;
 other endpoint children use `link`, both distinct from the `plug` resource category icon.
 ![Desktop resource navigation endpoint icons](./assets/resource-navigation-endpoint-icons.png)
 
-PR: include
 Desktop `/demo`: user children use `user-circle`, remain contained within the
 ten-row viewport, and retain the selected capsule.
 ![Desktop resource navigation user icons](./assets/resource-navigation-user-icons.png)
@@ -169,4 +166,3 @@ ten-row viewport, and retain the selected capsule.
 
 - `web/src/components/ui/scroll-area.tsx`
 - `web/src/components/ui/scroll-area.stories.tsx`
-- `docs/plan/0019:subscription-preview-formatting/PLAN.md`

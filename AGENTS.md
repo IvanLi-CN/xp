@@ -6,7 +6,7 @@
 - `web/`: Vite + React admin UI (TanStack Router/Query, Tailwind + DaisyUI).
 - DaisyUI theme prompt: `https://daisyui.com/llms.txt give me a light daisyUI 5 theme with tropical color palette`
 - `docs/desgin/`: design specs (requirements, architecture, API, quota, cluster, workflows).
-- `docs/plan/`: milestone-level plan and acceptance criteria.
+- `docs/specs/`: durable topic contracts with `SPEC.md`, `IMPLEMENTATION.md`, and `HISTORY.md`.
 - `scripts/`: repo tooling and helper scripts.
 - Build artifacts: `target/`, `web/dist/` (generated; don’t edit).
 

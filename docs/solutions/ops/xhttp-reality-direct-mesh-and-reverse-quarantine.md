@@ -10,7 +10,7 @@ tags:
   - native-reverse
 status: active
 related_specs:
-  - docs/specs/56dtr-reality-fallback-control-plane-mesh/SPEC.md
+  - docs/specs/reality-fallback-control-plane-mesh/SPEC.md
   - docs/specs/reality-mesh-reverse-relay/SPEC.md
 ---
 
@@ -80,6 +80,6 @@ Reverse also lacked an enforceable proof that dynamic removal closed every physi
 ## References
 
 - `docs/adr/0014-xhttp-endpoint-direct-mesh.md`
-- `docs/specs/56dtr-reality-fallback-control-plane-mesh/SPEC.md`
+- `docs/specs/reality-fallback-control-plane-mesh/SPEC.md`
 - `docs/specs/reality-mesh-reverse-relay/SPEC.md`
 - `tests/xray_mesh_transport_e2e.rs`

@@ -230,7 +230,7 @@ Mobile (`393x852` CSS viewport), repeated failure state:
 
 ## 文档更新（Docs to Update）
 
-- `docs/specs/7qj3h-web-pwa-offline-console/`
+- `docs/specs/web-pwa-offline-console/`
 - `docs/solutions/web/pwa-offline-admin-shell.md`
 - `docs/ops/**`
 - `AGENTS.md`
@@ -245,14 +245,6 @@ Mobile (`393x852` CSS viewport), repeated failure state:
 - [x] PWA 缓存生命周期与 API 兼容合同保持独立，不以 build ID 或缓存键耦合。
 - [x] UI 交付需先补 Storybook 状态，再由稳定 `ui_demo` 提供视觉证据。
 - [x] 两个 Ticket URL 已回填，dispatch readiness 成立；产品与架构决策已冻结。
-
-## 实现里程碑（Milestones）
-
-- [x] 框架错误分类、项目风格恢复界面、静态缓存恢复动作及 document 级最小 fallback
-      可独立验收。
-- [x] PWA 完整 precache、waiting 更新、跨标签页旧缓存保留与延迟清理可独立验收。
-- [x] N/N-1/N-2 新 Web 对旧后端和旧 Web 对新后端的版本化合同、能力探测与局部降级
-      可独立验收。
 
 ## 风险 / 假设 / 开放问题
 

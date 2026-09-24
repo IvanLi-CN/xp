@@ -176,13 +176,6 @@ Raft 也不应承载高频 Observation。
 - 在运维文档中写清三种部署路径的 ICMP capability、journal 水位与
   Repository prerequisite。
 
-## 实现里程碑（Milestones）
-
-1. 状态、SQLite schema、journal stream、签名与 rollup 数据结构。
-2. 四类 executor、公网地址保护、ICMP capability 与 scheduler。
-3. Repository receiver、quality、rollup、retention 和 API。
-4. Web 工作台、Storybook、E2E、部署矩阵和视觉证据。
-
 ## 参考（References）
 
 - `../cluster-history-repositories/SPEC.md`

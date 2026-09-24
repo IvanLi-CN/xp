@@ -37,7 +37,7 @@ That combination makes the real-Xray harness look flaky even though the product 
 
 ## References
 
-- `docs/specs/t8m4q-xray-stale-tcp-reclaim/SPEC.md`
+- `docs/specs/xray-stale-tcp-reclaim/SPEC.md`
 - `docs/solutions/ci/musl-release-openssl-vendoring.md`
 - `scripts/e2e/run-local-xray-e2e.sh`
 - `scripts/testbox/run-shared-quota-xray-e2e.sh`

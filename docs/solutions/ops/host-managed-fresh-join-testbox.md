@@ -91,5 +91,5 @@ this solution documents the reusable Docker-only validation method.
 - `scripts/testbox/run-host-managed-fresh-join-e2e.sh`
 - `scripts/testbox/host-managed-fresh-join-remote.sh`
 - `scripts/testbox/compose-host-managed-fresh-join.yml`
-- `docs/specs/38wmj-cluster-node-onboarding/SPEC.md`
+- `docs/specs/cluster-node-onboarding/SPEC.md`
 - `docs/ops/README.md`

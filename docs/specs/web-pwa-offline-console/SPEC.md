@@ -1,0 +1,164 @@
+# Web PWA 化与离线状态控制台
+
+## 背景 / 问题陈述
+
+- Web 管理台现在交付可安装的 `site.webmanifest`、Service Worker 和独立的前端静态资源更新提示；
+  后续运行时韧性要求继续约束其缓存生命周期。
+- 管理台原本主要依赖在线 API 查询；浏览器刷新、慢网、临时断线和上游故障时，页面容易退化成空白加载或通用错误，而不是可读的运维视图。
+- 顶栏 `VersionIndicator` 只表达后端 `xp` 升级 job 状态，不表达 Web bundle 自身是否有新版本可刷新。
+
+## 目标 / 非目标
+
+### Goals
+
+- 让 `xp` Web 管理台成为真正可安装的 PWA，首次成功打开后具备 app shell 预缓存、导航兜底和独立的前端 bundle 更新提示。
+- 用 IndexedDB 持久化 TanStack Query 读缓存，让 major read pages 在已登录设备上支持离线只读 warm-load。
+- 统一离线状态语义：`offline`、`stale`、`last synced at`、`no cached data`，而不是只显示通用加载失败。
+- 新增 admin 聚合状态 SSE：在应用打开时持续推送 Dashboard / Nodes / Alerts / Upgrade badge 需要的聚合状态，并把最近快照持久化到本地。
+- 把离线能力限制在“只读运维控制台”：离线时所有 mutation、destructive actions、实时探测与依赖后端写入的交互必须禁用或拦截。
+
+### Non-goals
+
+- 不做离线 mutation queue、冲突合并或恢复联网后的自动重放。
+- 不做页面关闭后的 Web Push、系统通知中心集成或 Push 订阅管理。
+- 不承诺第一次冷启动也在 `1s` 内进入。
+- 不把所有鉴权 API 响应直接放入 Service Worker runtime cache。
+
+## 范围（Scope）
+
+### In scope
+
+- `web/vite.config.ts`、`web/src/main.tsx`、PWA manifest、Service Worker 注册与 bundle 更新提示。
+- `web/src/offline/**` 中的运行时在线状态、写保护、React Query 持久化与缓存判定工具。
+- `web/src/components/AppShell.tsx`、`ReadStateBanner`、`PwaStatusPrompt` 与主要管理读页面的离线只读 UX。
+- `src/http/mod.rs` 新增 `GET /api/admin/status/events` admin 聚合状态 SSE。
+- 相关测试、Storybook 场景、spec / solution / README 文档同步。
+
+### Out of scope
+
+- 后端 token 模式调整、本地二次解锁或本地 PIN。
+- 离线可编辑草稿的冲突协调。
+- Web Push 告警网关。
+
+## 需求（Requirements）
+
+### MUST
+
+- Web 构建必须注册并交付 Service Worker，manifest 必须可安装（`display` 使用 `standalone`），
+  并交付构建版本化的完整 app-shell precache。
+- 首次成功加载后，重复访问在断网场景下必须能显示可交互 app shell 与最近缓存内容，而不是浏览器错误页。
+- React Query 持久化必须只覆盖允许的 major read queries，`maxAge` 为 `24h`，且缓存 `buster` 绑定当前前端构建版本。
+- 离线时 major read pages 必须明确标记缓存视图与最近同步时间；无缓存时返回专门的 offline empty state。
+- Major read pages 的初始请求或带缓存的后台刷新若因 `BackendApiError.status === 401` 失败，必须提供英文
+  `Sign in` 入口，并把当前相对路径、查询参数和锚点作为登录完成后的返回地址；仅在验证成功后才用
+  新 token 替换本地保存的旧 token，且原有 `Retry` 仍可用。错误态中的 `Sign in` 与 `Retry` 必须使用
+  同级、同高的 secondary controls，避免重新登录入口以更大的主色块压过错误信息。
+- `403` 表示已认证但无权访问，必须保留现有权限错误 / 重试状态，不得显示重新登录入口。
+- 离线时任何 `POST` / `PUT` / `PATCH` / `DELETE` 到同源 `/api/*` 的前端写入都必须被 UI 或全局保护拦截。
+- `GET /api/admin/status/events` 必须要求 admin auth，返回
+  `text/event-stream`，并至少发送 `hello` 与聚合 `snapshot` 事件。
+- Dashboard / Nodes / Alerts / Upgrade badge 所需状态必须能由聚合 SSE 驱动更新，并在断线时显示 reconnecting / stale 提示。
+
+### SHOULD
+
+- 主要离线页应尽量复用已缓存查询结果，优先显示旧快照而不是立即抛错。
+- 版本更新提示应与后端升级 job 提示分离，避免用户把“前端可刷新”误认为“后端正在升级”。
+- Storybook 应提供稳定的离线状态画廊，供视觉验收与回归使用。
+
+## 接口与行为规格
+
+### PWA / 缓存层
+
+- Service Worker 只负责静态资源与导航回退，不缓存通用认证 API 响应。
+- 每次构建使用独立的 app-shell cache 名称和注入的 Web build ID；入口 HTML、JS、CSS、字体、图标和 manifest
+  必须在同一个 precache 中完整存在。安装下载或校验失败时删除未激活的目标 cache，保留当前 active build。
+- 新 worker 完整安装后保持 `waiting`，更新提示由 `PwaStatusPrompt` 呈现，只有用户确认后才发送
+  `SKIP_WAITING`。跨标签页的 `clientId -> buildId` ownership 写入独立的 `xp_sw_metadata` IndexedDB，旧
+  cache 只有在所有 owner 消失并完成 reconciliation 后才可清理。
+- Workbox legacy migration 是唯一后台激活例外：当精确的同 scope `workbox-precache-v2-<scope>` 存在，且
+  最多 1 秒的声明探测仍找不到任何有效 XP owner，完整新 Worker 记录 migration state 后可
+  `skipWaiting()`。它绝不 `clients.claim()` 或刷新旧页；旧页手动刷新或新开页面后才使用新 build。回收仅在
+  所有存活页面声明有效 XP build 后执行，且只删除记录中的 legacy precache 与迁移开始时的无 owner app-shell。
+- 新导航从 active build 获取完整 `index.html`；受控页面的静态子资源按其声明的 build 路由，无法确定或缺失时
+  失败并请求 cache recovery，不从另一构建拼接资源。
+- 管理读模型通过 `PersistQueryClientProvider` + IndexedDB 持久化；只持久化 allowlist 中成功完成的 query。
+- 离线模式由运行时在线状态推导为只读模式，页面级状态从缓存是否存在、最近更新时间、网络是否在线共同计算。
+
+### 状态 SSE
+
+| Method | Path                       | Auth  | Behavior                                        |
+| ------ | -------------------------- | ----- | ----------------------------------------------- |
+| GET    | `/api/admin/status/events` | admin | 返回 `hello`、聚合 `snapshot`，失败时发错误事件 |
+
+`snapshot` 至少包含：
+
+- `health`
+- `cluster_info`
+- `nodes_runtime`
+- `alerts`
+- `upgrade`
+
+## 验收标准（Acceptance Criteria）
+
+- Given 浏览器已成功加载过管理台一次，When 断网后再次访问，Then `app shell + 最近缓存内容` 在 warm-load 场景下可进入，而不是白屏或浏览器错误页。
+- Given 浏览器收到新前端 bundle，When Service Worker 完成更新，Then
+  页面显示独立的“new web bundle ready”提示，而不是复用升级 job 文案。
+- Given legacy Workbox 仍控制一个旧页面且没有有效 XP ownership，When 完整新 Worker 安装，Then 它后台激活
+  但不接管或刷新该页面；When 用户手动刷新或新开页面，Then 页面加载单一当前 build，且 legacy cache 仅在
+  最后一个旧页面迁移后回收。
+- Given 设备断网但本地仍有 token 与缓存，When 访问 Dashboard / Nodes /
+  Node details / Endpoints / Users / Quota policy / Service config / Tools，
+  Then 页面进入离线只读态并显示 `last synced at`。
+- Given 设备断网且页面没有缓存，When 打开对应详情页，Then 页面显示专门的 offline empty state，而不是通用请求失败。
+- Given 已保存的 admin token 已失效，When 管理读页面的初始请求返回 `401`，Then 错误态同时提供
+  `Sign in` 和 `Retry`；When 带缓存的后台刷新返回 `401`，Then 缓存横幅提供
+  `Sign in`；验证新 token 后返回触发错误的原路径、查询参数和锚点。
+- Given 管理读页面的初始请求返回 `403`，When 页面呈现错误态，Then 不提供 `Sign in`。
+- Given 离线只读模式，When 用户尝试保存 / 删除 / 创建 / 触发 probe / 运行后端工具，Then 交互被禁用或请求在前端被拦截。
+- Given 管理台在线打开，When `GET /api/admin/status/events`
+  持续推送状态变化，Then Dashboard / Nodes / Alerts / Upgrade badge
+  随快照更新；断流时 UI 显示 reconnecting / stale。
+
+## 非功能性验收 / 质量门槛
+
+- `cargo test`
+- `cd web && bun run lint`
+- `cd web && bun run typecheck`
+- `cd web && bun run test`
+- `cd web && bun run build-storybook`
+- `cd web && bun run test-storybook`
+
+## Visual Evidence
+
+- Storybook `Pages/NodesPage/OfflineCachedInventory`
+
+  PR: include
+
+  ![Offline nodes inventory](./assets/offline-nodes-page.png)
+- Storybook `Pages/NodeDetailsPage/OfflineCachedRuntime`
+
+  PR: include
+
+  ![Offline node details runtime](./assets/offline-node-details-page.png)
+- Storybook `Pages/NodesPage/UnauthorizedLoadError`
+
+  PR: include
+
+  ![401 recovery in the Nodes error state](./assets/auth-recovery-nodes-error.png)
+- Storybook `Pages/NodesPage/CachedUnauthorizedInventory`
+  - ![Cached 401 recovery on Nodes](./assets/auth-recovery-nodes-page.png)
+- Storybook `Components/ReadStateBanner/UnauthorizedCachedData`
+  - ![401 authentication recovery](./assets/auth-recovery-401.png)
+
+## 文档更新（Docs to Update）
+
+- `docs/specs/README.md`
+- `README.md`
+- `docs/solutions/web/pwa-offline-admin-shell.md`
+
+## 风险 / 假设 / 开放问题
+
+- 风险：缓存模型只覆盖 allowlist 中的读查询；未纳入 allowlist 的新页面默认不会自动具备离线读取能力。
+- 风险：离线只读模式允许本地草稿状态继续编辑，但不会保存到后端；页面文案需要持续保持这个边界。
+- 假设：`1s` 目标指首次成功加载之后的重复访问 warm-load，而不是第一次冷启动。
+- 开放问题：关闭页面后的 Push / 通知系统仍留待后续规格。

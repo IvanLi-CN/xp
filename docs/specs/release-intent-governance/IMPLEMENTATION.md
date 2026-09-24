@@ -52,3 +52,9 @@
 
 - `./SPEC.md`
 - `./HISTORY.md`
+
+## 实现里程碑（Milestones）
+
+- 唯一 type/channel label gate 和 merge-time event replay 可独立验证。
+- 精确 SHA readiness 与 Manual Backfill expected-version guard 可独立验证。
+- 治理 PR 合并后，目标 SHA 的 stable Release、checksums 和 GHCR 镜像完成验证。

@@ -43,5 +43,5 @@ NODATA responses do not end the propagation check early.
 ## References
 
 - `src/vless_https_canary.rs`
-- `docs/specs/3e4q4-mihomo-provider-dual-track/SPEC.md`
+- `docs/specs/mihomo-provider-dual-track/SPEC.md`
 - `docs/ops/README.md`

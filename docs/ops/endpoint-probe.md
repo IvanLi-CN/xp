@@ -3,9 +3,10 @@
 `xp` runs a cluster-wide endpoint probe to measure **reachability** and **latency** for every ingress endpoint.
 Results are recorded per-hour (UTC) and surfaced in the Admin UI (last 24 hours).
 
-This document is an ops-oriented companion to the frozen spec:
+This document is an ops-oriented companion to the canonical Specs:
 
-- `docs/plan/n93kd:endpoint-probe/PLAN.md`
+- `docs/specs/endpoint-probe-online-participants/SPEC.md`
+- `docs/specs/endpoint-probe-skip-self-test/SPEC.md`
 
 ## What is being tested
 

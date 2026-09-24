@@ -138,12 +138,6 @@
 - 维护根 `CONTEXT.md`、`docs/adr/0001-merge-time-release-intent.md`、
   `docs/ops/README.md` 和 `docs/ops/docker.md` 的发布真相。
 
-## 实现里程碑（Milestones）
-
-- 唯一 type/channel label gate 和 merge-time event replay 可独立验证。
-- 精确 SHA readiness 与 Manual Backfill expected-version guard 可独立验证。
-- 治理 PR 合并后，目标 SHA 的 stable Release、checksums 和 GHCR 镜像完成验证。
-
 ## 非功能性验收 / 质量门槛（Quality Gates）
 
 ### Testing
