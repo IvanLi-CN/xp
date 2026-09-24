@@ -32,6 +32,7 @@ mod managed_vless_create;
 mod mihomo_smux;
 #[path = "tests/platform_assets.rs"]
 mod platform_assets;
+mod resource_error;
 #[path = "tests/stale_learner_retirement.rs"]
 mod stale_learner_retirement;
 #[path = "tests/status_events.rs"]
@@ -72,7 +73,6 @@ use crate::{
     },
     xray_supervisor::XrayHealthHandle,
 };
-
 #[derive(Clone)]
 struct PanickingRaft {
     inner: LocalRaft,

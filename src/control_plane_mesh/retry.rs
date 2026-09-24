@@ -28,10 +28,15 @@ pub(super) async fn signed_send_with_public_gateway_retries(
     let allow_retry = allow_retry && request_allows_public_gateway_retry(request);
     let started = Instant::now();
     let mut retry = 0;
+    let mut confirmed_timeout = false;
     loop {
         let remaining = budget.saturating_sub(started.elapsed());
         if remaining.is_zero() {
-            return Err(MeshRequestError::OutcomeUnknown);
+            return Err(if confirmed_timeout {
+                MeshRequestError::TransportTimeout
+            } else {
+                MeshRequestError::OutcomeUnknown
+            });
         }
         let sent = tokio::time::timeout(
             remaining,
@@ -48,6 +53,7 @@ pub(super) async fn signed_send_with_public_gateway_retries(
         let (response, verified) = match sent {
             Ok(Ok(result)) => result,
             Ok(Err(error)) => {
+                confirmed_timeout |= error.is_timeout() && !error.is_connect();
                 if allow_retry
                     && is_retryable_public_transport_error(&error)
                     && let Some(delay) = next_retry_delay(started, budget, retry)
@@ -56,8 +62,9 @@ pub(super) async fn signed_send_with_public_gateway_retries(
                     retry += 1;
                     continue;
                 }
-                return Err(public_transport_error(
+                return Err(classify_public_retry_failure(
                     error,
+                    confirmed_timeout,
                     request.allow_ambiguous_fallback,
                 ));
             }
@@ -67,10 +74,26 @@ pub(super) async fn signed_send_with_public_gateway_retries(
                     retry += 1;
                     continue;
                 }
-                return Err(MeshRequestError::OutcomeUnknown);
+                return Err(if confirmed_timeout {
+                    MeshRequestError::TransportTimeout
+                } else {
+                    MeshRequestError::OutcomeUnknown
+                });
             }
         };
         return Ok((response, verified));
+    }
+}
+
+pub(super) fn classify_public_retry_failure(
+    error: reqwest::Error,
+    confirmed_timeout: bool,
+    allow_ambiguous_fallback: bool,
+) -> MeshRequestError {
+    if confirmed_timeout {
+        MeshRequestError::TransportTimeout
+    } else {
+        public_transport_error(error, allow_ambiguous_fallback)
     }
 }
 

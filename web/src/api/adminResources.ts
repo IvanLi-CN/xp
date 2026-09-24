@@ -8,6 +8,13 @@ export const ResourceCapabilitySchema = z.enum([
 	"unsupported",
 ]);
 export const ResourceDomainSchema = z.enum(["host", "cgroup"]);
+export const ResourceCaptureStateSchema = z.enum(["active", "suspended"]);
+export const ResourceRuntimeStateSchema = z.enum(["managed", "not_managed"]);
+export const ResourceHistoryQualitySchema = z.enum([
+	"complete",
+	"partial",
+	"local_only",
+]);
 export const ResourceRoleSchema = z.enum([
 	"xp",
 	"xray",
@@ -61,7 +68,7 @@ export const ResourceSnapshotSchema = z.object({
 	node_id: z.string(),
 	observed_at: z.string(),
 	resource_domain: ResourceDomainSchema,
-	capture_state: z.string(),
+	capture_state: ResourceCaptureStateSchema,
 	capability: ResourceCapabilitySchema,
 	domain: z.object({
 		cpu_busy_percent: MeasurementSchema,
@@ -76,7 +83,7 @@ export const ResourceSnapshotSchema = z.object({
 	runtimes: z.array(
 		z.object({
 			role: ResourceRoleSchema,
-			state: z.string(),
+			state: ResourceRuntimeStateSchema,
 			capability: ResourceCapabilitySchema,
 			metrics: z.object({
 				cpu_percent: MeasurementSchema,
@@ -101,7 +108,7 @@ export const ResourceSeriesPointSchema = z.object({
 export const ResourceRecentSeriesSchema = z.object({
 	metric: z.string(),
 	role: ResourceRoleSchema.nullable().optional(),
-	resolution: z.string(),
+	resolution: z.literal("15s"),
 	points: z.array(ResourceSeriesPointSchema),
 	truncated: z.boolean(),
 });
@@ -110,8 +117,8 @@ export type ResourceRecentSeries = z.infer<typeof ResourceRecentSeriesSchema>;
 export const ResourceHistoryResponseSchema = z.object({
 	metric: z.string(),
 	role: ResourceRoleSchema.nullable().optional(),
-	resolution: z.string(),
-	quality: z.string(),
+	resolution: z.enum(["1m", "15m", "1h"]),
+	quality: ResourceHistoryQualitySchema,
 	coverage: z.tuple([z.number(), z.number()]).nullable().optional(),
 	watermark: z.number().nullable().optional(),
 	gaps: z.array(

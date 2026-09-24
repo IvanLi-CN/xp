@@ -40,6 +40,11 @@ limit/current，不能把宿主机内存总量伪装成容器值。旧节点通�
 - 集群总览和 Node Details Resources Tab，current 15 秒轮询、history 30 秒轮询，以及
   unsupported/partial/suspended 状态。Resources Tab 始终显示四个固定 Domain 图；四个角色卡可展开其固定
   五图详情（CPU、RSS/PSS、读/写、FD、线程），一次只查询一个角色；底层仍固定查询七项单指标历史。
+- structured Node Details resource failure diagnostics for XP API, peer transport, peer protocol,
+  circuit breaker, verified remote-node errors, browser offline state, and unknown fallback.
+  Circuit-open replies return bounded `Retry-After`; current and per-series history polling pauses
+  after error and resumes only after a successful refetch. A current snapshot is retained only for
+  the page session, with observed time, last successful read time, and stale age kept distinct.
 - systemd/OpenRC/Docker 共用完整 `XP_DATA_DIR`，升级路径必须保留
   `resource_metrics.sqlite3`。
 - Repository membership 变更和新节点加入在提交前按 82 MiB/可采集节点和 40%/4 GiB quota

@@ -60,6 +60,11 @@ pub(super) fn verify_relay_ack(
 fn dispatch_error(request: &MeshRequest, error: MeshRequestError) -> MeshRequestError {
     if request.allow_ambiguous_fallback {
         error
+    } else if matches!(
+        error,
+        MeshRequestError::ReverseTimeout | MeshRequestError::TransportTimeout
+    ) {
+        MeshRequestError::TransportTimeout
     } else {
         MeshRequestError::OutcomeUnknown
     }
@@ -396,8 +401,15 @@ impl MeshAwareHttpClient {
                         .await;
                     return Ok(response);
                 }
-                Err(MeshRequestError::OutcomeUnknown) if !request.allow_ambiguous_fallback => {
-                    return Err(MeshRequestError::OutcomeUnknown);
+                Err(
+                    error @ (MeshRequestError::OutcomeUnknown | MeshRequestError::TransportTimeout),
+                ) if !request.allow_ambiguous_fallback => {
+                    return Err(error);
+                }
+                Err(error @ MeshRequestError::ReverseTimeout)
+                    if !request.allow_ambiguous_fallback =>
+                {
+                    return Err(error);
                 }
                 Err(error @ (MeshRequestError::Auth(_) | MeshRequestError::Protocol(_))) => {
                     return Err(error);
@@ -438,9 +450,6 @@ pub(super) async fn send_outer_request(
         Ok(result) => result
             .map(|response| attach_mesh_gate(response, gate_guard))
             .map_err(|error| public_transport_error(error, allow_ambiguous_fallback)),
-        Err(_) if allow_ambiguous_fallback => Err(MeshRequestError::Reverse(
-            "reverse outer request timed out before response headers".to_string(),
-        )),
         Err(_) => Err(MeshRequestError::OutcomeUnknown),
     }
 }

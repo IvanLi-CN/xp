@@ -5,10 +5,15 @@ pub enum MeshRequestError {
     InvalidTarget(String),
     Auth(internal_auth::AuthError),
     OutcomeUnknown,
+    TransportTimeout,
     Protocol(String),
     Reverse(String),
+    ReverseTimeout,
     Public(reqwest::Error),
-    CircuitOpen { path: &'static str },
+    CircuitOpen {
+        path: &'static str,
+        dispatched: bool,
+    },
 }
 
 impl From<internal_auth::AuthError> for MeshRequestError {
@@ -25,10 +30,14 @@ impl std::fmt::Display for MeshRequestError {
             Self::OutcomeUnknown => {
                 f.write_str("Mesh request outcome is unknown; it may already have been applied")
             }
+            Self::TransportTimeout => {
+                f.write_str("Mesh request timed out before a verified response")
+            }
             Self::Protocol(value) => write!(f, "Mesh protocol error: {value}"),
             Self::Reverse(value) => write!(f, "reverse relay failed: {value}"),
+            Self::ReverseTimeout => f.write_str("reverse relay timed out before response headers"),
             Self::Public(value) => write!(f, "public fallback failed: {value}"),
-            Self::CircuitOpen { path } => write!(f, "{path} circuit is cooling down"),
+            Self::CircuitOpen { path, .. } => write!(f, "{path} circuit is cooling down"),
         }
     }
 }

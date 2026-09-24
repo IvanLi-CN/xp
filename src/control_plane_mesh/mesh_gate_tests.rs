@@ -126,7 +126,8 @@ async fn normal_direct_preflight_obeys_open_direct_circuit() {
     assert!(matches!(
         error,
         MeshRequestError::CircuitOpen {
-            path: "Direct Mesh"
+            path: "Direct Mesh",
+            ..
         }
     ));
 }

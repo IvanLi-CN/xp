@@ -468,19 +468,15 @@ export function NodeDetailsPage() {
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodeHistory(adminToken, nodeId, signal),
 	});
-	const {
-		resourceCapability,
-		resourceQuery,
-		resourceHistoryByMetric,
-		runtimeHistoryByMetric,
-	} = useNodeResourceQueries({
-		adminToken,
-		nodeId,
-		nodesAvailable: nodesCapability.available,
-		isOnline: appRuntime.isOnline,
-		activeTab,
-		selectedRuntimeRole,
-	});
+	const { resourceCapability, resourceQuery, resourceTabProps } =
+		useNodeResourceQueries({
+			adminToken,
+			nodeId,
+			nodesAvailable: nodesCapability.available,
+			isOnline: appRuntime.isOnline,
+			activeTab,
+			selectedRuntimeRole,
+		});
 	const [runtimeLive, setRuntimeLive] =
 		useState<AdminNodeRuntimeDetailResponse | null>(null);
 	const [runtimeSseConnected, setRuntimeSseConnected] = useState(false);
@@ -962,12 +958,13 @@ export function NodeDetailsPage() {
 								error={resourceQuery.error}
 								isFetching={resourceQuery.isFetching}
 								isOnline={appRuntime.isOnline}
+								dataUpdatedAt={resourceQuery.dataUpdatedAt}
 								onRetry={() => resourceQuery.refetch()}
+								onOpenMeshStatus={() => navigate({ to: "/system-status" })}
+								{...resourceTabProps}
 								onRuntimeDetailsChange={setSelectedRuntimeRole}
 								selectedRuntimeRole={selectedRuntimeRole}
 								snapshot={resourceQuery.data}
-								historyByMetric={resourceHistoryByMetric}
-								runtimeHistoryByMetric={runtimeHistoryByMetric}
 							/>
 						</section>
 					</ModuleTabsPanel>

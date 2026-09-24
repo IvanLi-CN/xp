@@ -324,6 +324,20 @@ impl PeerCircuitBreakers {
         }
     }
 
+    pub async fn retry_after_seconds(&self, peer_id: &str, public_path: bool) -> Option<u64> {
+        let peers = if public_path {
+            &self.public_peers
+        } else {
+            &self.peers
+        };
+        let peers = peers.lock().await;
+        let circuit = peers.get(peer_id)?;
+        if circuit.half_open_in_flight {
+            return Some(1);
+        }
+        let remaining = circuit.retry_at?.saturating_duration_since(Instant::now());
+        (!remaining.is_zero()).then(|| remaining.as_secs().saturating_add(1).clamp(1, 300))
+    }
     pub async fn release_public_half_open_probe(&self, peer_id: &str) {
         let mut peers = self.public_peers.lock().await;
         if let Some(circuit) = peers.get_mut(peer_id) {

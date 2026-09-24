@@ -20,7 +20,7 @@ import { fixtureCatalog } from "../fixture-policy/catalog";
 import { buildDenseNodeIpUsageStories } from "../storybook/ipUsageStoryData";
 import { buildDenseNodeTcpConnectionStories } from "../storybook/tcpConnectionStoryData";
 
-const node: AdminNode = {
+export const node: AdminNode = {
 	node_id: fixtureCatalog.identifier.nodePrimary(),
 	node_name: fixtureCatalog.identifier.nodeNamePrimary(),
 	access_host: fixtureCatalog.host.primary(),
@@ -205,7 +205,7 @@ function resourceHistory(
 	return {
 		metric,
 		role: null,
-		resolution: "15s",
+		resolution: "1m",
 		quality: "complete",
 		coverage: [1_788_256_800, 1_788_257_145],
 		watermark: 1_788_257_145,
@@ -364,7 +364,7 @@ const runtimeHistoryByRole = {
 	Record<ResourceRole, Record<string, ResourceHistoryResponse>>
 >;
 
-const resourceMonitoringFixtures = {
+export const resourceMonitoringFixtures = {
 	snapshot: resourceSnapshot,
 	historyByMetric: resourceHistoryByMetric,
 	runtimeHistoryByRole,

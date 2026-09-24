@@ -35,6 +35,25 @@ import type {
 	MockWindowedUserTraffic,
 } from "./apiMock";
 
+export type ResourceMonitoringMockError = {
+	status: number;
+	code: string;
+	message: string;
+	details?: Record<string, unknown>;
+	headers?: Record<string, string>;
+};
+
+export type ResourceMonitoringMockErrorMap = Record<
+	string,
+	{
+		snapshot?: ResourceMonitoringMockError;
+		history?: Record<string, ResourceMonitoringMockError>;
+		runtimeHistory?: Partial<
+			Record<ResourceRole, Record<string, ResourceMonitoringMockError>>
+		>;
+	}
+>;
+
 export type MockStateSeed = {
 	health: HealthResponse;
 	clusterInfo: ClusterInfoResponse;
@@ -66,6 +85,7 @@ export type MockStateSeed = {
 		string,
 		Partial<Record<ResourceRole, Record<string, ResourceHistoryResponse>>>
 	>;
+	resourceMonitoringErrors?: ResourceMonitoringMockErrorMap;
 	nodeHistoryByNodeId: Record<string, NodeHistorySnapshot>;
 	userIpUsageByUserId: Record<string, MockWindowedUserIpUsage>;
 	nodeTrafficByNodeId: Record<string, MockWindowedNodeTraffic>;

@@ -5,7 +5,10 @@ import type {
 } from "../../src/api/adminResources";
 import { ResourceRoleSchema } from "../../src/api/adminResources";
 
-import type { MockStateSeed } from "./apiMockContract";
+import type {
+	MockStateSeed,
+	ResourceMonitoringMockError,
+} from "./apiMockContract";
 import { clone, errorResponse, jsonResponse } from "./mockResponses";
 
 export type ResourceMonitoringMockState = Pick<
@@ -13,7 +16,21 @@ export type ResourceMonitoringMockState = Pick<
 	| "nodeResourcesByNodeId"
 	| "nodeResourceHistoryByNodeId"
 	| "nodeResourceRuntimeHistoryByNodeId"
+	| "resourceMonitoringErrors"
 >;
+
+function errorFixtureResponse(fixture: ResourceMonitoringMockError): Response {
+	const response = errorResponse(
+		fixture.status,
+		fixture.code,
+		fixture.message,
+		fixture.details,
+	);
+	for (const [name, value] of Object.entries(fixture.headers ?? {})) {
+		response.headers.set(name, value);
+	}
+	return response;
+}
 
 export function handleResourceMonitoringMockRequest(
 	state: ResourceMonitoringMockState,
@@ -33,6 +50,14 @@ export function handleResourceMonitoringMockRequest(
 		const runtimeRole = ResourceRoleSchema.safeParse(role).data as
 			| ResourceRole
 			| undefined;
+		const error = role
+			? runtimeRole
+				? state.resourceMonitoringErrors?.[nodeId]?.runtimeHistory?.[
+						runtimeRole
+					]?.[metric ?? ""]
+				: undefined
+			: state.resourceMonitoringErrors?.[nodeId]?.history?.[metric ?? ""];
+		if (error) return errorFixtureResponse(error);
 		const history = metric
 			? role
 				? runtimeRole
@@ -54,6 +79,8 @@ export function handleResourceMonitoringMockRequest(
 	const snapshotMatch = path.match(/^\/api\/admin\/nodes\/([^/]+)\/resources$/);
 	if (!snapshotMatch) return null;
 	const nodeId = decodeURIComponent(snapshotMatch[1]);
+	const error = state.resourceMonitoringErrors?.[nodeId]?.snapshot;
+	if (error) return errorFixtureResponse(error);
 	const snapshot = state.nodeResourcesByNodeId?.[nodeId];
 	return snapshot
 		? jsonResponse(clone(snapshot))

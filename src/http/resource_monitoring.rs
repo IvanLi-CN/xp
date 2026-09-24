@@ -8,7 +8,11 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ApiError, ApiJson, AppState, CLUSTER_RUNTIME_FANOUT_TIMEOUT, mesh::send_mesh_internal_read,
+    ApiError, ApiJson, AppState, CLUSTER_RUNTIME_FANOUT_TIMEOUT,
+    mesh::{
+        MeshCapabilityProbeResponse, send_mesh_internal_capability_read,
+        send_mesh_internal_resource_read,
+    },
 };
 use crate::resource_monitoring::{
     ResourceGap, ResourceHistoryResponse, ResourcePolicy, ResourceRecentSeries, ResourceRole,
@@ -59,7 +63,7 @@ pub(super) async fn admin_list_nodes_resources(
             items.push(state.resource_monitoring.current().await);
             continue;
         }
-        let response = send_mesh_internal_read(
+        let response = send_mesh_internal_resource_read(
             &state,
             &state.mesh_client,
             &node,
@@ -70,12 +74,24 @@ pub(super) async fn admin_list_nodes_resources(
         match response {
             Ok(response) if response.status().is_success() => {
                 match response.json::<ResourceSnapshot>().await {
-                    Ok(snapshot) => items.push(snapshot),
+                    Ok(snapshot) if snapshot.validate_wire_shape().is_ok() => items.push(snapshot),
                     Err(_) => unreachable_nodes.push(node.node_id),
+                    Ok(_) => unreachable_nodes.push(node.node_id),
                 }
             }
             Ok(response) if response.status() == StatusCode::NOT_FOUND => {
-                items.push(unsupported_snapshot(&node.node_id));
+                match classify_resource_response(
+                    response.status(),
+                    Some(resource_capability_status(&state, &node).await),
+                ) {
+                    ResourceResponseDisposition::Unsupported => {
+                        items.push(unsupported_snapshot(&node.node_id));
+                    }
+                    ResourceResponseDisposition::Remote(_) => {
+                        unreachable_nodes.push(node.node_id);
+                    }
+                    ResourceResponseDisposition::Success => unreachable_nodes.push(node.node_id),
+                }
             }
             _ => unreachable_nodes.push(node.node_id),
         }
@@ -103,7 +119,7 @@ pub(super) async fn admin_get_node_resources(
     if node.node_id == state.cluster.node_id {
         return Ok(Json(state.resource_monitoring.current().await));
     }
-    let response = send_mesh_internal_read(
+    let response = send_mesh_internal_resource_read(
         &state,
         &state.mesh_client,
         &node,
@@ -111,21 +127,28 @@ pub(super) async fn admin_get_node_resources(
         CLUSTER_RUNTIME_FANOUT_TIMEOUT,
     )
     .await?;
-    if response.status() == StatusCode::NOT_FOUND {
-        return Ok(Json(unsupported_snapshot(&node_id)));
+    let capability_status = if response.status() == StatusCode::NOT_FOUND {
+        Some(resource_capability_status(&state, &node).await)
+    } else {
+        None
+    };
+    match classify_resource_response(response.status(), capability_status) {
+        ResourceResponseDisposition::Unsupported => {
+            return Ok(Json(unsupported_snapshot(&node_id)));
+        }
+        ResourceResponseDisposition::Remote(status) => {
+            return Err(remote_resource_error(&node_id, status));
+        }
+        ResourceResponseDisposition::Success => {}
     }
-    if !response.status().is_success() {
-        return Err(ApiError::new(
-            "resource_monitoring_unsupported",
-            StatusCode::NOT_IMPLEMENTED,
-            "node does not expose resource monitoring",
-        ));
-    }
-    response
+    let snapshot = response
         .json::<ResourceSnapshot>()
         .await
-        .map(Json)
-        .map_err(|error| ApiError::internal(error.to_string()))
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    snapshot
+        .validate_wire_shape()
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    Ok(Json(snapshot))
 }
 
 pub(super) async fn admin_get_node_resources_recent(
@@ -156,7 +179,7 @@ pub(super) async fn admin_get_node_resources_recent(
         path.push_str("&role=");
         path.push_str(role.as_str());
     }
-    let response = send_mesh_internal_read(
+    let response = send_mesh_internal_resource_read(
         &state,
         &state.mesh_client,
         &node,
@@ -164,18 +187,28 @@ pub(super) async fn admin_get_node_resources_recent(
         CLUSTER_RUNTIME_FANOUT_TIMEOUT,
     )
     .await?;
-    if !response.status().is_success() {
-        return Err(ApiError::new(
-            "resource_monitoring_unsupported",
-            StatusCode::NOT_IMPLEMENTED,
-            "node does not expose resource monitoring",
-        ));
+    let capability_status = if response.status() == StatusCode::NOT_FOUND {
+        Some(resource_capability_status(&state, &node).await)
+    } else {
+        None
+    };
+    match classify_resource_response(response.status(), capability_status) {
+        ResourceResponseDisposition::Unsupported => {
+            return Ok(Json(unsupported_recent_series(&query.metric, query.role)));
+        }
+        ResourceResponseDisposition::Remote(status) => {
+            return Err(remote_resource_error(&node_id, status));
+        }
+        ResourceResponseDisposition::Success => {}
     }
-    response
+    let series = response
         .json::<ResourceRecentSeries>()
         .await
-        .map(Json)
-        .map_err(|error| ApiError::internal(error.to_string()))
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    series
+        .validate_wire_shape(&query.metric, query.role)
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    Ok(Json(series))
 }
 
 pub(super) async fn admin_get_node_resources_history(
@@ -280,7 +313,7 @@ pub(super) async fn admin_get_node_resources_history(
         path.push_str("&resolution=");
         path.push_str(&resolution);
     }
-    let response = send_mesh_internal_read(
+    let response = send_mesh_internal_resource_read(
         &state,
         &state.mesh_client,
         &node,
@@ -288,25 +321,264 @@ pub(super) async fn admin_get_node_resources_history(
         CLUSTER_RUNTIME_FANOUT_TIMEOUT,
     )
     .await?;
-    if response.status() == StatusCode::NOT_FOUND {
-        return Err(ApiError::new(
-            "resource_monitoring_unsupported",
-            StatusCode::NOT_IMPLEMENTED,
-            "node does not expose resource monitoring",
-        ));
+    let capability_status = if response.status() == StatusCode::NOT_FOUND {
+        Some(resource_capability_status(&state, &node).await)
+    } else {
+        None
+    };
+    match classify_resource_response(response.status(), capability_status) {
+        ResourceResponseDisposition::Unsupported => {
+            return Err(ApiError::new(
+                "resource_monitoring_unsupported",
+                StatusCode::NOT_IMPLEMENTED,
+                "node does not expose resource monitoring",
+            )
+            .with_detail("failure_layer", "unknown")
+            .with_detail("cause", "capability_unsupported")
+            .with_detail("confidence", "confirmed")
+            .with_detail("target_node_id", node_id.as_str())
+            .with_detail("attempted_path", "unknown")
+            .with_detail("dispatch_state", "verified_remote_response")
+            .with_detail("retryable", false)
+            .with_detail("support_id", crate::id::new_ulid_string()));
+        }
+        ResourceResponseDisposition::Remote(status) => {
+            return Err(remote_resource_error(&node_id, status));
+        }
+        ResourceResponseDisposition::Success => {}
     }
-    if !response.status().is_success() {
-        return Err(ApiError::new(
-            "resource_history_unavailable",
-            StatusCode::SERVICE_UNAVAILABLE,
-            "resource history is unavailable",
-        ));
-    }
-    response
+    let history = response
         .json::<ResourceHistoryResponse>()
         .await
-        .map(Json)
-        .map_err(|error| ApiError::internal(error.to_string()))
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    history
+        .validate_wire_shape(&query.metric, query.role)
+        .map_err(|_| malformed_resource_response_error(&node_id))?;
+    Ok(Json(history))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResourceCapabilityStatus {
+    Supported,
+    Unsupported,
+    Unknown,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalCapabilitiesResponse {
+    capabilities: Vec<String>,
+}
+
+async fn resource_capability_status(
+    state: &AppState,
+    node: &crate::domain::Node,
+) -> ResourceCapabilityStatus {
+    let probe = send_mesh_internal_capability_read(
+        state,
+        &state.mesh_client,
+        node,
+        CLUSTER_RUNTIME_FANOUT_TIMEOUT,
+    )
+    .await;
+    let Ok(probe) = probe else {
+        return ResourceCapabilityStatus::Unknown;
+    };
+    let MeshCapabilityProbeResponse::Verified { response, deadline } = probe else {
+        return ResourceCapabilityStatus::Unsupported;
+    };
+    let status = response.status();
+    if status == StatusCode::NOT_FOUND {
+        return classify_resource_capability(status, None);
+    }
+    if !status.is_success() {
+        return classify_resource_capability(status, None);
+    }
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    let Ok(body) = super::bounded_json::read_bounded_internal_json::<InternalCapabilitiesResponse>(
+        response, remaining,
+    )
+    .await
+    else {
+        return ResourceCapabilityStatus::Unknown;
+    };
+    classify_resource_capability(status, Some(&body.capabilities))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResourceResponseDisposition {
+    Success,
+    Unsupported,
+    Remote(StatusCode),
+}
+
+fn classify_resource_response(
+    status: StatusCode,
+    capability_status: Option<ResourceCapabilityStatus>,
+) -> ResourceResponseDisposition {
+    if status == StatusCode::NOT_FOUND
+        && matches!(
+            capability_status,
+            Some(ResourceCapabilityStatus::Unsupported)
+        )
+    {
+        return ResourceResponseDisposition::Unsupported;
+    }
+    if status.is_success() {
+        ResourceResponseDisposition::Success
+    } else {
+        ResourceResponseDisposition::Remote(status)
+    }
+}
+
+fn classify_resource_capability(
+    status: StatusCode,
+    capabilities: Option<&[String]>,
+) -> ResourceCapabilityStatus {
+    if status == StatusCode::NOT_FOUND {
+        return ResourceCapabilityStatus::Unsupported;
+    }
+    if !status.is_success() {
+        return ResourceCapabilityStatus::Unknown;
+    }
+    let Some(capabilities) = capabilities else {
+        return ResourceCapabilityStatus::Unknown;
+    };
+    if capabilities
+        .iter()
+        .any(|capability| capability == "admin.resource-monitoring")
+    {
+        ResourceCapabilityStatus::Supported
+    } else {
+        ResourceCapabilityStatus::Unsupported
+    }
+}
+
+fn remote_resource_error(node_id: &str, target_status: StatusCode) -> ApiError {
+    ApiError::new(
+        "remote_node_error",
+        target_status,
+        "the target node returned a resource error",
+    )
+    .with_detail("failure_layer", "remote_node")
+    .with_detail("cause", "remote_resource_error")
+    .with_detail("confidence", "confirmed")
+    .with_detail("target_node_id", node_id)
+    // The peer client may complete through Mesh, Reverse, or Public fallback. The
+    // response type currently does not carry that route, so keep the diagnostic honest.
+    .with_detail("attempted_path", "unknown")
+    .with_detail("dispatch_state", "verified_remote_response")
+    .with_detail(
+        "retryable",
+        target_status == StatusCode::TOO_MANY_REQUESTS || target_status.is_server_error(),
+    )
+    .with_detail("target_status", target_status.as_u16())
+    .with_detail("support_id", crate::id::new_ulid_string())
+}
+
+fn malformed_resource_response_error(node_id: &str) -> ApiError {
+    ApiError::new(
+        "peer_protocol_rejected",
+        StatusCode::BAD_GATEWAY,
+        "peer resource response could not be decoded",
+    )
+    .with_detail("failure_layer", "peer_protocol")
+    .with_detail("cause", "protocol_rejected")
+    .with_detail("confidence", "confirmed")
+    .with_detail("target_node_id", node_id)
+    .with_detail("attempted_path", "unknown")
+    .with_detail("dispatch_state", "dispatched_no_verified_response")
+    .with_detail("retryable", true)
+    .with_detail("support_id", crate::id::new_ulid_string())
+}
+
+fn unsupported_recent_series(metric: &str, role: Option<ResourceRole>) -> ResourceRecentSeries {
+    ResourceRecentSeries {
+        metric: metric.to_string(),
+        role,
+        resolution: "15s".to_string(),
+        points: Vec::new(),
+        truncated: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+
+    use super::{
+        ResourceCapabilityStatus, ResourceResponseDisposition, classify_resource_capability,
+        classify_resource_response, remote_resource_error,
+    };
+
+    #[test]
+    fn resource_404_is_unsupported_only_after_capability_probe() {
+        assert_eq!(
+            classify_resource_response(
+                StatusCode::NOT_FOUND,
+                Some(ResourceCapabilityStatus::Unsupported),
+            ),
+            ResourceResponseDisposition::Unsupported
+        );
+        assert_eq!(
+            classify_resource_response(
+                StatusCode::NOT_FOUND,
+                Some(ResourceCapabilityStatus::Supported),
+            ),
+            ResourceResponseDisposition::Remote(StatusCode::NOT_FOUND)
+        );
+        assert_eq!(
+            classify_resource_response(
+                StatusCode::NOT_FOUND,
+                Some(ResourceCapabilityStatus::Unknown),
+            ),
+            ResourceResponseDisposition::Remote(StatusCode::NOT_FOUND)
+        );
+    }
+
+    #[test]
+    fn capability_route_404_is_legacy_unsupported_but_remote_404_is_preserved() {
+        assert_eq!(
+            classify_resource_capability(StatusCode::NOT_FOUND, None),
+            ResourceCapabilityStatus::Unsupported
+        );
+        assert_eq!(
+            classify_resource_capability(
+                StatusCode::OK,
+                Some(&["admin.resource-monitoring".to_string()]),
+            ),
+            ResourceCapabilityStatus::Supported
+        );
+        assert_eq!(
+            classify_resource_capability(StatusCode::OK, None),
+            ResourceCapabilityStatus::Unknown
+        );
+        assert_eq!(
+            classify_resource_capability(StatusCode::INTERNAL_SERVER_ERROR, None),
+            ResourceCapabilityStatus::Unknown
+        );
+
+        let remote = remote_resource_error("node-a", StatusCode::NOT_FOUND);
+        assert_eq!(remote.code, "remote_node_error");
+        assert_eq!(remote.status, StatusCode::NOT_FOUND);
+        assert_eq!(remote.details["failure_layer"], "remote_node");
+        assert_eq!(remote.details["target_status"], 404);
+        assert_eq!(remote.details["attempted_path"], "unknown");
+    }
+
+    #[test]
+    fn malformed_verified_resource_payload_is_safe_protocol_error() {
+        let error = super::malformed_resource_response_error("node-a");
+        assert_eq!(error.code, "peer_protocol_rejected");
+        assert_eq!(error.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(error.message, "peer resource response could not be decoded");
+        assert_eq!(error.details["failure_layer"], "peer_protocol");
+        assert_eq!(
+            error.details["dispatch_state"],
+            "dispatched_no_verified_response"
+        );
+        assert_eq!(error.details["target_node_id"], "node-a");
+        assert!(error.details["support_id"].as_str().is_some());
+    }
 }
 
 pub(super) async fn admin_get_resource_policy(

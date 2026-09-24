@@ -2,6 +2,59 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeErr
 
 use super::*;
 
+impl ResourceSnapshot {
+    pub fn validate_wire_shape(&self) -> Result<(), &'static str> {
+        if !matches!(self.capture_state.as_str(), "active" | "suspended") {
+            return Err("resource_capture_state_invalid");
+        }
+        let mut roles = BTreeMap::new();
+        for runtime in &self.runtimes {
+            if !matches!(runtime.state.as_str(), "managed" | "not_managed") {
+                return Err("resource_runtime_state_invalid");
+            }
+            if roles.insert(runtime.role, ()).is_some() {
+                return Err("resource_runtime_role_duplicate");
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ResourceRecentSeries {
+    pub fn validate_wire_shape(
+        &self,
+        expected_metric: &str,
+        expected_role: Option<ResourceRole>,
+    ) -> Result<(), &'static str> {
+        if self.metric != expected_metric || self.role != expected_role {
+            return Err("resource_series_identity_mismatch");
+        }
+        if self.resolution != "15s" {
+            return Err("resource_recent_resolution_invalid");
+        }
+        Ok(())
+    }
+}
+
+impl ResourceHistoryResponse {
+    pub fn validate_wire_shape(
+        &self,
+        expected_metric: &str,
+        expected_role: Option<ResourceRole>,
+    ) -> Result<(), &'static str> {
+        if self.metric != expected_metric || self.role != expected_role {
+            return Err("resource_series_identity_mismatch");
+        }
+        if !matches!(self.resolution.as_str(), "1m" | "15m" | "1h") {
+            return Err("resource_history_resolution_invalid");
+        }
+        if !matches!(self.quality.as_str(), "complete" | "partial" | "local_only") {
+            return Err("resource_history_quality_invalid");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CompactResourceHistoryPayload {

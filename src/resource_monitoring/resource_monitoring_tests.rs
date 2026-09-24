@@ -7,6 +7,77 @@ fn snapshot(value: f64) -> ResourceSnapshot {
 }
 
 #[test]
+fn resource_wire_shape_rejects_unknown_semantic_states() {
+    let mut invalid_capture = snapshot(10.0);
+    assert!(invalid_capture.validate_wire_shape().is_ok());
+
+    invalid_capture.capture_state = "unknown".to_string();
+    assert_eq!(
+        invalid_capture.validate_wire_shape(),
+        Err("resource_capture_state_invalid")
+    );
+
+    let mut invalid_runtime = snapshot(10.0);
+    invalid_runtime.runtimes[0].state = "running".to_string();
+    assert_eq!(
+        invalid_runtime.validate_wire_shape(),
+        Err("resource_runtime_state_invalid")
+    );
+
+    let mut duplicate_role = snapshot(10.0);
+    let runtime = duplicate_role.runtimes[0].clone();
+    duplicate_role.runtimes.push(runtime);
+    assert_eq!(
+        duplicate_role.validate_wire_shape(),
+        Err("resource_runtime_role_duplicate")
+    );
+}
+
+#[test]
+fn resource_series_wire_shape_requires_requested_identity() {
+    let recent = ResourceRecentSeries {
+        metric: "cpu_percent".to_string(),
+        role: Some(ResourceRole::Xp),
+        resolution: "15s".to_string(),
+        points: Vec::new(),
+        truncated: false,
+    };
+    assert!(
+        recent
+            .validate_wire_shape("cpu_percent", Some(ResourceRole::Xp))
+            .is_ok()
+    );
+    assert_eq!(
+        recent.validate_wire_shape("rss_bytes", Some(ResourceRole::Xp)),
+        Err("resource_series_identity_mismatch")
+    );
+
+    let history = ResourceHistoryResponse {
+        metric: "cpu_percent".to_string(),
+        role: Some(ResourceRole::Xp),
+        resolution: "1m".to_string(),
+        quality: "complete".to_string(),
+        coverage: None,
+        watermark: None,
+        gaps: Vec::new(),
+        freshness_seconds: None,
+        truncated: false,
+        points: Vec::new(),
+    };
+    assert!(
+        history
+            .validate_wire_shape("cpu_percent", Some(ResourceRole::Xp))
+            .is_ok()
+    );
+    let mut invalid = history.clone();
+    invalid.quality = "unknown".to_string();
+    assert_eq!(
+        invalid.validate_wire_shape("cpu_percent", Some(ResourceRole::Xp)),
+        Err("resource_history_quality_invalid")
+    );
+}
+
+#[test]
 fn rollup_records_expected_and_captured_samples() {
     let mut accumulator = RollupAccumulator::new();
     assert!(accumulator.add(&snapshot(10.0), 60).is_none());

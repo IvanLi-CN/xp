@@ -492,6 +492,7 @@ impl MeshAwareHttpClient {
             self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
+                dispatched: false,
             });
         }
         let mesh_enabled = direct_mesh_is_eligible(peer, cluster_mesh_enabled, direct_validation);
@@ -500,11 +501,13 @@ impl MeshAwareHttpClient {
             .await;
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
         let mut mesh_outcome_ambiguous = false;
+        let mut mesh_outcome_timed_out = false;
 
         if matches!(decision, MeshAttemptDecision::Quarantined) {
             self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
+                dispatched: false,
             });
         }
 
@@ -556,9 +559,13 @@ impl MeshAwareHttpClient {
                 )
                 .await?
             {
-                gate::MeshAttemptResult::Fallback { ambiguous } => {
+                gate::MeshAttemptResult::Fallback {
+                    ambiguous,
+                    timed_out,
+                } => {
                     fallback = true;
                     mesh_outcome_ambiguous |= ambiguous;
+                    mesh_outcome_timed_out |= timed_out;
                 }
                 gate::MeshAttemptResult::Response(response) => return Ok(response),
             }
@@ -630,10 +637,15 @@ impl MeshAwareHttpClient {
                             "reverse relay attempt failed"
                         );
                         if !request.allow_ambiguous_fallback
-                            && matches!(error, MeshRequestError::OutcomeUnknown)
+                            && matches!(
+                                error,
+                                MeshRequestError::OutcomeUnknown
+                                    | MeshRequestError::TransportTimeout
+                                    | MeshRequestError::ReverseTimeout
+                            )
                         {
                             self.record_terminal_failure(peer).await;
-                            return Err(MeshRequestError::OutcomeUnknown);
+                            return Err(error);
                         }
                         if matches!(
                             error,
@@ -644,6 +656,10 @@ impl MeshAwareHttpClient {
                         }
                         // A gate rejection happens before dispatch and cannot make the outcome
                         // unknown. Transport failures remain ambiguous.
+                        mesh_outcome_timed_out |= matches!(
+                            error,
+                            MeshRequestError::TransportTimeout | MeshRequestError::ReverseTimeout
+                        );
                         if !matches!(
                             error,
                             MeshRequestError::Reverse(ref reason)
@@ -671,19 +687,31 @@ impl MeshAwareHttpClient {
             return Err(if matches!(decision, MeshAttemptDecision::Disabled) {
                 MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
             } else {
-                MeshRequestError::OutcomeUnknown
+                if mesh_outcome_timed_out {
+                    MeshRequestError::TransportTimeout
+                } else {
+                    MeshRequestError::OutcomeUnknown
+                }
             });
         }
         if !request.allow_ambiguous_fallback && mesh_outcome_ambiguous {
             self.record_terminal_failure(peer).await;
-            return Err(MeshRequestError::OutcomeUnknown);
+            return Err(if mesh_outcome_timed_out {
+                MeshRequestError::TransportTimeout
+            } else {
+                MeshRequestError::OutcomeUnknown
+            });
         }
         let elapsed = started.elapsed();
         let public_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
         let remaining = request.total_budget.saturating_sub(elapsed);
         if remaining.is_zero() {
             self.record_terminal_failure(peer).await;
-            return Err(MeshRequestError::OutcomeUnknown);
+            return Err(if mesh_outcome_timed_out {
+                MeshRequestError::TransportTimeout
+            } else {
+                MeshRequestError::OutcomeUnknown
+            });
         }
         match self
             .before_public_request(&peer.node_id, request.route)
@@ -691,7 +719,10 @@ impl MeshAwareHttpClient {
         {
             MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined => {
                 self.record_terminal_failure(peer).await;
-                return Err(MeshRequestError::CircuitOpen { path: "Public" });
+                return Err(MeshRequestError::CircuitOpen {
+                    path: "Public",
+                    dispatched: mesh_outcome_ambiguous,
+                });
             }
             MeshAttemptDecision::Attempt
             | MeshAttemptDecision::Probe
@@ -955,8 +986,13 @@ impl MeshAwareHttpClient {
             .await
             {
                 Ok(mesh_response) => response = Some(mesh_response),
-                Err(MeshRequestError::OutcomeUnknown) => {
-                    return Err(MeshRequestError::OutcomeUnknown);
+                Err(error @ MeshRequestError::TransportTimeout) => {
+                    return Err(error);
+                }
+                Err(error @ MeshRequestError::OutcomeUnknown)
+                    if !request.allow_ambiguous_fallback =>
+                {
+                    return Err(error);
                 }
                 Err(MeshRequestError::Public(_)) if !request.allow_ambiguous_fallback => {
                     return Err(MeshRequestError::OutcomeUnknown);
@@ -1056,6 +1092,8 @@ fn public_transport_error(
 ) -> MeshRequestError {
     if allow_ambiguous_fallback {
         MeshRequestError::Public(error)
+    } else if error.is_timeout() && !error.is_connect() {
+        MeshRequestError::TransportTimeout
     } else {
         MeshRequestError::OutcomeUnknown
     }
