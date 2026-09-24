@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { supportedSnapshot } from "../components/ResourceSnapshotPanel.stories";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { useNodeResourceQueries } from "./useNodeResourceQueries";
 
 const mocks = vi.hoisted(() => ({
@@ -52,7 +53,7 @@ describe("useNodeResourceQueries lifecycle", () => {
 			() =>
 				useNodeResourceQueries({
 					adminToken: "admin-token",
-					nodeId: "node-a",
+					nodeId: fixtureCatalog.identifier.nodePrimary(),
 					nodesAvailable: true,
 					isOnline: true,
 					activeTab: "resources",
@@ -83,7 +84,7 @@ describe("useNodeResourceQueries lifecycle", () => {
 		mocks.fetchAdminNodeResourceHistory.mockReset();
 		let historyFailed = false;
 		const historyPoint = {
-			observed_at: "2026-09-01T00:00:00.000Z",
+			observed_at: fixtureCatalog.timestamp.t20260901T000000(),
 			value: 20,
 		};
 		mocks.fetchAdminNodeResourceHistory.mockImplementation(
@@ -103,7 +104,7 @@ describe("useNodeResourceQueries lifecycle", () => {
 			() =>
 				useNodeResourceQueries({
 					adminToken: "admin-token",
-					nodeId: "node-a",
+					nodeId: fixtureCatalog.identifier.nodePrimary(),
 					nodesAvailable: true,
 					isOnline: true,
 					activeTab: "resources",
@@ -152,7 +153,7 @@ describe("useNodeResourceQueries lifecycle", () => {
 		mocks.fetchAdminNodeResourceHistory.mockReset();
 		let runtimeFailed = false;
 		const runtimePoint = {
-			observed_at: "2026-09-01T00:00:00.000Z",
+			observed_at: fixtureCatalog.timestamp.t20260901T000000(),
 			value: 8,
 		};
 		mocks.fetchAdminNodeResourceHistory.mockImplementation(
@@ -182,7 +183,7 @@ describe("useNodeResourceQueries lifecycle", () => {
 			() =>
 				useNodeResourceQueries({
 					adminToken: "admin-token",
-					nodeId: "node-a",
+					nodeId: fixtureCatalog.identifier.nodePrimary(),
 					nodesAvailable: true,
 					isOnline: true,
 					activeTab: "resources",
@@ -233,7 +234,7 @@ describe("useNodeResourceQueries lifecycle", () => {
 		const wrapper = wrapperFor(queryClient);
 		const props = {
 			adminToken: "admin-token",
-			nodeId: "node-a",
+			nodeId: fixtureCatalog.identifier.nodePrimary(),
 			nodesAvailable: true,
 			isOnline: true,
 			activeTab: "resources",

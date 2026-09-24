@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, userEvent, within } from "@storybook/test";
 
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import baseMeta, { node } from "./NodeDetailsPage.stories";
 
 const meta = {
@@ -54,7 +55,7 @@ export const ResourcesCircuitOpen: Story = {
 		mockApi: {
 			data: {
 				resourceMonitoringErrors: {
-					[node.node_id]: {
+					[fixtureCatalog.identifier.nodePrimary()]: {
 						snapshot: {
 							status: 503,
 							code: "peer_circuit_open",
@@ -95,7 +96,7 @@ export const ResourcesHistoryError: Story = {
 		mockApi: {
 			data: {
 				resourceMonitoringErrors: {
-					[node.node_id]: {
+					[fixtureCatalog.identifier.nodePrimary()]: {
 						history: {
 							cpu_busy_percent: {
 								status: 504,
