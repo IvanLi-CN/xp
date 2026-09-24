@@ -9,7 +9,7 @@ tags:
   - upgrade-status
 status: active
 related_specs:
-  - docs/specs/nq4ha-web-local-upgrade/SPEC.md
+  - docs/specs/web-local-upgrade/SPEC.md
 ---
 
 # Systemd Web upgrade runners need direct ExecStart and stale status recovery
@@ -80,4 +80,4 @@ ExecStart=/usr/local/bin/xp-ops _upgrade-runner
 - `src/ops/init.rs`
 - `src/upgrade_job.rs`
 - `docs/ops/systemd/xp-upgrade.service`
-- `docs/specs/nq4ha-web-local-upgrade/SPEC.md`
+- `docs/specs/web-local-upgrade/SPEC.md`

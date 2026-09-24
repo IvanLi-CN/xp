@@ -101,3 +101,10 @@
 - `./SPEC.md`
 - `./HISTORY.md`
 - `./contracts/api.md`
+
+## 实现里程碑（Milestones）
+
+1. 状态、SQLite schema、journal stream、签名与 rollup 数据结构。
+2. 四类 executor、公网地址保护、ICMP capability 与 scheduler。
+3. Repository receiver、quality、rollup、retention 和 API。
+4. Web 工作台、Storybook、E2E、部署矩阵和视觉证据。

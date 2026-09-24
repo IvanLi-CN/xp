@@ -5,7 +5,7 @@ problem_type: certificate issuance and renewal
 component: Cloudflare DNS-01 solver
 tags: [acme, dns-01, doh, cloudflare, vless-canary]
 status: active
-related_specs: [3e4q4-mihomo-provider-dual-track]
+related_specs: [docs/specs/mihomo-provider-dual-track/SPEC.md]
 ---
 
 # DNS-01 DoH Propagation Checks
@@ -43,5 +43,5 @@ NODATA responses do not end the propagation check early.
 ## References
 
 - `src/vless_https_canary.rs`
-- `docs/specs/3e4q4-mihomo-provider-dual-track/SPEC.md`
+- `docs/specs/mihomo-provider-dual-track/SPEC.md`
 - `docs/ops/README.md`

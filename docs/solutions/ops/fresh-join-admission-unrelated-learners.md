@@ -6,8 +6,8 @@ component: fresh join admission and legacy session migration
 tags: [raft, learner, fresh-join, membership, lifecycle]
 status: active
 related_specs:
-  - 7mvqp-raft-membership-voter-invariant
-  - 38wmj-cluster-node-onboarding
+  - docs/specs/raft-membership-voter-invariant/SPEC.md
+  - docs/specs/cluster-node-onboarding/SPEC.md
 ---
 
 # Fresh Join Admission Ignores Unrelated Learners
@@ -59,5 +59,5 @@ endpoints for explicit recovery; do not issue a membership removal or synthesize
 - `src/join_coordinator.rs`
 - `src/http/mod.rs`
 - `docs/adr/0010-fresh-join-admission.md`
-- `docs/specs/7mvqp-raft-membership-voter-invariant/SPEC.md`
-- `docs/specs/38wmj-cluster-node-onboarding/SPEC.md`
+- `docs/specs/raft-membership-voter-invariant/SPEC.md`
+- `docs/specs/cluster-node-onboarding/SPEC.md`

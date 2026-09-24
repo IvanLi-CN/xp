@@ -1,0 +1,34 @@
+# Implementation
+
+## Cloudflare ownership boundary
+
+- `src/ops/cloudflare_config.rs` 承载本地 YAML 定点编辑与远端 ingress 合并的
+  纯函数。
+- `xp-ops cloudflare provision` 和 `xp-ops deploy` 自动迁移已证明归属的 XP hostname；
+  `--migrate-existing-tunnel` 仅保留为兼容选项。
+- Cloudflare DNS 更新使用最小 PATCH，只更新目标 CNAME 的 Tunnel 内容。
+
+## Runtime safety
+
+- 本地 Cloudflared 配置含有 `ingress` 时，写入前用当前发行版安装路径运行 ingress validation，
+  使用同目录临时文件和原子替换；远程 Tunnel 形式的无本地 `ingress` 配置跳过该本地校验。
+- host-managed 服务在配置变化后重启并检查既有 `cloudflared` 服务；失败时恢复原 enable/running
+  状态及受影响文件的内容、权限和属主，不会创建第二个常驻进程。
+- 新 Tunnel 的后续远端配置或 DNS 预检失败会立即删除刚创建的 Tunnel，避免留下未受管资源。
+- 新建 remote-config Tunnel 的首次配置 GET 对精确 Cloudflare `1055` 合成空配置，再沿用正常
+  的远端 ingress 合并与写入路径；既有 Tunnel 和其他 API 错误不进入该恢复路径。
+
+## Validation
+
+- Rust 单元与 API smoke 测试覆盖本地无损编辑、远端规则合并、catch-all 歧义拒绝和
+  Tunnel/DNS 预检，以及新建 Tunnel 配置的 `1055` 空配置初始化；事务失败路径保留本地/远端快照并
+  逆序补偿。
+- `cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test` 与
+  `bun run check:style-budget`。
+
+## 实现里程碑
+
+1. 无损本地编辑和远端 ingress 合并。
+2. DNS 所有权判定与显式 Tunnel 迁移预检。
+3. 事务执行、受控重启和补偿回滚。
+4. CLI/API/失败阶段自动化测试与运维文档同步。

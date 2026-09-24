@@ -3,6 +3,10 @@
 > 当前有效规范以本文为准；实现覆盖与当前状态见
 > `./IMPLEMENTATION.md`，关键演进原因见 `./HISTORY.md`。
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 - Web 管理界面同时包含页面级滚动、表格横向溢出和受限高度的独立列表。若每个面板自行使用浏览器默认滚动条或伪造滚动条，主题与浏览器之间的视觉和交互会失去一致性。
@@ -140,17 +144,14 @@ None。该规范不改变后端接口，也不扩展 `ScrollArea` 的公开 Type
 
 Evidence target: `ui_demo`.
 
-PR: include
 Desktop `/demo`: the current web host uses cyan `server-bolt`, while ordinary
 nodes use the distinct `server-2` silhouette.
 ![Desktop resource navigation node icons](./assets/resource-navigation-node-icons.png)
 
-PR: include
 Desktop `/demo`: current-hosting-node endpoint uses cyan `plug-connected`;
 other endpoint children use `link`, both distinct from the `plug` resource category icon.
 ![Desktop resource navigation endpoint icons](./assets/resource-navigation-endpoint-icons.png)
 
-PR: include
 Desktop `/demo`: user children use `user-circle`, remain contained within the
 ten-row viewport, and retain the selected capsule.
 ![Desktop resource navigation user icons](./assets/resource-navigation-user-icons.png)
@@ -169,4 +170,3 @@ ten-row viewport, and retain the selected capsule.
 
 - `web/src/components/ui/scroll-area.tsx`
 - `web/src/components/ui/scroll-area.stories.tsx`
-- `docs/plan/0019:subscription-preview-formatting/PLAN.md`

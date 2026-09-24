@@ -36,4 +36,4 @@
 
 ## Supersession
 
-本主题扩展 `56dtr-reality-fallback-control-plane-mesh` 的 Direct/Public 控制面合同；不复活已 retired 的 `nbs5f-xray-control-plane-relay`。
+本主题扩展 `reality-fallback-control-plane-mesh` 的 Direct/Public 控制面合同；不复活已 retired 的 `xray-control-plane-relay`。

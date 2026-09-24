@@ -276,7 +276,7 @@ root 常驻服务来解决可观测性问题。
 
 - `docs/ops/README.md` 与 Docker 部署文档：Resource Domain、持久卷、能力降级与容量告警。
 - `docs/desgin/api.md` 与工作流文档：资源 API、历史质量和 alert semantics。
-- `docs/specs/nmgq8-managed-stack-64m-memory/SPEC.md`：明确固定 Resource Monitoring 不等同于不受约束的通用
+- `docs/specs/managed-stack-64m-memory/SPEC.md`：明确固定 Resource Monitoring 不等同于不受约束的通用
   metrics 平台。
 - `AGENTS.md`：实现时同步三种部署形态的 Resource Store 保留与 capability contract。
 
@@ -292,6 +292,6 @@ root 常驻服务来解决可观测性问题。
 
 - `../cluster-history-repositories/SPEC.md`
 - `../uptime-monitoring/SPEC.md`
-- `../9vmap-node-service-observability/SPEC.md`
-- `../m4n7c-node-tcp-connection-count/SPEC.md`
-- `../nmgq8-managed-stack-64m-memory/SPEC.md`
+- `../node-service-observability/SPEC.md`
+- `../node-tcp-connection-count/SPEC.md`
+- `../managed-stack-64m-memory/SPEC.md`

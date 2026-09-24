@@ -10,7 +10,7 @@ tags:
   - sse
 status: active
 related_specs:
-  - docs/specs/7qj3h-web-pwa-offline-console/SPEC.md
+  - docs/specs/web-pwa-offline-console/SPEC.md
   - docs/specs/web-runtime-resilience/SPEC.md
 ---
 

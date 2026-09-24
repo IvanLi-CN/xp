@@ -345,8 +345,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 ## 参考（References）
 
-- `docs/specs/k7m2n-node-history-fallback/SPEC.md`
-- `docs/specs/r26nc-node-user-traffic-analytics/SPEC.md`
-- `docs/specs/56dtr-reality-fallback-control-plane-mesh/SPEC.md`
+- `docs/specs/node-history-fallback/SPEC.md`
+- `docs/specs/node-user-traffic-analytics/SPEC.md`
+- `docs/specs/reality-fallback-control-plane-mesh/SPEC.md`
 - `docs/agents/issue-tracker.md`
 - Issue #248: https://github.com/IvanLi-CN/xp/issues/248

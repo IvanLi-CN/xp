@@ -11,8 +11,8 @@ tags:
   - hover
 status: active
 related_specs:
-  - docs/specs/r26nc-node-user-traffic-analytics/SPEC.md
-  - docs/specs/m4n7c-node-tcp-connection-count/SPEC.md
+  - docs/specs/node-user-traffic-analytics/SPEC.md
+  - docs/specs/node-tcp-connection-count/SPEC.md
 ---
 
 # Theme ECharts SVG tooltips and disable static-series emphasis

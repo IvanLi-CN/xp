@@ -3,6 +3,10 @@
 > 当前有效规范以本文为准；实现覆盖与当前状态见 `./IMPLEMENTATION.md`，关键演进原因见
 > `./HISTORY.md`。
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 VLESS Reality Vision/TCP 的每个代理 TCP 流都占用一条外部 TCP 连接。即使应用请求量不大，

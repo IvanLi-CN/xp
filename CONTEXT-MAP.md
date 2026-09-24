@@ -14,7 +14,7 @@
 - [Resource Monitoring](./docs/specs/resource-monitoring/CONTEXT.md) — defines
   bounded resource observations for managed node runtimes and their execution
   domains.
-- [Raft Membership Lifecycle](./docs/specs/7mvqp-raft-membership-voter-invariant/CONTEXT.md) —
+- [Raft Membership Lifecycle](./docs/specs/raft-membership-voter-invariant/CONTEXT.md) —
   defines the valid cluster-member roles and operator recovery terms.
 - [Mihomo Private Resource CIDRs](./docs/specs/mihomo-private-resource-cidrs/CONTEXT.md) —
   defines node-local private target authorization for split-DNS mirror resources.

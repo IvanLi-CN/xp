@@ -1,0 +1,220 @@
+# 用户订阅 Mihomo 混入配置
+
+## Related ADRs
+
+None
+
+## 背景 / 问题陈述
+
+- 当前订阅接口虽已支持 `format=mihomo`，但早期口径仍偏向“template + extra_*”自由拼装，容易把动态节点、provider 名称或落地组写死在用户输入里。
+- 真实使用里，动态层应由系统根据 XP 用户订阅数据生成：
+  - `proxies`（主力节点）来自 membership/endpoint/node；
+  - `proxy-providers`（普通节点池）若存在，则整体作为地区入口与链式代理的候选池；
+  - 用户输入只应补充静态配置与业务分组，不应继续固化动态节点名。
+- 若不把动态层系统内置化，会持续出现：
+  - 清空 `extra_*` 或切换用户后仍残留不存在的 proxy/provider/group 引用；
+  - 管理端把完整配置当模板粘贴后，动态层与静态层职责混淆；
+  - 示例配置难以稳定复用，管理员无法确认最终订阅与示例行为是否等价。
+
+## 目标 / 非目标
+
+### Goals
+
+- 新增并稳定 `format=mihomo` 输出，支持“每用户 mixin + 系统动态注入 + 用户扩展”。
+- 保持 `raw/base64/clash` 现有行为不变。
+- 将管理 API 字段统一收敛为 `mixin_yaml`，移除旧字段 `template_yaml` 兼容层。
+- 系统内置生成并覆盖 provider-only 模式下的动态地区组与落地组：
+  - 可见地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
+  - 兼容地区组：`🔒/🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`，统一改为隐藏 alias
+  - 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择`、`🤯 All`
+  - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
+- 保持 `extra_proxies_yaml` 为正式官方能力；`extra_proxy_providers_yaml` 保持可选。
+- 对一份外部提供的脱敏 Mihomo 示例生成可证明的“功能等价”输出，并给出脱敏示例与差异说明。
+
+### Non-goals
+
+- 不内置敏感配置内容到仓库。
+- 不保证 YAML 注释/anchors 原样保留。
+- 不新增 provider 自动抓取逻辑。
+
+## 范围（Scope）
+
+### In scope
+
+- 后端用户级 Mihomo mixin 配置存储与管理 API 收敛。
+- 订阅接口 `format=mihomo` 的系统动态组生成、mixin 合并与悬挂引用裁剪。
+- Web 用户详情页的 Mihomo mixin 编辑、保存与预览语义迁移。
+- 单测/集成测试/前端测试与共享测试机真实 Mihomo 校验。
+- Spec、契约文档与设计文档同步到 mixin 语义。
+
+### Out of scope
+
+- 不重做现有 raw/clash 命名规则。
+- 不追求 YAML 行级一致；验收以行为等价为准。
+- 不把示例中的具体动态节点名继续暴露为 mixin 的稳定接口。
+
+## 需求（Requirements）
+
+### MUST
+
+- `GET /api/sub/{token}?format=mihomo` 支持完整输出。
+- 用户 mixin 按 `user_id` 持久化存储。
+- 管理 API 请求与响应统一使用 `mixin_yaml`。
+- 对外 API 只接受 `mixin_yaml`；内部状态/WAL/snapshot 继续对旧字段 `template_yaml` 保持读写兼容（内部双写 `mixin_yaml` + `template_yaml`），以保证滚动升级与旧节点回放安全。
+- 用户可输入 `extra_proxies_yaml`（sequence）与 `extra_proxy_providers_yaml`（mapping，可空）。
+- 渲染时系统重建并覆盖 `proxies`、`proxy-providers` 与所有系统保留动态组。
+- 系统保留地区组、`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择` 与 `🤯 All` 必须只从节点主动探测得到的订阅地区派生，不再使用 `node_name` slug 猜测。
+- 地区面固定为 `Japan / HongKong / Taiwan / Korea / Singapore / US / Other`；首次成功探测前，为避免滚动升级时既有地区组瞬间清空，历史节点继续沿用 legacy slug fallback（JP/HK/TW/KR）归类；一旦存在成功探测结果，则优先使用 `subscription_region`，但仅在 probe 未 stale 时视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
+- `proxy-providers` 视为一个整体普通节点池；provider-only 模式下系统按 `Node.access_host` 聚合 relay，relay 组只消费外部 provider，并在 provider 为空时仍必须生成可加载配置。
+- `extra_proxies_yaml` 中的节点会并入最终 `proxies`。
+- 落地组生成遵循 provider filter 合同：`🛬 {base}` 通过 system provider payload 稳定消费 `{base}-ss-chain` / `{base}-reality-chain`，并保持 ss-chain 在前、reality-chain 在后。
+- 节点名冲突自动稳定重命名并记录告警日志。
+- mixin 缺失时 `format=mihomo` 回退 clash。
+- `GET/PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 返回与存储原样一致的 profile；服务端不自动抽取、不自动规范化，也不隐式剥离系统托管引用。
+
+### SHOULD
+
+- `mixin_yaml` / extra YAML 在写入前做根类型校验并返回可读错误。
+- 若管理员同时在 `mixin_yaml` 顶层和对应 `extra_*` 字段里提供同类动态段，服务端返回 `invalid_request`，避免静默覆盖。
+- 输出订阅示例应提供脱敏片段与差异说明，方便人工复核。
+
+### COULD
+
+- 后续扩展更多链式区域与可配置 filter，但不属于本轮验收。
+
+## 功能与行为规格（Functional/Behavior Spec）
+
+### Core flows
+
+- 管理员在用户详情页编辑并保存 Mihomo mixin config。
+- 用户订阅拉取 `format=mihomo` 时：
+  - 读取用户 `mixin_yaml`；
+  - 读取 `extra_proxy_providers_yaml` 作为普通节点池（可空）；
+  - 生成 system provider payload 与落地节点：`-reality`、`-ss`、`-ss-chain`、`-reality-chain`；
+  - 读取节点主动探测持久化状态，把每个落地节点映射到固定地区面；
+  - 合并 `extra_proxies_yaml`；
+  - 覆盖并注入系统保留动态组（可见地区组、隐藏 alias、高质量/节点选择聚合组、`🔒 落地` 与 `🛬 {base}`）；
+  - 裁剪或重映射 mixin 中残留的未知动态引用；
+  - 输出可直接导入的 Mihomo YAML。
+
+### Edge cases / errors
+
+- `mixin_yaml` 非法或根类型错误：管理 API 返回 `400 invalid_request`。
+- extra YAML 根类型不符合约束：管理 API 返回 `400 invalid_request`。
+- 用户只传 `mixin_yaml`；旧字段 `template_yaml` 不再接受。
+- 未配置 mixin：订阅接口回退 clash 输出。
+
+## 接口契约（Interfaces & Contracts）
+
+### 接口清单（Inventory）
+
+| 接口（Name）                                                 | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers）       | 备注（Notes）             |
+| ------------------------------------------------------------ | ------------ | ------------- | -------------- | ------------------------ | --------------- | ------------------------- | ------------------------- |
+| `GET /api/sub/{subscription_token}?format=mihomo`            | HTTP API     | external      | Existing       | ./contracts/http-apis.md | backend         | mihomo client/web preview | 无 mixin 时回退 clash     |
+| `GET /api/admin/users/{user_id}/subscription-mihomo-profile` | HTTP API     | internal      | Changed        | ./contracts/http-apis.md | backend         | web admin                 | 响应主字段为 `mixin_yaml` |
+| `PUT /api/admin/users/{user_id}/subscription-mihomo-profile` | HTTP API     | internal      | Changed        | ./contracts/http-apis.md | backend         | web admin                 | 仅接受 `mixin_yaml`       |
+
+### 契约文档（按 Kind 拆分）
+
+- [contracts/http-apis.md](./contracts/http-apis.md)
+
+## 验收标准（Acceptance Criteria）
+
+- Given 用户已配置 mixin，When 拉取 `format=mihomo`，Then 返回 YAML 包含系统生成的 `-reality`、`-ss`、`-chain` 节点。
+- Given 用户配置了多个 `proxy-providers`，When 拉取 `format=mihomo`，Then per-access-host relay 组只消费这些外部 provider，并带有 `url-test` 高可用探测参数。
+- Given `proxy-providers` 为空，When 拉取 `format=mihomo`，Then relay 组仍存在、订阅仍可加载，且不出现不存在的 proxy/provider/group 引用。
+- Given 新增节点已拥有 membership 与系统 provider 入口，When 该节点完成首次主动探测并映射到 `Taiwan`，Then 无需修改任何用户模板，`🌟 Taiwan` 与 `🚀 节点选择` 都会自动包含 `🛬 {base}`，且 `🔒 高质量` 会稳定暴露该地区入口。
+- Given 旧集群升级后某历史节点暂时还没有成功探测记录，When 其旧节点名 slug 原本会命中 `Japan/HongKong/Taiwan/Korea`，Then 订阅渲染仍保持该 legacy 地区归类，直到首次成功探测结果落盘。
+- Given 某节点主动探测暂时失败，When 该节点存在最近一次成功归类且该结果仍在 stale 窗口内，Then 订阅仍保留其上一轮地区归类，不会立即从系统托管分组中消失；一旦 probe 进入 stale，渲染回退到 legacy slug fallback / `Other`。
+- Given mixin 中残留旧系统组定义或引用（如 `🛣️ Japan` / `🔒 Japan`），When 拉取 `format=mihomo`，Then 这些旧系统组会在渲染阶段被系统覆盖为被动兼容组；若引用最终仍悬挂，则继续按悬挂引用处理并裁剪。
+- Given 非系统、显式声明 `proxies` 的用户 `select` 组引用了 legacy 地区组名或系统聚合别名，When 拉取 `format=mihomo`，Then 这些组选项会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放，并把系统管理地区名折叠为 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`🔒 高质量`、`💎 节点选择`；若对应 helper 缺失，则退回原始 `proxies` 顺序做最小替换，且不会直接暴露 `🔒/🤯 {Region}` 与 hidden alias。
+- Given 仅存在 `extra_proxies_yaml`，When 拉取 `format=mihomo`，Then extra proxies 仍出现在最终 `proxies` 中，且不会额外生成由系统托管的 `🛬 {base}` 落地组。
+- Given `extra_proxies_yaml` 中包含名称看起来像系统动态后缀（如 `-chain` / `-reality`，或历史遗留的 `-JP`）的静态节点，When 业务组显式引用这些节点，Then 引用仍绑定到这些 extra proxies，而不会被错误重映射到系统生成节点。
+- Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 必须包含 `base-reality`，且不得再把 `base-ss` 暴露为该组成员。
+- Given 仅存在 `base-ss`（无 `base-reality`），When 生成 `🛬 {base}`，Then `🛬 {base}` 继续沿用 `base-chain` 与 `base-ss` 的兼容回落路径。
+- Given 请求体只提供旧字段 `template_yaml`，When 保存 profile，Then 请求被拒绝。
+- Given 管理员打开 User Details，When 编辑用户资料或 Mihomo mixin，Then 用户资料保存区与 Mihomo 配置保存区以同级区域呈现，
+  且各自的保存按钮只属于对应区域。
+- Given 一份外部提供的脱敏 Mihomo 示例作为目标，When 在共享测试机生成 `format=mihomo` 输出，Then 必须能展示一份脱敏但结构真实的订阅片段，并说明系统托管动态段带来的结构差异与业务行为等价证据。
+- Given 目标示例自带脱敏后的静态 `proxies`（如遮蔽的 REALITY 公钥），When 需要做真实 Mihomo `-t` 校验，Then 应基于同一份业务 mixin 去掉这些不可解析的脱敏静态节点后再校验，以验证系统生成的动态层、provider 池与业务分组仍可被 Mihomo 实际加载。
+- Given 现有 `raw/clash/base64` 调用，When 回归测试，Then 输出语义与 content-type 不回归。
+
+## Visual Evidence
+
+source_type=storybook_canvas
+target_program=mock-only
+capture_scope=browser-viewport
+sensitive_exclusion=N/A; mock-only Storybook canvas
+submission_gate=approved
+
+PR: include
+
+User Details sibling save regions after the layout split.
+![User Details sibling sections](./assets/user-mihomo-layout.png)
+
+Storybook canvas evidence for the split User Details layout was captured
+and shown in the owner handoff; the committed asset is the approved PR evidence.
+
+## 实现前置条件（Definition of Ready / Preconditions）
+
+- API 主字段命名与回退策略已冻结。
+- 首批外层候选地区集合已冻结为 JP/HK/SG。
+- “功能等价而非文本等价”的验收口径已冻结。
+
+## 非功能性验收 / 质量门槛（Quality Gates）
+
+### Testing
+
+- Unit tests: `src/subscription.rs` 覆盖动态组注入、probe-derived 地区分组、provider 为空、冲突重命名、根类型错误、悬挂引用裁剪。
+- Integration tests: `src/http/tests.rs` 覆盖 admin profile API 的 `mixin_yaml` 主字段、旧字段拒绝、raw profile storage、`format=mihomo` 渲染、provider 为空与新增节点自动入组场景。
+- Web tests: `web/**` 覆盖 mixin 语义迁移、旧字段拒绝与 UI 文案，不再假设前端会本地自动抽取动态段。
+- Shared testbox: 在 `codex-testbox` 生成目标示例的真实输出；若源示例已脱敏且包含不可解析静态节点，则使用去掉这些节点的 provider-only 变体执行真实 Mihomo `-t` 校验，并保留差异说明。
+
+### Quality checks
+
+- `cargo test`
+- `cargo fmt`
+- `cargo clippy -- -D warnings`
+- `cd web && bun run lint`
+- `cd web && bun run typecheck`
+- `cd web && bun run test`
+
+## 文档更新（Docs to Update）
+
+- `docs/desgin/subscription.md`
+- `docs/specs/mihomo-subscription-template/contracts/http-apis.md`
+- `docs/specs/README.md`
+
+## 计划资产（Plan assets）
+
+- Directory: `docs/specs/mihomo-subscription-template/assets/`
+
+## 资产晋升（Asset promotion）
+
+- None
+
+## 示例资产
+
+- 规范化后的 owner-facing mixin 样例：
+  - `assets/owner-mixin-normalized.yaml`
+- 该样例表示“当前合同下可直接提交的 owner mixin”：
+  - 不再携带系统托管 provider、系统地区组、系统高质量组、系统节点选择组与落地组定义
+  - 只保留 owner-owned 的规则、rule-providers、listeners、DNS/TUN 与业务分组
+  - 业务分组统一引用当前 owner-facing 合同名（如 `🔒 高质量`、`💎 节点选择`）
+
+## 方案概述（Approach, high-level）
+
+- 以“混入配置（mixin config）”为静态补充，后端在渲染阶段覆盖动态段并注入系统保留动态组。
+- 将高风险自由输入限制为 YAML 根类型校验 + 联合预渲染校验 + 悬挂引用裁剪，保证配置最小正确性。
+- 通过系统托管动态组与 deterministic remap/prune，避免用户 mixin 持续依赖具体动态节点名。
+
+## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
+
+- 风险：用户输入 mixin 仍可能包含客户端不兼容字段，服务端只保证结构正确性与已知动态组约束。
+- 风险：示例配置的“功能等价”需要依赖真实测试机验证，不能仅凭文本 diff 判断。
+- 风险：Mihomo 不提供纯被动、零主动探测的自动回落；当前实现只能接受“失败后触发主动补检”的折中。
+- 假设：provider-only 系统托管层继续以 `3e4q4` 合同为准，本 spec 只负责用户 mixin/profile API 的 owner-facing 边界。
+
+## 参考（References）
+
+- 样例配置：外部提供的脱敏 Mihomo YAML（不入仓）

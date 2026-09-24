@@ -10,7 +10,7 @@ tags:
   - privilege-boundary
 status: active
 related_specs:
-  - docs/specs/nq4ha-web-local-upgrade/SPEC.md
+  - docs/specs/web-local-upgrade/SPEC.md
 ---
 
 # OpenRC Web upgrade readiness must cross the doas boundary

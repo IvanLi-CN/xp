@@ -3,6 +3,10 @@
 > 当前有效规范以本文为准；实现覆盖与当前状态见 `./IMPLEMENTATION.md`，关键演进原因见
 > `./HISTORY.md`。
 
+## Related ADRs
+
+None
+
 ## 背景 / 问题陈述
 
 测试、Storybook 和 demo fixture 可意外携带生产派生的拓扑、遥测或凭据样式信息。质量文档
