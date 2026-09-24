@@ -254,7 +254,7 @@ Web upgrade stale-conflict state:
 Node resource peer-unavailable diagnostic:
 
 - Source: Storybook canvas `Components/ResourceSnapshotPanel/PeerUnavailableWithRouteTrace`.
-- Bound implementation commit: `835a2eb136b5300b5a240643ea9457efe4b52aa6`.
+- Bound implementation commit: `1fc1e96e757877fd7727e01c4efa4d7c464f4689`.
 - Capture metadata: `source_type=storybook_canvas`, `target_program=mock-only`,
   `capture_scope=element`, `requested_viewports=1280x900,393x852`,
   `viewport_strategy=storybook-viewport`, `margin_policy=require_margin`,
