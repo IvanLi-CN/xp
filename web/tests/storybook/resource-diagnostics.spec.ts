@@ -53,3 +53,24 @@ test("keeps stale snapshot age and history errors visible", async ({
 		page.getByRole("button", { name: "Retry history" }),
 	).toBeVisible();
 });
+
+test("keeps unstructured resource failures safe and actionable", async ({
+	page,
+}) => {
+	await page.goto(
+		storyUrl(
+			"components-resourcesnapshotpanel--unknown-error",
+			"theme:light;density:comfortable",
+		),
+		{ waitUntil: "networkidle" },
+	);
+	await expect(page.getByText("Resource read failed")).toBeVisible({
+		timeout: 15_000,
+	});
+	await expect(
+		page.getByText("unstructured backend detail must stay hidden"),
+	).toHaveCount(0);
+	await expect(
+		page.getByRole("button", { name: "Retry resource read" }),
+	).toBeVisible();
+});

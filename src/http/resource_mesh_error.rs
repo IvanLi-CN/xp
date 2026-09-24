@@ -10,7 +10,29 @@ pub(super) async fn resource_mesh_error(
     error: MeshRequestError,
 ) -> ApiError {
     match error {
-        MeshRequestError::CircuitOpen { path } => {
+        MeshRequestError::CircuitOpen {
+            path,
+            dispatched: true,
+        } => {
+            let attempted_path = if path == "Public" { "public" } else { "direct" };
+            response(
+                "peer_transport_error",
+                StatusCode::BAD_GATEWAY,
+                "resource response could not be verified",
+                "peer_transport",
+                "outcome_unknown",
+                "unknown",
+                attempted_path,
+                "unknown",
+                true,
+                node_id,
+                support_id,
+            )
+        }
+        MeshRequestError::CircuitOpen {
+            path,
+            dispatched: false,
+        } => {
             let attempted_path = if path == "Public" { "public" } else { "direct" };
             let Some(retry_after) = client
                 .circuits()
@@ -294,6 +316,7 @@ mod tests {
             "support-a".to_string(),
             MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
+                dispatched: false,
             },
         )
         .await;
@@ -330,6 +353,7 @@ mod tests {
             "support-a".to_string(),
             MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
+                dispatched: false,
             },
         )
         .await;
@@ -337,6 +361,33 @@ mod tests {
         assert_eq!(mapped.code, "internal");
         assert_eq!(mapped.status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(mapped.details["cause"], "cooldown_unavailable");
+        assert!(mapped.details.get("retry_after_seconds").is_none());
+    }
+
+    #[tokio::test]
+    async fn circuit_open_after_dispatch_is_an_unknown_outcome() {
+        let client = test_client();
+        let mapped = resource_mesh_error(
+            &client,
+            "node-a",
+            "support-a".to_string(),
+            MeshRequestError::CircuitOpen {
+                path: "Public",
+                dispatched: true,
+            },
+        )
+        .await;
+
+        assert_mapping(
+            &mapped,
+            "peer_transport_error",
+            StatusCode::BAD_GATEWAY,
+            "unknown",
+            true,
+        );
+        assert_eq!(mapped.details["failure_layer"], "peer_transport");
+        assert_eq!(mapped.details["cause"], "outcome_unknown");
+        assert_eq!(mapped.details["attempted_path"], "public");
         assert!(mapped.details.get("retry_after_seconds").is_none());
     }
 

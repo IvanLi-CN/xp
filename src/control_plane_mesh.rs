@@ -492,6 +492,7 @@ impl MeshAwareHttpClient {
             self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
+                dispatched: false,
             });
         }
         let mesh_enabled = direct_mesh_is_eligible(peer, cluster_mesh_enabled, direct_validation);
@@ -506,6 +507,7 @@ impl MeshAwareHttpClient {
             self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
+                dispatched: false,
             });
         }
 
@@ -717,7 +719,10 @@ impl MeshAwareHttpClient {
         {
             MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined => {
                 self.record_terminal_failure(peer).await;
-                return Err(MeshRequestError::CircuitOpen { path: "Public" });
+                return Err(MeshRequestError::CircuitOpen {
+                    path: "Public",
+                    dispatched: mesh_outcome_ambiguous,
+                });
             }
             MeshAttemptDecision::Attempt
             | MeshAttemptDecision::Probe
@@ -1000,7 +1005,7 @@ impl MeshAwareHttpClient {
             None => {
                 let remaining = budget.saturating_sub(outer_started.elapsed());
                 if remaining.is_zero() {
-                    return Err(MeshRequestError::TransportTimeout);
+                    return Err(MeshRequestError::OutcomeUnknown);
                 }
                 let outer_url = join_url(
                     &route.rendezvous.public_base_url,

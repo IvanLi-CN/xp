@@ -452,6 +452,7 @@ impl MeshAwareHttpClient {
         ) {
             return Err(MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
+                dispatched: false,
             });
         }
         let result = self

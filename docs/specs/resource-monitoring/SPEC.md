@@ -231,6 +231,8 @@ root 常驻服务来解决可观测性问题。
 - Node Details 的资源 peer 读取使用结构化失败合同：circuit open 返回 503 `peer_circuit_open` 并带有界
   `Retry-After`，已派发但没有 verified response 的 timeout 返回 504，signed acknowledgement 无效返回 502；已验证的远端业务
   错误保留其 status 并标记 `failure_layer=remote_node`。仅 capability route 的 verified 404 映射为 `unsupported`。
+- 503 circuit-open 只表示请求在任何路径派发前被拒绝；如果 Mesh 或 Reverse 已尝试、随后 Public circuit-open，返回 502
+  `peer_transport_error`、`cause=outcome_unknown`、`dispatch_state=unknown`，不得让前端猜测新的 cooldown。
 - 没有 verified response 的非 timeout transport failure 返回 502 `peer_transport_error`，仍标记
   `failure_layer=peer_transport`，不得伪装为 timeout。
 - 如果本地 deadline 在 transport evidence 能确认 dispatch 前到期，返回 502

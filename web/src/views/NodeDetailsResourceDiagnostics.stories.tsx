@@ -14,6 +14,7 @@ type Story = StoryObj<typeof meta>;
 
 async function selectNodeDetailsTab(canvasElement: HTMLElement, label: string) {
 	const canvas = within(canvasElement);
+	await canvas.findByText("Node settings", { exact: true });
 	const tab = Array.from(
 		canvasElement.querySelectorAll<HTMLElement>('[role="tab"]'),
 	).find((element) => element.textContent?.trim() === label);

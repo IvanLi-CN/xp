@@ -217,3 +217,8 @@ each history query stop automatic polling after an error and resume only after t
 An error without a retained snapshot is not represented as empty resource data. Legacy or
 unstructured errors are shown as `unknown` without their raw message, and no resource error can
 trigger a restart, configuration mutation, endpoint change, or diagnostic probe.
+
+- A circuit-open response is 503 `peer_circuit_open` only when the circuit rejected the
+  request before any path was dispatched. If Mesh or Reverse was attempted and a later Public
+  circuit is open, the result is 502 `peer_transport_error` with `cause=outcome_unknown` and
+  `dispatch_state=unknown`; the browser must not treat it as a fresh cooldown.

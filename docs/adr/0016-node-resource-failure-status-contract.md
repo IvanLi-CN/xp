@@ -19,6 +19,9 @@ The status contract is:
 - An open circuit fails before dispatch with 503 `peer_circuit_open`. The server emits an integer
   `Retry-After` and `details.retry_after_seconds`, both bounded to 1 through 300. The browser must
   honor this value and must not guess a cooldown.
+- If Mesh or Reverse was attempted before a later Public circuit-open result, the request has an
+  ambiguous outcome and returns 502 `peer_transport_error` with `cause=outcome_unknown` and
+  `dispatch_state=unknown`; it is not reported as a new 503 cooldown.
 - A dispatched transport timeout without a verified response remains 504
   `peer_transport_timeout`.
 - If the local deadline expires before transport evidence can confirm dispatch, the resource

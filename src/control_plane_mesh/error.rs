@@ -10,7 +10,10 @@ pub enum MeshRequestError {
     Reverse(String),
     ReverseTimeout,
     Public(reqwest::Error),
-    CircuitOpen { path: &'static str },
+    CircuitOpen {
+        path: &'static str,
+        dispatched: bool,
+    },
 }
 
 impl From<internal_auth::AuthError> for MeshRequestError {
@@ -34,7 +37,7 @@ impl std::fmt::Display for MeshRequestError {
             Self::Reverse(value) => write!(f, "reverse relay failed: {value}"),
             Self::ReverseTimeout => f.write_str("reverse relay timed out before response headers"),
             Self::Public(value) => write!(f, "public fallback failed: {value}"),
-            Self::CircuitOpen { path } => write!(f, "{path} circuit is cooling down"),
+            Self::CircuitOpen { path, .. } => write!(f, "{path} circuit is cooling down"),
         }
     }
 }
