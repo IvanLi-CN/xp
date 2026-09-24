@@ -139,6 +139,7 @@ impl MeshAwareHttpClient {
             Some((Ok(Ok((response, verified))), gate_guard)) => {
                 let transport = mesh_transport_observation(&response);
                 if transport.protocol != MeshTransportProtocol::H2 {
+                    let status = response.status().as_u16();
                     return Err(self
                         .reject_mesh_response(
                             peer,
@@ -146,7 +147,7 @@ impl MeshAwareHttpClient {
                             response,
                             gate_guard,
                             validation_revision.clone(),
-                            MeshRequestError::Protocol("Mesh response did not use HTTP/2".into()),
+                            MeshRequestError::UnsignedResponse { status },
                         )
                         .await);
                 }

@@ -377,16 +377,16 @@ impl MeshAwareHttpClient {
         if path == PeerDirectPath::RealityMesh
             && mesh_transport_observation(&response).protocol != MeshTransportProtocol::H2
         {
-            return Err(MeshRequestError::Protocol(
-                "Mesh response did not use HTTP/2".to_string(),
-            ));
+            let status = response.status().as_u16();
+            return Err(MeshRequestError::UnsignedResponse { status });
         }
         let status = response.status().as_u16();
-        let ack = response
-            .headers()
-            .get(internal_auth::INTERNAL_ACK_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .ok_or(MeshRequestError::UnsignedResponse { status })?;
+        let ack = match response.headers().get(internal_auth::INTERNAL_ACK_HEADER) {
+            Some(value) => value
+                .to_str()
+                .map_err(|_| MeshRequestError::AcknowledgementInvalid)?,
+            None => return Err(MeshRequestError::UnsignedResponse { status }),
+        };
         internal_auth::verify_ack_v2(
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
@@ -761,7 +761,7 @@ impl MeshAwareHttpClient {
                         .set_public_breaker(
                             &peer.node_id,
                             public_breaker,
-                            Some(format!("Public circuit opened: {error}")),
+                            Some("Public circuit opened after bounded failure".to_string()),
                         )
                         .await;
                 }

@@ -62,11 +62,5 @@ export function parseResourcePeerDiagnostic(
 	) {
 		return null;
 	}
-	if (
-		parsed.data.last_public_failure &&
-		parsed.data.last_public_failure.request_id !== parsed.data.request_id
-	) {
-		return null;
-	}
 	return parsed.data;
 }

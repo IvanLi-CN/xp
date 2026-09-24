@@ -85,4 +85,22 @@ describe("parseResourcePeerDiagnostic", () => {
 
 		expect(parseResourcePeerDiagnostic(error)).toBeNull();
 	});
+
+	it("keeps a recent Public failure from an earlier request", () => {
+		const error = errorFor("pre_response_timeout");
+		const diagnostic = error.details?.diagnostic as Record<string, unknown>;
+		diagnostic.last_public_failure = {
+			failure: "pre_response_transport",
+			acknowledgement: "not_observed",
+			dispatch: "dispatched_no_verified_response",
+			observed_at: "2026-09-24T00:00:00Z",
+			request_id: "01M0C1SJ5M1JWE6CCKMXNXP7Z6",
+			elapsed_ms: 200,
+			retry_count: 1,
+		};
+
+		expect(
+			parseResourcePeerDiagnostic(error)?.last_public_failure,
+		).toMatchObject({ request_id: "01M0C1SJ5M1JWE6CCKMXNXP7Z6" });
+	});
 });

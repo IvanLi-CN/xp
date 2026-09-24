@@ -237,10 +237,8 @@ impl MeshAwareHttpClient {
             Err(_error) => {
                 diagnostics.public_circuit = Some(self.circuits.public_state(&peer.node_id).await);
                 if let Some(telemetry) = &self.telemetry {
-                    diagnostics.last_public_failure = telemetry
-                        .last_public_failure(&peer.node_id)
-                        .await
-                        .filter(|failure| failure.request_id == diagnostics.request_id);
+                    diagnostics.last_public_failure =
+                        telemetry.last_public_failure(&peer.node_id).await;
                 }
                 return Err(MeshRequestFailure { diagnostics });
             }
@@ -289,5 +287,33 @@ impl MeshAwareHttpClient {
                 CapabilityProbeResponse::PredecessorNotFound
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_received_without_utf8_ack_as_invalid() {
+        let failure = failure_for_error(&MeshRequestError::AcknowledgementInvalid);
+        assert_eq!(failure.failure, MeshFailureClass::AcknowledgementInvalid);
+        assert_eq!(failure.acknowledgement, MeshAcknowledgementState::Invalid);
+        assert_eq!(
+            failure.dispatch,
+            MeshDispatchState::DispatchedNoVerifiedResponse
+        );
+    }
+
+    #[test]
+    fn classifies_received_non_h2_response_as_unsigned() {
+        let failure = failure_for_error(&MeshRequestError::UnsignedResponse { status: 200 });
+        assert_eq!(failure.failure, MeshFailureClass::UnsignedResponse);
+        assert_eq!(failure.acknowledgement, MeshAcknowledgementState::Missing);
+        assert_eq!(
+            failure.dispatch,
+            MeshDispatchState::DispatchedNoVerifiedResponse
+        );
+        assert_eq!(failure.http_status, Some(200));
     }
 }
