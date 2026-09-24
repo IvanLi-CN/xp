@@ -37,18 +37,19 @@ pub(super) fn verify_relay_ack(
     header_name: &str,
     _missing_message: &str,
 ) -> Result<(), MeshRequestError> {
-    let ack = response
-        .headers()
-        .get(header_name)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| {
-            dispatch_error(
+    let ack = match response.headers().get(header_name) {
+        Some(value) => value
+            .to_str()
+            .map_err(|_| dispatch_error(request, MeshRequestError::AcknowledgementInvalid))?,
+        None => {
+            return Err(dispatch_error(
                 request,
                 MeshRequestError::AcknowledgementMissing {
                     status: response.status().as_u16(),
                 },
-            )
-        })?;
+            ));
+        }
+    };
     if internal_auth::verify_ack_v2(
         cluster_ca_key_pem,
         cluster_ca_cert_pem,

@@ -401,6 +401,18 @@ export const PeerUnavailableWithRouteTrace: Story = {
 		selectedRuntimeRole: null,
 		onRuntimeDetailsChange: () => undefined,
 	},
+	parameters: {
+		viewport: {
+			defaultViewport: "resourceDiagnosticDesktop",
+			viewports: {
+				resourceDiagnosticDesktop: {
+					name: "Resource diagnostic desktop (1280x900)",
+					styles: { height: "900px", width: "1280px" },
+					type: "desktop",
+				},
+			},
+		},
+	},
 	render: () => (
 		<div className="bg-background p-6" data-visual-evidence-surface>
 			<div data-visual-evidence-target>

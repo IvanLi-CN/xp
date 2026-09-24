@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { BackendApiError } from "../api/backendError";
 import { fixtureCatalog } from "../fixture-policy/catalog";
@@ -159,6 +159,59 @@ describe("runtime resource charts", () => {
 });
 
 describe("ResourcePeerDiagnosticState", () => {
+	const requestId = "01M0C1SJ5M1JWE6CCKMXNXPZ78";
+
+	function diagnosticError(
+		failure:
+			| "circuit_open"
+			| "pre_response_timeout"
+			| "pre_response_transport"
+			| "unsigned_response"
+			| "acknowledgement_missing"
+			| "acknowledgement_invalid"
+			| "outcome_unknown",
+		dispatch = "dispatched_no_verified_response",
+	) {
+		return new BackendApiError({
+			status: 504,
+			code: "resource_peer_unavailable",
+			message: "resource snapshot is unavailable from the target node",
+			details: {
+				diagnostic: {
+					origin: { node_id: "101", node_name: "101" },
+					target: { node_id: "us", node_name: "us" },
+					route_attempts: [
+						{
+							route: "direct_mesh",
+							failure,
+							acknowledgement: "not_observed",
+							dispatch,
+							observed_at: "2026-09-24T00:00:00Z",
+							request_id: requestId,
+							elapsed_ms: 100,
+							retry_count: 0,
+						},
+					],
+					public_circuit: "closed",
+					request_id: requestId,
+				},
+			},
+		});
+	}
+
+	function diagnosticProps(
+		error: BackendApiError,
+		onRetry: () => void = () => undefined,
+		isOnline = true,
+	) {
+		return {
+			error,
+			isFetching: false,
+			isOnline,
+			onRetry,
+		};
+	}
+
 	it("shows the source, target, route boundary, and copyable correlation id", () => {
 		render(
 			<ResourcePeerDiagnosticState
@@ -209,6 +262,58 @@ describe("ResourcePeerDiagnosticState", () => {
 		expect(screen.getByText(/Public 备用路径未发送/)).toBeVisible();
 		expect(screen.getByText("01M0C1SJ5M1JWE6CCKMXNXPZ78")).toBeVisible();
 		expect(screen.getByRole("button", { name: "复制 ID" })).toBeVisible();
+	});
+
+	it.each([
+		["pre_response_transport", /发生传输失败/],
+		["unsigned_response", /没有可验证的签名确认/],
+		["acknowledgement_missing", /响应缺少签名确认/],
+		["acknowledgement_invalid", /签名确认无法验证/],
+		["outcome_unknown", /请求结果未知/],
+	] as const)("renders the %s boundary", (failure, expected) => {
+		const view = render(
+			<ResourcePeerDiagnosticState
+				{...diagnosticProps(diagnosticError(failure))}
+			/>,
+		);
+
+		expect(screen.getByText(expected)).toBeVisible();
+		view.unmount();
+	});
+
+	it("copies the correlation id, retries, and disables retry offline", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: { writeText },
+		});
+		const onRetry = vi.fn();
+		const view = render(
+			<ResourcePeerDiagnosticState
+				{...diagnosticProps(diagnosticError("pre_response_timeout"), onRetry)}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "复制 ID" }));
+		await waitFor(() => expect(writeText).toHaveBeenCalledWith(requestId));
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: "已复制" })).toBeVisible(),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+		expect(onRetry).toHaveBeenCalledTimes(1);
+		view.unmount();
+
+		const offlineView = render(
+			<ResourcePeerDiagnosticState
+				{...diagnosticProps(
+					diagnosticError("pre_response_timeout"),
+					onRetry,
+					false,
+				)}
+			/>,
+		);
+		expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+		offlineView.unmount();
 	});
 
 	it("does not describe a Direct Mesh circuit as a Public circuit", () => {
