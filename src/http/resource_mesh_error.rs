@@ -337,7 +337,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn circuit_open_without_available_cooldown_is_internal() {
+    async fn circuit_open_with_active_probe_has_a_bounded_cooldown() {
         let client = test_client();
         let circuits = client.circuits();
         {
@@ -358,10 +358,10 @@ mod tests {
         )
         .await;
 
-        assert_eq!(mapped.code, "internal");
-        assert_eq!(mapped.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(mapped.details["cause"], "cooldown_unavailable");
-        assert!(mapped.details.get("retry_after_seconds").is_none());
+        assert_eq!(mapped.code, "peer_circuit_open");
+        assert_eq!(mapped.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(mapped.details["cause"], "circuit_open");
+        assert_eq!(mapped.details["retry_after_seconds"], 1);
     }
 
     #[tokio::test]

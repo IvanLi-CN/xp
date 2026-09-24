@@ -333,7 +333,7 @@ impl PeerCircuitBreakers {
         let peers = peers.lock().await;
         let circuit = peers.get(peer_id)?;
         if circuit.half_open_in_flight {
-            return None;
+            return Some(1);
         }
         let remaining = circuit.retry_at?.saturating_duration_since(Instant::now());
         (!remaining.is_zero()).then(|| remaining.as_secs().saturating_add(1).clamp(1, 300))

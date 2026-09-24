@@ -94,6 +94,12 @@ export function useNodeResourceQueries(props: {
 			resourceHistoryQueries[index]?.error,
 		]),
 	) as Partial<Record<NodeResourceHistoryMetric, unknown>>;
+	const resourceHistoryFetchingByMetric = Object.fromEntries(
+		NODE_RESOURCE_HISTORY_METRICS.map((metric, index) => [
+			metric,
+			resourceHistoryQueries[index]?.isFetching ?? false,
+		]),
+	) as Partial<Record<NodeResourceHistoryMetric, boolean>>;
 	const runtimeHistoryQueries = useQueries({
 		queries: RUNTIME_RESOURCE_HISTORY_METRICS.map((metric) => ({
 			queryKey: [
@@ -140,22 +146,43 @@ export function useNodeResourceQueries(props: {
 			runtimeHistoryQueries[index]?.error,
 		]),
 	) as Partial<Record<RuntimeResourceHistoryMetric, unknown>>;
+	const runtimeHistoryFetchingByMetric = Object.fromEntries(
+		RUNTIME_RESOURCE_HISTORY_METRICS.map((metric, index) => [
+			metric,
+			runtimeHistoryQueries[index]?.isFetching ?? false,
+		]),
+	) as Partial<Record<RuntimeResourceHistoryMetric, boolean>>;
 	const retryResourceHistory = (metric: NodeResourceHistoryMetric) => {
 		const index = NODE_RESOURCE_HISTORY_METRICS.indexOf(metric);
+		if (resourceHistoryQueries[index]?.isFetching) return;
 		void resourceHistoryQueries[index]?.refetch();
 	};
 	const retryRuntimeHistory = (metric: RuntimeResourceHistoryMetric) => {
 		const index = RUNTIME_RESOURCE_HISTORY_METRICS.indexOf(metric);
+		if (runtimeHistoryQueries[index]?.isFetching) return;
 		void runtimeHistoryQueries[index]?.refetch();
+	};
+	const resourceTabProps = {
+		historyByMetric: resourceHistoryByMetric,
+		historyErrorByMetric: resourceHistoryErrorByMetric,
+		historyFetchingByMetric: resourceHistoryFetchingByMetric,
+		runtimeHistoryByMetric,
+		runtimeHistoryErrorByMetric,
+		runtimeHistoryFetchingByMetric,
+		onRetryHistory: retryResourceHistory,
+		onRetryRuntimeHistory: retryRuntimeHistory,
 	};
 	return {
 		resourceCapability,
 		resourceQuery,
 		resourceHistoryByMetric,
 		resourceHistoryErrorByMetric,
+		resourceHistoryFetchingByMetric,
 		retryResourceHistory,
 		runtimeHistoryByMetric,
 		runtimeHistoryErrorByMetric,
+		runtimeHistoryFetchingByMetric,
 		retryRuntimeHistory,
+		resourceTabProps,
 	};
 }

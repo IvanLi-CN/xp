@@ -514,6 +514,7 @@ export const CircuitOpen: Story = {
 						status: 503,
 						code: "peer_circuit_open",
 						message: "circuit details are not shown",
+						retryAfterDeadline: Date.parse("2026-09-01T00:00:18.000Z"),
 						details: {
 							failure_layer: "circuit_breaker",
 							dispatch_state: "not_dispatched",
@@ -525,6 +526,7 @@ export const CircuitOpen: Story = {
 				}
 				historyByMetric={{}}
 				runtimeHistoryByMetric={{}}
+				now={Date.parse("2026-09-01T00:00:00.000Z")}
 			/>
 		</EvidenceFrame>
 	),

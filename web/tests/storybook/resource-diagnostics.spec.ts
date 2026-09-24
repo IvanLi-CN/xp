@@ -53,6 +53,13 @@ test("keeps stale snapshot age and history errors visible", async ({
 	await expect(page.getByText(/age \d+ min|age \d+ hr/)).toBeVisible({
 		timeout: 15_000,
 	});
+	await page.goto(
+		storyUrl("components-resourcesnapshotpanel--history-refresh-error"),
+		{ waitUntil: "networkidle" },
+	);
+	await expect(
+		page.getByText("Refresh failed; showing the last successful points."),
+	).toBeVisible({ timeout: 15_000 });
 
 	await page.goto(
 		storyUrl(
@@ -115,6 +122,18 @@ test("keeps unstructured resource failures safe and actionable", async ({
 	await expect(
 		page.getByRole("button", { name: "Retry resource read" }),
 	).toBeVisible();
+});
+
+test("renders dark-theme unknown failure state safely", async ({ page }) => {
+	await page.goto(storyUrl("components-resourcesnapshotpanel--unknown-error"), {
+		waitUntil: "networkidle",
+	});
+	await expect(page.getByText("Resource read failed")).toBeVisible({
+		timeout: 15_000,
+	});
+	await expect(
+		page.getByText("unstructured backend detail must stay hidden"),
+	).toHaveCount(0);
 });
 
 test("renders light-theme unknown failure state safely", async ({ page }) => {

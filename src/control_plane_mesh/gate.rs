@@ -270,7 +270,7 @@ impl MeshAwareHttpClient {
                 .await;
                 Ok(MeshAttemptResult::Fallback {
                     ambiguous: true,
-                    timed_out: false,
+                    timed_out: true,
                 })
             }
         }

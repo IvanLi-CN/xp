@@ -135,16 +135,20 @@ export const RUNTIME_RESOURCE_HISTORY_CHARTS = [
 	},
 ] as const satisfies readonly ResourceHistoryChart[];
 
-function useRetryCooldown(error: unknown, isOnline: boolean) {
+function useRetryCooldown(
+	error: unknown,
+	isOnline: boolean,
+	nowOverride?: number,
+) {
 	const diagnostic = classifyResourceError(error, { isOnline });
-	const [now, setNow] = useState(() => Date.now());
+	const [now, setNow] = useState(() => nowOverride ?? Date.now());
 	const retryAt = diagnostic.retryDeadlineAt ?? null;
 
 	useEffect(() => {
-		if (!retryAt) return;
+		if (nowOverride !== undefined || !retryAt) return;
 		const timer = window.setInterval(() => setNow(Date.now()), 1000);
 		return () => window.clearInterval(timer);
-	}, [retryAt]);
+	}, [nowOverride, retryAt]);
 
 	const remainingSeconds = retryAt
 		? Math.max(0, Math.ceil((retryAt - now) / 1000))
@@ -179,6 +183,7 @@ function ResourceDiagnosticBanner(props: {
 	const { diagnostic, remainingSeconds } = useRetryCooldown(
 		props.error,
 		props.isOnline,
+		props.now,
 	);
 	const canRetry =
 		props.isOnline && diagnostic.retryable && remainingSeconds === 0;
@@ -388,6 +393,7 @@ function ResourceHistoryChart(props: {
 	historyByMetric: Partial<Record<string, ResourceHistoryPoint[]>>;
 	error?: unknown;
 	isOnline: boolean;
+	isFetching: boolean;
 	onRetry?: () => void;
 }) {
 	const palette = useEChartsThemePalette();
@@ -421,7 +427,10 @@ function ResourceHistoryChart(props: {
 					{props.onRetry && diagnostic.layer !== "unsupported" ? (
 						<Button
 							disabled={
-								!props.isOnline || !diagnostic.retryable || remainingSeconds > 0
+								!props.isOnline ||
+								!diagnostic.retryable ||
+								remainingSeconds > 0 ||
+								props.isFetching
 							}
 							onClick={props.onRetry}
 							size="sm"
@@ -466,7 +475,10 @@ function ResourceHistoryChart(props: {
 								"disabled:cursor-not-allowed disabled:no-underline disabled:opacity-60",
 							].join(" ")}
 							disabled={
-								!props.isOnline || !diagnostic.retryable || remainingSeconds > 0
+								!props.isOnline ||
+								!diagnostic.retryable ||
+								remainingSeconds > 0 ||
+								props.isFetching
 							}
 							onClick={props.onRetry}
 							type="button"
@@ -487,6 +499,7 @@ function ResourceHistoryCard(props: {
 	historyByMetric: Partial<Record<string, ResourceHistoryPoint[]>>;
 	error?: unknown;
 	isOnline: boolean;
+	isFetching: boolean;
 	onRetry?: () => void;
 }) {
 	const palette = useEChartsThemePalette();
@@ -525,6 +538,7 @@ function ResourceHistoryCard(props: {
 				error={props.error}
 				historyByMetric={props.historyByMetric}
 				isOnline={props.isOnline}
+				isFetching={props.isFetching}
 				onRetry={props.onRetry}
 			/>
 		</div>
@@ -581,8 +595,12 @@ export function ResourceSnapshotPanel(props: {
 		>
 	>;
 	historyErrorByMetric?: Partial<Record<NodeResourceHistoryMetric, unknown>>;
+	historyFetchingByMetric?: Partial<Record<NodeResourceHistoryMetric, boolean>>;
 	runtimeHistoryErrorByMetric?: Partial<
 		Record<RuntimeResourceHistoryMetric, unknown>
+	>;
+	runtimeHistoryFetchingByMetric?: Partial<
+		Record<RuntimeResourceHistoryMetric, boolean>
 	>;
 	isOnline?: boolean;
 	onRetryHistory?: (metric: NodeResourceHistoryMetric) => void;
@@ -668,6 +686,12 @@ export function ResourceSnapshotPanel(props: {
 							.find(Boolean)}
 						historyByMetric={props.historyByMetric}
 						isOnline={isOnline}
+						isFetching={chart.series.some(
+							(series) =>
+								props.historyFetchingByMetric?.[
+									series.metric as NodeResourceHistoryMetric
+								] ?? false,
+						)}
 						onRetry={() => {
 							for (const series of chart.series) {
 								props.onRetryHistory?.(
@@ -741,6 +765,7 @@ export function ResourceSnapshotPanel(props: {
 				<RuntimeResourceDetails
 					historyByMetric={props.runtimeHistoryByMetric}
 					historyErrorByMetric={props.runtimeHistoryErrorByMetric}
+					historyFetchingByMetric={props.runtimeHistoryFetchingByMetric}
 					isOnline={isOnline}
 					onRetryHistory={props.onRetryRuntimeHistory}
 					role={props.selectedRuntimeRole}
@@ -759,6 +784,9 @@ function RuntimeResourceDetails(props: {
 		>
 	>;
 	historyErrorByMetric?: Partial<Record<RuntimeResourceHistoryMetric, unknown>>;
+	historyFetchingByMetric?: Partial<
+		Record<RuntimeResourceHistoryMetric, boolean>
+	>;
 	isOnline: boolean;
 	onRetryHistory?: (metric: RuntimeResourceHistoryMetric) => void;
 }) {
@@ -787,6 +815,12 @@ function RuntimeResourceDetails(props: {
 							.find(Boolean)}
 						historyByMetric={props.historyByMetric}
 						isOnline={props.isOnline}
+						isFetching={chart.series.some(
+							(series) =>
+								props.historyFetchingByMetric?.[
+									series.metric as RuntimeResourceHistoryMetric
+								] ?? false,
+						)}
 						onRetry={() => {
 							for (const series of chart.series) {
 								props.onRetryHistory?.(
@@ -822,8 +856,12 @@ export function ResourceTabContent(props: {
 		>
 	>;
 	historyErrorByMetric?: Partial<Record<NodeResourceHistoryMetric, unknown>>;
+	historyFetchingByMetric?: Partial<Record<NodeResourceHistoryMetric, boolean>>;
 	runtimeHistoryErrorByMetric?: Partial<
 		Record<RuntimeResourceHistoryMetric, unknown>
+	>;
+	runtimeHistoryFetchingByMetric?: Partial<
+		Record<RuntimeResourceHistoryMetric, boolean>
 	>;
 	onRetryHistory?: (metric: NodeResourceHistoryMetric) => void;
 	onRetryRuntimeHistory?: (metric: RuntimeResourceHistoryMetric) => void;
@@ -890,12 +928,14 @@ export function ResourceTabContent(props: {
 				<ResourceSnapshotPanel
 					historyByMetric={props.historyByMetric}
 					historyErrorByMetric={props.historyErrorByMetric}
+					historyFetchingByMetric={props.historyFetchingByMetric}
 					isOnline={props.isOnline}
 					onRetryHistory={props.onRetryHistory}
 					onRetryRuntimeHistory={props.onRetryRuntimeHistory}
 					onRuntimeDetailsChange={props.onRuntimeDetailsChange}
 					runtimeHistoryByMetric={props.runtimeHistoryByMetric}
 					runtimeHistoryErrorByMetric={props.runtimeHistoryErrorByMetric}
+					runtimeHistoryFetchingByMetric={props.runtimeHistoryFetchingByMetric}
 					selectedRuntimeRole={props.selectedRuntimeRole}
 					snapshot={props.snapshot}
 				/>
