@@ -62,8 +62,9 @@ pub(super) async fn signed_send_with_public_gateway_retries(
                     retry += 1;
                     continue;
                 }
-                return Err(public_transport_error(
+                return Err(classify_public_retry_failure(
                     error,
+                    confirmed_timeout,
                     request.allow_ambiguous_fallback,
                 ));
             }
@@ -81,6 +82,18 @@ pub(super) async fn signed_send_with_public_gateway_retries(
             }
         };
         return Ok((response, verified));
+    }
+}
+
+pub(super) fn classify_public_retry_failure(
+    error: reqwest::Error,
+    confirmed_timeout: bool,
+    allow_ambiguous_fallback: bool,
+) -> MeshRequestError {
+    if confirmed_timeout {
+        MeshRequestError::TransportTimeout
+    } else {
+        public_transport_error(error, allow_ambiguous_fallback)
     }
 }
 

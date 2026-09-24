@@ -182,6 +182,21 @@ async fn public_transport_failure_retries_for_idempotent_request() {
     task.abort();
 }
 
+#[tokio::test]
+async fn confirmed_timeout_survives_a_later_public_transport_error() {
+    let error = reqwest::Client::new()
+        .get("http://127.0.0.1:1")
+        .send()
+        .await
+        .expect_err("the test port must not be listening");
+
+    assert!(error.is_connect());
+    assert!(matches!(
+        retry::classify_public_retry_failure(error, true, true),
+        MeshRequestError::TransportTimeout
+    ));
+}
+
 #[test]
 fn public_gateway_retry_excludes_non_idempotent_mutations() {
     let mut request = MeshRequest {

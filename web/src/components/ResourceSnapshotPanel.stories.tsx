@@ -571,7 +571,7 @@ export const StaleSnapshot: Story = {
 		<EvidenceFrame>
 			<ResourceTabContent
 				{...resourceTabProps}
-				dataUpdatedAt={Date.now() - 45 * 60 * 1000}
+				dataUpdatedAt={Date.parse("2026-09-01T00:00:00.000Z")}
 				isError
 				error={
 					new BackendApiError({
@@ -581,6 +581,7 @@ export const StaleSnapshot: Story = {
 						details: { failure_layer: "peer_transport", retryable: true },
 					})
 				}
+				now={Date.parse("2026-09-01T00:45:00.000Z")}
 				snapshot={supportedSnapshot}
 			/>
 		</EvidenceFrame>

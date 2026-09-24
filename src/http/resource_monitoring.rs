@@ -337,7 +337,7 @@ pub(super) async fn admin_get_node_resources_history(
             .with_detail("cause", "capability_unsupported")
             .with_detail("confidence", "confirmed")
             .with_detail("target_node_id", node_id.as_str())
-            .with_detail("attempted_path", "mesh")
+            .with_detail("attempted_path", "unknown")
             .with_detail("dispatch_state", "verified_remote_response")
             .with_detail("retryable", false)
             .with_detail("support_id", crate::id::new_ulid_string()));
@@ -463,7 +463,9 @@ fn remote_resource_error(node_id: &str, target_status: StatusCode) -> ApiError {
     .with_detail("cause", "remote_resource_error")
     .with_detail("confidence", "confirmed")
     .with_detail("target_node_id", node_id)
-    .with_detail("attempted_path", "mesh")
+    // The peer client may complete through Mesh, Reverse, or Public fallback. The
+    // response type currently does not carry that route, so keep the diagnostic honest.
+    .with_detail("attempted_path", "unknown")
     .with_detail("dispatch_state", "verified_remote_response")
     .with_detail(
         "retryable",
@@ -560,6 +562,7 @@ mod tests {
         assert_eq!(remote.status, StatusCode::NOT_FOUND);
         assert_eq!(remote.details["failure_layer"], "remote_node");
         assert_eq!(remote.details["target_status"], 404);
+        assert_eq!(remote.details["attempted_path"], "unknown");
     }
 
     #[test]

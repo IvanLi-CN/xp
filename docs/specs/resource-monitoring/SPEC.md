@@ -72,12 +72,26 @@ root 常驻服务来解决可观测性问题。
   ![Resource circuit-open mobile state](./assets/node-resource-circuit-open-mobile.png)
 
 - source_type: storybook_canvas
+  story_id_or_title: Components/ResourceSnapshotPanel/CircuitOpen
+  state: circuit-open at 393x852, light theme
+  evidence_note: Confirms the same bounded cooldown state remains legible in the light theme.
+  image:
+  ![Resource circuit-open mobile light state](./assets/node-resource-circuit-open-mobile-light.png)
+
+- source_type: storybook_canvas
   story_id_or_title: Components/ResourceSnapshotPanel/UnknownError
   state: unknown error at 393x852
   evidence_note: Confirms that an unstructured failure uses the unknown fallback without exposing
   the backend error text and keeps the retry action safe.
   image:
   ![Resource unknown mobile state](./assets/node-resource-unknown-mobile.png)
+
+- source_type: storybook_canvas
+  story_id_or_title: Components/ResourceSnapshotPanel/UnknownError
+  state: unknown error at 393x852, light theme
+  evidence_note: Confirms the safe unknown fallback and retry action in the light theme.
+  image:
+  ![Resource unknown mobile light state](./assets/node-resource-unknown-mobile-light.png)
 
 - source_type: storybook_canvas
   story_id_or_title: Components/ResourceSnapshotPanel/StaleSnapshot
@@ -88,12 +102,28 @@ root 常驻服务来解决可观测性问题。
   ![Resource stale snapshot desktop state](./assets/node-resource-stale-desktop.png)
 
 - source_type: storybook_canvas
+  story_id_or_title: Components/ResourceSnapshotPanel/StaleSnapshot
+  state: stale snapshot at 1600x1200, light theme
+  evidence_note: Confirms retained data, deterministic stale age, and peer diagnostics in the light
+  theme.
+  image:
+  ![Resource stale snapshot desktop light state](./assets/node-resource-stale-desktop-light.png)
+
+- source_type: storybook_canvas
   story_id_or_title: Components/ResourceSnapshotPanel/HistoryRefreshError
   state: one history chart refresh failure at 1600x1200
   evidence_note: Confirms that a chart keeps its last successful points while exposing a scoped
   refresh failure and retry action.
   image:
   ![Resource history refresh error desktop state](./assets/node-resource-history-error-desktop.png)
+
+- source_type: storybook_canvas
+  story_id_or_title: Components/ResourceSnapshotPanel/HistoryRefreshError
+  state: one history chart refresh failure at 1600x1200, light theme
+  evidence_note: Confirms the scoped chart error, retained points, and retry action in the light
+  theme.
+  image:
+  ![Light history refresh error](./assets/node-resource-history-error-desktop-light.png)
 
 ## 需求（Requirements）
 

@@ -172,6 +172,7 @@ function ResourceDiagnosticBanner(props: {
 	isFetching: boolean;
 	snapshot?: ResourceSnapshot;
 	dataUpdatedAt?: number;
+	now?: number;
 	onRetry: () => void;
 	onOpenMeshStatus?: () => void;
 }) {
@@ -181,13 +182,14 @@ function ResourceDiagnosticBanner(props: {
 	);
 	const canRetry =
 		props.isOnline && diagnostic.retryable && remainingSeconds === 0;
-	const [now, setNow] = useState(() => Date.now());
+	const [now, setNow] = useState(() => props.now ?? Date.now());
 
 	useEffect(() => {
-		if (!props.snapshot || !props.dataUpdatedAt) return;
+		if (props.now !== undefined || !props.snapshot || !props.dataUpdatedAt)
+			return;
 		const timer = window.setInterval(() => setNow(Date.now()), 1_000);
 		return () => window.clearInterval(timer);
-	}, [props.dataUpdatedAt, props.snapshot]);
+	}, [props.dataUpdatedAt, props.now, props.snapshot]);
 	const isPeerLayer = [
 		"peer_transport",
 		"peer_protocol",
@@ -811,6 +813,7 @@ export function ResourceTabContent(props: {
 	onRetry: () => void;
 	onOpenMeshStatus?: () => void;
 	dataUpdatedAt?: number;
+	now?: number;
 	snapshot?: ResourceSnapshot;
 	historyByMetric: Partial<
 		Record<
@@ -857,6 +860,7 @@ export function ResourceTabContent(props: {
 					error={props.error}
 					isFetching={props.isFetching}
 					isOnline={props.isOnline}
+					now={props.now}
 					onOpenMeshStatus={props.onOpenMeshStatus}
 					onRetry={props.onRetry}
 				/>
@@ -877,6 +881,7 @@ export function ResourceTabContent(props: {
 						error={props.error}
 						isFetching={props.isFetching}
 						isOnline={props.isOnline}
+						now={props.now}
 						onOpenMeshStatus={props.onOpenMeshStatus}
 						onRetry={props.onRetry}
 						snapshot={props.snapshot}
