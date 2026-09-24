@@ -251,6 +251,21 @@ Web upgrade stale-conflict state:
 
 ![Version indicator stale upgrade conflict](./assets/version-indicator-stale-upgrade-conflict.png)
 
+Node resource peer-unavailable diagnostic:
+
+- Source: Storybook canvas `Components/ResourceSnapshotPanel/PeerUnavailableWithRouteTrace`.
+- Bound implementation commit: `835a2eb136b5300b5a240643ea9457efe4b52aa6`.
+- Capture metadata: `source_type=storybook_canvas`, `target_program=mock-only`,
+  `capture_scope=element`, `requested_viewports=1280x900,393x852`,
+  `viewport_strategy=storybook-viewport`, `margin_policy=require_margin`,
+  `evidence_surface=component`, `sensitive_exclusion=N/A`, `submission_gate=approved`.
+- The desktop and narrow views show the ordered Direct Mesh/Public trace, local Public circuit
+  state, unsent Public explanation, recent Public failure, correlation ID, copy action, and Retry.
+
+![Node resource peer diagnostic desktop](./assets/resource-peer-diagnostic-desktop.png)
+
+![Node resource peer diagnostic mobile](./assets/resource-peer-diagnostic-mobile.png)
+
 - Source: mock-only, login-free `/ui-demo/system-status`.
 - Bound implementation commit: `721c0a6a1d4e1cd2c6f4ff20e6a067802766058a`.
 - Capture metadata: `source_type=ui_demo`, `target_program=mock-only`,
