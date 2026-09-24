@@ -36,12 +36,7 @@ async fn stale_mesh_epoch_cannot_reopen_current_breaker() {
     assert!(client.observe_mesh_gate().await);
     for _ in 0..MESH_FAILURES_BEFORE_OPEN {
         client
-            .record_mesh_transport_failure(
-                &peer,
-                MeshPeerReason::TransportError,
-                "stale request".to_string(),
-                0,
-            )
+            .record_mesh_transport_failure(&peer, MeshPeerReason::TransportError, 0)
             .await;
     }
     assert_eq!(circuits.state("peer", true).await, BreakerState::Closed);

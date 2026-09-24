@@ -5,7 +5,6 @@ impl MeshAwareHttpClient {
         &self,
         peer: &MeshPeerTarget,
         mesh_reason: MeshPeerReason,
-        reason: String,
         epoch: u64,
     ) {
         let _gate_lock = self.mesh_gate_lock.read().await;
@@ -29,16 +28,13 @@ impl MeshAwareHttpClient {
         .await;
         self.record_mesh_reason(peer, mesh_reason).await;
         if let Some(telemetry) = &self.telemetry {
-            let message = if state == BreakerState::Open {
-                format!("Mesh breaker opened after retryable transport failure: {reason}")
-            } else {
-                format!("Mesh transport failure: {reason}")
-            };
             let _ = telemetry
                 .set_breaker(
                     &peer.node_id,
                     state,
-                    (state == BreakerState::Open).then_some(message),
+                    (state == BreakerState::Open).then_some(
+                        "Mesh circuit opened after bounded transport failure".to_string(),
+                    ),
                 )
                 .await;
         }

@@ -63,7 +63,7 @@ impl MeshRequestDiagnostics {
             failure: failure.failure,
             acknowledgement: failure.acknowledgement,
             dispatch: failure.dispatch,
-            observed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            observed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
             request_id: request_id.to_string(),
             elapsed_ms: started.elapsed().as_millis().min(u32::MAX as u128) as u32,
             retry_count: failure.retry_count,

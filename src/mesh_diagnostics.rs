@@ -61,3 +61,21 @@ pub struct MeshPublicFailure {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http_status: Option<u16>,
 }
+
+pub(crate) fn public_failure_is_newer(
+    candidate: &MeshPublicFailure,
+    previous: &MeshPublicFailure,
+) -> bool {
+    match (
+        chrono::DateTime::parse_from_rfc3339(&candidate.observed_at),
+        chrono::DateTime::parse_from_rfc3339(&previous.observed_at),
+    ) {
+        (Ok(candidate_at), Ok(previous_at)) => {
+            candidate_at > previous_at
+                || (candidate_at == previous_at && candidate.request_id >= previous.request_id)
+        }
+        (Ok(_), Err(_)) => true,
+        (Err(_), Ok(_)) => false,
+        (Err(_), Err(_)) => candidate.request_id >= previous.request_id,
+    }
+}

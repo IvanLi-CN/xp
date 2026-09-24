@@ -231,12 +231,11 @@ impl MeshAwareHttpClient {
                     )
                     .await)
             }
-            Some((Ok(Err(error)), gate_guard)) => {
+            Some((Ok(Err(_error)), gate_guard)) => {
                 drop(gate_guard);
                 self.record_mesh_transport_failure(
                     peer,
                     MeshPeerReason::TransportError,
-                    error.to_string(),
                     mesh_epoch,
                 )
                 .await;
@@ -263,7 +262,6 @@ impl MeshAwareHttpClient {
                 self.record_mesh_transport_failure(
                     peer,
                     MeshPeerReason::TransportTimeout,
-                    "Mesh request timed out".into(),
                     mesh_epoch,
                 )
                 .await;
