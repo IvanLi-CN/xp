@@ -251,6 +251,35 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn circuit_open_mapping_is_bounded_and_not_dispatched() {
+        let client = test_client();
+        let mapped = resource_mesh_error(
+            &client,
+            "node-a",
+            "support-a".to_string(),
+            MeshRequestError::CircuitOpen {
+                path: "Direct Mesh",
+            },
+        )
+        .await;
+
+        assert_mapping(
+            &mapped,
+            "peer_circuit_open",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "not_dispatched",
+            true,
+        );
+        assert_eq!(mapped.details["failure_layer"], "circuit_breaker");
+        assert_eq!(mapped.details["retry_after_seconds"], 1);
+        assert!(
+            mapped.details["retry_after_seconds"]
+                .as_u64()
+                .is_some_and(|seconds| (1..=300).contains(&seconds))
+        );
+    }
+
     #[test]
     fn public_transport_mapping_distinguishes_timeout() {
         let timeout = public_transport_error(true, "node-a", "support-a".to_string());

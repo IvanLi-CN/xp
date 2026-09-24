@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     ApiError, ApiJson, AppState, CLUSTER_RUNTIME_FANOUT_TIMEOUT,
-    mesh::send_mesh_internal_resource_read,
+    mesh::{
+        MeshCapabilityProbeResponse, send_mesh_internal_capability_read,
+        send_mesh_internal_resource_read,
+    },
 };
 use crate::resource_monitoring::{
     ResourceGap, ResourceHistoryResponse, ResourcePolicy, ResourceRecentSeries, ResourceRole,
@@ -76,7 +79,13 @@ pub(super) async fn admin_list_nodes_resources(
                 }
             }
             Ok(response) if response.status() == StatusCode::NOT_FOUND => {
-                items.push(unsupported_snapshot(&node.node_id));
+                if resource_not_found_is_unsupported(
+                    resource_capability_status(&state, &node).await,
+                ) {
+                    items.push(unsupported_snapshot(&node.node_id));
+                } else {
+                    unreachable_nodes.push(node.node_id);
+                }
             }
             _ => unreachable_nodes.push(node.node_id),
         }
@@ -112,7 +121,9 @@ pub(super) async fn admin_get_node_resources(
         CLUSTER_RUNTIME_FANOUT_TIMEOUT,
     )
     .await?;
-    if response.status() == StatusCode::NOT_FOUND {
+    if response.status() == StatusCode::NOT_FOUND
+        && resource_not_found_is_unsupported(resource_capability_status(&state, &node).await)
+    {
         return Ok(Json(unsupported_snapshot(&node_id)));
     }
     if !response.status().is_success() {
@@ -161,7 +172,9 @@ pub(super) async fn admin_get_node_resources_recent(
         CLUSTER_RUNTIME_FANOUT_TIMEOUT,
     )
     .await?;
-    if response.status() == StatusCode::NOT_FOUND {
+    if response.status() == StatusCode::NOT_FOUND
+        && resource_not_found_is_unsupported(resource_capability_status(&state, &node).await)
+    {
         return Ok(Json(unsupported_recent_series(&query.metric, query.role)));
     }
     if !response.status().is_success() {
@@ -284,7 +297,9 @@ pub(super) async fn admin_get_node_resources_history(
         CLUSTER_RUNTIME_FANOUT_TIMEOUT,
     )
     .await?;
-    if response.status() == StatusCode::NOT_FOUND {
+    if response.status() == StatusCode::NOT_FOUND
+        && resource_not_found_is_unsupported(resource_capability_status(&state, &node).await)
+    {
         return Err(ApiError::new(
             "resource_monitoring_unsupported",
             StatusCode::NOT_IMPLEMENTED,
@@ -299,6 +314,79 @@ pub(super) async fn admin_get_node_resources_history(
         .await
         .map(Json)
         .map_err(|error| ApiError::internal(error.to_string()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResourceCapabilityStatus {
+    Supported,
+    Unsupported,
+    Unknown,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalCapabilitiesResponse {
+    #[serde(default)]
+    capabilities: Vec<String>,
+}
+
+async fn resource_capability_status(
+    state: &AppState,
+    node: &crate::domain::Node,
+) -> ResourceCapabilityStatus {
+    let probe = send_mesh_internal_capability_read(
+        state,
+        &state.mesh_client,
+        node,
+        CLUSTER_RUNTIME_FANOUT_TIMEOUT,
+    )
+    .await;
+    let Ok(probe) = probe else {
+        return ResourceCapabilityStatus::Unknown;
+    };
+    let MeshCapabilityProbeResponse::Verified { response, deadline } = probe else {
+        return ResourceCapabilityStatus::Unsupported;
+    };
+    let status = response.status();
+    if status == StatusCode::NOT_FOUND {
+        return classify_resource_capability(status, None);
+    }
+    if !status.is_success() {
+        return classify_resource_capability(status, None);
+    }
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    let Ok(body) = super::bounded_json::read_bounded_internal_json::<InternalCapabilitiesResponse>(
+        response, remaining,
+    )
+    .await
+    else {
+        return ResourceCapabilityStatus::Unknown;
+    };
+    classify_resource_capability(status, Some(&body.capabilities))
+}
+
+fn resource_not_found_is_unsupported(status: ResourceCapabilityStatus) -> bool {
+    matches!(status, ResourceCapabilityStatus::Unsupported)
+}
+
+fn classify_resource_capability(
+    status: StatusCode,
+    capabilities: Option<&[String]>,
+) -> ResourceCapabilityStatus {
+    if status == StatusCode::NOT_FOUND {
+        return ResourceCapabilityStatus::Unsupported;
+    }
+    if !status.is_success() {
+        return ResourceCapabilityStatus::Unknown;
+    }
+    if capabilities.is_some_and(|items| {
+        items
+            .iter()
+            .any(|capability| capability == "admin.resource-monitoring")
+    }) {
+        ResourceCapabilityStatus::Supported
+    } else {
+        ResourceCapabilityStatus::Unsupported
+    }
 }
 
 fn remote_resource_error(node_id: &str, target_status: StatusCode) -> ApiError {
@@ -328,6 +416,54 @@ fn unsupported_recent_series(metric: &str, role: Option<ResourceRole>) -> Resour
         resolution: "15s".to_string(),
         points: Vec::new(),
         truncated: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+
+    use super::{
+        ResourceCapabilityStatus, classify_resource_capability, remote_resource_error,
+        resource_not_found_is_unsupported,
+    };
+
+    #[test]
+    fn resource_404_is_unsupported_only_after_capability_probe() {
+        assert!(resource_not_found_is_unsupported(
+            ResourceCapabilityStatus::Unsupported
+        ));
+        assert!(!resource_not_found_is_unsupported(
+            ResourceCapabilityStatus::Supported
+        ));
+        assert!(!resource_not_found_is_unsupported(
+            ResourceCapabilityStatus::Unknown
+        ));
+    }
+
+    #[test]
+    fn capability_route_404_is_legacy_unsupported_but_remote_404_is_preserved() {
+        assert_eq!(
+            classify_resource_capability(StatusCode::NOT_FOUND, None),
+            ResourceCapabilityStatus::Unsupported
+        );
+        assert_eq!(
+            classify_resource_capability(
+                StatusCode::OK,
+                Some(&["admin.resource-monitoring".to_string()]),
+            ),
+            ResourceCapabilityStatus::Supported
+        );
+        assert_eq!(
+            classify_resource_capability(StatusCode::INTERNAL_SERVER_ERROR, None),
+            ResourceCapabilityStatus::Unknown
+        );
+
+        let remote = remote_resource_error("node-a", StatusCode::NOT_FOUND);
+        assert_eq!(remote.code, "remote_node_error");
+        assert_eq!(remote.status, StatusCode::NOT_FOUND);
+        assert_eq!(remote.details["failure_layer"], "remote_node");
+        assert_eq!(remote.details["target_status"], 404);
     }
 }
 
