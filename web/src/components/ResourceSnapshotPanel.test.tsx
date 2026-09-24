@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { BackendApiError } from "../api/backendError";
+import { BackendApiError, throwIfNotOk } from "../api/backendError";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	RESOURCE_HISTORY_CHARTS,
@@ -105,6 +105,54 @@ describe("buildResourceHistoryChartOption", () => {
 });
 
 describe("ResourceTabContent diagnostics", () => {
+	it("uses the authoritative Retry-After header for the disabled retry state", async () => {
+		const response = new Response(
+			JSON.stringify({
+				error: {
+					code: "peer_circuit_open",
+					message: "cooldown",
+					details: {
+						failure_layer: "circuit_breaker",
+						retryable: true,
+						retry_after_seconds: 1,
+					},
+				},
+			}),
+			{ status: 503, headers: { "Retry-After": "45" } },
+		);
+		let parsedError: unknown;
+		try {
+			await throwIfNotOk(response);
+		} catch (error) {
+			parsedError = error;
+		}
+
+		render(
+			<ResourceTabContent
+				capabilityUnavailable={false}
+				isLoading={false}
+				isError
+				error={parsedError}
+				isFetching={false}
+				isOnline
+				onRetry={() => undefined}
+				historyByMetric={{}}
+				runtimeHistoryByMetric={{}}
+				selectedRuntimeRole={null}
+				onRuntimeDetailsChange={() => undefined}
+			/>,
+		);
+
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Retry resource read" }),
+			).toHaveTextContent(/Retry in 4\ds/),
+		);
+		expect(
+			screen.getByRole("button", { name: "Retry resource read" }),
+		).toBeDisabled();
+	});
+
 	it("does not use raw backend text and disables retry during cooldown", () => {
 		const onRetry = vi.fn();
 		render(

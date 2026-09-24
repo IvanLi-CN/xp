@@ -413,68 +413,74 @@ export const UnknownError: Story = {
 export const XpApiError: Story = {
 	args: resourcePanelStoryArgs,
 	render: () => (
-		<ResourceTabContent
-			{...resourceTabProps}
-			isError
-			error={
-				new BackendApiError({
-					status: 500,
-					code: "internal",
-					message: "internal diagnostics are not shown",
-					details: { failure_layer: "xp_api", retryable: true },
-				})
-			}
-			historyByMetric={{}}
-			runtimeHistoryByMetric={{}}
-		/>
+		<EvidenceFrame>
+			<ResourceTabContent
+				{...resourceTabProps}
+				isError
+				error={
+					new BackendApiError({
+						status: 500,
+						code: "internal",
+						message: "internal diagnostics are not shown",
+						details: { failure_layer: "xp_api", retryable: true },
+					})
+				}
+				historyByMetric={{}}
+				runtimeHistoryByMetric={{}}
+			/>
+		</EvidenceFrame>
 	),
 };
 
 export const PeerTransport: Story = {
 	args: resourcePanelStoryArgs,
 	render: () => (
-		<ResourceTabContent
-			{...resourceTabProps}
-			isError
-			error={
-				new BackendApiError({
-					status: 504,
-					code: "peer_transport_timeout",
-					message: "transport details are not shown",
-					details: {
-						failure_layer: "peer_transport",
-						dispatch_state: "dispatched_no_verified_response",
-						retryable: true,
-					},
-				})
-			}
-			historyByMetric={{}}
-			runtimeHistoryByMetric={{}}
-		/>
+		<EvidenceFrame>
+			<ResourceTabContent
+				{...resourceTabProps}
+				isError
+				error={
+					new BackendApiError({
+						status: 504,
+						code: "peer_transport_timeout",
+						message: "transport details are not shown",
+						details: {
+							failure_layer: "peer_transport",
+							dispatch_state: "dispatched_no_verified_response",
+							retryable: true,
+						},
+					})
+				}
+				historyByMetric={{}}
+				runtimeHistoryByMetric={{}}
+			/>
+		</EvidenceFrame>
 	),
 };
 
 export const PeerProtocol: Story = {
 	args: resourcePanelStoryArgs,
 	render: () => (
-		<ResourceTabContent
-			{...resourceTabProps}
-			isError
-			error={
-				new BackendApiError({
-					status: 502,
-					code: "peer_protocol_rejected",
-					message: "signature details are not shown",
-					details: {
-						failure_layer: "peer_protocol",
-						cause: "protocol_rejected",
-						retryable: true,
-					},
-				})
-			}
-			historyByMetric={{}}
-			runtimeHistoryByMetric={{}}
-		/>
+		<EvidenceFrame>
+			<ResourceTabContent
+				{...resourceTabProps}
+				isError
+				error={
+					new BackendApiError({
+						status: 502,
+						code: "peer_protocol_rejected",
+						message: "signature details are not shown",
+						details: {
+							failure_layer: "peer_protocol",
+							cause: "protocol_rejected",
+							retryable: true,
+						},
+					})
+				}
+				historyByMetric={{}}
+				runtimeHistoryByMetric={{}}
+			/>
+		</EvidenceFrame>
 	),
 };
 
@@ -521,24 +527,26 @@ export const CircuitOpen: Story = {
 export const RemoteError: Story = {
 	args: resourcePanelStoryArgs,
 	render: () => (
-		<ResourceTabContent
-			{...resourceTabProps}
-			isError
-			error={
-				new BackendApiError({
-					status: 429,
-					code: "remote_node_error",
-					message: "remote body is not shown",
-					details: {
-						failure_layer: "remote_node",
-						target_status: 429,
-						retryable: true,
-					},
-				})
-			}
-			historyByMetric={{}}
-			runtimeHistoryByMetric={{}}
-		/>
+		<EvidenceFrame>
+			<ResourceTabContent
+				{...resourceTabProps}
+				isError
+				error={
+					new BackendApiError({
+						status: 429,
+						code: "remote_node_error",
+						message: "remote body is not shown",
+						details: {
+							failure_layer: "remote_node",
+							target_status: 429,
+							retryable: true,
+						},
+					})
+				}
+				historyByMetric={{}}
+				runtimeHistoryByMetric={{}}
+			/>
+		</EvidenceFrame>
 	),
 };
 

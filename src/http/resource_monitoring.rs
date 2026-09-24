@@ -325,7 +325,6 @@ enum ResourceCapabilityStatus {
 
 #[derive(Debug, Deserialize)]
 struct InternalCapabilitiesResponse {
-    #[serde(default)]
     capabilities: Vec<String>,
 }
 
@@ -378,11 +377,13 @@ fn classify_resource_capability(
     if !status.is_success() {
         return ResourceCapabilityStatus::Unknown;
     }
-    if capabilities.is_some_and(|items| {
-        items
-            .iter()
-            .any(|capability| capability == "admin.resource-monitoring")
-    }) {
+    let Some(capabilities) = capabilities else {
+        return ResourceCapabilityStatus::Unknown;
+    };
+    if capabilities
+        .iter()
+        .any(|capability| capability == "admin.resource-monitoring")
+    {
         ResourceCapabilityStatus::Supported
     } else {
         ResourceCapabilityStatus::Unsupported
@@ -453,6 +454,10 @@ mod tests {
                 Some(&["admin.resource-monitoring".to_string()]),
             ),
             ResourceCapabilityStatus::Supported
+        );
+        assert_eq!(
+            classify_resource_capability(StatusCode::OK, None),
+            ResourceCapabilityStatus::Unknown
         );
         assert_eq!(
             classify_resource_capability(StatusCode::INTERNAL_SERVER_ERROR, None),

@@ -1,4 +1,5 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
 import {
 	NODE_RESOURCE_HISTORY_METRICS,
@@ -10,6 +11,8 @@ import {
 	fetchAdminNodeResources,
 } from "../api/adminResources";
 import { useApiCapability } from "../api/useApiCompatibility";
+
+let resourcePageSessionSequence = 0;
 
 export function resourceQueryRefetchInterval(
 	isOnline: boolean,
@@ -28,12 +31,18 @@ export function useNodeResourceQueries(props: {
 	selectedRuntimeRole: ResourceRole | null;
 }) {
 	const resourceCapability = useApiCapability("admin.resource-monitoring");
+	const [resourcePageSessionId] = useState(() => ++resourcePageSessionSequence);
 	const enabled =
 		props.adminToken.length > 0 &&
 		props.nodesAvailable &&
 		resourceCapability.available;
 	const resourceQuery = useQuery({
-		queryKey: ["adminNodeResources", props.adminToken, props.nodeId],
+		queryKey: [
+			"adminNodeResources",
+			resourcePageSessionId,
+			props.adminToken,
+			props.nodeId,
+		],
 		enabled,
 		queryFn: ({ signal }) =>
 			fetchAdminNodeResources(props.adminToken, props.nodeId, signal),
@@ -44,6 +53,7 @@ export function useNodeResourceQueries(props: {
 		queries: NODE_RESOURCE_HISTORY_METRICS.map((metric) => ({
 			queryKey: [
 				"adminNodeResourceHistory",
+				resourcePageSessionId,
 				props.adminToken,
 				props.nodeId,
 				metric,
@@ -80,6 +90,7 @@ export function useNodeResourceQueries(props: {
 		queries: RUNTIME_RESOURCE_HISTORY_METRICS.map((metric) => ({
 			queryKey: [
 				"adminNodeRuntimeResourceHistory",
+				resourcePageSessionId,
 				props.adminToken,
 				props.nodeId,
 				props.selectedRuntimeRole,
