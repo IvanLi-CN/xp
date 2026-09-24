@@ -168,16 +168,14 @@ impl MeshAwareHttpClient {
                                 .await);
                         }
                     };
-                    if internal_auth::verify_ack_v2(
+                    if let Err(error) = internal_auth::verify_ack_v2(
                         cluster_ca_key_pem,
                         cluster_ca_cert_pem,
                         &verified,
                         &peer.node_id,
                         response.status().as_u16(),
                         ack,
-                    )
-                    .is_err()
-                    {
+                    ) {
                         return Err(self
                             .reject_mesh_response(
                                 peer,
@@ -185,7 +183,7 @@ impl MeshAwareHttpClient {
                                 response,
                                 gate_guard,
                                 validation_revision.clone(),
-                                MeshRequestError::AcknowledgementInvalid,
+                                error.into(),
                             )
                             .await);
                     }

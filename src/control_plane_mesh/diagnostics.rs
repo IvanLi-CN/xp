@@ -223,8 +223,10 @@ impl MeshAwareHttpClient {
             Err(_error) => {
                 diagnostics.public_circuit = Some(self.circuits.public_state(&peer.node_id).await);
                 if let Some(telemetry) = &self.telemetry {
-                    diagnostics.last_public_failure =
-                        telemetry.last_public_failure(&peer.node_id).await;
+                    diagnostics.last_public_failure = telemetry
+                        .last_public_failure(&peer.node_id)
+                        .await
+                        .filter(|failure| failure.request_id == diagnostics.request_id);
                 }
                 return Err(MeshRequestFailure { diagnostics });
             }
