@@ -841,15 +841,36 @@ impl HistoryStorage {
         connection
             .query_row(
                 "
-                SELECT MIN(COALESCE(aggregate_start, observed_start)),
-                       MAX(COALESCE(aggregate_end, observed_end))
-                FROM repository_history_records
-                WHERE is_tombstone = 0
-                  AND (?1 IS NULL OR subject_node_id = ?1)
-                  AND (?2 IS NULL OR schema_id = ?2)
-                  AND (aggregate_complete = 0 OR aggregate_complete IS NULL)
-                  AND COALESCE(aggregate_start, observed_start) <= ?3
-                  AND COALESCE(aggregate_end, observed_end) >= ?4
+                SELECT MIN(valid_start), MAX(valid_end)
+                FROM (
+                    SELECT
+                        CASE WHEN aggregate_start IS NOT NULL
+                                  AND aggregate_end IS NOT NULL
+                                  AND aggregate_start >= 0
+                                  AND aggregate_start <= aggregate_end
+                             THEN aggregate_start ELSE observed_start END AS valid_start,
+                        CASE WHEN aggregate_start IS NOT NULL
+                                  AND aggregate_end IS NOT NULL
+                                  AND aggregate_start >= 0
+                                  AND aggregate_start <= aggregate_end
+                             THEN aggregate_end ELSE observed_end END AS valid_end,
+                        aggregate_complete,
+                        aggregate_start,
+                        aggregate_end
+                    FROM repository_history_records
+                    WHERE is_tombstone = 0
+                      AND (?1 IS NULL OR subject_node_id = ?1)
+                      AND (?2 IS NULL OR schema_id = ?2)
+                )
+                WHERE (
+                    aggregate_complete IS NULL OR aggregate_complete <> 1
+                    OR aggregate_start IS NOT NULL AND aggregate_end IS NULL
+                    OR aggregate_start IS NULL AND aggregate_end IS NOT NULL
+                    OR aggregate_start < 0 OR aggregate_end < 0
+                    OR aggregate_start > aggregate_end
+                )
+                  AND valid_start <= ?3
+                  AND valid_end >= ?4
                 ",
                 params![
                     subject_node_id,

@@ -144,6 +144,11 @@ fn sqlite_retention_keeps_unchanged_aggregate_row() {
             [],
         )
         .expect("simulate reverse aggregate range");
+    let query = HistoryQuery::new(0, now, 10).expect("history query");
+    let gap = runtime
+        .incomplete_aggregate_gap(&query)
+        .expect("reverse aggregate range does not break queries");
+    assert!(gap.is_some(), "malformed metadata is observable as a gap");
     runtime.snapshot.retention_compaction_cursor = None;
     runtime.snapshot.retention_compaction_continuation = None;
     runtime
