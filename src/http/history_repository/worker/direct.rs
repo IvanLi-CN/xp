@@ -73,11 +73,10 @@ pub(crate) async fn preserve_history_truncated(
     history_truncated: bool,
 ) -> Result<(), RepositoryRuntimeError> {
     if history_truncated {
-        state
-            .repository_replica
-            .lock()
-            .await
-            .mark_history_truncated()?;
+        super::repository_op(&state.repository_replica, |runtime| {
+            runtime.mark_history_truncated()
+        })
+        .await?;
     }
     Ok(())
 }

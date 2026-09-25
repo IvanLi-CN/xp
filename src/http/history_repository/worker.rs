@@ -395,15 +395,14 @@ async fn publish_local_history_segment(
         .iter()
         .find(|peer| peer.node_id == selected_repository_id);
     if selected_repository_id != state.cluster.node_id && selected_peer.is_none() {
-        state
-            .repository_replica
-            .lock()
-            .await
-            .record_local_source_collector_delivery(
+        repository_op(&state.repository_replica, |runtime| {
+            runtime.record_local_source_collector_delivery(
                 &primary_repository_id,
                 &selected_repository_id,
                 false,
-            )?;
+            )
+        })
+        .await?;
         tracing::debug!(
             repository = selected_repository_id,
             "selected history repository is unreachable"
