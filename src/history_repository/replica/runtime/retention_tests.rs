@@ -163,6 +163,33 @@ fn sqlite_retention_keeps_unchanged_aggregate_row() {
         )
         .expect("repaired aggregate range");
     assert_eq!(repaired_range, (canonical_start, canonical_end));
+
+    let observed_range: (i64, i64) = connection
+        .query_row(
+            "SELECT observed_start, observed_end
+             FROM repository_history_records WHERE sequence = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("observed range");
+    connection
+        .execute(
+            "UPDATE repository_history_records SET aggregate_complete = -1,
+                 aggregate_start = observed_start + 1_000,
+                 aggregate_end = observed_end + 1_000 WHERE sequence = 1",
+            [],
+        )
+        .expect("simulate invalid completion with a valid but wrong range");
+    let gap = runtime
+        .incomplete_aggregate_gap(&query)
+        .expect("invalid completion falls back to observed bounds");
+    assert_eq!(
+        gap,
+        Some((
+            u64::try_from(observed_range.0).expect("observed start"),
+            u64::try_from(observed_range.1).expect("observed end"),
+        ))
+    );
 }
 
 #[test]

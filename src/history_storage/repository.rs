@@ -844,12 +844,14 @@ impl HistoryStorage {
                 SELECT MIN(valid_start), MAX(valid_end)
                 FROM (
                     SELECT
-                        CASE WHEN aggregate_start IS NOT NULL
+                        CASE WHEN aggregate_complete IN (0, 1)
+                                  AND aggregate_start IS NOT NULL
                                   AND aggregate_end IS NOT NULL
                                   AND aggregate_start >= 0
                                   AND aggregate_start <= aggregate_end
                              THEN aggregate_start ELSE observed_start END AS valid_start,
-                        CASE WHEN aggregate_start IS NOT NULL
+                        CASE WHEN aggregate_complete IN (0, 1)
+                                  AND aggregate_start IS NOT NULL
                                   AND aggregate_end IS NOT NULL
                                   AND aggregate_start >= 0
                                   AND aggregate_start <= aggregate_end
