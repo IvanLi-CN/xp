@@ -185,6 +185,10 @@
   existing permanent evidence, then incoming recoverable ranges and older recoverable evidence. This
   keeps permanent gaps from being evicted by recoverable evidence while retaining the source's
   repair predecessor.
+  Presence checks against summary pages query only segment IDs through the SQLite primary-key
+  index. This compares the retained segment set, not the integrity of each stored payload; a
+  malformed local payload does not block segment/gap synchronization but is rejected if selected
+  for an actual repair batch. Full signed payloads are loaded only for that repair batch.
   Summary responses carry the additive `history_truncated` marker. A peer persists the marker when
   observed and keeps its affected queries partial; summaries from older peers omit it and decode as
   false.

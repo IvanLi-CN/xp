@@ -106,6 +106,34 @@ impl HistoryStorage {
             .map_err(sqlite_error)
     }
 
+    pub(crate) fn repository_history_segment_ids_by_ids(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<String>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut backend = self.lock_backend();
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => return Ok(Vec::new()),
+        };
+        let placeholders = std::iter::repeat_n("?", ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT id FROM repository_history_segments
+             WHERE id IN ({placeholders}) ORDER BY id ASC"
+        );
+        let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(ids.iter()), |row| row.get(0))
+            .map_err(sqlite_error)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error)
+    }
+
     pub(crate) fn repository_history_segment_exists(&self, id: &str) -> Result<bool> {
         let mut backend = self.lock_backend();
         let connection = match &mut *backend {

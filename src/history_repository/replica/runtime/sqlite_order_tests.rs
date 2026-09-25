@@ -362,7 +362,7 @@ fn sqlite_retention_commits_summary_invalidation_with_rewrite() {
 #[test]
 fn sqlite_summary_reads_metadata_only() {
     let temporary = tempfile::tempdir().expect("SQLite temporary directory");
-    let runtime =
+    let mut runtime =
         RepositoryReplicaRuntime::load(HistoryStorage::open(temporary.path())).expect("runtime");
     let rows = (0..257_u64)
         .map(|sequence| RepositoryHistorySegmentRow {
@@ -386,6 +386,21 @@ fn sqlite_summary_reads_metadata_only() {
         .expect("summary must not decode segment payloads");
     assert_eq!(summary.segment_ids.len(), 256);
     assert_eq!(summary.next_segment_id.as_deref(), Some("r:segment-255"));
+
+    let mut remote = summary;
+    remote.segment_ids.push("missing-segment".to_owned());
+    assert_eq!(
+        runtime
+            .missing_segment_ids(&remote, false)
+            .expect("presence check must not decode segment payloads"),
+        ["missing-segment"]
+    );
+
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    assert!(matches!(
+        runtime.repair_batch(&["segment-000".to_owned()]),
+        Err(RepositoryRuntimeError::Storage(_))
+    ));
 }
 
 #[cfg(target_os = "linux")]
