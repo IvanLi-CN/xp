@@ -31,6 +31,7 @@ const MAX_REPOSITORY_PEERS_PER_CYCLE: usize = 4;
 const READY_STABILITY_WINDOW: Duration = Duration::from_secs(5 * 60);
 const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0";
 mod backfill;
+mod blocking;
 mod deep_repair;
 mod direct;
 mod legacy_segment_index;
@@ -50,6 +51,7 @@ use backfill::{
     backfill_initial_repository_from_local_history, catch_up_against_ready_repositories,
     pull_peer_initial_history,
 };
+use blocking::repository_blocking;
 #[cfg(test)]
 use deep_repair::deep_repair_requires_tiered_backfill;
 use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
@@ -100,9 +102,12 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     {
         return Ok(());
     }
+    repository_blocking(state.repository_replica.clone(), move |runtime| {
+        runtime.prepare_for_replication(now)
+    })
+    .await?;
     let (work, tombstone_acknowledgements) = {
         let mut runtime = state.repository_replica.lock().await;
-        runtime.prepare_for_replication(now)?;
         // Keep every Raft Ready member in the tombstone ledger. Missing node metadata
         // must not turn an unacknowledged stale member into an acknowledged one.
         runtime.reconcile_ready_repositories(&ready_repository_ids)?;
@@ -538,13 +543,10 @@ async fn publish_local_history_segment(
     Ok(delivery_succeeded)
 }
 async fn sync_local_repository_capacity(state: &AppState, now: u64) -> anyhow::Result<()> {
-    let capacity = state
-        .repository_replica
-        .lock()
-        .await
-        .runtime_status(now)?
-        .capacity()
-        .clone();
+    let capacity = repository_blocking(state.repository_replica.clone(), move |runtime| {
+        Ok(runtime.runtime_status(now)?.capacity().clone())
+    })
+    .await?;
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let capacity_is_current = {
         let store = state.store.lock().await;

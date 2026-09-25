@@ -7,6 +7,31 @@ use crate::state::history_repository::{
 };
 use ed25519_dalek::SigningKey;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn repository_storage_work_leaves_the_single_runtime_worker_available() {
+    let directory = tempfile::tempdir().unwrap();
+    let replica = RepositoryReplicaRuntime::load(HistoryStorage::open(directory.path())).unwrap();
+    let replica = std::sync::Arc::new(tokio::sync::Mutex::new(replica));
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let work = tokio::spawn(async move {
+        repository_blocking(replica, move |_| {
+            started_tx.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    });
+    started_rx.await.unwrap();
+    tokio::time::timeout(
+        Duration::from_millis(150),
+        tokio::time::sleep(Duration::from_millis(10)),
+    )
+    .await
+    .unwrap();
+    work.await.unwrap();
+}
+
 #[test]
 fn dynamic_relay_keys_are_deterministic_per_cluster_and_recipient() {
     let sender = relay_keypair_from_cluster_material("cluster-a", "repository-a", "ca-key");

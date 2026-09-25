@@ -61,11 +61,11 @@ pub(super) fn spawn_local_source_worker(state: AppState) {
         loop {
             ticker.tick().await;
             let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
-            if let Err(error) = state
-                .repository_replica
-                .lock()
+            if let Err(error) =
+                super::repository_blocking(state.repository_replica.clone(), |runtime| {
+                    runtime.repair_source_delivery_journal_order_page()
+                })
                 .await
-                .repair_source_delivery_journal_order_page()
             {
                 tracing::debug!(
                     error = %error,
@@ -128,18 +128,23 @@ pub(super) async fn receive_local_source_segment(
     ready_repository_ids: &[String],
     now: u64,
 ) -> anyhow::Result<()> {
-    let receipt = {
-        let mut runtime = state.repository_replica.lock().await;
+    let cluster_id = state.cluster.cluster_id.clone();
+    let node_id = state.cluster.node_id.clone();
+    let segment = segment.clone();
+    let gaps = gaps.to_vec();
+    let ready_repository_ids = ready_repository_ids.to_vec();
+    let receipt = super::repository_blocking(state.repository_replica.clone(), move |runtime| {
         runtime.receive_wire_from_repository_with_gaps(
-            &state.cluster.cluster_id,
+            &cluster_id,
             &segment.identity,
             &segment.wire,
-            gaps,
+            &gaps,
             now,
-            ready_repository_ids,
-            &state.cluster.node_id,
-        )?
-    };
+            &ready_repository_ids,
+            &node_id,
+        )
+    })
+    .await?;
     if should_fanout_tombstone_acknowledgements(local_repository_lifecycle(state).await?)
         && !receipt.tombstone_acknowledgements().is_empty()
     {
