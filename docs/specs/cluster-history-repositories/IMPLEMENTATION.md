@@ -230,6 +230,8 @@
   daily deep verification scheduling, preserve gaps/forks/unknown schemas/tombstones across
   restart, retain source segment repair state, transform older repository history into aggregates,
   anonymize IP identifiers after seven days, and select the healthiest most complete ready response.
+  An unchanged bounded retention page skips row replacement while preserving the cursor snapshot,
+  expiration deletes, and legacy aggregate-metadata backfill.
 - The proxy configuration, proxy client, proxy listener, proxy status, compatibility path, and
   history synchronization relay path are not used by the repository worker. Legacy relay payload
   types remain wire-compatible for the receive boundary, but normal source delivery and

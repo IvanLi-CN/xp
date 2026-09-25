@@ -576,6 +576,13 @@ impl RepositoryReplicaRuntime {
             .iter()
             .map(StoredRecord::sqlite_row)
             .collect::<Result<Vec<_>, _>>()?;
+        let unchanged = removed_rows.len() == retained.len() && {
+            let mut removed = removed_rows.iter().collect::<Vec<_>>();
+            let mut retained = retained.iter().collect::<Vec<_>>();
+            removed.sort_unstable();
+            retained.sort_unstable();
+            removed == retained
+        };
         let next_retention_cursor = if !has_more && rows.len() < RETENTION_COMPACTION_PAGE_SIZE {
             None
         } else {
@@ -624,8 +631,8 @@ impl RepositoryReplicaRuntime {
             }
         };
         let result = self.storage.replace_repository_history_records_and_prune(
-            &removed_rows,
-            &retained,
+            if unchanged { &[] } else { &removed_rows },
+            if unchanged { &[] } else { &retained },
             now_unix_seconds.saturating_sub(policy.max_age_seconds()),
             now_unix_seconds.saturating_sub(policy.minute_retention_seconds()),
             &control_payload,

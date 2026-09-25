@@ -8,7 +8,7 @@ pub(crate) use segments::segment_phase_sql;
 /// A repository-history row is deliberately stored outside the control snapshot.
 /// The metadata columns keep retention and paged queries in SQLite rather than loading the
 /// two-year repository window into the replica process.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RepositoryHistoryRecordRow {
     pub(crate) source_node_id: String,
     pub(crate) source_epoch: u64,
@@ -482,7 +482,8 @@ impl HistoryStorage {
                 "
                 SELECT source_node_id, source_epoch, stream, sequence, subject_node_id,
                        observer_node_id, schema_id, schema_version, record_key, is_tombstone,
-                       observed_start, observed_end, received_at, payload
+                       observed_start, observed_end, received_at, payload,
+                       aggregate_complete, aggregate_start, aggregate_end
                 FROM repository_history_records INDEXED BY repository_history_records_keyset
                 WHERE is_tombstone = 0 AND observed_start < ?1
                   AND (observed_start, source_node_id, source_epoch, stream, sequence)
@@ -503,7 +504,17 @@ impl HistoryStorage {
                     after_sequence,
                     i64::try_from(limit).unwrap_or(i64::MAX),
                 ],
-                repository_history_record_row,
+                |row| {
+                    let mut record = repository_history_record_row(row)?;
+                    record.aggregate_complete = row.get(14)?;
+                    record.aggregate_start_unix_seconds = row
+                        .get::<_, Option<i64>>(15)?
+                        .and_then(|value| u64::try_from(value).ok());
+                    record.aggregate_end_unix_seconds = row
+                        .get::<_, Option<i64>>(16)?
+                        .and_then(|value| u64::try_from(value).ok());
+                    Ok(record)
+                },
             )
             .map_err(sqlite_error)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
