@@ -675,6 +675,15 @@ impl RepositoryReplicaRuntime {
         })
     }
 
+    pub(crate) fn runtime_capacity(
+        &mut self,
+    ) -> Result<RepositoryCapacity, RepositoryRuntimeError> {
+        if !self.storage_degraded {
+            self.refresh_capacity()?;
+        }
+        Ok(self.snapshot.capacity.clone())
+    }
+
     pub(crate) fn history_write_availability(&self) -> HistoryWriteAvailability {
         self.snapshot.capacity.history_write_availability()
     }
