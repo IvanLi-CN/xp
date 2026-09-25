@@ -114,11 +114,10 @@ pub(super) async fn clear_peer_deep_verification(
     state: &AppState,
     peer_repository_id: &str,
 ) -> anyhow::Result<()> {
-    state
-        .repository_replica
-        .lock()
-        .await
-        .clear_direct_peer_deep_verification(peer_repository_id)?;
+    super::repository_op(&state.repository_replica, |runtime| {
+        runtime.clear_direct_peer_deep_verification(peer_repository_id)
+    })
+    .await?;
     Ok(())
 }
 

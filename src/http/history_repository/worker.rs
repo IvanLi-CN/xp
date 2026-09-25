@@ -51,7 +51,7 @@ use backfill::{
     backfill_initial_repository_from_local_history, catch_up_against_ready_repositories,
     pull_peer_initial_history,
 };
-use blocking::repository_blocking;
+use blocking::{repository_blocking, repository_op};
 #[cfg(test)]
 use deep_repair::deep_repair_requires_tiered_backfill;
 use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
@@ -133,13 +133,12 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         .await
         {
             Ok(()) => {
-                state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .record_tombstone_acknowledgement_delivery(
+                repository_op(&state.repository_replica, |runtime| {
+                    runtime.record_tombstone_acknowledgement_delivery(
                         tombstone_acknowledgements.next_cursor(),
-                    )?;
+                    )
+                })
+                .await?;
             }
             Err(error) => tracing::debug!(
                 error = %error,
@@ -150,15 +149,14 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     if !work.is_anti_entropy() {
         return Ok(());
     }
-    let selected_peer_ids = state
-        .repository_replica
-        .lock()
-        .await
-        .next_replication_peers(
+    let selected_peer_ids = repository_op(&state.repository_replica, |runtime| {
+        runtime.next_replication_peers(
             &ready_repository_ids,
             &state.cluster.node_id,
             MAX_REPOSITORY_PEERS_PER_CYCLE,
-        )?;
+        )
+    })
+    .await?;
     let peers_to_replicate = selected_peer_ids
         .iter()
         .filter_map(|repository_id| peers.iter().find(|peer| peer.node_id == *repository_id))
@@ -179,16 +177,16 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
             Ok(directly_converged) => {
                 synchronized = true;
                 if work.is_deep_verification() && directly_converged {
-                    deep_verification_succeeded = state
-                        .repository_replica
-                        .lock()
-                        .await
-                        .record_direct_peer_deep_verification(
-                            &peer.node_id,
-                            &ready_repository_ids,
-                            &state.cluster.node_id,
-                            work,
-                        )?;
+                    deep_verification_succeeded =
+                        repository_op(&state.repository_replica, |runtime| {
+                            runtime.record_direct_peer_deep_verification(
+                                &peer.node_id,
+                                &ready_repository_ids,
+                                &state.cluster.node_id,
+                                work,
+                            )
+                        })
+                        .await?;
                 } else if work.is_deep_verification() {
                     clear_peer_deep_verification(state, &peer.node_id).await?;
                     deep_verification_succeeded = false;
@@ -211,11 +209,10 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     }
     if should_record_anti_entropy_completion(synchronized, peers.len(), missing_metadata) {
         let completed_work = completed_replication_work(work, deep_verification_succeeded);
-        state
-            .repository_replica
-            .lock()
-            .await
-            .record_replication_completed(now, completed_work)?;
+        repository_op(&state.repository_replica, |runtime| {
+            runtime.record_replication_completed(now, completed_work)
+        })
+        .await?;
     }
     if work.is_deep_verification() {
         update_local_replica_convergence(state, deep_verification_succeeded).await?;
@@ -247,11 +244,10 @@ async fn publish_local_history_segment(
     let signing_key = super::derived_repository_signing_key(state, identity.node_id().as_str())
         .map_err(|_| anyhow::anyhow!("derive local history source signing key"))?;
     let mut capture_paused = !capture_live
-        || state
-            .repository_replica
-            .lock()
-            .await
-            .source_delivery_capture_paused()?;
+        || repository_op(&state.repository_replica, |runtime| {
+            runtime.source_delivery_capture_paused()
+        })
+        .await?;
     let mut source_batch = if capture_paused {
         SourceRecordBatch::empty()
     } else {
@@ -865,11 +861,10 @@ async fn replicate_peer(
                         &repair.unavailable_segment_ids,
                     )?;
                     if repair.segments.is_empty() && !repair.gaps.is_empty() {
-                        state
-                            .repository_replica
-                            .lock()
-                            .await
-                            .merge_replica_gaps(&repair.gaps)?;
+                        repository_op(&state.repository_replica, |runtime| {
+                            runtime.merge_replica_gaps(&repair.gaps)
+                        })
+                        .await?;
                     }
                     let repair_gaps = repair.gaps;
                     for (index, segment) in repair.segments.into_iter().enumerate() {
@@ -908,24 +903,28 @@ async fn replicate_peer(
                 .await?;
             }
             let (remaining_segment_repairs, repair_remains_after_segment_repairs) = {
-                let mut runtime = state.repository_replica.lock().await;
-                (
-                    !runtime
-                        .missing_segment_ids(&remote_summary, work.is_deep_verification())?
-                        .is_empty(),
-                    runtime.requires_repair(&remote_summary, work.is_deep_verification())?,
-                )
+                repository_op(&state.repository_replica, |runtime| {
+                    Ok::<_, RepositoryRuntimeError>((
+                        !runtime
+                            .missing_segment_ids(&remote_summary, work.is_deep_verification())?
+                            .is_empty(),
+                        runtime.requires_repair(&remote_summary, work.is_deep_verification())?,
+                    ))
+                })
+                .await?
             };
             if remaining_segment_repairs || repair_remains_after_segment_repairs {
                 let restarted_tiered_backfill = {
-                    let mut runtime = state.repository_replica.lock().await;
-                    restart_tiered_backfill_after_incomplete_deep_repair(
-                        &mut runtime,
-                        &peer.node_id,
-                        work,
-                        remaining_segment_repairs,
-                        repair_remains_after_segment_repairs,
-                    )?
+                    repository_op(&state.repository_replica, |runtime| {
+                        restart_tiered_backfill_after_incomplete_deep_repair(
+                            runtime,
+                            &peer.node_id,
+                            work,
+                            remaining_segment_repairs,
+                            repair_remains_after_segment_repairs,
+                        )
+                    })
+                    .await?
                 };
                 if restarted_tiered_backfill {
                     pull_peer_initial_history(state, peer, ready_repository_ids).await?;

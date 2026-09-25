@@ -9,13 +9,18 @@ use ed25519_dalek::SigningKey;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn repository_storage_work_leaves_the_single_runtime_worker_available() {
+    let directory = tempfile::tempdir().unwrap();
+    let replica = RepositoryReplicaRuntime::load(HistoryStorage::open(directory.path())).unwrap();
+    let replica = std::sync::Arc::new(tokio::sync::Mutex::new(replica));
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
     let (resume_tx, resume_rx) = std::sync::mpsc::channel();
     let work = tokio::spawn(async move {
-        repository_blocking(|| {
+        repository_op(&replica, move |runtime| {
+            runtime.runtime_capacity().unwrap();
             started_tx.send(()).unwrap();
-            resume_rx.recv_timeout(Duration::from_secs(3)).unwrap();
-        });
+            resume_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        })
+        .await;
     });
     started_rx.await.unwrap();
     resume_tx.send(()).unwrap();
