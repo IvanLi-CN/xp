@@ -98,15 +98,19 @@ fn sqlite_retention_keeps_unchanged_aggregate_row() {
     runtime
         .prepare_for_replication(now)
         .expect("backfill aggregate metadata");
-    let (backfilled_rowid, complete, canonical_start): (i64, Option<bool>, Option<i64>) =
-        connection
-            .query_row(
-                "SELECT rowid, aggregate_complete, aggregate_start
+    let (backfilled_rowid, complete, canonical_start, canonical_end): (
+        i64,
+        Option<bool>,
+        Option<i64>,
+        Option<i64>,
+    ) = connection
+        .query_row(
+            "SELECT rowid, aggregate_complete, aggregate_start, aggregate_end
              FROM repository_history_records WHERE sequence = 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .expect("backfilled row");
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("backfilled row");
     assert_ne!(after.0, backfilled_rowid);
     assert_eq!(complete, Some(true));
 
@@ -132,6 +136,28 @@ fn sqlite_retention_keeps_unchanged_aggregate_row() {
         .expect("repaired row");
     assert_eq!(complete, Some(1));
     assert_eq!(start, canonical_start);
+
+    connection
+        .execute(
+            "UPDATE repository_history_records SET aggregate_start = 20_000,
+                 aggregate_end = 10_000 WHERE sequence = 1",
+            [],
+        )
+        .expect("simulate reverse aggregate range");
+    runtime.snapshot.retention_compaction_cursor = None;
+    runtime.snapshot.retention_compaction_continuation = None;
+    runtime
+        .prepare_for_replication(now)
+        .expect("repair reverse aggregate range");
+    let repaired_range: (Option<i64>, Option<i64>) = connection
+        .query_row(
+            "SELECT aggregate_start, aggregate_end
+             FROM repository_history_records WHERE sequence = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("repaired aggregate range");
+    assert_eq!(repaired_range, (canonical_start, canonical_end));
 }
 
 #[test]

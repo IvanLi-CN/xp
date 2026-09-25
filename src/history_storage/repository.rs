@@ -509,9 +509,12 @@ impl HistoryStorage {
                     let complete = row.get::<_, Option<i64>>(14)?;
                     let start = row.get::<_, Option<i64>>(15)?;
                     let end = row.get::<_, Option<i64>>(16)?;
-                    let metadata_valid = matches!(complete, None | Some(0 | 1))
-                        && start.is_none_or(|value| value >= 0)
-                        && end.is_none_or(|value| value >= 0);
+                    let range_valid = match (start, end) {
+                        (None, None) => true,
+                        (Some(start), Some(end)) => start >= 0 && start <= end,
+                        _ => false,
+                    };
+                    let metadata_valid = matches!(complete, None | Some(0 | 1)) && range_valid;
                     record.aggregate_complete = if metadata_valid {
                         complete.map(|value| value != 0)
                     } else {
