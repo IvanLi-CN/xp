@@ -386,6 +386,15 @@ fn sqlite_summary_reads_metadata_only() {
         .expect("summary must not decode segment payloads");
     assert_eq!(summary.segment_ids.len(), 256);
     assert_eq!(summary.next_segment_id.as_deref(), Some("r:segment-255"));
+
+    let mut remote = summary;
+    remote.segment_ids.push("missing-segment".to_owned());
+    assert_eq!(
+        runtime
+            .missing_segment_ids(&remote, false)
+            .expect("presence check must not decode segment payloads"),
+        ["missing-segment"]
+    );
 }
 
 #[cfg(target_os = "linux")]

@@ -391,15 +391,14 @@ impl RepositoryReplicaRuntime {
         remote: &RepositoryReplicaSummary,
         _deep_verification: bool,
     ) -> Result<Vec<String>, RepositoryRuntimeError> {
-        let local_segments = self.stored_segments_by_ids(&remote.segment_ids)?;
-        let local_ids = local_segments
-            .iter()
-            .map(|segment| segment.id.as_str())
+        let local_ids = self
+            .stored_segment_ids_by_ids(&remote.segment_ids)?
+            .into_iter()
             .collect::<BTreeSet<_>>();
         Ok(remote
             .segment_ids
             .iter()
-            .filter(|id| !local_ids.contains(id.as_str()))
+            .filter(|id| !local_ids.contains(*id))
             .take(MAX_REPAIR_SEGMENTS)
             .cloned()
             .collect())

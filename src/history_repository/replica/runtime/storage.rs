@@ -327,6 +327,25 @@ impl RepositoryReplicaRuntime {
             .collect()
     }
 
+    pub(crate) fn stored_segment_ids_by_ids(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<String>, RepositoryRuntimeError> {
+        if !self.uses_sqlite_history() {
+            let requested = ids.iter().collect::<BTreeSet<_>>();
+            return Ok(self
+                .snapshot
+                .segments
+                .iter()
+                .filter(|segment| requested.contains(&segment.id))
+                .map(|segment| segment.id.clone())
+                .collect());
+        }
+        self.storage
+            .repository_history_segment_ids_by_ids(ids)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+    }
+
     pub(crate) fn stored_segment_exists(&self, id: &str) -> Result<bool, RepositoryRuntimeError> {
         if !self.uses_sqlite_history() {
             return Ok(self
