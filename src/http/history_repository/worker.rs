@@ -102,25 +102,26 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     {
         return Ok(());
     }
-    repository_blocking(state.repository_replica.clone(), move |runtime| {
-        runtime.prepare_for_replication(now)
-    })
-    .await?;
+    let mut runtime = state.repository_replica.lock().await;
+    repository_blocking(|| runtime.prepare_for_replication(now))?;
+    drop(runtime);
     let (work, tombstone_acknowledgements) = {
         let mut runtime = state.repository_replica.lock().await;
-        // Keep every Raft Ready member in the tombstone ledger. Missing node metadata
-        // must not turn an unacknowledged stale member into an acknowledged one.
-        runtime.reconcile_ready_repositories(&ready_repository_ids)?;
-        runtime.record_stale_collection_cycles(
-            now,
-            &available_ready_repository_ids,
-            &state.cluster.node_id,
-            &known_source_node_ids,
-        )?;
-        (
-            runtime.replication_work(now),
-            runtime.tombstone_acknowledgement_page(&state.cluster.node_id)?,
-        )
+        repository_blocking(|| {
+            // Keep every Raft Ready member in the tombstone ledger. Missing node metadata
+            // must not turn an unacknowledged stale member into an acknowledged one.
+            runtime.reconcile_ready_repositories(&ready_repository_ids)?;
+            runtime.record_stale_collection_cycles(
+                now,
+                &available_ready_repository_ids,
+                &state.cluster.node_id,
+                &known_source_node_ids,
+            )?;
+            Ok::<_, RepositoryRuntimeError>((
+                runtime.replication_work(now),
+                runtime.tombstone_acknowledgement_page(&state.cluster.node_id)?,
+            ))
+        })?
     };
     if !tombstone_acknowledgements.acknowledgements().is_empty() {
         match propagate_tombstone_acknowledgements(
@@ -258,35 +259,12 @@ async fn publish_local_history_segment(
     };
     let (segments, gaps) = {
         let mut runtime = state.repository_replica.lock().await;
-        let segments = if capture_paused {
-            // `RepositoryReplicaRuntime::load` already hydrates the first durable replay page.
-            // Re-hydrating it here makes the worker repeat the expensive oldest-row query over a
-            // large backlog before it can deliver anything. Only load a page when the in-memory
-            // window is empty, such as after the previous page was ACKed.
-            let mut page = runtime.local_source_pending_segments_page_with_budget(
-                MAX_SEGMENTS_PER_DELIVERY_PAGE,
-                1024 * 1024,
-            );
-            if page.is_empty() {
-                runtime.hydrate_source_delivery_journal_with_budget(
-                    MAX_SEGMENTS_PER_DELIVERY_PAGE,
-                    1024 * 1024,
-                )?;
-                page = runtime.local_source_pending_segments_page_with_budget(
-                    MAX_SEGMENTS_PER_DELIVERY_PAGE,
-                    1024 * 1024,
-                );
-            }
-            // The durable journal is authoritative. Drop the cloned replay window before
-            // receiver processing so large wire payloads do not remain resident until the next
-            // hydration; ACK can remove the durable rows even when this in-memory window is empty.
-            runtime.clear_local_source_pending_window();
-            page
-        } else {
-            // Capacity can be reached after the initial guard check (for example while another
-            // source cycle commits). Treat that race exactly like a paused capture: keep the
-            // generated observations pending and replay the durable page instead.
-            let queue_result = if !source_batch.has_records() {
+        repository_blocking(|| -> Result<_, RepositoryRuntimeError> {
+            let segments = if capture_paused {
+                // `RepositoryReplicaRuntime::load` already hydrates the first durable replay page.
+                // Re-hydrating repeats the expensive oldest-row query over a
+                // large backlog before it can deliver anything. Only load a page when the in-memory
+                // window is empty, such as after the previous page was ACKed.
                 let mut page = runtime.local_source_pending_segments_page_with_budget(
                     MAX_SEGMENTS_PER_DELIVERY_PAGE,
                     1024 * 1024,
@@ -301,42 +279,16 @@ async fn publish_local_history_segment(
                         1024 * 1024,
                     );
                 }
-                Ok(page)
+                // The durable journal is authoritative. Drop the cloned replay window before
+                // receiver processing so large wire payloads do not remain resident until the next
+                // hydration; ACK can remove durable rows even when this window is empty.
+                runtime.clear_local_source_pending_window();
+                page
             } else {
-                runtime.queue_local_source_segments_for_repositories(
-                    &state.cluster.cluster_id,
-                    identity.clone(),
-                    &signing_key,
-                    source_batch.take_records(),
-                    now,
-                    // The outbox must retain ACK requirements for every Ready member. The
-                    // collector-only set is for transport selection and must not weaken tombstone
-                    // bookkeeping when a Ready member has no usable metadata.
-                    ready_repository_ids,
-                )
-            };
-            match queue_result {
-                Ok(segments) => {
-                    // Journal commit makes resource rows safe to mark enqueued before collector
-                    // ACK.
-                    source_batch.mark_resources_enqueued(state);
-                    // The queue API may return its legacy default page size. Re-read through the
-                    // bounded projection so live capture and replay share the same memory limit.
-                    if segments.len() > MAX_SEGMENTS_PER_DELIVERY_PAGE {
-                        runtime.local_source_pending_segments_page_with_budget(
-                            MAX_SEGMENTS_PER_DELIVERY_PAGE,
-                            1024 * 1024,
-                        )
-                    } else {
-                        segments
-                    }
-                }
-                Err(RepositoryRuntimeError::Storage(error))
-                    if error.contains("source delivery journal capacity guard") =>
-                {
-                    capture_paused = true;
-                    // Re-enter through the empty-record path so the capacity preflight is
-                    // bypassed while the durable journal page is still replayed.
+                // Capacity can be reached after the initial guard check (for example while another
+                // source cycle commits). Treat that race exactly like a paused capture: keep the
+                // generated observations pending and replay the durable page instead.
+                let queue_result = if !source_batch.has_records() {
                     let mut page = runtime.local_source_pending_segments_page_with_budget(
                         MAX_SEGMENTS_PER_DELIVERY_PAGE,
                         1024 * 1024,
@@ -351,14 +303,65 @@ async fn publish_local_history_segment(
                             1024 * 1024,
                         );
                     }
-                    runtime.clear_local_source_pending_window();
-                    page
+                    Ok(page)
+                } else {
+                    runtime.queue_local_source_segments_for_repositories(
+                        &state.cluster.cluster_id,
+                        identity.clone(),
+                        &signing_key,
+                        source_batch.take_records(),
+                        now,
+                        // The outbox must retain ACK requirements for every Ready member. The
+                        // collector-only selection must not weaken tombstone
+                        // bookkeeping when a Ready member has no usable metadata.
+                        ready_repository_ids,
+                    )
+                };
+                match queue_result {
+                    Ok(segments) => {
+                        // Journal commit makes resource rows safe to mark enqueued before collector
+                        // ACK.
+                        source_batch.mark_resources_enqueued(state);
+                        // The queue API may return its legacy default page size. Re-read
+                        // through the bounded projection for the same live/replay memory limit.
+                        if segments.len() > MAX_SEGMENTS_PER_DELIVERY_PAGE {
+                            runtime.local_source_pending_segments_page_with_budget(
+                                MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                                1024 * 1024,
+                            )
+                        } else {
+                            segments
+                        }
+                    }
+                    Err(RepositoryRuntimeError::Storage(error))
+                        if error.contains("source delivery journal capacity guard") =>
+                    {
+                        capture_paused = true;
+                        // Re-enter through the empty-record path so the capacity preflight is
+                        // bypassed while the durable journal page is still replayed.
+                        let mut page = runtime.local_source_pending_segments_page_with_budget(
+                            MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                            1024 * 1024,
+                        );
+                        if page.is_empty() {
+                            runtime.hydrate_source_delivery_journal_with_budget(
+                                MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                                1024 * 1024,
+                            )?;
+                            page = runtime.local_source_pending_segments_page_with_budget(
+                                MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                                1024 * 1024,
+                            );
+                        }
+                        runtime.clear_local_source_pending_window();
+                        page
+                    }
+                    Err(error) => return Err(error),
                 }
-                Err(error) => return Err(error.into()),
-            }
-        };
-        let gaps = runtime.local_source_gaps_for_segments(&state.cluster.node_id, &segments);
-        (segments, gaps)
+            };
+            let gaps = runtime.local_source_gaps_for_segments(&state.cluster.node_id, &segments);
+            Ok((segments, gaps))
+        })?
     };
     if !capture_paused {
         source_batch
@@ -483,50 +486,41 @@ async fn publish_local_history_segment(
         } else {
             "direct"
         };
-        state
-            .repository_replica
-            .lock()
-            .await
-            .acknowledge_local_source_segments_via_without_hydrating(
+        let mut runtime = state.repository_replica.lock().await;
+        repository_blocking(|| {
+            runtime.acknowledge_local_source_segments_via_without_hydrating(
                 &delivered_segments,
                 now,
                 delivery_path,
-            )?;
+            )
+        })?;
     }
     if (segments.is_empty() && delivery_succeeded && !gaps.is_empty())
         || !delivered_segments.is_empty()
     {
-        state
-            .repository_replica
-            .lock()
-            .await
-            .commit_local_source_gap_page(&gaps)?;
+        let mut runtime = state.repository_replica.lock().await;
+        repository_blocking(|| runtime.commit_local_source_gap_page(&gaps))?;
     }
     if !tombstone_acknowledgements.is_empty() {
-        state
-            .repository_replica
-            .lock()
-            .await
-            .acknowledge_tombstones(&tombstone_acknowledgements)?;
+        let mut runtime = state.repository_replica.lock().await;
+        repository_blocking(|| runtime.acknowledge_tombstones(&tombstone_acknowledgements))?;
     }
     let acknowledgements_replicated = true;
-    state
-        .repository_replica
-        .lock()
-        .await
-        .record_local_source_collector_delivery(
+    let mut runtime = state.repository_replica.lock().await;
+    repository_blocking(|| {
+        runtime.record_local_source_collector_delivery(
             &primary_repository_id,
             &selected_repository_id,
             delivery_succeeded,
-        )?;
-    let tombstones_fully_acknowledged = state
-        .repository_replica
-        .lock()
-        .await
-        .local_source_tombstones_fully_acknowledged(
+        )
+    })?;
+    let tombstones_fully_acknowledged = repository_blocking(|| {
+        runtime.local_source_tombstones_fully_acknowledged(
             &state.cluster.node_id,
             &source_batch.deletion_markers,
-        )?;
+        )
+    })?;
+    drop(runtime);
     if delivery_succeeded && acknowledgements_replicated && tombstones_fully_acknowledged {
         for marker in &source_batch.deletion_markers {
             state
@@ -534,19 +528,17 @@ async fn publish_local_history_segment(
                 .complete_repository_deletion_marker(&state.cluster.node_id, marker)
                 .await;
         }
-        state
-            .repository_replica
-            .lock()
-            .await
-            .complete_local_source_tombstones(&source_batch.deletion_markers)?;
+        let mut runtime = state.repository_replica.lock().await;
+        repository_blocking(|| {
+            runtime.complete_local_source_tombstones(&source_batch.deletion_markers)
+        })?;
     }
     Ok(delivery_succeeded)
 }
-async fn sync_local_repository_capacity(state: &AppState, now: u64) -> anyhow::Result<()> {
-    let capacity = repository_blocking(state.repository_replica.clone(), move |runtime| {
-        Ok(runtime.runtime_status(now)?.capacity().clone())
-    })
-    .await?;
+async fn sync_local_repository_capacity(state: &AppState) -> anyhow::Result<()> {
+    let mut runtime = state.repository_replica.lock().await;
+    let capacity = repository_blocking(|| runtime.runtime_capacity())?;
+    drop(runtime);
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let capacity_is_current = {
         let store = state.store.lock().await;
@@ -801,7 +793,9 @@ async fn replicate_peer(
         }
         let requires_repair = {
             let mut runtime = state.repository_replica.lock().await;
-            runtime.requires_repair(&remote_summary, work.is_deep_verification())?
+            repository_blocking(|| {
+                runtime.requires_repair(&remote_summary, work.is_deep_verification())
+            })?
         };
         if requires_repair {
             let mut acknowledgements = Vec::new();
@@ -809,10 +803,11 @@ async fn replicate_peer(
             loop {
                 let mut pending_segment_ids = {
                     let runtime = state.repository_replica.lock().await;
-                    runtime
-                        .missing_segment_ids(&remote_summary, work.is_deep_verification())?
-                        .into_iter()
-                        .collect::<BTreeSet<_>>()
+                    repository_blocking(|| {
+                        runtime.missing_segment_ids(&remote_summary, work.is_deep_verification())
+                    })?
+                    .into_iter()
+                    .collect::<BTreeSet<_>>()
                 };
                 if pending_segment_ids.is_empty() && !needs_gap_refresh {
                     break;
@@ -886,11 +881,9 @@ async fn replicate_peer(
                         {
                             anyhow::bail!("repository repair segment identity is not pinned")
                         }
-                        let receipt = state
-                            .repository_replica
-                            .lock()
-                            .await
-                            .receive_wire_from_repository_with_gaps(
+                        let mut runtime = state.repository_replica.lock().await;
+                        let receipt = repository_blocking(|| {
+                            runtime.receive_wire_from_repository_with_gaps(
                                 &state.cluster.cluster_id,
                                 &segment.identity,
                                 &segment.wire,
@@ -898,7 +891,8 @@ async fn replicate_peer(
                                 now,
                                 ready_repository_ids,
                                 &state.cluster.node_id,
-                            )?;
+                            )
+                        })?;
                         acknowledgements
                             .extend(receipt.tombstone_acknowledgements().iter().cloned());
                     }

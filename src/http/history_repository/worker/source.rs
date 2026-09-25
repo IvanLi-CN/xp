@@ -61,19 +61,18 @@ pub(super) fn spawn_local_source_worker(state: AppState) {
         loop {
             ticker.tick().await;
             let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
-            if let Err(error) =
-                super::repository_blocking(state.repository_replica.clone(), |runtime| {
-                    runtime.repair_source_delivery_journal_order_page()
-                })
-                .await
-            {
+            let mut runtime = state.repository_replica.lock().await;
+            let repair_result =
+                super::repository_blocking(|| runtime.repair_source_delivery_journal_order_page());
+            drop(runtime);
+            if let Err(error) = repair_result {
                 tracing::debug!(
                     error = %error,
                     "history source journal order repair cycle skipped"
                 );
             }
             let (capacity_result, lifecycle_result, source_result) = run_local_source_worker_cycle(
-                super::sync_local_repository_capacity(&state, now),
+                super::sync_local_repository_capacity(&state),
                 super::advance_local_repository_lifecycle(&state, now),
                 super::source_records::publish_local_history_segments(&state),
             )
@@ -109,11 +108,8 @@ pub(super) async fn repair_legacy_tombstone_metadata(
     state: &AppState,
     now_unix_seconds: u64,
 ) -> anyhow::Result<()> {
-    state
-        .repository_replica
-        .lock()
-        .await
-        .repair_legacy_tombstone_metadata(now_unix_seconds)?;
+    let mut runtime = state.repository_replica.lock().await;
+    super::repository_blocking(|| runtime.repair_legacy_tombstone_metadata(now_unix_seconds))?;
     Ok(())
 }
 
@@ -128,23 +124,19 @@ pub(super) async fn receive_local_source_segment(
     ready_repository_ids: &[String],
     now: u64,
 ) -> anyhow::Result<()> {
-    let cluster_id = state.cluster.cluster_id.clone();
-    let node_id = state.cluster.node_id.clone();
-    let segment = segment.clone();
-    let gaps = gaps.to_vec();
-    let ready_repository_ids = ready_repository_ids.to_vec();
-    let receipt = super::repository_blocking(state.repository_replica.clone(), move |runtime| {
+    let mut runtime = state.repository_replica.lock().await;
+    let receipt = super::repository_blocking(|| {
         runtime.receive_wire_from_repository_with_gaps(
-            &cluster_id,
+            &state.cluster.cluster_id,
             &segment.identity,
             &segment.wire,
-            &gaps,
+            gaps,
             now,
-            &ready_repository_ids,
-            &node_id,
+            ready_repository_ids,
+            &state.cluster.node_id,
         )
-    })
-    .await?;
+    })?;
+    drop(runtime);
     if should_fanout_tombstone_acknowledgements(local_repository_lifecycle(state).await?)
         && !receipt.tombstone_acknowledgements().is_empty()
     {
