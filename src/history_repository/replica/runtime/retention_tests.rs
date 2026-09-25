@@ -98,15 +98,40 @@ fn sqlite_retention_keeps_unchanged_aggregate_row() {
     runtime
         .prepare_for_replication(now)
         .expect("backfill aggregate metadata");
-    let (backfilled_rowid, complete): (i64, Option<bool>) = connection
+    let (backfilled_rowid, complete, canonical_start): (i64, Option<bool>, Option<i64>) =
+        connection
+            .query_row(
+                "SELECT rowid, aggregate_complete, aggregate_start
+             FROM repository_history_records WHERE sequence = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("backfilled row");
+    assert_ne!(after.0, backfilled_rowid);
+    assert_eq!(complete, Some(true));
+
+    connection
+        .execute(
+            "UPDATE repository_history_records SET aggregate_complete = -1,
+                 aggregate_start = -1 WHERE sequence = 1",
+            [],
+        )
+        .expect("simulate malformed aggregate metadata");
+    runtime.snapshot.retention_compaction_cursor = None;
+    runtime.snapshot.retention_compaction_continuation = None;
+    runtime
+        .prepare_for_replication(now)
+        .expect("repair malformed aggregate metadata");
+    let (complete, start): (Option<i64>, Option<i64>) = connection
         .query_row(
-            "SELECT rowid, aggregate_complete FROM repository_history_records WHERE sequence = 1",
+            "SELECT aggregate_complete, aggregate_start
+             FROM repository_history_records WHERE sequence = 1",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .expect("backfilled row");
-    assert_ne!(after.0, backfilled_rowid);
-    assert_eq!(complete, Some(true));
+        .expect("repaired row");
+    assert_eq!(complete, Some(1));
+    assert_eq!(start, canonical_start);
 }
 
 #[test]

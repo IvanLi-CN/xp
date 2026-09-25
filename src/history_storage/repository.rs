@@ -506,13 +506,21 @@ impl HistoryStorage {
                 ],
                 |row| {
                     let mut record = repository_history_record_row(row)?;
-                    record.aggregate_complete = row.get(14)?;
-                    record.aggregate_start_unix_seconds = row
-                        .get::<_, Option<i64>>(15)?
-                        .and_then(|value| u64::try_from(value).ok());
-                    record.aggregate_end_unix_seconds = row
-                        .get::<_, Option<i64>>(16)?
-                        .and_then(|value| u64::try_from(value).ok());
+                    let complete = row.get::<_, Option<i64>>(14)?;
+                    let start = row.get::<_, Option<i64>>(15)?;
+                    let end = row.get::<_, Option<i64>>(16)?;
+                    let metadata_valid = matches!(complete, None | Some(0 | 1))
+                        && start.is_none_or(|value| value >= 0)
+                        && end.is_none_or(|value| value >= 0);
+                    record.aggregate_complete = if metadata_valid {
+                        complete.map(|value| value != 0)
+                    } else {
+                        None
+                    };
+                    record.aggregate_start_unix_seconds =
+                        start.and_then(|value| u64::try_from(value).ok());
+                    record.aggregate_end_unix_seconds =
+                        end.and_then(|value| u64::try_from(value).ok());
                     Ok(record)
                 },
             )
