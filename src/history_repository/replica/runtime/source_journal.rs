@@ -543,9 +543,24 @@ impl RepositoryReplicaRuntime {
         storage_degraded: bool,
         filesystem_available_bytes: u64,
     ) -> Result<SourceDeliveryStatus, RepositoryRuntimeError> {
+        self.source_delivery_status_with_caller(
+            now_unix_seconds,
+            storage_degraded,
+            filesystem_available_bytes,
+            "history_repository.source_delivery_status",
+        )
+    }
+
+    pub(crate) fn source_delivery_status_with_caller(
+        &self,
+        now_unix_seconds: u64,
+        storage_degraded: bool,
+        filesystem_available_bytes: u64,
+        caller_class: &'static str,
+    ) -> Result<SourceDeliveryStatus, RepositoryRuntimeError> {
         let summary = if self.storage.is_sqlite() {
             self.storage
-                .source_delivery_journal_summary()
+                .source_delivery_journal_summary_with_caller(caller_class)
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
         } else {
             crate::state::history_storage::SourceDeliveryJournalSummary {
