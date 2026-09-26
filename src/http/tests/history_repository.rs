@@ -1,5 +1,163 @@
 use super::*;
 use pretty_assertions::assert_eq;
+use std::time::{Duration, Instant};
+
+use crate::state::history_storage::{
+    HistoryStorage, RepositoryHistoryRecordRow, RepositoryHistorySegmentRow,
+};
+
+#[tokio::test(flavor = "current_thread")]
+async fn signed_internal_history_status_does_not_stall_health_on_single_worker() {
+    let tmp = tempfile::tempdir().expect("temporary directory");
+    let storage = HistoryStorage::open(tmp.path());
+    storage
+        .upsert_repository_history_records(&[RepositoryHistoryRecordRow {
+            source_node_id: "source-a".to_owned(),
+            source_epoch: 1,
+            stream: "runtime".to_owned(),
+            sequence: 1,
+            subject_node_id: "subject-a".to_owned(),
+            observer_node_id: "observer-a".to_owned(),
+            schema_id: "runtime.v1".to_owned(),
+            schema_version: 1,
+            record_key: b"record-a".to_vec(),
+            tombstone: false,
+            observed_start_unix_seconds: 1,
+            observed_end_unix_seconds: 2,
+            received_at_unix_seconds: 2,
+            aggregate_complete: None,
+            aggregate_start_unix_seconds: None,
+            aggregate_end_unix_seconds: None,
+            payload: b"record".to_vec(),
+        }])
+        .expect("history record fixture");
+    storage
+        .upsert_repository_history_segments(&[RepositoryHistorySegmentRow {
+            id: "segment-a".to_owned(),
+            closed_at_unix_seconds: 2,
+            contains_tombstone: false,
+            source_node_id: "source-a".to_owned(),
+            source_epoch: 1,
+            stream: "runtime".to_owned(),
+            first_sequence: 1,
+            payload: b"segment".to_vec(),
+        }])
+        .expect("history segment fixture");
+    drop(storage);
+
+    let router = app_with(&tmp, ReconcileHandle::noop()).0;
+    let cluster = ClusterMetadata::load(tmp.path()).expect("cluster metadata");
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).expect("cluster CA");
+    let ca_key = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .expect("cluster CA key")
+        .expect("private cluster CA key");
+    let uri: Uri = "/api/admin/_internal/history-repository/status"
+        .parse()
+        .expect("status URI");
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        &cluster.cluster_id,
+        &cluster.node_id,
+        &cluster.node_id,
+        new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        &ca_key,
+        &ca_pem,
+        &Method::GET,
+        &uri,
+        None,
+        b"",
+        &context,
+        &mut headers,
+    )
+    .expect("sign internal status");
+    let build_status_request = || {
+        let mut request = Request::builder()
+            .method(Method::GET)
+            .uri(uri.clone())
+            .body(Body::empty())
+            .expect("internal status request");
+        request.headers_mut().extend(headers.clone());
+        request
+    };
+
+    {
+        let _legacy_count = crate::state::history_storage::legacy_history_status_count_for_test();
+        let _count_probe = crate::state::history_storage::history_status_count_probe_for_test();
+        let health_started = Instant::now();
+        let status_task = tokio::spawn({
+            let router = router.clone();
+            let status_request = build_status_request();
+            async move {
+                router
+                    .oneshot(status_request)
+                    .await
+                    .expect("legacy status response")
+            }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            crate::state::history_storage::history_status_count_started_for_test(),
+            "legacy status count did not start before health request"
+        );
+        let health_response = router
+            .clone()
+            .oneshot(req("GET", "/api/health"))
+            .await
+            .expect("legacy health response");
+        let health_elapsed = health_started.elapsed();
+        let status_response = status_task.await.expect("legacy status task");
+
+        assert_eq!(status_response.status(), StatusCode::OK);
+        assert_eq!(health_response.status(), StatusCode::OK);
+        assert!(
+            crate::state::history_storage::history_status_count_used_legacy_query_for_test(),
+            "legacy status did not use the forced indexed count query"
+        );
+        assert!(
+            health_elapsed >= Duration::from_millis(200),
+            "legacy history status unexpectedly stayed responsive: {health_elapsed:?}"
+        );
+    }
+
+    let _count_probe = crate::state::history_storage::history_status_count_probe_for_test();
+    let status_task = tokio::spawn({
+        let router = router.clone();
+        let status_request = build_status_request();
+        async move {
+            router
+                .oneshot(status_request)
+                .await
+                .expect("status response")
+        }
+    });
+    tokio::task::yield_now().await;
+    assert!(
+        crate::state::history_storage::history_status_count_started_for_test(),
+        "fixed status count did not start before health request"
+    );
+    let health_response = tokio::time::timeout(
+        Duration::from_secs(2),
+        router.clone().oneshot(req("GET", "/api/health")),
+    )
+    .await
+    .expect("health response timed out")
+    .expect("health response");
+    let status_response = status_task.await.expect("status task");
+
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status_json = body_json(status_response).await;
+    assert_eq!(status_json["record_count"], 1);
+    assert_eq!(status_json["segment_count"], 1);
+    assert_eq!(health_response.status(), StatusCode::OK);
+    assert!(
+        crate::state::history_storage::history_status_count_used_fixed_query_for_test(),
+        "fixed status did not use the exact COUNT(*) query"
+    );
+}
 
 #[tokio::test]
 async fn ready_repository_serves_internal_queries_from_an_ordinary_cluster_peer() {

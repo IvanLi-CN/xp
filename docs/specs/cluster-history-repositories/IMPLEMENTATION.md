@@ -20,6 +20,10 @@
   existing node runtime, traffic, connection and IP views. Syncing members perform bounded repair
   catch-up and enter `ready` only after five stable minutes; successful deep verification writes
   local convergence back to Raft.
+- Runtime status obtains exact record and segment row counts with SQLite `COUNT(*)` on the ordinary
+  rowid tables. SQLite uses its constant-time row-count opcode, so status does not scan a full
+  payload-free index on every request. Counts still include every durable row, including tombstones,
+  and remain correct across mutation, retention, restart and upgrade without a counter migration.
 - Initial repository bootstrap is deliberately yieldable: each worker tick exports at most one
   local page and one bounded page per peer (128 records / 192 KiB). Before any member is `ready`,
   a syncing repository imports each peer's node-local history, including another configured

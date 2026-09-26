@@ -544,18 +544,23 @@ impl HistoryStorage {
             return Ok(0);
         };
         let query = match table {
-            // The keyset index contains the complete ordering metadata but no payload. Counting
-            // through it keeps startup metadata-only even when history rows carry large values.
-            "repository_history_records" => {
-                "SELECT COUNT(source_node_id) FROM repository_history_records
-                 INDEXED BY repository_history_records_keyset"
-            }
-            "repository_history_segments" => {
-                "SELECT COUNT(id) FROM repository_history_segments
-                 INDEXED BY repository_history_segments_sync_order_v2"
-            }
+            // These are ordinary rowid tables. SQLite's COUNT(*) uses the exact table row count
+            // opcode, so status remains O(1) without scanning a payload or metadata index.
+            "repository_history_records" => "SELECT COUNT(*) FROM repository_history_records",
+            "repository_history_segments" => "SELECT COUNT(*) FROM repository_history_segments",
             _ => unreachable!("repository history count operation was validated above"),
         };
+        #[cfg(test)]
+        let query = crate::state::history_storage::test_hooks::history_status_count_query_for_test(
+            table,
+            caller_class,
+            query,
+        );
+        #[cfg(test)]
+        crate::state::history_storage::test_hooks::maybe_delay_legacy_history_count_for_test(
+            caller_class,
+            query,
+        );
         let value = connection
             .query_row(query, [], |row| row.get::<_, i64>(0))
             .map(|value| usize::try_from(value).unwrap_or(usize::MAX))

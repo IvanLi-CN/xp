@@ -28,6 +28,12 @@ The instrumented boundaries are:
 - retention expiry probes, compaction pages, export leases, and replacement/prune maintenance.
 - source-delivery journal summary reads used by runtime status.
 
+Runtime status record and segment counts use SQLite's exact `COUNT(*)` row-count operation on the
+ordinary rowid tables. They do not scan a covering index or deserialize payloads, so the per-request
+count remains constant-time as the retained history grows. The result still includes every durable
+record and segment row, including tombstones, and is not an approximate or asynchronously refreshed
+value.
+
 An operation records its in-flight description in memory before the blocking boundary and queues it
 to one dedicated, coalescing writer. The writer is rate-limited to one atomic replacement per 100 ms
 and runs outside SQLite/backend locks, so diagnostics do not add a synchronous fsync to each query.
