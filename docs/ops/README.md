@@ -830,6 +830,7 @@ ${XP_DATA_DIR}/
   ddns_state.json
   resource_metrics.sqlite3
   resource-runtime-identities.json
+  history.sqlite3.diagnostics.json
 ```
 
 Notes:
@@ -848,6 +849,12 @@ Notes:
   coverage, watermarks, gaps, clock skew and `complete` / `partial` / `local_only` query quality
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
+- `history.sqlite3.diagnostics.json` is a private, bounded operational record for investigating
+  slow local repository reads and maintenance. It is atomically replaced with mode `0600`, capped
+  at 16 KiB, and contains only stable operation identifiers, caller classes, SQL templates with
+  placeholders, wall-clock start/finish times, monotonic elapsed time, and bounded result counts.
+  It never contains SQL bind values, history payloads, credentials, or request bodies. See
+  `docs/ops/history-storage-diagnostics.md` for the field contract and incident collection steps.
 - Repository bootstrap is bounded and resumable: one worker tick handles at most one local page
   and one initial summary page per peer, capped at 128 records and 192 KiB. Before any member is
   `ready`, syncing

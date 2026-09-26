@@ -19,7 +19,8 @@ use crate::{
             },
         },
         history_storage::{
-            REPOSITORY_REPLICA_KEY, RepositoryHistoryCompactionCursor, RepositoryHistoryRecordRow,
+            HistoryStorageDiagnosticOperation, REPOSITORY_REPLICA_KEY,
+            RepositoryHistoryCompactionCursor, RepositoryHistoryRecordRow,
             RepositoryHistorySegmentRow, RepositoryHistoryTombstone, RepositoryReplicaMutation,
         },
     },
@@ -632,6 +633,18 @@ impl RepositoryReplicaRuntime {
         &mut self,
         now_unix_seconds: u64,
     ) -> Result<RepositoryRuntimeStatus, RepositoryRuntimeError> {
+        self.runtime_status_with_caller(now_unix_seconds, "history_repository.runtime_status")
+    }
+
+    pub(crate) fn runtime_status_with_caller(
+        &mut self,
+        now_unix_seconds: u64,
+        caller_class: &'static str,
+    ) -> Result<RepositoryRuntimeStatus, RepositoryRuntimeError> {
+        let diagnostic = self.storage.begin_diagnostic(
+            HistoryStorageDiagnosticOperation::RuntimeStatus,
+            caller_class,
+        );
         if !self.storage_degraded {
             self.refresh_capacity()?;
         }
@@ -646,19 +659,19 @@ impl RepositoryReplicaRuntime {
             crate::state::history_storage::HistoryStorageMode::Sqlite => "sqlite",
             crate::state::history_storage::HistoryStorageMode::DegradedJson => "degraded_json",
         };
-        Ok(RepositoryRuntimeStatus {
+        let status = RepositoryRuntimeStatus {
             storage_mode: storage_mode.to_owned(),
             capacity: self.snapshot.capacity.clone(),
             record_count: if self.uses_sqlite_history() {
                 self.storage
-                    .repository_history_record_count()
+                    .repository_history_record_count_with_caller(caller_class)
                     .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
             } else {
                 self.snapshot.records.len()
             },
             segment_count: if self.uses_sqlite_history() {
                 self.storage
-                    .repository_history_segment_count()
+                    .repository_history_segment_count_with_caller(caller_class)
                     .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
             } else {
                 self.snapshot.segments.len()
@@ -672,7 +685,9 @@ impl RepositoryReplicaRuntime {
                 .snapshot
                 .last_dynamic_relay_attempt_unix_seconds,
             source_delivery,
-        })
+        };
+        diagnostic.finish();
+        Ok(status)
     }
 
     pub(crate) fn runtime_capacity(

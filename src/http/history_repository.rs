@@ -400,7 +400,9 @@ pub(super) async fn admin_internal_history_repository_status(
     if internal.verified.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
-    Ok(Json(local_repository_runtime_status(&state).await?))
+    Ok(Json(
+        local_repository_runtime_status(&state, "http.internal_history_repository_status").await?,
+    ))
 }
 
 pub(super) async fn admin_internal_history_repository_repair(
@@ -817,7 +819,10 @@ pub(super) async fn admin_list_history_repositories(
     for member in membership.members() {
         let node_id = member.node_id().as_str().to_owned();
         let runtime = if node_id == local_node_id {
-            Some(local_repository_runtime_status(&state).await?)
+            Some(
+                local_repository_runtime_status(&state, "http.admin_list_history_repositories")
+                    .await?,
+            )
         } else if let Some(node) = nodes.get(&node_id) {
             match super::mesh::send_mesh_internal_read(
                 &state,
@@ -979,12 +984,16 @@ pub(super) fn derived_repository_signing_key(
 
 pub(crate) async fn local_repository_runtime_status(
     state: &AppState,
+    caller_class: &'static str,
 ) -> Result<RepositoryRuntimeStatus, ApiError> {
     state
         .repository_replica
         .lock()
         .await
-        .runtime_status(u64::try_from(Utc::now().timestamp()).unwrap_or_default())
+        .runtime_status_with_caller(
+            u64::try_from(Utc::now().timestamp()).unwrap_or_default(),
+            caller_class,
+        )
         .map_err(repository_error)
 }
 

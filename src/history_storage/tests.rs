@@ -438,6 +438,35 @@ fn repository_record_count_uses_the_payload_free_keyset_index() {
 }
 
 #[test]
+fn repository_record_count_persists_storage_diagnostic() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+
+    assert_eq!(storage.repository_history_record_count().unwrap(), 0);
+
+    let diagnostic: serde_json::Value = serde_json::from_slice(
+        &fs::read(temporary.path().join("history.sqlite3.diagnostics.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(diagnostic["in_flight"], serde_json::Value::Null);
+    assert!(diagnostic["completed_operations"].as_u64().unwrap() >= 1);
+    assert_eq!(
+        diagnostic["last_slow_event"]["operation_id"],
+        "runtime_status.record_count"
+    );
+    assert_eq!(
+        diagnostic["last_slow_event"]["caller_class"],
+        "history_storage.repository_history_count"
+    );
+    assert!(
+        diagnostic["last_slow_event"]["statement"]
+            .as_str()
+            .unwrap()
+            .contains("repository_history_records_keyset")
+    );
+}
+
+#[test]
 fn repository_segment_count_uses_the_payload_free_keyset_index() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());

@@ -56,6 +56,11 @@ const BACKUP_RETENTION: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const CHECKPOINT_PAGES: u32 = 64;
 const VACUUM_PAGES: u32 = 64;
 
+mod diagnostics;
+#[cfg(test)]
+mod test_hooks;
+pub(crate) use diagnostics::HistoryStorageDiagnosticOperation;
+
 const SOURCES: [HistorySource; 6] = [
     HistorySource::new(STATE_KEY, "state.json"),
     HistorySource::new(USAGE_KEY, "usage.json"),
@@ -101,6 +106,7 @@ type Result<T> = std::result::Result<T, HistoryStorageError>;
 pub(crate) struct HistoryStorage {
     data_dir: Arc<PathBuf>,
     backend: Arc<Mutex<Backend>>,
+    diagnostics: Arc<diagnostics::HistoryStorageDiagnostics>,
     #[cfg(test)]
     fail_maintenance_after_commit: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(test)]
@@ -128,6 +134,7 @@ impl HistoryStorage {
         let data_dir = Arc::new(normalize_data_dir(data_dir));
         let backend = shared_backend(&data_dir);
         let storage = Self {
+            diagnostics: diagnostics::shared_history_storage_diagnostics(&data_dir),
             data_dir,
             backend,
             #[cfg(test)]
@@ -263,31 +270,6 @@ impl HistoryStorage {
         self.backend
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_query_only_for_test(&self, enabled: bool) -> Result<()> {
-        let mut backend = self.lock_backend();
-        let Some(connection) = sqlite_connection(&mut backend)? else {
-            return Err(HistoryStorageError(
-                "query-only test hook requires SQLite".to_owned(),
-            ));
-        };
-        connection
-            .pragma_update(None, "query_only", if enabled { "ON" } else { "OFF" })
-            .map_err(sqlite_error)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_maintenance_failure_for_test(&self, enabled: bool) {
-        self.fail_maintenance_after_commit
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_history_rewrite_maintenance_failure_for_test(&self, enabled: bool) {
-        self.fail_history_rewrite_maintenance
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

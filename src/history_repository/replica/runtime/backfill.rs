@@ -160,6 +160,10 @@ impl RepositoryReplicaRuntime {
         repair_cache_cutoff_unix_seconds: u64,
         now_unix_seconds: u64,
     ) -> Result<RepositoryTieredBackfillPage, RepositoryRuntimeError> {
+        let _diagnostic = self.storage.begin_diagnostic(
+            HistoryStorageDiagnosticOperation::TieredBackfillPage,
+            "history_repository.tiered_backfill_page",
+        );
         let limit = limit.min(MAX_INITIAL_BACKFILL_PAGE_RECORDS);
         if limit == 0 {
             return Err(RepositoryRuntimeError::StateLimitExceeded);

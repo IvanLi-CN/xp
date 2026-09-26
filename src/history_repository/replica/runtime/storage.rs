@@ -465,6 +465,10 @@ impl RepositoryReplicaRuntime {
         &mut self,
         now_unix_seconds: u64,
     ) -> Result<(), RepositoryRuntimeError> {
+        let _diagnostic = self.storage.begin_diagnostic(
+            HistoryStorageDiagnosticOperation::RetentionReplaceAndPrune,
+            "history_repository.retention",
+        );
         if self
             .storage
             .has_active_repository_history_export(now_unix_seconds)
