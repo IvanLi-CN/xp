@@ -15,6 +15,168 @@ use crate::{
 use ed25519_dalek::SigningKey;
 
 #[test]
+fn sqlite_retention_keeps_unchanged_aggregate_row() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let policy = super::super::RepositoryRetentionPolicy::default();
+    let observed_at = 10_000_u64;
+    let now = observed_at
+        .saturating_add(policy.minute_retention_seconds())
+        .saturating_add(2);
+    let mut runtime = load(temporary.path());
+    runtime
+        .migrate_history_to_sqlite()
+        .expect("enable SQLite history");
+    let row = StoredRecord {
+        observed_at_unix_seconds: observed_at,
+        received_at_unix_seconds: now,
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        sequence: 1,
+        subject_node_id: "subject-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key: b"stable".to_vec(),
+        payload: b"sample".to_vec(),
+        tombstone: false,
+    }
+    .sqlite_row()
+    .expect("SQLite row");
+    runtime
+        .storage
+        .upsert_repository_history_records(&[row.clone()])
+        .expect("seed history");
+
+    runtime
+        .prepare_for_replication(now)
+        .expect("compact history");
+    let mut recent_row = row;
+    recent_row.sequence = 2;
+    recent_row.observed_start_unix_seconds = now;
+    recent_row.observed_end_unix_seconds = now;
+    recent_row.record_key = b"recent".to_vec();
+    runtime
+        .storage
+        .upsert_repository_history_records(&[recent_row])
+        .expect("seed newer history");
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("history database");
+    let before: (i64, Vec<u8>) = connection
+        .query_row(
+            "SELECT rowid, payload FROM repository_history_records WHERE sequence = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("compacted row");
+
+    runtime.reset_partition_summary_cache();
+    while !runtime
+        .advance_partition_summary_rebuild_page()
+        .expect("rebuild partition summaries")
+    {}
+    runtime
+        .snapshot
+        .deep_verified_peer_ids
+        .insert("repository-peer".to_owned());
+
+    runtime
+        .prepare_for_replication(now)
+        .expect("repeat retention pass");
+    assert!(runtime.snapshot.partition_summaries_complete);
+    assert!(
+        runtime
+            .snapshot
+            .deep_verified_peer_ids
+            .contains("repository-peer")
+    );
+    let after: (i64, Vec<u8>) = connection
+        .query_row(
+            "SELECT rowid, payload FROM repository_history_records WHERE sequence = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("retained row");
+    assert!(
+        before.1 == after.1,
+        "aggregate payload must remain unchanged"
+    );
+    assert_eq!(
+        before.0, after.0,
+        "unchanged aggregate must not be rewritten"
+    );
+
+    connection
+        .execute(
+            "UPDATE repository_history_records SET aggregate_complete = NULL WHERE sequence = 1",
+            [],
+        )
+        .expect("simulate a legacy aggregate row");
+    runtime
+        .prepare_for_replication(now)
+        .expect("backfill aggregate metadata");
+    let (backfilled_rowid, complete, canonical_start, _canonical_end): (
+        i64,
+        Option<bool>,
+        Option<i64>,
+        Option<i64>,
+    ) = connection
+        .query_row(
+            "SELECT rowid, aggregate_complete, aggregate_start, aggregate_end
+             FROM repository_history_records WHERE sequence = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("backfilled row");
+    assert_ne!(after.0, backfilled_rowid);
+    assert_eq!(complete, Some(true));
+
+    connection
+        .execute(
+            "UPDATE repository_history_records SET aggregate_complete = -1,
+                 aggregate_start = -1 WHERE sequence = 1",
+            [],
+        )
+        .expect("simulate malformed aggregate metadata");
+    runtime.snapshot.retention_compaction_cursor = None;
+    runtime.snapshot.retention_compaction_continuation = None;
+    runtime
+        .prepare_for_replication(now)
+        .expect("repair malformed aggregate metadata");
+    let (complete, start): (Option<i64>, Option<i64>) = connection
+        .query_row(
+            "SELECT aggregate_complete, aggregate_start
+             FROM repository_history_records WHERE sequence = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("repaired row");
+    assert_eq!(complete, Some(1));
+    assert_eq!(start, canonical_start);
+
+    connection
+        .execute(
+            "UPDATE repository_history_records SET aggregate_complete = 'invalid',
+                 aggregate_start = X'01' WHERE sequence = 1",
+            [],
+        )
+        .expect("simulate noninteger aggregate metadata");
+    runtime.snapshot.retention_compaction_cursor = None;
+    runtime.snapshot.retention_compaction_continuation = None;
+    runtime
+        .prepare_for_replication(now)
+        .expect("repair noninteger aggregate metadata");
+    let repaired_complete: Option<i64> = connection
+        .query_row(
+            "SELECT aggregate_complete FROM repository_history_records WHERE sequence = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("repaired noninteger completion");
+    assert_eq!(repaired_complete, Some(1));
+}
+
+#[test]
 fn sqlite_retention_progresses_for_mixed_buckets_sharing_a_dense_timestamp() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let policy = super::super::RepositoryRetentionPolicy::default();

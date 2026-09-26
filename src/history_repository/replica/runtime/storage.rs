@@ -576,6 +576,13 @@ impl RepositoryReplicaRuntime {
             .iter()
             .map(StoredRecord::sqlite_row)
             .collect::<Result<Vec<_>, _>>()?;
+        let unchanged = removed_rows.len() == retained.len() && {
+            let mut removed = removed_rows.iter().collect::<Vec<_>>();
+            let mut retained = retained.iter().collect::<Vec<_>>();
+            removed.sort_unstable();
+            retained.sort_unstable();
+            removed == retained
+        };
         let next_retention_cursor = if !has_more && rows.len() < RETENTION_COMPACTION_PAGE_SIZE {
             None
         } else {
@@ -606,8 +613,14 @@ impl RepositoryReplicaRuntime {
         } else {
             None
         };
+        let record_expiry_cutoff = now_unix_seconds.saturating_sub(policy.max_age_seconds());
+        let has_expired = unchanged
+            && self
+                .storage
+                .repository_history_has_expired_records(record_expiry_cutoff)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         let previous_snapshot = self.snapshot.clone();
-        if !removed_rows.is_empty() {
+        if !unchanged || has_expired {
             self.reset_partition_summary_cache();
         }
         self.snapshot.retention_compaction_cursor = next_retention_cursor;
@@ -624,9 +637,9 @@ impl RepositoryReplicaRuntime {
             }
         };
         let result = self.storage.replace_repository_history_records_and_prune(
-            &removed_rows,
-            &retained,
-            now_unix_seconds.saturating_sub(policy.max_age_seconds()),
+            if unchanged { &[] } else { &removed_rows },
+            if unchanged { &[] } else { &retained },
+            record_expiry_cutoff,
             now_unix_seconds.saturating_sub(policy.minute_retention_seconds()),
             &control_payload,
         );
