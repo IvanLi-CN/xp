@@ -352,9 +352,16 @@ impl HistoryStorage {
     }
 
     pub(crate) fn source_delivery_journal_summary(&self) -> Result<SourceDeliveryJournalSummary> {
+        self.source_delivery_journal_summary_with_caller("history_storage.source_delivery")
+    }
+
+    pub(crate) fn source_delivery_journal_summary_with_caller(
+        &self,
+        caller_class: &'static str,
+    ) -> Result<SourceDeliveryJournalSummary> {
         let diagnostic = self.begin_diagnostic(
             HistoryStorageDiagnosticOperation::SourceDeliveryJournalSummary,
-            "history_storage.source_delivery",
+            caller_class,
         );
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
@@ -369,6 +376,10 @@ impl HistoryStorage {
                 capacity_suspended: false,
             });
         };
+        let state_diagnostic = self.begin_diagnostic(
+            HistoryStorageDiagnosticOperation::SourceDeliveryJournalState,
+            caller_class,
+        );
         let state = connection
             .query_row(
                 "SELECT pending_segments, pending_bytes, last_acknowledged_at,
@@ -388,11 +399,16 @@ impl HistoryStorage {
                 },
             )
             .map_err(sqlite_error)?;
+        state_diagnostic.finish();
         let order_repairing = state.4 == 0;
         let oldest = if order_repairing {
             None
         } else {
-            connection
+            let oldest_diagnostic = self.begin_diagnostic(
+                HistoryStorageDiagnosticOperation::SourceDeliveryJournalOldest,
+                caller_class,
+            );
+            let oldest = connection
                 .query_row(
                     "SELECT id, stream, closed_at, identity, wire
                      FROM source_delivery_journal
@@ -403,7 +419,9 @@ impl HistoryStorage {
                     source_delivery_journal_row,
                 )
                 .optional()
-                .map_err(sqlite_error)?
+                .map_err(sqlite_error)?;
+            oldest_diagnostic.finish();
+            oldest
         };
         let summary = SourceDeliveryJournalSummary {
             pending_segments: usize::try_from(state.0).unwrap_or(usize::MAX),

@@ -648,10 +648,11 @@ impl RepositoryReplicaRuntime {
         if !self.storage_degraded {
             self.refresh_capacity()?;
         }
-        let source_delivery = self.source_delivery_status(
+        let source_delivery = self.source_delivery_status_with_caller(
             now_unix_seconds,
             self.storage_degraded,
             self.snapshot.capacity.filesystem_available_bytes(),
+            caller_class,
         )?;
         let storage_mode = match self.storage.mode() {
             crate::state::history_storage::HistoryStorageMode::Unavailable => "unavailable",

@@ -38,9 +38,13 @@ pub(crate) enum HistoryStorageDiagnosticOperation {
     RuntimeStatusRecordCount,
     RuntimeStatusSegmentCount,
     SourceDeliveryJournalSummary,
+    SourceDeliveryJournalState,
+    SourceDeliveryJournalOldest,
     TieredBackfillPage,
     TieredBackfillExportRefresh,
     TieredBackfillExportFinish,
+    TieredBackfillExportActiveCount,
+    TieredBackfillExportUpsert,
     TieredBackfillExportSession,
     TieredBackfillExportWatermarks,
     TieredBackfillReceivedAtCutoff,
@@ -48,6 +52,7 @@ pub(crate) enum HistoryStorageDiagnosticOperation {
     TieredBackfillRecordWatermark,
     TieredBackfillRecordsPage,
     RetentionActiveExport,
+    RetentionPrune,
     RetentionCompactionPage,
     RetentionExpiredRecordProbe,
     RetentionReplaceAndPrune,
@@ -60,9 +65,13 @@ impl HistoryStorageDiagnosticOperation {
             Self::RuntimeStatusRecordCount => "runtime_status.record_count",
             Self::RuntimeStatusSegmentCount => "runtime_status.segment_count",
             Self::SourceDeliveryJournalSummary => "source_delivery.journal_summary",
+            Self::SourceDeliveryJournalState => "source_delivery.journal_state",
+            Self::SourceDeliveryJournalOldest => "source_delivery.journal_oldest",
             Self::TieredBackfillPage => "tiered_backfill_page",
             Self::TieredBackfillExportRefresh => "tiered_backfill.export_refresh",
             Self::TieredBackfillExportFinish => "tiered_backfill.export_finish",
+            Self::TieredBackfillExportActiveCount => "tiered_backfill.export_active_count",
+            Self::TieredBackfillExportUpsert => "tiered_backfill.export_upsert",
             Self::TieredBackfillExportSession => "tiered_backfill.export_session",
             Self::TieredBackfillExportWatermarks => "tiered_backfill.export_watermarks",
             Self::TieredBackfillReceivedAtCutoff => {
@@ -76,6 +85,7 @@ impl HistoryStorageDiagnosticOperation {
             }
             Self::TieredBackfillRecordsPage => "tiered_backfill.records_page",
             Self::RetentionActiveExport => "retention.active_export",
+            Self::RetentionPrune => "retention.prune",
             Self::RetentionCompactionPage => "retention.compaction_page",
             Self::RetentionExpiredRecordProbe => "retention.expired_record_probe",
             Self::RetentionReplaceAndPrune => "retention.replace_and_prune",
@@ -93,26 +103,30 @@ impl HistoryStorageDiagnosticOperation {
                 "SELECT COUNT(id) FROM repository_history_segments ",
                 "INDEXED BY repository_history_segments_sync_order_v2"
             ),
-            Self::SourceDeliveryJournalSummary => concat!(
+            Self::SourceDeliveryJournalSummary => "composite source delivery journal summary",
+            Self::SourceDeliveryJournalState => concat!(
                 "SELECT pending_segments, pending_bytes, last_acknowledged_at, ",
                 "last_delivery_path, order_repair_completed, capacity_suspended ",
-                "FROM source_delivery_journal_state WHERE singleton = 1; ",
+                "FROM source_delivery_journal_state WHERE singleton = 1"
+            ),
+            Self::SourceDeliveryJournalOldest => concat!(
                 "SELECT id, stream, closed_at, identity, wire FROM source_delivery_journal ",
                 "ORDER BY (stream = 'tombstone') DESC, source_node_id, source_epoch, ",
                 "stream, first_sequence, created_at, id LIMIT 1"
             ),
             Self::TieredBackfillPage => "composite tiered history backfill page",
-            Self::TieredBackfillExportRefresh => concat!(
-                "DELETE FROM repository_history_export_leases WHERE expires_at <= ?1; ",
-                "SELECT EXISTS(SELECT 1 FROM repository_history_export_leases ",
-                "WHERE session_id = ?1); SELECT COUNT(*) FROM ",
-                "repository_history_export_leases; INSERT INTO ",
-                "repository_history_export_leases (session_id, expires_at) VALUES (?1, ?2) ",
-                "ON CONFLICT(session_id) DO UPDATE SET expires_at = excluded.expires_at"
-            ),
+            Self::TieredBackfillExportRefresh => "composite tiered backfill export refresh",
             Self::TieredBackfillExportFinish => {
                 "DELETE FROM repository_history_export_leases WHERE session_id = ?1"
             }
+            Self::TieredBackfillExportActiveCount => {
+                "SELECT COUNT(*) FROM repository_history_export_leases"
+            }
+            Self::TieredBackfillExportUpsert => concat!(
+                "INSERT INTO repository_history_export_leases (session_id, expires_at) ",
+                "VALUES (?1, ?2) ON CONFLICT(session_id) DO UPDATE SET ",
+                "expires_at = excluded.expires_at"
+            ),
             Self::TieredBackfillExportSession => concat!(
                 "DELETE FROM repository_history_export_leases WHERE expires_at <= ?1; ",
                 "SELECT EXISTS(SELECT 1 FROM repository_history_export_leases ",
@@ -148,6 +162,7 @@ impl HistoryStorageDiagnosticOperation {
                 "DELETE FROM repository_history_export_leases WHERE expires_at <= ?1; ",
                 "SELECT EXISTS(SELECT 1 FROM repository_history_export_leases)"
             ),
+            Self::RetentionPrune => "composite retention prune",
             Self::RetentionCompactionPage => concat!(
                 "SELECT source_node_id, source_epoch, stream, sequence, subject_node_id, ",
                 "observer_node_id, schema_id, schema_version, record_key, is_tombstone, ",
@@ -169,6 +184,18 @@ impl HistoryStorageDiagnosticOperation {
             ),
         }
     }
+
+    fn is_composite(self) -> bool {
+        matches!(
+            self,
+            Self::RuntimeStatus
+                | Self::SourceDeliveryJournalSummary
+                | Self::TieredBackfillPage
+                | Self::TieredBackfillExportRefresh
+                | Self::TieredBackfillExportWatermarks
+                | Self::RetentionPrune
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -176,6 +203,8 @@ pub(crate) struct HistoryStorageDiagnosticEvent {
     operation_id: String,
     caller_class: String,
     statement: String,
+    #[serde(skip)]
+    composite: bool,
     started_at_unix_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     finished_at_unix_ms: Option<u64>,
@@ -265,15 +294,15 @@ impl HistoryStorageDiagnostics {
             persist_failures: AtomicU64::new(0),
             persist_retry_after_unix_ms: AtomicU64::new(0),
         });
-        if preserve_existing_file {
-            diagnostics.persist_snapshot();
-        }
         let weak = Arc::downgrade(&diagnostics);
         if let Err(error) = thread::Builder::new()
             .name("xp-history-diagnostics".to_owned())
             .spawn(move || persist_worker(weak, persist_rx))
         {
             warn!(error = %error, "failed to start history diagnostics writer");
+        }
+        if preserve_existing_file {
+            diagnostics.notify_persist();
         }
         diagnostics
     }
@@ -289,6 +318,7 @@ impl HistoryStorageDiagnostics {
             operation_id: operation.operation_id().to_owned(),
             caller_class: caller_class.to_owned(),
             statement: operation.statement().to_owned(),
+            composite: operation.is_composite(),
             started_at_unix_ms,
             finished_at_unix_ms: None,
             elapsed_ms: None,
@@ -346,7 +376,7 @@ impl HistoryStorageDiagnostics {
             if elapsed_ms >= SLOW_OPERATION_MILLISECONDS {
                 state.slow_operations = state.slow_operations.saturating_add(1);
                 state.last_slow_event = Some(event.clone());
-                if !event.statement.starts_with("composite ") {
+                if !event.composite {
                     state.last_slow_leaf_event = Some(event.clone());
                 }
             }

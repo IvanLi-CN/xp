@@ -394,6 +394,10 @@ impl HistoryStorage {
             )
             .map_err(sqlite_error)?;
         if !existing {
+            let count_diagnostic = self.begin_diagnostic(
+                HistoryStorageDiagnosticOperation::TieredBackfillExportActiveCount,
+                "history_storage.tiered_backfill",
+            );
             let active = transaction
                 .query_row(
                     "SELECT COUNT(*) FROM repository_history_export_leases",
@@ -401,6 +405,7 @@ impl HistoryStorage {
                     |row| row.get::<_, i64>(0),
                 )
                 .map_err(sqlite_error)?;
+            count_diagnostic.finish();
             if usize::try_from(active).unwrap_or(usize::MAX)
                 >= MAX_ACTIVE_REPOSITORY_HISTORY_EXPORTS
             {
@@ -409,6 +414,10 @@ impl HistoryStorage {
                 ));
             }
         }
+        let upsert_diagnostic = self.begin_diagnostic(
+            HistoryStorageDiagnosticOperation::TieredBackfillExportUpsert,
+            "history_storage.tiered_backfill",
+        );
         transaction
             .execute(
                 "INSERT INTO repository_history_export_leases (session_id, expires_at)
@@ -423,6 +432,7 @@ impl HistoryStorage {
                 ],
             )
             .map_err(sqlite_error)?;
+        upsert_diagnostic.finish();
         transaction.commit().map_err(sqlite_error)?;
         diagnostic.finish();
         Ok(())
