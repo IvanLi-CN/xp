@@ -165,23 +165,34 @@ impl HistoryStorage {
     }
 
     pub(crate) fn repository_history_used_bytes(&self) -> Result<u64> {
+        let diagnostic = self.begin_diagnostic(
+            HistoryStorageDiagnosticOperation::RepositoryHistoryUsedBytes,
+            "history_storage.capacity",
+        );
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
+            diagnostic.finish();
             return Ok(0);
         };
-        let page_count = connection
-            .pragma_query_value(None, "page_count", |row| row.get::<_, i64>(0))
-            .map_err(sqlite_error)?;
-        let page_size = connection
-            .pragma_query_value(None, "page_size", |row| row.get::<_, i64>(0))
-            .map_err(sqlite_error)?;
-        let database_bytes = u64::try_from(page_count)
-            .unwrap_or(u64::MAX)
-            .saturating_mul(u64::try_from(page_size).unwrap_or(u64::MAX));
-        let wal_bytes = fs::metadata(self.data_dir.join(format!("{SQLITE_FILE}-wal")))
-            .map(|metadata| metadata.len())
-            .unwrap_or_default();
-        Ok(database_bytes.saturating_add(wal_bytes))
+        let result = (|| {
+            let page_count = connection
+                .pragma_query_value(None, "page_count", |row| row.get::<_, i64>(0))
+                .map_err(sqlite_error)?;
+            let page_size = connection
+                .pragma_query_value(None, "page_size", |row| row.get::<_, i64>(0))
+                .map_err(sqlite_error)?;
+            let database_bytes = u64::try_from(page_count)
+                .unwrap_or(u64::MAX)
+                .saturating_mul(u64::try_from(page_size).unwrap_or(u64::MAX));
+            let wal_bytes = fs::metadata(self.data_dir.join(format!("{SQLITE_FILE}-wal")))
+                .map(|metadata| metadata.len())
+                .unwrap_or_default();
+            Ok(database_bytes.saturating_add(wal_bytes))
+        })();
+        if result.is_ok() {
+            diagnostic.finish();
+        }
+        result
     }
 
     #[allow(dead_code)]

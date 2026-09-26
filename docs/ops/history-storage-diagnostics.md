@@ -55,16 +55,36 @@ sudo -n date -u
 sudo -n cat /proc/pressure/io
 sudo -n cat /proc/loadavg
 sudo -n cat /var/lib/xp/data/history.sqlite3.diagnostics.json
+sudo -n ls -l /var/lib/xp/data/resource_metrics.sqlite3*
 curl --max-time 5 -fsS http://127.0.0.1:62416/api/health
+
+# With the operator's already-authorized admin token, capture current and I/O history.
+curl --max-time 5 -fsS \
+  -H "Authorization: Bearer ${XP_ADMIN_TOKEN}" \
+  http://127.0.0.1:62416/api/admin/nodes/<node-id>/resources
+curl --max-time 5 -fsS \
+  -H "Authorization: Bearer ${XP_ADMIN_TOKEN}" \
+  'http://127.0.0.1:62416/api/admin/nodes/<node-id>/resources/history?metric=cpu_iowait_percent'\
+  '&limit=1500'
 
 # Docker Compose uses the mounted path inside the official container.
 docker compose exec -T xp cat /proc/pressure/io
 docker compose exec -T xp cat /var/lib/xp/data/history.sqlite3.diagnostics.json
+docker compose exec -T xp ls -l /var/lib/xp/data/resource_metrics.sqlite3*
 ```
 
 Use the node's actual configured `XP_DATA_DIR` when it differs from the generated default; do not
 substitute a guessed data directory. Also preserve the matching `history.sqlite3-wal` and
-`history.sqlite3-shm` files during collection.
+`history.sqlite3-shm` files, plus the `resource_metrics.sqlite3-wal` and
+`resource_metrics.sqlite3-shm` files during collection. If the container is stopped, use its
+read-only mounted volume path instead of `docker compose exec`:
+
+```sh
+docker compose run --rm --no-deps \
+  --entrypoint ls xp -l /var/lib/xp/data
+```
+
+Do not start XP solely to collect evidence.
 
 Do not delete `history.sqlite3`, its WAL, or the diagnostic file while collecting evidence. The
 diagnostic file is safe to omit from a normal incident report if it contains no in-flight,

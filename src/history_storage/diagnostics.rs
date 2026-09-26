@@ -5,8 +5,8 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, OnceLock, Weak,
-        atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver, SyncSender},
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError},
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -37,6 +37,7 @@ pub(crate) enum HistoryStorageDiagnosticOperation {
     RuntimeStatus,
     RuntimeStatusRecordCount,
     RuntimeStatusSegmentCount,
+    RepositoryHistoryUsedBytes,
     SourceDeliveryJournalSummary,
     SourceDeliveryJournalState,
     SourceDeliveryJournalOldest,
@@ -64,6 +65,7 @@ impl HistoryStorageDiagnosticOperation {
             Self::RuntimeStatus => "runtime_status",
             Self::RuntimeStatusRecordCount => "runtime_status.record_count",
             Self::RuntimeStatusSegmentCount => "runtime_status.segment_count",
+            Self::RepositoryHistoryUsedBytes => "repository_history.used_bytes",
             Self::SourceDeliveryJournalSummary => "source_delivery.journal_summary",
             Self::SourceDeliveryJournalState => "source_delivery.journal_state",
             Self::SourceDeliveryJournalOldest => "source_delivery.journal_oldest",
@@ -102,6 +104,10 @@ impl HistoryStorageDiagnosticOperation {
             Self::RuntimeStatusSegmentCount => concat!(
                 "SELECT COUNT(id) FROM repository_history_segments ",
                 "INDEXED BY repository_history_segments_sync_order_v2"
+            ),
+            Self::RepositoryHistoryUsedBytes => concat!(
+                "PRAGMA page_count; PRAGMA page_size; stat ",
+                "history.sqlite3-wal"
             ),
             Self::SourceDeliveryJournalSummary => "composite source delivery journal summary",
             Self::SourceDeliveryJournalState => concat!(
@@ -265,6 +271,7 @@ pub(crate) struct HistoryStorageDiagnostics {
     active_operations: Mutex<BTreeMap<u64, HistoryStorageDiagnosticEvent>>,
     next_scope_id: AtomicU64,
     persist_tx: SyncSender<()>,
+    persist_writer_failed: AtomicBool,
     persist_failures: AtomicU64,
     persist_retry_after_unix_ms: AtomicU64,
 }
@@ -291,6 +298,7 @@ impl HistoryStorageDiagnostics {
             active_operations: Mutex::new(BTreeMap::new()),
             next_scope_id: AtomicU64::new(1),
             persist_tx,
+            persist_writer_failed: AtomicBool::new(false),
             persist_failures: AtomicU64::new(0),
             persist_retry_after_unix_ms: AtomicU64::new(0),
         });
@@ -299,6 +307,9 @@ impl HistoryStorageDiagnostics {
             .name("xp-history-diagnostics".to_owned())
             .spawn(move || persist_worker(weak, persist_rx))
         {
+            diagnostics
+                .persist_writer_failed
+                .store(true, Ordering::Relaxed);
             warn!(error = %error, "failed to start history diagnostics writer");
         }
         if preserve_existing_file {
@@ -390,7 +401,17 @@ impl HistoryStorageDiagnostics {
     }
 
     fn notify_persist(&self) {
-        let _ = self.persist_tx.try_send(());
+        match self.persist_tx.try_send(()) {
+            Ok(()) | Err(TrySendError::Full(())) => {}
+            Err(TrySendError::Disconnected(())) => {
+                if !self.persist_writer_failed.swap(true, Ordering::Relaxed) {
+                    warn!(
+                        path = %self.path.display(),
+                        "history diagnostics writer is unavailable"
+                    );
+                }
+            }
+        }
     }
 
     fn persist_snapshot(&self) {
@@ -483,11 +504,29 @@ fn persist_worker(weak: Weak<HistoryStorageDiagnostics>, receiver: Receiver<()>)
     let mut last_persist = Instant::now()
         .checked_sub(DIAGNOSTIC_PERSIST_INTERVAL)
         .unwrap_or_else(Instant::now);
-    while receiver.recv().is_ok() {
+    loop {
+        let retry_after = weak.upgrade().map(|diagnostics| {
+            diagnostics
+                .persist_retry_after_unix_ms
+                .load(Ordering::Relaxed)
+        });
+        let now = unix_milliseconds(SystemTime::now());
+        let received = if let Some(retry_after) = retry_after.filter(|deadline| *deadline > now) {
+            receiver.recv_timeout(Duration::from_millis(retry_after.saturating_sub(now)))
+        } else {
+            receiver.recv().map_err(|_| RecvTimeoutError::Disconnected)
+        };
+        match received {
+            Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return,
+        }
         while receiver.try_recv().is_ok() {}
         let elapsed = last_persist.elapsed();
         if elapsed < DIAGNOSTIC_PERSIST_INTERVAL {
-            thread::sleep(DIAGNOSTIC_PERSIST_INTERVAL - elapsed);
+            match receiver.recv_timeout(DIAGNOSTIC_PERSIST_INTERVAL - elapsed) {
+                Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
             while receiver.try_recv().is_ok() {}
         }
         let Some(diagnostics) = weak.upgrade() else {
@@ -668,6 +707,20 @@ mod tests {
         wait_for_state(&path, |state| state.in_flight.is_none());
         let bytes = fs::read(path).unwrap();
         assert!(bytes.len() <= DIAGNOSTIC_MAX_BYTES);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diagnostic_file_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempdir().unwrap();
+        let diagnostics = HistoryStorageDiagnostics::open(temporary.path());
+        let path = temporary.path().join(HISTORY_STORAGE_DIAGNOSTICS_FILE);
+        wait_for_state(&path, |_| true);
+        let mode = fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        drop(diagnostics);
     }
 
     #[test]

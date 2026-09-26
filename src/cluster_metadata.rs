@@ -207,13 +207,26 @@ fn write_atomic_with_mode(path: &Path, bytes: &[u8], private: bool) -> io::Resul
     {
         let mut f = fs::File::create(&tmp_path)?;
         if private {
-            best_effort_chmod_0600(&tmp_path);
+            set_private_permissions(&tmp_path)?;
         }
         f.write_all(bytes)?;
         f.sync_all()?;
     }
     fs::rename(tmp_path, path)?;
     Ok(())
+}
+
+fn set_private_permissions(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 fn best_effort_chmod_0600(path: &Path) {
