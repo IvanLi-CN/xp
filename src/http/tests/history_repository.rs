@@ -74,18 +74,57 @@ async fn signed_internal_history_status_does_not_stall_health_on_single_worker()
         &mut headers,
     )
     .expect("sign internal status");
-    let mut status_request = Request::builder()
-        .method(Method::GET)
-        .uri(uri)
-        .body(Body::empty())
-        .expect("internal status request");
-    status_request.headers_mut().extend(headers);
+    let build_status_request = || {
+        let mut request = Request::builder()
+            .method(Method::GET)
+            .uri(uri.clone())
+            .body(Body::empty())
+            .expect("internal status request");
+        request.headers_mut().extend(headers.clone());
+        request
+    };
 
-    let _slow_count = crate::state::history_storage::slow_legacy_history_status_count_for_test();
+    {
+        let _legacy_count = crate::state::history_storage::legacy_history_status_count_for_test();
+        let _count_probe = crate::state::history_storage::history_status_count_probe_for_test();
+        let health_started = Instant::now();
+        let status_task = tokio::spawn({
+            let router = router.clone();
+            let status_request = build_status_request();
+            async move {
+                router
+                    .oneshot(status_request)
+                    .await
+                    .expect("legacy status response")
+            }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            crate::state::history_storage::history_status_count_started_for_test(),
+            "legacy status count did not start before health request"
+        );
+        let health_response = router
+            .clone()
+            .oneshot(req("GET", "/api/health"))
+            .await
+            .expect("legacy health response");
+        let health_elapsed = health_started.elapsed();
+        let status_response = status_task.await.expect("legacy status task");
+
+        assert_eq!(status_response.status(), StatusCode::OK);
+        assert_eq!(health_response.status(), StatusCode::OK);
+        assert!(
+            health_elapsed >= Duration::from_millis(200),
+            "legacy history status unexpectedly stayed responsive: {health_elapsed:?}"
+        );
+    }
+
+    let _count_probe = crate::state::history_storage::history_status_count_probe_for_test();
     let health_budget = Duration::from_millis(100);
     let health_started = Instant::now();
     let status_task = tokio::spawn({
         let router = router.clone();
+        let status_request = build_status_request();
         async move {
             router
                 .oneshot(status_request)
@@ -94,7 +133,12 @@ async fn signed_internal_history_status_does_not_stall_health_on_single_worker()
         }
     });
     tokio::task::yield_now().await;
+    assert!(
+        crate::state::history_storage::history_status_count_started_for_test(),
+        "fixed status count did not start before health request"
+    );
     let health_response = router
+        .clone()
         .oneshot(req("GET", "/api/health"))
         .await
         .expect("health response");
@@ -108,7 +152,7 @@ async fn signed_internal_history_status_does_not_stall_health_on_single_worker()
     assert_eq!(health_response.status(), StatusCode::OK);
     assert!(
         health_elapsed < health_budget,
-        "health exceeded {:?} while signed history status was in flight: {:?}",
+        "health exceeded {:?} while fixed history status was in flight: {:?}",
         health_budget,
         health_elapsed
     );

@@ -61,7 +61,10 @@ mod diagnostics;
 mod test_hooks;
 pub(crate) use diagnostics::HistoryStorageDiagnosticOperation;
 #[cfg(test)]
-pub(crate) use test_hooks::slow_legacy_history_status_count_for_test;
+pub(crate) use test_hooks::{
+    history_status_count_probe_for_test, history_status_count_started_for_test,
+    legacy_history_status_count_for_test,
+};
 
 const SOURCES: [HistorySource; 6] = [
     HistorySource::new(STATE_KEY, "state.json"),

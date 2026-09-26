@@ -551,6 +551,12 @@ impl HistoryStorage {
             _ => unreachable!("repository history count operation was validated above"),
         };
         #[cfg(test)]
+        let query = crate::state::history_storage::test_hooks::history_status_count_query_for_test(
+            table,
+            caller_class,
+            query,
+        );
+        #[cfg(test)]
         crate::state::history_storage::test_hooks::maybe_delay_legacy_history_count_for_test(
             caller_class,
             query,
