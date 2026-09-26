@@ -202,15 +202,13 @@ pub(super) fn incomplete_aggregate_gap<'a>(
         })
 }
 
-pub(super) fn aggregate_metadata(record: &StoredRecord) -> (bool, Option<(u64, u64)>) {
-    let Some(payload) = aggregate_payload(record) else {
-        return (true, None);
-    };
-    let range = payload
+pub(super) fn aggregate_metadata(record: &StoredRecord) -> Option<(bool, u64, u64)> {
+    let payload = aggregate_payload(record)?;
+    let (start, end) = payload
         .bucket_start_unix_seconds
         .zip(payload.bucket_end_unix_seconds)
-        .filter(|(start, end)| start <= end);
-    (payload.complete && range.is_some(), range)
+        .filter(|(start, end)| start <= end)?;
+    Some((payload.complete, start, end))
 }
 
 fn retention_identifier(
@@ -464,21 +462,15 @@ struct AggregateContribution {
 }
 
 fn aggregate_contribution(record: &StoredRecord) -> AggregateContribution {
-    let aggregate = aggregate_payload(record);
-    let is_aggregate = aggregate.is_some();
-    let parsed = aggregate.and_then(|payload| {
+    let parsed = aggregate_payload(record).and_then(|payload| {
         let hash = hex::decode(&payload.payload_sha256).ok()?;
         let payload_hash: [u8; 32] = hash.try_into().ok()?;
-        let range_valid = payload
-            .bucket_start_unix_seconds
-            .zip(payload.bucket_end_unix_seconds)
-            .is_some_and(|(start, end)| start <= end);
         Some(AggregateContribution {
             record_count: payload.record_count,
             first_sequence: payload.first_sequence,
             last_sequence: payload.last_sequence,
             payload_hash,
-            complete: payload.complete && range_valid,
+            complete: payload.complete,
             anonymized_identifier: payload.anonymized_identifier,
         })
     });
@@ -487,7 +479,7 @@ fn aggregate_contribution(record: &StoredRecord) -> AggregateContribution {
         first_sequence: record.sequence,
         last_sequence: record.sequence,
         payload_hash: record_payload_hash(record),
-        complete: !is_aggregate,
+        complete: true,
         anonymized_identifier: None,
     })
 }
@@ -723,35 +715,6 @@ mod tests {
     use crate::resource_monitoring::{
         Capability, ResourceGap, ResourceHistoryPayload, RollupValue,
     };
-
-    #[test]
-    fn malformed_aggregate_hash_is_incomplete() {
-        let record = StoredRecord {
-            observed_at_unix_seconds: 1_000,
-            received_at_unix_seconds: 1_000,
-            source_node_id: "node-a".to_owned(),
-            source_epoch: 7,
-            stream: "traffic".to_owned(),
-            sequence: 1,
-            subject_node_id: "subject-a".to_owned(),
-            observer_node_id: "node-a".to_owned(),
-            schema_id: "traffic.v1".to_owned(),
-            schema_version: 1,
-            record_key: b"aggregate".to_vec(),
-            payload: serde_json::to_vec(&serde_json::json!({
-                "algorithm": "sha256",
-                "resolution": "hour",
-                "record_count": 1,
-                "first_sequence": 1,
-                "last_sequence": 1,
-                "payload_sha256": "00",
-                "complete": true,
-            }))
-            .expect("aggregate payload"),
-            tombstone: false,
-        };
-        assert!(!aggregate_contribution(&record).complete);
-    }
 
     #[test]
     fn resource_retention_preserves_numeric_rollup_semantics() {

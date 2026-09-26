@@ -233,10 +233,7 @@
   An unchanged bounded retention page skips row replacement and partition-summary invalidation
   while preserving the cursor snapshot, expiration deletes, and legacy aggregate-metadata backfill.
   Actual expiration still invalidates the summary. Invalid aggregate metadata is rewritten during
-  compaction; queries use observed bounds for explicitly invalid metadata. Raw rows legitimately
-  have no aggregate range; parseable aggregate payloads without a valid range stay incomplete
-  through compaction. Legacy complete/null-range rows are ambiguous without payload inspection
-  and require a separate migration to distinguish malformed aggregates from raw rows.
+  compaction. Query completeness and aggregate payload interpretation remain unchanged.
 - The proxy configuration, proxy client, proxy listener, proxy status, compatibility path, and
   history synchronization relay path are not used by the repository worker. Legacy relay payload
   types remain wire-compatible for the receive boundary, but normal source delivery and

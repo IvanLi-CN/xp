@@ -844,7 +844,7 @@ impl StoredRecord {
     pub(crate) fn sqlite_row(&self) -> Result<RepositoryHistoryRecordRow, RepositoryRuntimeError> {
         let (observed_start_unix_seconds, observed_end_unix_seconds) =
             retention::record_time_range(self);
-        let (aggregate_complete, aggregate_range) = retention::aggregate_metadata(self);
+        let aggregate_metadata = retention::aggregate_metadata(self);
         Ok(RepositoryHistoryRecordRow {
             source_node_id: self.source_node_id.clone(),
             source_epoch: self.source_epoch,
@@ -861,9 +861,9 @@ impl StoredRecord {
             received_at_unix_seconds: record_received_at(self),
             // Newly persisted raw rows explicitly carry complete metadata. NULL is reserved for
             // rows written before this metadata existed and is conservatively reported partial.
-            aggregate_complete: Some(aggregate_complete),
-            aggregate_start_unix_seconds: aggregate_range.map(|(start, _)| start),
-            aggregate_end_unix_seconds: aggregate_range.map(|(_, end)| end),
+            aggregate_complete: Some(aggregate_metadata.is_none_or(|(complete, _, _)| complete)),
+            aggregate_start_unix_seconds: aggregate_metadata.map(|(_, start, _)| start),
+            aggregate_end_unix_seconds: aggregate_metadata.map(|(_, _, end)| end),
             payload: serde_json::to_vec(self)
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?,
         })

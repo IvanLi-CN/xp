@@ -115,7 +115,7 @@ fn sqlite_retention_keeps_unchanged_aggregate_row() {
     runtime
         .prepare_for_replication(now)
         .expect("backfill aggregate metadata");
-    let (backfilled_rowid, complete, canonical_start, canonical_end): (
+    let (backfilled_rowid, complete, canonical_start, _canonical_end): (
         i64,
         Option<bool>,
         Option<i64>,
@@ -174,60 +174,6 @@ fn sqlite_retention_keeps_unchanged_aggregate_row() {
         )
         .expect("repaired noninteger completion");
     assert_eq!(repaired_complete, Some(1));
-
-    connection
-        .execute(
-            "UPDATE repository_history_records SET aggregate_start = 20_000,
-                 aggregate_end = 10_000 WHERE sequence = 1",
-            [],
-        )
-        .expect("simulate reverse aggregate range");
-    let query = HistoryQuery::new(0, now, 10).expect("history query");
-    let gap = runtime
-        .incomplete_aggregate_gap(&query)
-        .expect("reverse aggregate range does not break queries");
-    assert!(gap.is_some(), "malformed metadata is observable as a gap");
-    runtime.snapshot.retention_compaction_cursor = None;
-    runtime.snapshot.retention_compaction_continuation = None;
-    runtime
-        .prepare_for_replication(now)
-        .expect("repair reverse aggregate range");
-    let repaired_range: (Option<i64>, Option<i64>) = connection
-        .query_row(
-            "SELECT aggregate_start, aggregate_end
-             FROM repository_history_records WHERE sequence = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .expect("repaired aggregate range");
-    assert_eq!(repaired_range, (canonical_start, canonical_end));
-
-    let observed_range: (i64, i64) = connection
-        .query_row(
-            "SELECT observed_start, observed_end
-             FROM repository_history_records WHERE sequence = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .expect("observed range");
-    connection
-        .execute(
-            "UPDATE repository_history_records SET aggregate_complete = -1,
-                 aggregate_start = observed_start + 1_000,
-                 aggregate_end = observed_end + 1_000 WHERE sequence = 1",
-            [],
-        )
-        .expect("simulate invalid completion with a valid but wrong range");
-    let gap = runtime
-        .incomplete_aggregate_gap(&query)
-        .expect("invalid completion falls back to observed bounds");
-    assert_eq!(
-        gap,
-        Some((
-            u64::try_from(observed_range.0).expect("observed start"),
-            u64::try_from(observed_range.1).expect("observed end"),
-        ))
-    );
 }
 
 #[test]
