@@ -97,14 +97,8 @@ impl HistoryStorageDiagnosticOperation {
     fn statement(self) -> &'static str {
         match self {
             Self::RuntimeStatus => "composite history repository runtime status",
-            Self::RuntimeStatusRecordCount => concat!(
-                "SELECT COUNT(source_node_id) FROM repository_history_records ",
-                "INDEXED BY repository_history_records_keyset"
-            ),
-            Self::RuntimeStatusSegmentCount => concat!(
-                "SELECT COUNT(id) FROM repository_history_segments ",
-                "INDEXED BY repository_history_segments_sync_order_v2"
-            ),
+            Self::RuntimeStatusRecordCount => "SELECT COUNT(*) FROM repository_history_records",
+            Self::RuntimeStatusSegmentCount => "SELECT COUNT(*) FROM repository_history_segments",
             Self::RepositoryHistoryUsedBytes => concat!(
                 "PRAGMA page_count; PRAGMA page_size; stat ",
                 "history.sqlite3-wal"
@@ -637,7 +631,7 @@ mod tests {
         wait_for_state(&path, |state| state.in_flight.is_some());
         let raw = fs::read_to_string(&path).unwrap();
         assert!(raw.contains("runtime_status.record_count"));
-        assert!(raw.contains("repository_history_records_keyset"));
+        assert!(raw.contains("SELECT COUNT(*) FROM repository_history_records"));
         assert!(!raw.contains("bind"));
 
         std::thread::sleep(Duration::from_millis(2));

@@ -416,25 +416,18 @@ fn repository_keyset_indexes_avoid_a_full_sort_for_compaction_and_export() {
 }
 
 #[test]
-fn repository_record_count_uses_the_payload_free_keyset_index() {
+fn repository_record_count_uses_sqlite_constant_time_row_count() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
     let backend = storage.lock_backend();
     let Backend::Sqlite(connection) = &*backend else {
         panic!("test storage should use SQLite");
     };
-    let plan = query_plan(
+    let opcodes = sqlite_opcodes(
         connection,
-        "SELECT COUNT(source_node_id) FROM repository_history_records
-         INDEXED BY repository_history_records_keyset",
+        "SELECT COUNT(*) FROM repository_history_records",
     );
-    assert!(
-        plan.iter()
-            .any(|detail| detail.contains("repository_history_records_keyset"))
-    );
-    assert!(plan.iter().any(|detail| {
-        detail.contains("USING COVERING INDEX repository_history_records_keyset")
-    }));
+    assert_constant_time_row_count(&opcodes);
 }
 
 #[test]
@@ -476,26 +469,111 @@ fn repository_record_count_persists_storage_diagnostic() {
         diagnostic["last_slow_event"]["statement"]
             .as_str()
             .unwrap()
-            .contains("repository_history_records_keyset")
+            .contains("SELECT COUNT(*) FROM repository_history_records")
     );
 }
 
 #[test]
-fn repository_segment_count_uses_the_payload_free_keyset_index() {
+fn repository_segment_count_uses_sqlite_constant_time_row_count() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
     let backend = storage.lock_backend();
     let Backend::Sqlite(connection) = &*backend else {
         panic!("test storage should use SQLite");
     };
-    let plan = query_plan(
+    let opcodes = sqlite_opcodes(
         connection,
-        "SELECT COUNT(id) FROM repository_history_segments
-         INDEXED BY repository_history_segments_sync_order_v2",
+        "SELECT COUNT(*) FROM repository_history_segments",
     );
-    assert!(plan.iter().any(|detail| {
-        detail.contains("USING COVERING INDEX repository_history_segments_sync_order_v2")
-    }));
+    assert_constant_time_row_count(&opcodes);
+}
+
+#[test]
+fn repository_counts_remain_exact_through_delete_retention_and_restart() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    let live_record = RepositoryHistoryRecordRow {
+        source_node_id: "source-a".to_owned(),
+        source_epoch: 1,
+        stream: "runtime".to_owned(),
+        sequence: 1,
+        subject_node_id: "subject-a".to_owned(),
+        observer_node_id: "observer-a".to_owned(),
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key: b"live".to_vec(),
+        tombstone: false,
+        observed_start_unix_seconds: 10,
+        observed_end_unix_seconds: 20,
+        received_at_unix_seconds: 20,
+        aggregate_complete: None,
+        aggregate_start_unix_seconds: None,
+        aggregate_end_unix_seconds: None,
+        payload: b"live-payload".to_vec(),
+    };
+    let tombstone_record = RepositoryHistoryRecordRow {
+        sequence: 2,
+        record_key: b"tombstone".to_vec(),
+        tombstone: true,
+        payload: b"tombstone-payload".to_vec(),
+        ..live_record.clone()
+    };
+    storage
+        .upsert_repository_history_records(&[live_record, tombstone_record])
+        .unwrap();
+    storage
+        .upsert_repository_history_segments(&[
+            RepositoryHistorySegmentRow {
+                id: "segment-a".to_owned(),
+                closed_at_unix_seconds: 20,
+                contains_tombstone: false,
+                source_node_id: "source-a".to_owned(),
+                source_epoch: 1,
+                stream: "runtime".to_owned(),
+                first_sequence: 1,
+                payload: b"segment-a".to_vec(),
+            },
+            RepositoryHistorySegmentRow {
+                id: "segment-b".to_owned(),
+                closed_at_unix_seconds: 30,
+                contains_tombstone: true,
+                source_node_id: "source-a".to_owned(),
+                source_epoch: 1,
+                stream: "runtime".to_owned(),
+                first_sequence: 2,
+                payload: b"segment-b".to_vec(),
+            },
+        ])
+        .unwrap();
+    assert_eq!(storage.repository_history_record_count().unwrap(), 2);
+    assert_eq!(storage.repository_history_segment_count().unwrap(), 2);
+
+    storage
+        .delete_repository_history_tombstone(&RepositoryHistoryTombstone {
+            source_node_id: "source-a".to_owned(),
+            source_epoch: 1,
+            stream: "runtime".to_owned(),
+            subject_node_id: "subject-a".to_owned(),
+            observer_node_id: "observer-a".to_owned(),
+            schema_id: "runtime.v1".to_owned(),
+            schema_version: 1,
+            record_key: b"tombstone".to_vec(),
+            prefix: false,
+        })
+        .unwrap();
+    assert_eq!(storage.repository_history_record_count().unwrap(), 1);
+    assert_eq!(storage.repository_history_segment_count().unwrap(), 2);
+
+    storage
+        .replace_repository_history_records_and_prune(&[], &[], 100, 100, b"{}")
+        .unwrap();
+    assert_eq!(storage.repository_history_record_count().unwrap(), 0);
+    assert_eq!(storage.repository_history_segment_count().unwrap(), 0);
+    drop(storage);
+
+    let restarted = HistoryStorage::open(temporary.path());
+    assert_eq!(restarted.repository_history_record_count().unwrap(), 0);
+    assert_eq!(restarted.repository_history_segment_count().unwrap(), 0);
 }
 
 #[test]
@@ -623,6 +701,33 @@ fn query_plan_with_params<P: rusqlite::Params>(
         .unwrap()
         .collect::<std::result::Result<Vec<String>, _>>()
         .unwrap()
+}
+
+fn sqlite_opcodes(connection: &rusqlite::Connection, query: &str) -> Vec<String> {
+    connection
+        .prepare(&format!("EXPLAIN {query}"))
+        .unwrap()
+        .query_map([], |row| row.get(1))
+        .unwrap()
+        .collect::<std::result::Result<Vec<String>, _>>()
+        .unwrap()
+}
+
+fn assert_constant_time_row_count(opcodes: &[String]) {
+    assert_eq!(
+        opcodes
+            .iter()
+            .filter(|opcode| opcode.as_str() == "Count")
+            .count(),
+        1,
+        "expected SQLite Count opcode, got {opcodes:?}"
+    );
+    assert!(
+        !opcodes
+            .iter()
+            .any(|opcode| opcode == "Next" || opcode == "Rewind"),
+        "row count must not scan a table or index: {opcodes:?}"
+    );
 }
 
 fn set_query_only(storage: &HistoryStorage) {
