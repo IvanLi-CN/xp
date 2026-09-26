@@ -202,13 +202,15 @@ pub(super) fn incomplete_aggregate_gap<'a>(
         })
 }
 
-pub(super) fn aggregate_metadata(record: &StoredRecord) -> Option<(bool, u64, u64)> {
-    let payload = aggregate_payload(record)?;
-    let (start, end) = payload
+pub(super) fn aggregate_metadata(record: &StoredRecord) -> (bool, Option<(u64, u64)>) {
+    let Some(payload) = aggregate_payload(record) else {
+        return (true, None);
+    };
+    let range = payload
         .bucket_start_unix_seconds
         .zip(payload.bucket_end_unix_seconds)
-        .filter(|(start, end)| start <= end)?;
-    Some((payload.complete, start, end))
+        .filter(|(start, end)| start <= end);
+    (payload.complete && range.is_some(), range)
 }
 
 fn retention_identifier(

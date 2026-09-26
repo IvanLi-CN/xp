@@ -193,6 +193,79 @@ fn sqlite_retention_keeps_unchanged_aggregate_row() {
 }
 
 #[test]
+fn sqlite_marks_aggregate_without_bucket_range_incomplete() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let runtime = load(temporary.path());
+    let observed_at = 1_000_u64;
+    let row = StoredRecord {
+        observed_at_unix_seconds: observed_at,
+        received_at_unix_seconds: observed_at,
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "traffic".to_owned(),
+        sequence: 1,
+        subject_node_id: "subject-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "traffic.v1".to_owned(),
+        schema_version: 1,
+        record_key: b"aggregate".to_vec(),
+        payload: serde_json::to_vec(&serde_json::json!({
+            "algorithm": "sha256",
+            "resolution": "hour",
+            "record_count": 1,
+            "first_sequence": 1,
+            "last_sequence": 1,
+            "payload_sha256": "00",
+            "complete": true,
+        }))
+        .expect("aggregate payload"),
+        tombstone: false,
+    }
+    .sqlite_row()
+    .expect("SQLite row");
+    assert_eq!(row.aggregate_complete, Some(false));
+    assert_eq!(row.aggregate_start_unix_seconds, None);
+    assert_eq!(row.aggregate_end_unix_seconds, None);
+    runtime
+        .storage
+        .upsert_repository_history_records(&[row])
+        .expect("seed aggregate without range");
+    let gap = runtime
+        .incomplete_aggregate_gap(&HistoryQuery::new(999, 1_001, 10).expect("history query"))
+        .expect("missing range is observable as a gap");
+    assert_eq!(gap, Some((observed_at, observed_at)));
+
+    let raw_row = StoredRecord {
+        observed_at_unix_seconds: 2_000,
+        received_at_unix_seconds: 2_000,
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "traffic".to_owned(),
+        sequence: 2,
+        subject_node_id: "subject-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "traffic.v1".to_owned(),
+        schema_version: 1,
+        record_key: b"raw".to_vec(),
+        payload: b"raw payload".to_vec(),
+        tombstone: false,
+    }
+    .sqlite_row()
+    .expect("raw SQLite row");
+    assert_eq!(raw_row.aggregate_complete, Some(true));
+    assert_eq!(raw_row.aggregate_start_unix_seconds, None);
+    assert_eq!(raw_row.aggregate_end_unix_seconds, None);
+    runtime
+        .storage
+        .upsert_repository_history_records(&[raw_row])
+        .expect("seed raw row");
+    let raw_gap = runtime
+        .incomplete_aggregate_gap(&HistoryQuery::new(1_999, 2_001, 10).expect("raw history query"))
+        .expect("raw row does not create a gap");
+    assert_eq!(raw_gap, None);
+}
+
+#[test]
 fn sqlite_retention_progresses_for_mixed_buckets_sharing_a_dense_timestamp() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let policy = super::super::RepositoryRetentionPolicy::default();
