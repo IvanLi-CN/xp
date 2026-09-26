@@ -230,11 +230,13 @@
   daily deep verification scheduling, preserve gaps/forks/unknown schemas/tombstones across
   restart, retain source segment repair state, transform older repository history into aggregates,
   anonymize IP identifiers after seven days, and select the healthiest most complete ready response.
-  An unchanged bounded retention page skips row replacement while preserving the cursor snapshot,
-  expiration deletes, and legacy aggregate-metadata backfill. Invalid aggregate metadata is
-  rewritten during compaction; queries validate both the completion flag and time range, using
-  observed bounds until that repair completes. Raw rows legitimately have no aggregate range;
-  parseable aggregate payloads without a valid range are persisted as incomplete instead.
+  An unchanged bounded retention page skips row replacement and partition-summary invalidation
+  while preserving the cursor snapshot, expiration deletes, and legacy aggregate-metadata backfill.
+  Actual expiration still invalidates the summary. Invalid aggregate metadata is rewritten during
+  compaction; queries use observed bounds for explicitly invalid metadata. Raw rows legitimately
+  have no aggregate range; parseable aggregate payloads without a valid range stay incomplete
+  through compaction. Legacy complete/null-range rows are ambiguous without payload inspection
+  and require a separate migration to distinguish malformed aggregates from raw rows.
 - The proxy configuration, proxy client, proxy listener, proxy status, compatibility path, and
   history synchronization relay path are not used by the repository worker. Legacy relay payload
   types remain wire-compatible for the receive boundary, but normal source delivery and

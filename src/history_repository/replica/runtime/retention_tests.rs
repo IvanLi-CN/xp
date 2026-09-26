@@ -70,9 +70,26 @@ fn sqlite_retention_keeps_unchanged_aggregate_row() {
         )
         .expect("compacted row");
 
+    runtime.reset_partition_summary_cache();
+    while !runtime
+        .advance_partition_summary_rebuild_page()
+        .expect("rebuild partition summaries")
+    {}
+    runtime
+        .snapshot
+        .deep_verified_peer_ids
+        .insert("repository-peer".to_owned());
+
     runtime
         .prepare_for_replication(now)
         .expect("repeat retention pass");
+    assert!(runtime.snapshot.partition_summaries_complete);
+    assert!(
+        runtime
+            .snapshot
+            .deep_verified_peer_ids
+            .contains("repository-peer")
+    );
     let after: (i64, Vec<u8>) = connection
         .query_row(
             "SELECT rowid, payload FROM repository_history_records WHERE sequence = 1",
@@ -139,6 +156,27 @@ fn sqlite_retention_keeps_unchanged_aggregate_row() {
 
     connection
         .execute(
+            "UPDATE repository_history_records SET aggregate_complete = 'invalid',
+                 aggregate_start = X'01' WHERE sequence = 1",
+            [],
+        )
+        .expect("simulate noninteger aggregate metadata");
+    runtime.snapshot.retention_compaction_cursor = None;
+    runtime.snapshot.retention_compaction_continuation = None;
+    runtime
+        .prepare_for_replication(now)
+        .expect("repair noninteger aggregate metadata");
+    let repaired_complete: Option<i64> = connection
+        .query_row(
+            "SELECT aggregate_complete FROM repository_history_records WHERE sequence = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("repaired noninteger completion");
+    assert_eq!(repaired_complete, Some(1));
+
+    connection
+        .execute(
             "UPDATE repository_history_records SET aggregate_start = 20_000,
                  aggregate_end = 10_000 WHERE sequence = 1",
             [],
@@ -190,79 +228,6 @@ fn sqlite_retention_keeps_unchanged_aggregate_row() {
             u64::try_from(observed_range.1).expect("observed end"),
         ))
     );
-}
-
-#[test]
-fn sqlite_marks_aggregate_without_bucket_range_incomplete() {
-    let temporary = tempfile::tempdir().expect("temporary directory");
-    let runtime = load(temporary.path());
-    let observed_at = 1_000_u64;
-    let row = StoredRecord {
-        observed_at_unix_seconds: observed_at,
-        received_at_unix_seconds: observed_at,
-        source_node_id: "node-a".to_owned(),
-        source_epoch: 7,
-        stream: "traffic".to_owned(),
-        sequence: 1,
-        subject_node_id: "subject-a".to_owned(),
-        observer_node_id: "node-a".to_owned(),
-        schema_id: "traffic.v1".to_owned(),
-        schema_version: 1,
-        record_key: b"aggregate".to_vec(),
-        payload: serde_json::to_vec(&serde_json::json!({
-            "algorithm": "sha256",
-            "resolution": "hour",
-            "record_count": 1,
-            "first_sequence": 1,
-            "last_sequence": 1,
-            "payload_sha256": "00",
-            "complete": true,
-        }))
-        .expect("aggregate payload"),
-        tombstone: false,
-    }
-    .sqlite_row()
-    .expect("SQLite row");
-    assert_eq!(row.aggregate_complete, Some(false));
-    assert_eq!(row.aggregate_start_unix_seconds, None);
-    assert_eq!(row.aggregate_end_unix_seconds, None);
-    runtime
-        .storage
-        .upsert_repository_history_records(&[row])
-        .expect("seed aggregate without range");
-    let gap = runtime
-        .incomplete_aggregate_gap(&HistoryQuery::new(999, 1_001, 10).expect("history query"))
-        .expect("missing range is observable as a gap");
-    assert_eq!(gap, Some((observed_at, observed_at)));
-
-    let raw_row = StoredRecord {
-        observed_at_unix_seconds: 2_000,
-        received_at_unix_seconds: 2_000,
-        source_node_id: "node-a".to_owned(),
-        source_epoch: 7,
-        stream: "traffic".to_owned(),
-        sequence: 2,
-        subject_node_id: "subject-a".to_owned(),
-        observer_node_id: "node-a".to_owned(),
-        schema_id: "traffic.v1".to_owned(),
-        schema_version: 1,
-        record_key: b"raw".to_vec(),
-        payload: b"raw payload".to_vec(),
-        tombstone: false,
-    }
-    .sqlite_row()
-    .expect("raw SQLite row");
-    assert_eq!(raw_row.aggregate_complete, Some(true));
-    assert_eq!(raw_row.aggregate_start_unix_seconds, None);
-    assert_eq!(raw_row.aggregate_end_unix_seconds, None);
-    runtime
-        .storage
-        .upsert_repository_history_records(&[raw_row])
-        .expect("seed raw row");
-    let raw_gap = runtime
-        .incomplete_aggregate_gap(&HistoryQuery::new(1_999, 2_001, 10).expect("raw history query"))
-        .expect("raw row does not create a gap");
-    assert_eq!(raw_gap, None);
 }
 
 #[test]

@@ -102,6 +102,14 @@ pub(crate) struct RepositoryReplicaMutation {
     pub(crate) segments: Vec<RepositoryHistorySegmentRow>,
 }
 
+fn sqlite_nullable_integer(value: rusqlite::types::ValueRef<'_>) -> Option<Option<i64>> {
+    match value {
+        rusqlite::types::ValueRef::Null => Some(None),
+        rusqlite::types::ValueRef::Integer(value) => Some(Some(value)),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RepositoryHistoryCoverage {
     pub(crate) observed_start_unix_seconds: u64,
@@ -157,6 +165,27 @@ impl HistoryStorage {
 
     pub(crate) fn repository_history_record_count(&self) -> Result<usize> {
         self.repository_history_count("repository_history_records")
+    }
+
+    pub(crate) fn repository_history_has_expired_records(
+        &self,
+        end_unix_seconds: u64,
+    ) -> Result<bool> {
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Ok(false);
+        };
+        connection
+            .query_row(
+                "SELECT 1 FROM repository_history_records
+                 INDEXED BY repository_history_records_export_filter
+                 WHERE is_tombstone = 0 AND observed_end < ?1 LIMIT 1",
+                [i64::try_from(end_unix_seconds).unwrap_or(i64::MAX)],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|row| row.is_some())
+            .map_err(sqlite_error)
     }
 
     pub(crate) fn repository_history_segment_count(&self) -> Result<usize> {
@@ -506,24 +535,25 @@ impl HistoryStorage {
                 ],
                 |row| {
                     let mut record = repository_history_record_row(row)?;
-                    let complete = row.get::<_, Option<i64>>(14)?;
-                    let start = row.get::<_, Option<i64>>(15)?;
-                    let end = row.get::<_, Option<i64>>(16)?;
+                    let complete = sqlite_nullable_integer(row.get_ref(14)?);
+                    let start = sqlite_nullable_integer(row.get_ref(15)?);
+                    let end = sqlite_nullable_integer(row.get_ref(16)?);
                     let range_valid = match (start, end) {
-                        (None, None) => true,
-                        (Some(start), Some(end)) => start >= 0 && start <= end,
+                        (Some(None), Some(None)) => true,
+                        (Some(Some(start)), Some(Some(end))) => start >= 0 && start <= end,
                         _ => false,
                     };
-                    let metadata_valid = matches!(complete, None | Some(0 | 1)) && range_valid;
+                    let metadata_valid =
+                        matches!(complete, Some(None | Some(0 | 1))) && range_valid;
                     record.aggregate_complete = if metadata_valid {
-                        complete.map(|value| value != 0)
+                        complete.flatten().map(|value| value != 0)
                     } else {
                         None
                     };
                     record.aggregate_start_unix_seconds =
-                        start.and_then(|value| u64::try_from(value).ok());
+                        start.flatten().and_then(|value| u64::try_from(value).ok());
                     record.aggregate_end_unix_seconds =
-                        end.and_then(|value| u64::try_from(value).ok());
+                        end.flatten().and_then(|value| u64::try_from(value).ok());
                     Ok(record)
                 },
             )

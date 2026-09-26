@@ -613,8 +613,14 @@ impl RepositoryReplicaRuntime {
         } else {
             None
         };
+        let record_expiry_cutoff = now_unix_seconds.saturating_sub(policy.max_age_seconds());
+        let has_expired = unchanged
+            && self
+                .storage
+                .repository_history_has_expired_records(record_expiry_cutoff)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         let previous_snapshot = self.snapshot.clone();
-        if !removed_rows.is_empty() {
+        if !unchanged || has_expired {
             self.reset_partition_summary_cache();
         }
         self.snapshot.retention_compaction_cursor = next_retention_cursor;
@@ -633,7 +639,7 @@ impl RepositoryReplicaRuntime {
         let result = self.storage.replace_repository_history_records_and_prune(
             if unchanged { &[] } else { &removed_rows },
             if unchanged { &[] } else { &retained },
-            now_unix_seconds.saturating_sub(policy.max_age_seconds()),
+            record_expiry_cutoff,
             now_unix_seconds.saturating_sub(policy.minute_retention_seconds()),
             &control_payload,
         );

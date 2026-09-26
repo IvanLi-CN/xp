@@ -889,6 +889,10 @@ mod tests;
 mod retention_tests;
 
 #[cfg(test)]
+#[path = "runtime/retention_integrity_tests.rs"]
+mod retention_integrity_tests;
+
+#[cfg(test)]
 #[path = "runtime/repair_batch_tests.rs"]
 mod repair_batch_tests;
 #[cfg(test)]
