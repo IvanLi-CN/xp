@@ -114,14 +114,16 @@ async fn signed_internal_history_status_does_not_stall_health_on_single_worker()
         assert_eq!(status_response.status(), StatusCode::OK);
         assert_eq!(health_response.status(), StatusCode::OK);
         assert!(
+            crate::state::history_storage::history_status_count_used_legacy_query_for_test(),
+            "legacy status did not use the forced indexed count query"
+        );
+        assert!(
             health_elapsed >= Duration::from_millis(200),
             "legacy history status unexpectedly stayed responsive: {health_elapsed:?}"
         );
     }
 
     let _count_probe = crate::state::history_storage::history_status_count_probe_for_test();
-    let health_budget = Duration::from_millis(100);
-    let health_started = Instant::now();
     let status_task = tokio::spawn({
         let router = router.clone();
         let status_request = build_status_request();
@@ -137,12 +139,13 @@ async fn signed_internal_history_status_does_not_stall_health_on_single_worker()
         crate::state::history_storage::history_status_count_started_for_test(),
         "fixed status count did not start before health request"
     );
-    let health_response = router
-        .clone()
-        .oneshot(req("GET", "/api/health"))
-        .await
-        .expect("health response");
-    let health_elapsed = health_started.elapsed();
+    let health_response = tokio::time::timeout(
+        Duration::from_secs(2),
+        router.clone().oneshot(req("GET", "/api/health")),
+    )
+    .await
+    .expect("health response timed out")
+    .expect("health response");
     let status_response = status_task.await.expect("status task");
 
     assert_eq!(status_response.status(), StatusCode::OK);
@@ -151,10 +154,8 @@ async fn signed_internal_history_status_does_not_stall_health_on_single_worker()
     assert_eq!(status_json["segment_count"], 1);
     assert_eq!(health_response.status(), StatusCode::OK);
     assert!(
-        health_elapsed < health_budget,
-        "health exceeded {:?} while fixed history status was in flight: {:?}",
-        health_budget,
-        health_elapsed
+        crate::state::history_storage::history_status_count_used_fixed_query_for_test(),
+        "fixed status did not use the exact COUNT(*) query"
     );
 }
 

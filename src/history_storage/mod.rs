@@ -63,7 +63,8 @@ pub(crate) use diagnostics::HistoryStorageDiagnosticOperation;
 #[cfg(test)]
 pub(crate) use test_hooks::{
     history_status_count_probe_for_test, history_status_count_started_for_test,
-    legacy_history_status_count_for_test,
+    history_status_count_used_fixed_query_for_test,
+    history_status_count_used_legacy_query_for_test, legacy_history_status_count_for_test,
 };
 
 const SOURCES: [HistorySource; 6] = [

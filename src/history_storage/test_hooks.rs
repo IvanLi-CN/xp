@@ -8,6 +8,8 @@ use std::{
 static SLOW_LEGACY_HISTORY_STATUS_COUNT: AtomicBool = AtomicBool::new(false);
 static FORCE_LEGACY_HISTORY_STATUS_COUNT: AtomicBool = AtomicBool::new(false);
 static HISTORY_STATUS_COUNT_STARTED: AtomicBool = AtomicBool::new(false);
+static HISTORY_STATUS_COUNT_USED_FIXED_QUERY: AtomicBool = AtomicBool::new(false);
+static HISTORY_STATUS_COUNT_USED_LEGACY_QUERY: AtomicBool = AtomicBool::new(false);
 
 pub(crate) struct LegacyHistoryStatusCountGuard;
 pub(crate) struct HistoryStatusCountProbeGuard;
@@ -27,12 +29,16 @@ impl Drop for LegacyHistoryStatusCountGuard {
 
 pub(crate) fn history_status_count_probe_for_test() -> HistoryStatusCountProbeGuard {
     HISTORY_STATUS_COUNT_STARTED.store(false, Ordering::SeqCst);
+    HISTORY_STATUS_COUNT_USED_FIXED_QUERY.store(false, Ordering::SeqCst);
+    HISTORY_STATUS_COUNT_USED_LEGACY_QUERY.store(false, Ordering::SeqCst);
     HistoryStatusCountProbeGuard
 }
 
 impl Drop for HistoryStatusCountProbeGuard {
     fn drop(&mut self) {
         HISTORY_STATUS_COUNT_STARTED.store(false, Ordering::SeqCst);
+        HISTORY_STATUS_COUNT_USED_FIXED_QUERY.store(false, Ordering::SeqCst);
+        HISTORY_STATUS_COUNT_USED_LEGACY_QUERY.store(false, Ordering::SeqCst);
     }
 }
 
@@ -40,25 +46,41 @@ pub(crate) fn history_status_count_started_for_test() -> bool {
     HISTORY_STATUS_COUNT_STARTED.load(Ordering::SeqCst)
 }
 
+pub(crate) fn history_status_count_used_fixed_query_for_test() -> bool {
+    HISTORY_STATUS_COUNT_USED_FIXED_QUERY.load(Ordering::SeqCst)
+}
+
+pub(crate) fn history_status_count_used_legacy_query_for_test() -> bool {
+    HISTORY_STATUS_COUNT_USED_LEGACY_QUERY.load(Ordering::SeqCst)
+}
+
 pub(crate) fn history_status_count_query_for_test(
     table: &str,
     caller_class: &'static str,
     query: &'static str,
 ) -> &'static str {
-    if FORCE_LEGACY_HISTORY_STATUS_COUNT.load(Ordering::SeqCst)
-        && caller_class == "http.internal_history_repository_status"
-    {
-        match table {
-            "repository_history_records" => {
-                "SELECT COUNT(source_node_id) FROM repository_history_records
-                 INDEXED BY repository_history_records_keyset"
+    if caller_class == "http.internal_history_repository_status" {
+        let selected_query = if FORCE_LEGACY_HISTORY_STATUS_COUNT.load(Ordering::SeqCst) {
+            match table {
+                "repository_history_records" => {
+                    "SELECT COUNT(source_node_id) FROM repository_history_records
+                     INDEXED BY repository_history_records_keyset"
+                }
+                "repository_history_segments" => {
+                    "SELECT COUNT(id) FROM repository_history_segments
+                     INDEXED BY repository_history_segments_sync_order_v2"
+                }
+                _ => query,
             }
-            "repository_history_segments" => {
-                "SELECT COUNT(id) FROM repository_history_segments
-                 INDEXED BY repository_history_segments_sync_order_v2"
-            }
-            _ => query,
+        } else {
+            query
+        };
+        if selected_query.contains("INDEXED BY") {
+            HISTORY_STATUS_COUNT_USED_LEGACY_QUERY.store(true, Ordering::SeqCst);
+        } else if selected_query.contains("COUNT(*)") {
+            HISTORY_STATUS_COUNT_USED_FIXED_QUERY.store(true, Ordering::SeqCst);
         }
+        selected_query
     } else {
         query
     }
