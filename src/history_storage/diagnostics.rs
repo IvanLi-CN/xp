@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::cluster_metadata::write_atomic_private;
+use crate::cluster_metadata::write_atomic_private_strict;
 
 use super::HistoryStorage;
 
@@ -196,10 +196,14 @@ impl HistoryStorageDiagnosticOperation {
             self,
             Self::RuntimeStatus
                 | Self::SourceDeliveryJournalSummary
+                | Self::RepositoryHistoryUsedBytes
                 | Self::TieredBackfillPage
                 | Self::TieredBackfillExportRefresh
+                | Self::TieredBackfillExportSession
                 | Self::TieredBackfillExportWatermarks
+                | Self::RetentionActiveExport
                 | Self::RetentionPrune
+                | Self::RetentionReplaceAndPrune
         )
     }
 }
@@ -427,7 +431,7 @@ impl HistoryStorageDiagnostics {
         if now < self.persist_retry_after_unix_ms.load(Ordering::Relaxed) {
             return;
         }
-        match write_atomic_private(&self.path, &bytes) {
+        match write_atomic_private_strict(&self.path, &bytes) {
             Ok(()) => {
                 self.persist_failures.store(0, Ordering::Relaxed);
                 self.persist_retry_after_unix_ms.store(0, Ordering::Relaxed);

@@ -164,10 +164,13 @@ impl HistoryStorage {
         transaction.commit().map_err(sqlite_error)
     }
 
-    pub(crate) fn repository_history_used_bytes(&self) -> Result<u64> {
+    pub(crate) fn repository_history_used_bytes_with_caller(
+        &self,
+        caller_class: &'static str,
+    ) -> Result<u64> {
         let diagnostic = self.begin_diagnostic(
             HistoryStorageDiagnosticOperation::RepositoryHistoryUsedBytes,
-            "history_storage.capacity",
+            caller_class,
         );
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {

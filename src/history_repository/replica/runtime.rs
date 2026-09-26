@@ -646,7 +646,7 @@ impl RepositoryReplicaRuntime {
             caller_class,
         );
         if !self.storage_degraded {
-            self.refresh_capacity()?;
+            self.refresh_capacity_with_caller(caller_class)?;
         }
         let source_delivery = self.source_delivery_status_with_caller(
             now_unix_seconds,
@@ -819,6 +819,13 @@ impl RepositoryReplicaRuntime {
     }
 
     fn refresh_capacity(&mut self) -> Result<(), RepositoryRuntimeError> {
+        self.refresh_capacity_with_caller("history_repository.capacity")
+    }
+
+    fn refresh_capacity_with_caller(
+        &mut self,
+        caller_class: &'static str,
+    ) -> Result<(), RepositoryRuntimeError> {
         #[cfg(test)]
         let capacity = self.capacity_override;
         #[cfg(not(test))]
@@ -828,7 +835,7 @@ impl RepositoryReplicaRuntime {
             None => (
                 if self.uses_sqlite_history() {
                     self.storage
-                        .repository_history_used_bytes()
+                        .repository_history_used_bytes_with_caller(caller_class)
                         .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
                 } else {
                     self.serialized_snapshot_len()?
