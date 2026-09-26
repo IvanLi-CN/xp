@@ -1,15 +1,20 @@
 use std::{
     collections::BTreeMap,
-    fs,
+    fs::File,
+    io::{self, Read},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, OnceLock, Weak,
         atomic::{AtomicU64, Ordering},
+        mpsc::{self, Receiver, SyncSender},
     },
+    thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
+use tracing::warn;
+use uuid::Uuid;
 
 use crate::cluster_metadata::write_atomic_private;
 
@@ -19,6 +24,9 @@ pub(crate) const HISTORY_STORAGE_DIAGNOSTICS_FILE: &str = "history.sqlite3.diagn
 
 const DIAGNOSTIC_SCHEMA_VERSION: u32 = 1;
 const DIAGNOSTIC_MAX_BYTES: usize = 16 * 1024;
+const DIAGNOSTIC_PERSIST_INTERVAL: Duration = Duration::from_millis(100);
+const DIAGNOSTIC_RETRY_BASE_MILLISECONDS: u64 = 1_000;
+const DIAGNOSTIC_RETRY_MAX_MILLISECONDS: u64 = 60_000;
 #[cfg(not(test))]
 const SLOW_OPERATION_MILLISECONDS: u64 = 1_000;
 #[cfg(test)]
@@ -29,8 +37,12 @@ pub(crate) enum HistoryStorageDiagnosticOperation {
     RuntimeStatus,
     RuntimeStatusRecordCount,
     RuntimeStatusSegmentCount,
+    SourceDeliveryJournalSummary,
     TieredBackfillPage,
+    TieredBackfillExportRefresh,
+    TieredBackfillExportFinish,
     TieredBackfillExportSession,
+    TieredBackfillExportWatermarks,
     TieredBackfillReceivedAtCutoff,
     TieredBackfillTombstoneWatermark,
     TieredBackfillRecordWatermark,
@@ -47,8 +59,12 @@ impl HistoryStorageDiagnosticOperation {
             Self::RuntimeStatus => "runtime_status",
             Self::RuntimeStatusRecordCount => "runtime_status.record_count",
             Self::RuntimeStatusSegmentCount => "runtime_status.segment_count",
+            Self::SourceDeliveryJournalSummary => "source_delivery.journal_summary",
             Self::TieredBackfillPage => "tiered_backfill_page",
+            Self::TieredBackfillExportRefresh => "tiered_backfill.export_refresh",
+            Self::TieredBackfillExportFinish => "tiered_backfill.export_finish",
             Self::TieredBackfillExportSession => "tiered_backfill.export_session",
+            Self::TieredBackfillExportWatermarks => "tiered_backfill.export_watermarks",
             Self::TieredBackfillReceivedAtCutoff => {
                 "tiered_backfill.export_watermarks.received_at_cutoff"
             }
@@ -77,12 +93,32 @@ impl HistoryStorageDiagnosticOperation {
                 "SELECT COUNT(id) FROM repository_history_segments ",
                 "INDEXED BY repository_history_segments_sync_order_v2"
             ),
+            Self::SourceDeliveryJournalSummary => concat!(
+                "SELECT pending_segments, pending_bytes, last_acknowledged_at, ",
+                "last_delivery_path, order_repair_completed, capacity_suspended ",
+                "FROM source_delivery_journal_state WHERE singleton = 1; ",
+                "SELECT id, stream, closed_at, identity, wire FROM source_delivery_journal ",
+                "ORDER BY (stream = 'tombstone') DESC, source_node_id, source_epoch, ",
+                "stream, first_sequence, created_at, id LIMIT 1"
+            ),
             Self::TieredBackfillPage => "composite tiered history backfill page",
+            Self::TieredBackfillExportRefresh => concat!(
+                "DELETE FROM repository_history_export_leases WHERE expires_at <= ?1; ",
+                "SELECT EXISTS(SELECT 1 FROM repository_history_export_leases ",
+                "WHERE session_id = ?1); SELECT COUNT(*) FROM ",
+                "repository_history_export_leases; INSERT INTO ",
+                "repository_history_export_leases (session_id, expires_at) VALUES (?1, ?2) ",
+                "ON CONFLICT(session_id) DO UPDATE SET expires_at = excluded.expires_at"
+            ),
+            Self::TieredBackfillExportFinish => {
+                "DELETE FROM repository_history_export_leases WHERE session_id = ?1"
+            }
             Self::TieredBackfillExportSession => concat!(
                 "DELETE FROM repository_history_export_leases WHERE expires_at <= ?1; ",
                 "SELECT EXISTS(SELECT 1 FROM repository_history_export_leases ",
                 "WHERE session_id = ?1)"
             ),
+            Self::TieredBackfillExportWatermarks => "composite tiered backfill export watermarks",
             Self::TieredBackfillReceivedAtCutoff => concat!(
                 "SELECT MAX(received_at) FROM repository_history_records ",
                 "WHERE (is_tombstone = 1 OR observed_end < ?1)"
@@ -156,11 +192,15 @@ pub(crate) struct HistoryStorageDiagnosticState {
     #[serde(default = "diagnostic_schema_version")]
     schema_version: u32,
     process_start_unix_ms: u64,
+    #[serde(default)]
+    process_nonce: String,
     updated_at_unix_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     in_flight: Option<HistoryStorageDiagnosticEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_slow_event: Option<HistoryStorageDiagnosticEvent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_slow_leaf_event: Option<HistoryStorageDiagnosticEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_interrupted_event: Option<HistoryStorageDiagnosticEvent>,
     #[serde(default)]
@@ -178,9 +218,11 @@ impl Default for HistoryStorageDiagnosticState {
         Self {
             schema_version: DIAGNOSTIC_SCHEMA_VERSION,
             process_start_unix_ms: 0,
+            process_nonce: String::new(),
             updated_at_unix_ms: 0,
             in_flight: None,
             last_slow_event: None,
+            last_slow_leaf_event: None,
             last_interrupted_event: None,
             completed_operations: 0,
             slow_operations: 0,
@@ -193,30 +235,46 @@ pub(crate) struct HistoryStorageDiagnostics {
     state: Mutex<HistoryStorageDiagnosticState>,
     active_operations: Mutex<BTreeMap<u64, HistoryStorageDiagnosticEvent>>,
     next_scope_id: AtomicU64,
+    persist_tx: SyncSender<()>,
+    persist_failures: AtomicU64,
+    persist_retry_after_unix_ms: AtomicU64,
 }
 
 impl HistoryStorageDiagnostics {
     fn open(data_dir: &Path) -> Arc<Self> {
         let process_start_unix_ms = unix_milliseconds(SystemTime::now());
+        let process_nonce = Uuid::new_v4().to_string();
         let path = data_dir.join(HISTORY_STORAGE_DIAGNOSTICS_FILE);
-        let mut state = fs::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<HistoryStorageDiagnosticState>(&bytes).ok())
-            .unwrap_or_default();
-        if state.process_start_unix_ms != 0 && state.process_start_unix_ms != process_start_unix_ms
+        let (mut state, preserve_existing_file) = load_diagnostic_state(&path);
+        if state.in_flight.is_some()
+            && (state.process_nonce.is_empty() || state.process_nonce != process_nonce)
         {
             state.last_interrupted_event = state.in_flight.take();
         }
         state.schema_version = DIAGNOSTIC_SCHEMA_VERSION;
         state.process_start_unix_ms = process_start_unix_ms;
+        state.process_nonce = process_nonce;
         state.updated_at_unix_ms = process_start_unix_ms;
+        let (persist_tx, persist_rx) = mpsc::sync_channel(1);
         let diagnostics = Arc::new(Self {
             path,
             state: Mutex::new(state),
             active_operations: Mutex::new(BTreeMap::new()),
             next_scope_id: AtomicU64::new(1),
+            persist_tx,
+            persist_failures: AtomicU64::new(0),
+            persist_retry_after_unix_ms: AtomicU64::new(0),
         });
-        diagnostics.persist();
+        if preserve_existing_file {
+            diagnostics.persist_snapshot();
+        }
+        let weak = Arc::downgrade(&diagnostics);
+        if let Err(error) = thread::Builder::new()
+            .name("xp-history-diagnostics".to_owned())
+            .spawn(move || persist_worker(weak, persist_rx))
+        {
+            warn!(error = %error, "failed to start history diagnostics writer");
+        }
         diagnostics
     }
 
@@ -249,8 +307,8 @@ impl HistoryStorageDiagnostics {
                 .last_key_value()
                 .map(|(_, event)| event.clone());
             state.updated_at_unix_ms = started_at_unix_ms;
-            self.persist_locked(&state);
         }
+        self.notify_persist();
         HistoryStorageDiagnosticGuard {
             diagnostics: Arc::clone(self),
             scope_id,
@@ -278,38 +336,135 @@ impl HistoryStorageDiagnostics {
         event.finished_at_unix_ms = Some(finished_at_unix_ms);
         event.elapsed_ms = Some(elapsed_ms);
         event.outcome = Some(outcome.to_owned());
-        let mut active_operations = self
-            .active_operations
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut state = self.lock_state();
-        state.completed_operations = state.completed_operations.saturating_add(1);
-        if elapsed_ms >= SLOW_OPERATION_MILLISECONDS {
-            state.slow_operations = state.slow_operations.saturating_add(1);
-            state.last_slow_event = Some(event.clone());
+        {
+            let mut active_operations = self
+                .active_operations
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut state = self.lock_state();
+            state.completed_operations = state.completed_operations.saturating_add(1);
+            if elapsed_ms >= SLOW_OPERATION_MILLISECONDS {
+                state.slow_operations = state.slow_operations.saturating_add(1);
+                state.last_slow_event = Some(event.clone());
+                if !event.statement.starts_with("composite ") {
+                    state.last_slow_leaf_event = Some(event.clone());
+                }
+            }
+            active_operations.remove(&scope_id);
+            state.in_flight = active_operations
+                .last_key_value()
+                .map(|(_, event)| event.clone());
+            state.updated_at_unix_ms = finished_at_unix_ms;
         }
-        active_operations.remove(&scope_id);
-        state.in_flight = active_operations
-            .last_key_value()
-            .map(|(_, event)| event.clone());
-        state.updated_at_unix_ms = finished_at_unix_ms;
-        self.persist_locked(&state);
+        self.notify_persist();
     }
 
-    fn persist(&self) {
+    fn notify_persist(&self) {
+        let _ = self.persist_tx.try_send(());
+    }
+
+    fn persist_snapshot(&self) {
         let state = self.lock_state().clone();
-        self.persist_locked(&state);
-    }
-
-    fn persist_locked(&self, state: &HistoryStorageDiagnosticState) {
-        let Ok(mut bytes) = serde_json::to_vec_pretty(state) else {
+        let Ok(mut bytes) = serde_json::to_vec_pretty(&state) else {
             return;
         };
-        if bytes.len() > DIAGNOSTIC_MAX_BYTES {
+        if bytes.len().saturating_add(1) > DIAGNOSTIC_MAX_BYTES {
             return;
         }
         bytes.push(b'\n');
-        let _ = write_atomic_private(&self.path, &bytes);
+        let now = unix_milliseconds(SystemTime::now());
+        if now < self.persist_retry_after_unix_ms.load(Ordering::Relaxed) {
+            return;
+        }
+        match write_atomic_private(&self.path, &bytes) {
+            Ok(()) => {
+                self.persist_failures.store(0, Ordering::Relaxed);
+                self.persist_retry_after_unix_ms.store(0, Ordering::Relaxed);
+            }
+            Err(error) => {
+                let failures = self
+                    .persist_failures
+                    .fetch_add(1, Ordering::Relaxed)
+                    .saturating_add(1);
+                let shift = failures.saturating_sub(1).min(6);
+                let delay = DIAGNOSTIC_RETRY_BASE_MILLISECONDS
+                    .saturating_mul(1_u64 << shift)
+                    .min(DIAGNOSTIC_RETRY_MAX_MILLISECONDS);
+                self.persist_retry_after_unix_ms
+                    .store(now.saturating_add(delay), Ordering::Relaxed);
+                warn!(
+                    path = %self.path.display(),
+                    error = %error,
+                    retry_after_ms = delay,
+                    "history diagnostics persistence failed"
+                );
+            }
+        }
+    }
+}
+
+fn load_diagnostic_state(path: &Path) -> (HistoryStorageDiagnosticState, bool) {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return (HistoryStorageDiagnosticState::default(), true);
+        }
+        Err(error) => {
+            warn!(
+                path = %path.display(),
+                error = %error,
+                "history diagnostics file could not be read"
+            );
+            return (HistoryStorageDiagnosticState::default(), false);
+        }
+    };
+    if file
+        .metadata()
+        .map(|metadata| metadata.len() > u64::try_from(DIAGNOSTIC_MAX_BYTES).unwrap_or(u64::MAX))
+        .unwrap_or(true)
+    {
+        warn!(path = %path.display(), "history diagnostics file exceeds the size limit");
+        return (HistoryStorageDiagnosticState::default(), false);
+    }
+    let mut bytes = Vec::with_capacity(DIAGNOSTIC_MAX_BYTES);
+    if file
+        .take(
+            u64::try_from(DIAGNOSTIC_MAX_BYTES)
+                .unwrap_or(u64::MAX)
+                .saturating_add(1),
+        )
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() > DIAGNOSTIC_MAX_BYTES
+    {
+        warn!(path = %path.display(), "history diagnostics file could not be bounded-read");
+        return (HistoryStorageDiagnosticState::default(), false);
+    }
+    match serde_json::from_slice(&bytes) {
+        Ok(state) => (state, true),
+        Err(error) => {
+            warn!(path = %path.display(), error = %error, "history diagnostics file is invalid");
+            (HistoryStorageDiagnosticState::default(), false)
+        }
+    }
+}
+
+fn persist_worker(weak: Weak<HistoryStorageDiagnostics>, receiver: Receiver<()>) {
+    let mut last_persist = Instant::now()
+        .checked_sub(DIAGNOSTIC_PERSIST_INTERVAL)
+        .unwrap_or_else(Instant::now);
+    while receiver.recv().is_ok() {
+        while receiver.try_recv().is_ok() {}
+        let elapsed = last_persist.elapsed();
+        if elapsed < DIAGNOSTIC_PERSIST_INTERVAL {
+            thread::sleep(DIAGNOSTIC_PERSIST_INTERVAL - elapsed);
+            while receiver.try_recv().is_ok() {}
+        }
+        let Some(diagnostics) = weak.upgrade() else {
+            return;
+        };
+        diagnostics.persist_snapshot();
+        last_persist = Instant::now();
     }
 }
 
@@ -394,6 +549,7 @@ fn unix_milliseconds(now: SystemTime) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::tempdir;
 
     #[test]
@@ -404,18 +560,18 @@ mod tests {
             HistoryStorageDiagnosticOperation::RuntimeStatusRecordCount,
             "test.runtime_status",
         );
-        let raw =
-            fs::read_to_string(temporary.path().join(HISTORY_STORAGE_DIAGNOSTICS_FILE)).unwrap();
+        let path = temporary.path().join(HISTORY_STORAGE_DIAGNOSTICS_FILE);
+        wait_for_state(&path, |state| state.in_flight.is_some());
+        let raw = fs::read_to_string(&path).unwrap();
         assert!(raw.contains("runtime_status.record_count"));
         assert!(raw.contains("repository_history_records_keyset"));
         assert!(!raw.contains("bind"));
 
         std::thread::sleep(Duration::from_millis(2));
         guard.finish_with_count(12);
-        let state: HistoryStorageDiagnosticState = serde_json::from_slice(
-            &fs::read(temporary.path().join(HISTORY_STORAGE_DIAGNOSTICS_FILE)).unwrap(),
-        )
-        .unwrap();
+        let state = wait_for_state(&path, |state| {
+            state.in_flight.is_none() && state.last_slow_event.is_some()
+        });
         assert!(state.in_flight.is_none());
         assert_eq!(state.last_slow_event.unwrap().result_count, Some(12));
         assert!(state.completed_operations >= 1);
@@ -430,6 +586,10 @@ mod tests {
             "test.backfill",
         );
         std::mem::forget(guard);
+        wait_for_state(
+            &temporary.path().join(HISTORY_STORAGE_DIAGNOSTICS_FILE),
+            |state| state.in_flight.is_some(),
+        );
         drop(diagnostics);
 
         let restarted = HistoryStorageDiagnostics::open(temporary.path());
@@ -474,7 +634,58 @@ mod tests {
             "test.retention",
         );
         guard.finish();
-        let bytes = fs::read(temporary.path().join(HISTORY_STORAGE_DIAGNOSTICS_FILE)).unwrap();
+        let path = temporary.path().join(HISTORY_STORAGE_DIAGNOSTICS_FILE);
+        wait_for_state(&path, |state| state.in_flight.is_none());
+        let bytes = fs::read(path).unwrap();
         assert!(bytes.len() <= DIAGNOSTIC_MAX_BYTES);
+    }
+
+    #[test]
+    fn nested_slow_operation_preserves_leaf_event() {
+        let temporary = tempdir().unwrap();
+        let diagnostics = HistoryStorageDiagnostics::open(temporary.path());
+        let outer = diagnostics.begin(
+            HistoryStorageDiagnosticOperation::RuntimeStatus,
+            "test.outer",
+        );
+        let inner = diagnostics.begin(
+            HistoryStorageDiagnosticOperation::RuntimeStatusRecordCount,
+            "test.inner",
+        );
+        inner.finish();
+        outer.finish();
+
+        let state = diagnostics.lock_state().clone();
+        assert_eq!(
+            state.last_slow_leaf_event.unwrap().operation_id,
+            "runtime_status.record_count"
+        );
+        assert_eq!(
+            state.last_slow_event.unwrap().operation_id,
+            "runtime_status"
+        );
+        let path = temporary.path().join(HISTORY_STORAGE_DIAGNOSTICS_FILE);
+        let persisted = wait_for_state(&path, |state| state.last_slow_leaf_event.is_some());
+        assert_eq!(
+            persisted.last_slow_leaf_event.unwrap().operation_id,
+            "runtime_status.record_count"
+        );
+    }
+
+    fn wait_for_state(
+        path: &Path,
+        predicate: impl Fn(&HistoryStorageDiagnosticState) -> bool,
+    ) -> HistoryStorageDiagnosticState {
+        for _ in 0..100 {
+            if let Ok(bytes) = fs::read(path) {
+                if let Ok(state) = serde_json::from_slice::<HistoryStorageDiagnosticState>(&bytes) {
+                    if predicate(&state) {
+                        return state;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("timed out waiting for history diagnostics persistence");
     }
 }

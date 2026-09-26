@@ -444,10 +444,24 @@ fn repository_record_count_persists_storage_diagnostic() {
 
     assert_eq!(storage.repository_history_record_count().unwrap(), 0);
 
-    let diagnostic: serde_json::Value = serde_json::from_slice(
-        &fs::read(temporary.path().join("history.sqlite3.diagnostics.json")).unwrap(),
-    )
-    .unwrap();
+    let path = temporary.path().join("history.sqlite3.diagnostics.json");
+    let diagnostic = (0..100)
+        .find_map(|_| {
+            let value = fs::read(&path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+            let ready = value.as_ref().is_some_and(|value| {
+                value["in_flight"].is_null()
+                    && value["completed_operations"].as_u64().unwrap_or(0) >= 1
+            });
+            if ready {
+                value
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                None
+            }
+        })
+        .expect("history diagnostics persistence timed out");
     assert_eq!(diagnostic["in_flight"], serde_json::Value::Null);
     assert!(diagnostic["completed_operations"].as_u64().unwrap() >= 1);
     assert_eq!(

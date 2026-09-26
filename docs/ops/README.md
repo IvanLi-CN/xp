@@ -850,9 +850,11 @@ Notes:
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
 - `history.sqlite3.diagnostics.json` is a private, bounded operational record for investigating
-  slow local repository reads and maintenance. It is atomically replaced with mode `0600`, capped
-  at 16 KiB, and contains only stable operation identifiers, caller classes, SQL templates with
-  placeholders, wall-clock start/finish times, monotonic elapsed time, and bounded result counts.
+  slow local repository reads and maintenance. It is atomically replaced by a bounded, coalescing
+  writer outside SQLite/backend locks with mode `0600`, capped at 16 KiB, and contains only stable
+  operation identifiers, caller classes, SQL templates with placeholders, wall-clock start/finish
+  times, monotonic elapsed time, and bounded result counts. It retains both the latest slow event
+  and the latest slow leaf SQL event so an outer composite scope cannot hide the blocking query.
   It never contains SQL bind values, history payloads, credentials, or request bodies. See
   `docs/ops/history-storage-diagnostics.md` for the field contract and incident collection steps.
 - Repository bootstrap is bounded and resumable: one worker tick handles at most one local page

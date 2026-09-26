@@ -160,7 +160,7 @@ impl RepositoryReplicaRuntime {
         repair_cache_cutoff_unix_seconds: u64,
         now_unix_seconds: u64,
     ) -> Result<RepositoryTieredBackfillPage, RepositoryRuntimeError> {
-        let _diagnostic = self.storage.begin_diagnostic(
+        let diagnostic = self.storage.begin_diagnostic(
             HistoryStorageDiagnosticOperation::TieredBackfillPage,
             "history_repository.tiered_backfill_page",
         );
@@ -214,6 +214,7 @@ impl RepositoryReplicaRuntime {
                     .repository_history_export_watermarks(repair_cache_cutoff_unix_seconds)
                     .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
                 else {
+                    diagnostic.finish();
                     return Ok(RepositoryTieredBackfillPage {
                         records: Vec::new(),
                         next_cursor: None,
@@ -247,6 +248,7 @@ impl RepositoryReplicaRuntime {
                     .repository_history_export_watermarks(repair_cache_cutoff_unix_seconds)
                     .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
                 else {
+                    diagnostic.finish();
                     return Ok(RepositoryTieredBackfillPage {
                         records: Vec::new(),
                         next_cursor: None,
@@ -367,10 +369,12 @@ impl RepositoryReplicaRuntime {
                 .expect("repository backfill cursor is serializable"),
             )
         });
-        Ok(RepositoryTieredBackfillPage {
+        let page = RepositoryTieredBackfillPage {
             records: selected_records,
             next_cursor,
-        })
+        };
+        diagnostic.finish();
+        Ok(page)
     }
 
     /// Import canonical rows from a ready repository's authenticated long-term export. The

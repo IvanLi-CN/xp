@@ -352,8 +352,13 @@ impl HistoryStorage {
     }
 
     pub(crate) fn source_delivery_journal_summary(&self) -> Result<SourceDeliveryJournalSummary> {
+        let diagnostic = self.begin_diagnostic(
+            HistoryStorageDiagnosticOperation::SourceDeliveryJournalSummary,
+            "history_storage.source_delivery",
+        );
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
+            diagnostic.finish();
             return Ok(SourceDeliveryJournalSummary {
                 pending_segments: 0,
                 pending_bytes: 0,
@@ -400,7 +405,7 @@ impl HistoryStorage {
                 .optional()
                 .map_err(sqlite_error)?
         };
-        Ok(SourceDeliveryJournalSummary {
+        let summary = SourceDeliveryJournalSummary {
             pending_segments: usize::try_from(state.0).unwrap_or(usize::MAX),
             pending_bytes: u64::try_from(state.1).unwrap_or(u64::MAX),
             oldest,
@@ -408,7 +413,9 @@ impl HistoryStorage {
             last_delivery_path: state.3,
             order_repairing,
             capacity_suspended: state.5 != 0,
-        })
+        };
+        diagnostic.finish();
+        Ok(summary)
     }
 
     pub(crate) fn source_delivery_journal_capacity_suspended(&self) -> Result<bool> {

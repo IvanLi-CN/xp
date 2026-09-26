@@ -11,24 +11,31 @@ The file is `${XP_DATA_DIR}/history.sqlite3.diagnostics.json`.
 
 - The file is private (`0600`) and atomically replaced.
 - The serialized state is capped at 16 KiB and retains only the current in-flight operation, the
-  last operation slower than one second, the last operation interrupted across a process restart,
-  and bounded completion counters.
+  latest slow operation, the latest slow leaf SQL operation, the last operation interrupted across
+  a process restart, and bounded completion counters.
 - Each event has a stable `operation_id`, a static `caller_class`, a static SQL template or
   composite-operation description, wall-clock start and finish times, monotonic `elapsed_ms`, an
   outcome, and an optional result count.
 - SQL templates retain placeholders such as `?1`; they never include bind values. History rows,
-  payloads, tokens, request bodies, and URLs are not recorded.
+  payloads, tokens, request bodies, and URLs are not recorded. `last_slow_leaf_event` preserves the
+  most specific SQL boundary when a composite operation finishes after it.
 
 The instrumented boundaries are:
 
 - repository runtime status and its metadata-only record and segment counts;
-- tiered backfill page execution, export leases, received-at cutoff, and both watermark reads;
+- tiered backfill page execution, export lease refresh/finish/session checks, received-at cutoff,
+  and both watermark reads;
 - retention expiry probes, compaction pages, export leases, and replacement/prune maintenance.
+- source-delivery journal summary reads used by runtime status.
 
-An operation writes its in-flight description before the blocking boundary. On normal completion it
-writes the elapsed result. If the process is restarted while an operation is in flight, the next
-startup moves that description to `last_interrupted_event`. A failed operation is retained with its
-scope-exit outcome when the guard is unwound.
+An operation records its in-flight description in memory before the blocking boundary and queues it
+to one dedicated, coalescing writer. The writer is rate-limited to one atomic replacement per 100 ms
+and runs outside SQLite/backend locks, so diagnostics do not add a synchronous fsync to each query.
+On normal completion it writes the elapsed result. If the process is restarted while an operation is
+in flight, the next startup moves that description to `last_interrupted_event`. A failed operation
+is retained with its scope-exit outcome when the guard is unwound. The file is evidence, not a
+transactional health signal; collect it before restart because an abrupt process or host failure may
+leave the last queued update unwritten.
 
 ## Incident collection
 
@@ -39,13 +46,25 @@ resource monitoring data, and host I/O or PSI observations. The diagnostic event
 SQLite boundary; the health and host records establish whether that operation coincided with service
 unavailability or storage pressure.
 
-On a host-managed node, the read-only collection is equivalent to:
+For the generated host-managed assets, collect the diagnostic, health, and host I/O evidence before
+restarting. The commands are read-only:
 
-```text
-sudo -n cat ${XP_DATA_DIR}/history.sqlite3.diagnostics.json
+```sh
+# OpenRC and systemd generated assets use /var/lib/xp/data.
+sudo -n date -u
+sudo -n cat /proc/pressure/io
+sudo -n cat /proc/loadavg
+sudo -n cat /var/lib/xp/data/history.sqlite3.diagnostics.json
+curl --max-time 5 -fsS http://127.0.0.1:62416/api/health
+
+# Docker Compose uses the mounted path inside the official container.
+docker compose exec -T xp cat /proc/pressure/io
+docker compose exec -T xp cat /var/lib/xp/data/history.sqlite3.diagnostics.json
 ```
 
-Use the node's actual configured `XP_DATA_DIR`; do not substitute a guessed data directory.
+Use the node's actual configured `XP_DATA_DIR` when it differs from the generated default; do not
+substitute a guessed data directory. Also preserve the matching `history.sqlite3-wal` and
+`history.sqlite3-shm` files during collection.
 
 Do not delete `history.sqlite3`, its WAL, or the diagnostic file while collecting evidence. The
 diagnostic file is safe to omit from a normal incident report if it contains no in-flight,

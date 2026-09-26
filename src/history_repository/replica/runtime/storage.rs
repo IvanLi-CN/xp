@@ -465,7 +465,7 @@ impl RepositoryReplicaRuntime {
         &mut self,
         now_unix_seconds: u64,
     ) -> Result<(), RepositoryRuntimeError> {
-        let _diagnostic = self.storage.begin_diagnostic(
+        let diagnostic = self.storage.begin_diagnostic(
             HistoryStorageDiagnosticOperation::RetentionReplaceAndPrune,
             "history_repository.retention",
         );
@@ -474,6 +474,7 @@ impl RepositoryReplicaRuntime {
             .has_active_repository_history_export(now_unix_seconds)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
         {
+            diagnostic.finish();
             return Ok(());
         }
         let policy = super::super::RepositoryRetentionPolicy::default();
@@ -496,7 +497,11 @@ impl RepositoryReplicaRuntime {
         if fetched_rows.is_empty() {
             self.snapshot.retention_compaction_cursor = None;
             self.snapshot.retention_compaction_continuation = None;
-            return self.persist_control_state();
+            let result = self.persist_control_state();
+            if result.is_ok() {
+                diagnostic.finish();
+            }
+            return result;
         }
         let mut rows = fetched_rows.clone();
         let mut decoded_rows = match rows
@@ -511,6 +516,7 @@ impl RepositoryReplicaRuntime {
                     error = %error,
                     "history retention deferred after malformed row"
                 );
+                diagnostic.finish();
                 return Ok(());
             }
         };
@@ -548,6 +554,7 @@ impl RepositoryReplicaRuntime {
             // No closed bucket fits in this bounded lookahead. Retain the cursor and wait for
             // later history rather than creating a partial aggregate or loading an unbounded
             // bucket into memory.
+            diagnostic.finish();
             return Ok(());
         }
         let continuation = self.snapshot.retention_compaction_continuation.clone();
@@ -650,6 +657,7 @@ impl RepositoryReplicaRuntime {
         match result {
             Ok(outcome) => {
                 self.storage_degraded |= outcome.maintenance_degraded;
+                diagnostic.finish();
                 Ok(())
             }
             Err(error) => {

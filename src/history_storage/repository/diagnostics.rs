@@ -282,8 +282,13 @@ impl HistoryStorage {
         &self,
         repair_cache_cutoff_unix_seconds: u64,
     ) -> Result<Option<RepositoryHistoryExportWatermarks>> {
+        let diagnostic = self.begin_diagnostic(
+            HistoryStorageDiagnosticOperation::TieredBackfillExportWatermarks,
+            "history_storage.tiered_backfill",
+        );
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
+            diagnostic.finish();
             return Ok(None);
         };
         let received_at_cutoff = {
@@ -304,6 +309,7 @@ impl HistoryStorage {
             value.map(|value| u64::try_from(value).unwrap_or(u64::MAX))
         };
         let Some(received_at_cutoff) = received_at_cutoff else {
+            diagnostic.finish();
             return Ok(None);
         };
         let watermark_for = |tombstones_only: bool| {
@@ -347,6 +353,7 @@ impl HistoryStorage {
         };
         let tombstone_watermark = watermark_for(true)?;
         let record_watermark = watermark_for(false)?;
+        diagnostic.finish();
         Ok(
             (tombstone_watermark.is_some() || record_watermark.is_some()).then_some((
                 tombstone_watermark,
@@ -362,7 +369,7 @@ impl HistoryStorage {
         now_unix_seconds: u64,
     ) -> Result<()> {
         let diagnostic = self.begin_diagnostic(
-            HistoryStorageDiagnosticOperation::TieredBackfillExportSession,
+            HistoryStorageDiagnosticOperation::TieredBackfillExportRefresh,
             "history_storage.tiered_backfill",
         );
         let mut backend = self.lock_backend();
@@ -423,7 +430,7 @@ impl HistoryStorage {
 
     pub(crate) fn finish_repository_history_export(&self, session_id: &str) -> Result<()> {
         let diagnostic = self.begin_diagnostic(
-            HistoryStorageDiagnosticOperation::TieredBackfillExportSession,
+            HistoryStorageDiagnosticOperation::TieredBackfillExportFinish,
             "history_storage.tiered_backfill",
         );
         let mut backend = self.lock_backend();
