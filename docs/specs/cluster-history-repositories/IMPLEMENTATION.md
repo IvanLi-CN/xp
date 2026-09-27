@@ -27,6 +27,8 @@
   available while SQLite operations wait. Counts remain exact through mutation, retention, restart
   and upgrade.
 - Repository query preparation and reads run on blocking workers, not Tokio request workers.
+  One local query at a time may enter the blocking pool; others await an asynchronous permit
+  without holding a repository mutex or a blocking thread.
   Node-scoped coverage reads only the covering `repository_history_records_coverage` index;
   incomplete aggregate checks seek the existing completeness index by subject. Both operations
   expose bounded slow-query diagnostics. The covering index is built from existing history at the

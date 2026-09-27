@@ -705,10 +705,17 @@ async fn local_repository_query(
     now: u64,
     local_is_ready: bool,
 ) -> Result<RepositoryHistoryQueryResponse, ApiError> {
+    let query_permit = state
+        .repository_query_gate
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| ApiError::internal("repository query gate is closed"))?;
     let replica = state.repository_replica.clone();
     let node_id = state.cluster.node_id.clone();
-    let mut runtime = replica.lock_owned().await;
     tokio::task::spawn_blocking(move || {
+        let _query_permit = query_permit;
+        let mut runtime = replica.blocking_lock();
         runtime.prepare_for_replication(now)?;
         let local = LocalQueryMetadata::current_window(now);
         if local_is_ready {
