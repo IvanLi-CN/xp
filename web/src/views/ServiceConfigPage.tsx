@@ -287,7 +287,7 @@ export function ServiceConfigPage() {
 							<p className="text-sm text-muted-foreground">
 								Private mirror targets are configured per node from the node
 								details page. Deployment defaults come from
-								<span className="mx-1 font-mono">
+								<span className="mx-1 break-all font-mono">
 									XP_MIHOMO_ALLOWED_PRIVATE_CIDRS
 								</span>
 								and are never stored in Raft.
