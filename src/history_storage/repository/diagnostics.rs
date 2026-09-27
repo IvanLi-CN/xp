@@ -544,10 +544,12 @@ impl HistoryStorage {
             return Ok(0);
         };
         let query = match table {
-            // These are ordinary rowid tables. SQLite's COUNT(*) uses the exact table row count
-            // opcode, so status remains O(1) without scanning a payload or metadata index.
-            "repository_history_records" => "SELECT COUNT(*) FROM repository_history_records",
-            "repository_history_segments" => "SELECT COUNT(*) FROM repository_history_segments",
+            "repository_history_records" => {
+                "SELECT record_count FROM repository_history_counts WHERE id = 1"
+            }
+            "repository_history_segments" => {
+                "SELECT segment_count FROM repository_history_counts WHERE id = 1"
+            }
             _ => unreachable!("repository history count operation was validated above"),
         };
         #[cfg(test)]

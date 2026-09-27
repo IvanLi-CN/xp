@@ -137,6 +137,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   幂等新增该索引，保留旧索引和所有 signed segment payload。
 - 既有 external-history SQLite 在该索引的启动期创建失败时必须保持 SQLite 保护边界并向调用方
   返回错误；不得退回可能陈旧的 JSON snapshot 或推进任何持久 checkpoint。
+- Repository runtime status 的 record/segment 计数必须精确且包含 tombstone；每次状态请求不得
+  遍历历史表或索引，也不得在 Tokio request worker 上执行同步 SQLite 工作。既有库允许在首次
+  启动时一次性回填持久计数；后续 insert/delete 必须在同一事务内更新计数。初始化失败时不得
+  降级到可能陈旧的 JSON snapshot，也不得丢弃已有历史行。
 
 ### Source delivery journal
 

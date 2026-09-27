@@ -165,6 +165,73 @@ fn external_repository_history_fails_closed_when_keyset_index_upgrade_fails() {
 }
 
 #[test]
+fn external_repository_history_fails_closed_when_count_migration_fails() {
+    let temporary = tempfile::tempdir().unwrap();
+    {
+        let storage = HistoryStorage::open(temporary.path());
+        storage
+            .write(REPOSITORY_REPLICA_KEY, br#"{"external_history":true}"#)
+            .unwrap();
+        storage
+            .upsert_repository_history_records(&[RepositoryHistoryRecordRow {
+                source_node_id: "source".to_owned(),
+                source_epoch: 1,
+                stream: "runtime".to_owned(),
+                sequence: 1,
+                subject_node_id: "subject".to_owned(),
+                observer_node_id: String::new(),
+                schema_id: String::new(),
+                schema_version: 0,
+                record_key: Vec::new(),
+                tombstone: false,
+                observed_start_unix_seconds: 1,
+                observed_end_unix_seconds: 2,
+                received_at_unix_seconds: 2,
+                aggregate_complete: None,
+                aggregate_start_unix_seconds: None,
+                aggregate_end_unix_seconds: None,
+                payload: b"record".to_vec(),
+            }])
+            .unwrap();
+    }
+    let database_path = temporary.path().join(SQLITE_FILE);
+    let connection = rusqlite::Connection::open(&database_path).unwrap();
+    connection
+        .execute_batch(
+            "DROP TRIGGER repository_history_records_count_insert;
+             DROP TRIGGER repository_history_records_count_delete;
+             DROP TRIGGER repository_history_segments_count_insert;
+             DROP TRIGGER repository_history_segments_count_delete;
+             DROP TABLE repository_history_counts;",
+        )
+        .unwrap();
+    drop(connection);
+
+    fail_next_repository_history_counts_for_test();
+    let restarted = HistoryStorage::open(temporary.path());
+
+    assert_eq!(restarted.mode(), HistoryStorageMode::Unavailable);
+    assert!(restarted.is_sqlite());
+    assert!(restarted.read(REPOSITORY_REPLICA_KEY).is_err());
+    let connection = rusqlite::Connection::open_with_flags(
+        &database_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM repository_history_records",
+                [],
+                |row| { row.get::<_, i64>(0) }
+            )
+            .unwrap(),
+        1
+    );
+    assert!(!temporary.path().join(JSON_FALLBACK_FILE).exists());
+}
+
+#[test]
 fn published_history_sqlite_failure_fails_closed_instead_of_falling_back_to_json() {
     let temporary = tempfile::tempdir().unwrap();
     let legacy_path = temporary.path().join("history/repository_replica.json");
@@ -416,7 +483,7 @@ fn repository_keyset_indexes_avoid_a_full_sort_for_compaction_and_export() {
 }
 
 #[test]
-fn repository_record_count_uses_sqlite_constant_time_row_count() {
+fn repository_record_count_reads_materialized_count_without_scanning_history() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
     let backend = storage.lock_backend();
@@ -425,9 +492,9 @@ fn repository_record_count_uses_sqlite_constant_time_row_count() {
     };
     let opcodes = sqlite_opcodes(
         connection,
-        "SELECT COUNT(*) FROM repository_history_records",
+        "SELECT record_count FROM repository_history_counts WHERE id = 1",
     );
-    assert_constant_time_row_count(&opcodes);
+    assert_materialized_count_lookup(&opcodes);
 }
 
 #[test]
@@ -469,12 +536,12 @@ fn repository_record_count_persists_storage_diagnostic() {
         diagnostic["last_slow_event"]["statement"]
             .as_str()
             .unwrap()
-            .contains("SELECT COUNT(*) FROM repository_history_records")
+            .contains("SELECT record_count FROM repository_history_counts WHERE id = 1")
     );
 }
 
 #[test]
-fn repository_segment_count_uses_sqlite_constant_time_row_count() {
+fn repository_segment_count_reads_materialized_count_without_scanning_history() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
     let backend = storage.lock_backend();
@@ -483,9 +550,9 @@ fn repository_segment_count_uses_sqlite_constant_time_row_count() {
     };
     let opcodes = sqlite_opcodes(
         connection,
-        "SELECT COUNT(*) FROM repository_history_segments",
+        "SELECT segment_count FROM repository_history_counts WHERE id = 1",
     );
-    assert_constant_time_row_count(&opcodes);
+    assert_materialized_count_lookup(&opcodes);
 }
 
 #[test]
@@ -519,7 +586,7 @@ fn repository_counts_remain_exact_through_delete_retention_and_restart() {
         ..live_record.clone()
     };
     storage
-        .upsert_repository_history_records(&[live_record, tombstone_record])
+        .upsert_repository_history_records(&[live_record.clone(), tombstone_record.clone()])
         .unwrap();
     storage
         .upsert_repository_history_segments(&[
@@ -547,6 +614,10 @@ fn repository_counts_remain_exact_through_delete_retention_and_restart() {
         .unwrap();
     assert_eq!(storage.repository_history_record_count().unwrap(), 2);
     assert_eq!(storage.repository_history_segment_count().unwrap(), 2);
+    storage
+        .upsert_repository_history_records(&[live_record, tombstone_record])
+        .unwrap();
+    assert_eq!(storage.repository_history_record_count().unwrap(), 2);
 
     storage
         .delete_repository_history_tombstone(&RepositoryHistoryTombstone {
@@ -572,6 +643,62 @@ fn repository_counts_remain_exact_through_delete_retention_and_restart() {
     drop(storage);
 
     let restarted = HistoryStorage::open(temporary.path());
+    assert_eq!(restarted.repository_history_record_count().unwrap(), 0);
+    assert_eq!(restarted.repository_history_segment_count().unwrap(), 0);
+}
+
+#[test]
+fn repository_counts_initialize_from_existing_history_on_upgrade() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    {
+        let mut backend = storage.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            panic!("test storage should use SQLite");
+        };
+        connection
+            .execute_batch(
+                "DROP TRIGGER repository_history_records_count_insert;
+                 DROP TRIGGER repository_history_records_count_delete;
+                 DROP TRIGGER repository_history_segments_count_insert;
+                 DROP TRIGGER repository_history_segments_count_delete;
+                 DROP TABLE repository_history_counts;
+                 INSERT INTO repository_history_records (
+                     source_node_id, source_epoch, stream, sequence, subject_node_id,
+                     observed_start, observed_end, received_at, payload
+                 ) VALUES ('source', 1, 'runtime', 1, 'subject', 1, 2, 2, X'01');
+                 INSERT INTO repository_history_segments (id, payload)
+                 VALUES ('segment', X'01');",
+            )
+            .unwrap();
+    }
+    drop(storage);
+
+    let upgraded = HistoryStorage::open(temporary.path());
+    assert_eq!(upgraded.repository_history_record_count().unwrap(), 1);
+    assert_eq!(upgraded.repository_history_segment_count().unwrap(), 1);
+    drop(upgraded);
+
+    let restarted = HistoryStorage::open(temporary.path());
+    assert_eq!(restarted.repository_history_record_count().unwrap(), 1);
+    assert_eq!(restarted.repository_history_segment_count().unwrap(), 1);
+    {
+        let mut backend = restarted.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            panic!("test storage should use SQLite");
+        };
+        let transaction = connection.transaction().unwrap();
+        transaction
+            .execute(
+                "INSERT INTO repository_history_segments (id, payload)
+                 VALUES ('rolled-back', X'02')",
+                [],
+            )
+            .unwrap();
+        transaction.rollback().unwrap();
+    }
+    assert_eq!(restarted.repository_history_segment_count().unwrap(), 1);
+    restarted.clear_repository_history().unwrap();
     assert_eq!(restarted.repository_history_record_count().unwrap(), 0);
     assert_eq!(restarted.repository_history_segment_count().unwrap(), 0);
 }
@@ -713,20 +840,12 @@ fn sqlite_opcodes(connection: &rusqlite::Connection, query: &str) -> Vec<String>
         .unwrap()
 }
 
-fn assert_constant_time_row_count(opcodes: &[String]) {
-    assert_eq!(
-        opcodes
-            .iter()
-            .filter(|opcode| opcode.as_str() == "Count")
-            .count(),
-        1,
-        "expected SQLite Count opcode, got {opcodes:?}"
-    );
+fn assert_materialized_count_lookup(opcodes: &[String]) {
     assert!(
         !opcodes
             .iter()
-            .any(|opcode| opcode == "Next" || opcode == "Rewind"),
-        "row count must not scan a table or index: {opcodes:?}"
+            .any(|opcode| opcode == "Count" || opcode == "Next" || opcode == "Rewind"),
+        "status must not scan a history table or index: {opcodes:?}"
     );
 }
 

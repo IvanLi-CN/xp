@@ -87,7 +87,6 @@ async fn signed_internal_history_status_does_not_stall_health_on_single_worker()
     {
         let _legacy_count = crate::state::history_storage::legacy_history_status_count_for_test();
         let _count_probe = crate::state::history_storage::history_status_count_probe_for_test();
-        let health_started = Instant::now();
         let status_task = tokio::spawn({
             let router = router.clone();
             let status_request = build_status_request();
@@ -98,28 +97,33 @@ async fn signed_internal_history_status_does_not_stall_health_on_single_worker()
                     .expect("legacy status response")
             }
         });
-        tokio::task::yield_now().await;
-        assert!(
-            crate::state::history_storage::history_status_count_started_for_test(),
-            "legacy status count did not start before health request"
-        );
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !crate::state::history_storage::history_status_count_started_for_test() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("legacy status count did not start");
+        let health_started = Instant::now();
         let health_response = router
             .clone()
             .oneshot(req("GET", "/api/health"))
             .await
             .expect("legacy health response");
         let health_elapsed = health_started.elapsed();
-        let status_response = status_task.await.expect("legacy status task");
-
-        assert_eq!(status_response.status(), StatusCode::OK);
         assert_eq!(health_response.status(), StatusCode::OK);
         assert!(
             crate::state::history_storage::history_status_count_used_legacy_query_for_test(),
             "legacy status did not use the forced indexed count query"
         );
         assert!(
-            health_elapsed >= Duration::from_millis(200),
-            "legacy history status unexpectedly stayed responsive: {health_elapsed:?}"
+            health_elapsed < Duration::from_millis(200),
+            "history status blocked the current-thread runtime: {health_elapsed:?}"
+        );
+        assert!(!status_task.is_finished(), "health waited for slow status");
+        assert_eq!(
+            status_task.await.expect("legacy status task").status(),
+            StatusCode::OK
         );
     }
 
@@ -134,11 +138,13 @@ async fn signed_internal_history_status_does_not_stall_health_on_single_worker()
                 .expect("status response")
         }
     });
-    tokio::task::yield_now().await;
-    assert!(
-        crate::state::history_storage::history_status_count_started_for_test(),
-        "fixed status count did not start before health request"
-    );
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !crate::state::history_storage::history_status_count_started_for_test() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("fixed status count did not start");
     let health_response = tokio::time::timeout(
         Duration::from_secs(2),
         router.clone().oneshot(req("GET", "/api/health")),
@@ -155,7 +161,7 @@ async fn signed_internal_history_status_does_not_stall_health_on_single_worker()
     assert_eq!(health_response.status(), StatusCode::OK);
     assert!(
         crate::state::history_storage::history_status_count_used_fixed_query_for_test(),
-        "fixed status did not use the exact COUNT(*) query"
+        "fixed status did not use the materialized count query"
     );
 }
 

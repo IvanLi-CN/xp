@@ -28,11 +28,12 @@ The instrumented boundaries are:
 - retention expiry probes, compaction pages, export leases, and replacement/prune maintenance.
 - source-delivery journal summary reads used by runtime status.
 
-Runtime status record and segment counts use SQLite's exact `COUNT(*)` row-count operation on the
-ordinary rowid tables. They do not scan a covering index or deserialize payloads, so the per-request
-count remains constant-time as the retained history grows. The result still includes every durable
-record and segment row, including tombstones, and is not an approximate or asynchronously refreshed
-value.
+Runtime status reads exact record and segment counts from the singleton
+`repository_history_counts` row. Insert/delete triggers update that row in the same transaction as
+the history mutation, including tombstones. Existing databases initialize it once from the durable
+tables at startup; the first upgraded start can take longer while SQLite counts the existing rows.
+Subsequent status requests do not traverse either history table. The status calculation runs on a
+blocking worker so a slow SQLite operation cannot occupy a Tokio request worker.
 
 An operation records its in-flight description in memory before the blocking boundary and queues it
 to one dedicated, coalescing writer. The writer is rate-limited to one atomic replacement per 100 ms

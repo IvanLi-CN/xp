@@ -60,6 +60,9 @@
   creates that index idempotently at startup without replacing the legacy index or signed payloads.
   An external-history database whose startup index creation fails preserves its durable rows on
   disk and returns a storage failure; it never falls back to a potentially stale JSON snapshot.
+  Repository runtime status reads exact record and segment counts from a durable singleton updated
+  by insert/delete triggers in each history transaction; existing databases backfill it once at
+  startup. Status requests do not traverse retained history tables and run off Tokio workers.
   A `history_truncated=true` initial-backfill repair page may cross an existing source watermark
   once per stream over an expired retained prefix. One page may require multiple wire-bounded
   responses; each response has its own content digest, while the per-stream allowance remains until
