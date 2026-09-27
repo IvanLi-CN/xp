@@ -188,6 +188,11 @@ html[data-density="compact"] {
 		@apply rounded-2xl border border-border/70 bg-muted/35;
 	}
 
+	.xp-menu-content {
+		@apply w-80 p-3;
+		max-width: calc(100vw - 1rem);
+	}
+
 	.xp-input,
 	.xp-select,
 	.xp-textarea {
