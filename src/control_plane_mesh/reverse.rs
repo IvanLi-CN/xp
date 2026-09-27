@@ -26,6 +26,79 @@ pub(super) fn reverse_authority(route: &ReverseRelayRoute, peer: &MeshPeerTarget
     )
 }
 
+pub(super) struct SignedReverseDispatch {
+    pub(super) headers: axum::http::HeaderMap,
+    pub(super) inner_verified: internal_auth::VerifiedRequest,
+    pub(super) outer_verified: internal_auth::VerifiedRequest,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn signed_reverse_dispatch(
+    peer: &MeshPeerTarget,
+    route: &ReverseRelayRoute,
+    request: &MeshRequest,
+    outer_request: &MeshRequest,
+    cluster_ca_key_pem: &str,
+    cluster_ca_cert_pem: &str,
+) -> Result<SignedReverseDispatch, MeshRequestError> {
+    let inner_context = RequestContext::now(
+        request.route,
+        request.cluster_id.clone(),
+        request.sender_id.clone(),
+        peer.node_id.clone(),
+        request.request_id.clone(),
+    );
+    let (inner_headers, inner_verified) = signed_headers(
+        request,
+        &inner_context,
+        cluster_ca_key_pem,
+        cluster_ca_cert_pem,
+    )?;
+    let inner_signature = inner_headers
+        .get(internal_auth::INTERNAL_SIGNATURE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| MeshRequestError::Reverse("inner signature is missing".to_string()))?;
+    let mut envelope = ReverseRelayEnvelope {
+        version: String::new(),
+        assignment_generation: route.assignment.generation,
+        target_node_id: peer.node_id.clone(),
+        method: request.method.as_str().to_string(),
+        uri: request.path_and_query.clone(),
+        content_type: request.content_type.clone().unwrap_or_default(),
+        route: request.route.as_str().to_string(),
+        sender_node_id: request.sender_id.clone(),
+        request_id: request.request_id.clone(),
+        issued_at: inner_verified.context.issued_at,
+        content_length: request.body.len(),
+        reverse_authority: reverse_authority(route, peer),
+        inner_signature: inner_signature.to_string(),
+        outer_signature: String::new(),
+    };
+    envelope.sign(cluster_ca_key_pem);
+
+    let outer_context = RequestContext::now(
+        outer_request.route,
+        outer_request.cluster_id.clone(),
+        outer_request.sender_id.clone(),
+        route.rendezvous.node_id.clone(),
+        outer_request.request_id.clone(),
+    );
+    let (mut headers, outer_verified) = signed_headers(
+        outer_request,
+        &outer_context,
+        cluster_ca_key_pem,
+        cluster_ca_cert_pem,
+    )?;
+    envelope
+        .insert_headers(&mut headers)
+        .map_err(|error| MeshRequestError::Reverse(error.to_string()))?;
+    Ok(SignedReverseDispatch {
+        headers,
+        inner_verified,
+        outer_verified,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn verify_relay_ack(
     request: &MeshRequest,
@@ -412,7 +485,8 @@ impl MeshAwareHttpClient {
                     return Err(error);
                 }
                 Err(
-                    error @ (MeshRequestError::PreDispatchAuth(_)
+                    error @ (MeshRequestError::InvalidTarget(_)
+                    | MeshRequestError::PreDispatchAuth(_)
                     | MeshRequestError::Auth(_)
                     | MeshRequestError::Protocol(_)),
                 ) => {

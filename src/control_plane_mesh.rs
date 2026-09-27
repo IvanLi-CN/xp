@@ -634,7 +634,11 @@ impl MeshAwareHttpClient {
                             self.record_terminal_failure(peer).await;
                             return Err(error);
                         }
-                        if matches!(error, MeshRequestError::PreDispatchAuth(_)) {
+                        if matches!(
+                            error,
+                            MeshRequestError::PreDispatchAuth(_)
+                                | MeshRequestError::InvalidTarget(_)
+                        ) {
                             return Err(error);
                         }
                         if matches!(
@@ -878,46 +882,6 @@ impl MeshAwareHttpClient {
             .circuits
             .try_reverse_slot(&route.rendezvous.node_id, class)
             .await?;
-        request
-            .path_and_query
-            .parse::<axum::http::Uri>()
-            .map_err(|error| MeshRequestError::InvalidTarget(error.to_string()))?;
-        let inner_context = RequestContext::now(
-            request.route,
-            request.cluster_id.clone(),
-            request.sender_id.clone(),
-            peer.node_id.clone(),
-            request.request_id.clone(),
-        );
-        let (inner_headers, inner_verified) = signed_headers(
-            request,
-            &inner_context,
-            cluster_ca_key_pem,
-            cluster_ca_cert_pem,
-        )?;
-        let inner_signature = inner_headers
-            .get(internal_auth::INTERNAL_SIGNATURE_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| MeshRequestError::Reverse("inner signature is missing".to_string()))?;
-        let reverse_authority = reverse::reverse_authority(route, peer);
-        let mut envelope = ReverseRelayEnvelope {
-            version: String::new(),
-            assignment_generation: route.assignment.generation,
-            target_node_id: peer.node_id.clone(),
-            method: request.method.as_str().to_string(),
-            uri: request.path_and_query.clone(),
-            content_type: request.content_type.clone().unwrap_or_default(),
-            route: request.route.as_str().to_string(),
-            sender_node_id: request.sender_id.clone(),
-            request_id: request.request_id.clone(),
-            issued_at: inner_verified.context.issued_at,
-            content_length: request.body.len(),
-            reverse_authority,
-            inner_signature: inner_signature.to_string(),
-            outer_signature: String::new(),
-        };
-        envelope.sign(cluster_ca_key_pem);
-
         let outer_request = MeshRequest {
             method: reqwest::Method::POST,
             path_and_query: "/api/admin/_internal/mesh/reverse-relay".to_string(),
@@ -931,22 +895,6 @@ impl MeshAwareHttpClient {
             sender_id: request.sender_id.clone(),
             updates_active_path: false,
         };
-        let outer_context = RequestContext::now(
-            InternalRoute::MeshV2,
-            request.cluster_id.clone(),
-            request.sender_id.clone(),
-            route.rendezvous.node_id.clone(),
-            request.request_id.clone(),
-        );
-        let (mut outer_headers, outer_verified) = signed_headers(
-            &outer_request,
-            &outer_context,
-            cluster_ca_key_pem,
-            cluster_ca_cert_pem,
-        )?;
-        envelope
-            .insert_headers(&mut outer_headers)
-            .map_err(|error| MeshRequestError::Reverse(error.to_string()))?;
         let outer_started = Instant::now();
         let local_rendezvous = self
             .local_reverse_relay
@@ -955,27 +903,46 @@ impl MeshAwareHttpClient {
         let mut response = None;
         if let Some(local) = local_rendezvous {
             let local_url = join_url(&local.base_url, &outer_request.path_and_query, false)?;
-            response = Some(
-                reverse::send_outer_request(
-                    &self.public_direct,
-                    &outer_request,
-                    &local_url,
-                    &outer_headers,
-                    budget,
-                    request.allow_ambiguous_fallback,
-                    &self.cluster_mesh_enabled,
-                    &self.mesh_gate_lock,
-                )
-                .await?,
-            );
+            let dispatch = reverse::signed_reverse_dispatch(
+                peer,
+                route,
+                request,
+                &outer_request,
+                cluster_ca_key_pem,
+                cluster_ca_cert_pem,
+            )?;
+            let local_response = reverse::send_outer_request(
+                &self.public_direct,
+                &outer_request,
+                &local_url,
+                &dispatch.headers,
+                budget,
+                request.allow_ambiguous_fallback,
+                &self.cluster_mesh_enabled,
+                &self.mesh_gate_lock,
+            )
+            .await?;
+            response = Some((
+                local_response,
+                dispatch.inner_verified,
+                dispatch.outer_verified,
+            ));
         } else if let Some(mesh_base_url) = route.rendezvous.mesh_base_url.as_deref() {
             let mesh_budget = mesh_attempt_budget(budget).min(budget);
             let mesh_url = join_url(mesh_base_url, &outer_request.path_and_query, false)?;
+            let dispatch = reverse::signed_reverse_dispatch(
+                peer,
+                route,
+                request,
+                &outer_request,
+                cluster_ca_key_pem,
+                cluster_ca_cert_pem,
+            )?;
             match reverse::send_outer_request(
                 &self.mesh,
                 &outer_request,
                 &mesh_url,
-                &outer_headers,
+                &dispatch.headers,
                 mesh_budget,
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
@@ -983,7 +950,13 @@ impl MeshAwareHttpClient {
             )
             .await
             {
-                Ok(mesh_response) => response = Some(mesh_response),
+                Ok(mesh_response) => {
+                    response = Some((
+                        mesh_response,
+                        dispatch.inner_verified,
+                        dispatch.outer_verified,
+                    ));
+                }
                 Err(error @ MeshRequestError::TransportTimeout) => {
                     return Err(error);
                 }
@@ -998,7 +971,7 @@ impl MeshAwareHttpClient {
                 Err(_) => {}
             }
         }
-        let response = match response {
+        let (response, inner_verified, outer_verified) = match response {
             Some(response) => response,
             None => {
                 let remaining = budget.saturating_sub(outer_started.elapsed());
@@ -1010,17 +983,30 @@ impl MeshAwareHttpClient {
                     &outer_request.path_and_query,
                     false,
                 )?;
-                reverse::send_outer_request(
+                let dispatch = reverse::signed_reverse_dispatch(
+                    peer,
+                    route,
+                    request,
+                    &outer_request,
+                    cluster_ca_key_pem,
+                    cluster_ca_cert_pem,
+                )?;
+                let public_response = reverse::send_outer_request(
                     &self.public_direct,
                     &outer_request,
                     &outer_url,
-                    &outer_headers,
+                    &dispatch.headers,
                     remaining,
                     request.allow_ambiguous_fallback,
                     &self.cluster_mesh_enabled,
                     &self.mesh_gate_lock,
                 )
-                .await?
+                .await?;
+                (
+                    public_response,
+                    dispatch.inner_verified,
+                    dispatch.outer_verified,
+                )
             }
         };
         reverse::verify_relay_ack(

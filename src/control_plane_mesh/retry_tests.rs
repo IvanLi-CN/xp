@@ -11,7 +11,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use tokio::{sync::Mutex, task::JoinHandle};
+use tokio::{io::AsyncReadExt, net::TcpStream, sync::Mutex, task::JoinHandle};
 
 #[derive(Clone)]
 struct GatewayState {
@@ -115,26 +115,7 @@ async fn observation_gateway(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let verified = crate::internal_auth::verify_request_v2(
-        &state.ca_key_pem,
-        &state.ca_cert_pem,
-        &method,
-        &uri,
-        &headers,
-        &body,
-        xp_test_fixtures::cluster_fixture53(),
-        xp_test_fixtures::primary_node_id(),
-    )
-    .expect("observed dispatch receives a fresh valid signature");
-    state.observations.lock().await.push(AttemptObservation {
-        request_id: verified.context.request_id.clone(),
-        issued_at: verified.context.issued_at,
-        idempotency_sha256: verified.idempotency_sha256.clone(),
-    });
-    let mut applied = state.applied_idempotencies.lock().await;
-    if !applied.contains(&verified.idempotency_sha256) {
-        applied.push(verified.idempotency_sha256.clone());
-    }
+    let verified = observe_request(&state, &method, &uri, &headers, &body).await;
     let acknowledgement = crate::internal_auth::sign_ack_v2(
         &state.ca_key_pem,
         &state.ca_cert_pem,
@@ -150,7 +131,93 @@ async fn observation_gateway(
         .expect("observation response")
 }
 
-async fn spawn_observation_gateway(
+async fn observe_request(
+    state: &ObservationGatewayState,
+    method: &Method,
+    uri: &Uri,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> crate::internal_auth::VerifiedRequest {
+    let verified = crate::internal_auth::verify_request_v2(
+        &state.ca_key_pem,
+        &state.ca_cert_pem,
+        method,
+        uri,
+        headers,
+        body,
+        xp_test_fixtures::cluster_fixture53(),
+        xp_test_fixtures::primary_node_id(),
+    )
+    .expect("observed dispatch receives a fresh valid signature");
+    state.observations.lock().await.push(AttemptObservation {
+        request_id: verified.context.request_id.clone(),
+        issued_at: verified.context.issued_at,
+        idempotency_sha256: verified.idempotency_sha256.clone(),
+    });
+    let mut applied = state.applied_idempotencies.lock().await;
+    if !applied.contains(&verified.idempotency_sha256) {
+        applied.push(verified.idempotency_sha256.clone());
+    }
+    verified
+}
+
+async fn read_raw_request(socket: &mut TcpStream) -> (Method, Uri, HeaderMap, Vec<u8>) {
+    let mut raw = Vec::new();
+    let header_end = loop {
+        let mut chunk = [0_u8; 4096];
+        let read = socket.read(&mut chunk).await.expect("read raw request");
+        assert!(read > 0, "raw gateway request closed before headers");
+        raw.extend_from_slice(&chunk[..read]);
+        if let Some(position) = raw.windows(4).position(|window| window == b"\r\n\r\n") {
+            break position;
+        }
+    };
+    let body_start = header_end + 4;
+    let header_text = String::from_utf8(raw[..header_end].to_vec()).expect("raw request headers");
+    let content_length = header_text
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().expect("content length"))
+        })
+        .unwrap_or_default();
+    while raw.len() < body_start + content_length {
+        let mut chunk = [0_u8; 4096];
+        let read = socket
+            .read(&mut chunk)
+            .await
+            .expect("read raw request body");
+        assert!(read > 0, "raw gateway request closed before body");
+        raw.extend_from_slice(&chunk[..read]);
+    }
+    let mut lines = header_text.lines();
+    let mut request_line = lines.next().expect("raw request line").split_whitespace();
+    let method = Method::from_bytes(request_line.next().expect("raw request method").as_bytes())
+        .expect("raw request method parses");
+    let uri = request_line
+        .next()
+        .expect("raw request URI")
+        .parse()
+        .expect("raw request URI parses");
+    let mut headers = HeaderMap::new();
+    for line in lines {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let name = axum::http::HeaderName::from_bytes(name.as_bytes()).expect("raw header name");
+        let value = axum::http::HeaderValue::from_str(value.trim()).expect("raw header value");
+        headers.insert(name, value);
+    }
+    (
+        method,
+        uri,
+        headers,
+        raw[body_start..body_start + content_length].to_vec(),
+    )
+}
+
+async fn spawn_retry_observation_gateway(
     ca_key_pem: &str,
     ca_cert_pem: &str,
 ) -> (
@@ -172,6 +239,11 @@ async fn spawn_observation_gateway(
         .expect("observation listener");
     let address = listener.local_addr().expect("observation address");
     let task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("first retry connection");
+        let (method, uri, headers, body) = read_raw_request(&mut socket).await;
+        let _ = observe_request(&state, &method, &uri, &headers, &body).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        drop(socket);
         let _ = axum::serve(
             listener,
             Router::new()
@@ -229,17 +301,18 @@ fn stale_pre_dispatch_context_fails_closed_without_panicking() {
 }
 
 #[tokio::test]
-async fn each_actual_dispatch_refreshes_timestamp_but_preserves_idempotency() {
+async fn public_transport_retry_refreshes_timestamp_but_preserves_idempotency() {
     let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
         .expect("cluster CA");
     let (base_url, observations, applied_idempotencies, task) =
-        spawn_observation_gateway(&ca.key_pem, &ca.cert_pem).await;
+        spawn_retry_observation_gateway(&ca.key_pem, &ca.cert_pem).await;
+    let peer = peer_target_tests::primary_reverse_target(None, base_url);
     let request = MeshRequest {
         method: reqwest::Method::POST,
         path_and_query: "/api/admin/_internal/raft/client-write".to_owned(),
         content_type: Some("application/json".to_owned()),
         body: br#"{"op":"set"}"#.to_vec(),
-        total_budget: Duration::from_secs(2),
+        total_budget: Duration::from_secs(4),
         allow_ambiguous_fallback: true,
         request_id: "fresh-dispatch-idempotency".to_owned(),
         route: InternalRoute::MeshV2,
@@ -248,33 +321,10 @@ async fn each_actual_dispatch_refreshes_timestamp_but_preserves_idempotency() {
         updates_active_path: true,
     };
     let client = MeshAwareHttpClient::new(reqwest::Client::new());
-    let url = format!("{base_url}{}", request.path_and_query);
-
-    client
-        .send_public_signed(
-            &url,
-            &request,
-            xp_test_fixtures::primary_node_id(),
-            &ca.key_pem,
-            &ca.cert_pem,
-            Duration::from_secs(2),
-            false,
-        )
-        .await
-        .expect("first dispatch and acknowledgement");
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    client
-        .send_public_signed(
-            &url,
-            &request,
-            xp_test_fixtures::primary_node_id(),
-            &ca.key_pem,
-            &ca.cert_pem,
-            Duration::from_secs(2),
-            false,
-        )
-        .await
-        .expect("retry dispatch and acknowledgement");
+    let result = client
+        .send_peer_request(&peer, request, &ca.key_pem, &ca.cert_pem)
+        .await;
+    assert!(result.is_ok(), "transport retry should recover: {result:?}");
 
     let observations = observations.lock().await.clone();
     assert_eq!(observations.len(), 2);
@@ -286,6 +336,121 @@ async fn each_actual_dispatch_refreshes_timestamp_but_preserves_idempotency() {
     assert_ne!(observations[0].issued_at, observations[1].issued_at);
     assert_eq!(applied_idempotencies.lock().await.len(), 1);
     task.abort();
+}
+
+#[derive(Clone)]
+struct IssuedAtRelayState {
+    issued_at: Arc<Mutex<Vec<i64>>>,
+    stall: bool,
+}
+
+async fn record_issued_at_relay(
+    State(state): State<IssuedAtRelayState>,
+    headers: HeaderMap,
+) -> StatusCode {
+    let issued_at = headers
+        .get(crate::internal_auth::INTERNAL_ISSUED_AT_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .expect("reverse relay receives an issued-at header")
+        .parse::<i64>()
+        .expect("reverse relay issued-at header parses");
+    state.issued_at.lock().await.push(issued_at);
+    if state.stall {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    StatusCode::SERVICE_UNAVAILABLE
+}
+
+async fn spawn_issued_at_relay(stall: bool) -> (String, Arc<Mutex<Vec<i64>>>, JoinHandle<()>) {
+    let issued_at = Arc::new(Mutex::new(Vec::new()));
+    let state = IssuedAtRelayState {
+        issued_at: issued_at.clone(),
+        stall,
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("issued-at relay listener");
+    let address = listener.local_addr().expect("issued-at relay address");
+    let task = tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            Router::new()
+                .fallback(any(record_issued_at_relay))
+                .with_state(state),
+        )
+        .await;
+    });
+    (format!("http://{address}"), issued_at, task)
+}
+
+#[tokio::test]
+async fn reverse_public_fallback_refreshes_outer_signature_timestamp() {
+    let (mesh_base_url, mesh_issued_at, mesh_task) = spawn_issued_at_relay(true).await;
+    let (public_base_url, public_issued_at, public_task) = spawn_issued_at_relay(false).await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let rendezvous =
+        peer_target_tests::secondary_reverse_target(Some(mesh_base_url), public_base_url);
+    let peer = peer_target_tests::primary_reverse_target(None, "http://127.0.0.1:1".to_owned());
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    client
+        .set_reverse_route(
+            peer.node_id.clone(),
+            peer_target_tests::reverse_route(
+                rendezvous,
+                None,
+                peer_target_tests::reverse_assignment(),
+            ),
+        )
+        .await;
+
+    client
+        .send_peer_reverse_request(
+            &peer,
+            peer_target_tests::reverse_request(),
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await
+        .expect_err("relay responses omit signed acknowledgements");
+
+    let mesh_issued_at = mesh_issued_at.lock().await.clone();
+    let public_issued_at = public_issued_at.lock().await.clone();
+    assert_eq!(mesh_issued_at.len(), 1);
+    assert_eq!(public_issued_at.len(), 1);
+    assert_ne!(mesh_issued_at[0], public_issued_at[0]);
+    mesh_task.abort();
+    public_task.abort();
+}
+
+#[tokio::test]
+async fn invalid_reverse_target_is_not_reported_as_an_unknown_outcome() {
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let peer = peer_target_tests::primary_reverse_target(None, "http://127.0.0.1:1".to_owned());
+    let rendezvous = peer_target_tests::secondary_reverse_target(
+        Some("not-a-url".to_owned()),
+        "https://public.example".to_owned(),
+    );
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    client
+        .set_reverse_route(
+            peer.node_id.clone(),
+            peer_target_tests::reverse_route(
+                rendezvous,
+                None,
+                peer_target_tests::reverse_assignment(),
+            ),
+        )
+        .await;
+
+    let mut request = peer_target_tests::reverse_request();
+    request.allow_ambiguous_fallback = false;
+    let error = client
+        .send_peer_request(&peer, request, &ca.key_pem, &ca.cert_pem)
+        .await
+        .expect_err("invalid reverse target must fail before dispatch");
+    assert!(matches!(error, MeshRequestError::InvalidTarget(_)));
 }
 
 #[tokio::test]
