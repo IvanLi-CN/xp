@@ -12,7 +12,6 @@ import {
 } from "../api/adminNodeHistory";
 import {
 	type AdminNodeRuntimeDetailResponse,
-	type NodeRuntimeHistorySlot,
 	fetchAdminNodeRuntime,
 	startNodeRuntimeEvents,
 } from "../api/adminNodeRuntime";
@@ -88,6 +87,7 @@ import {
 	validateMihomoPrivateCidr,
 } from "../utils/mihomoPrivateCidr";
 import { formatQuotaBytesHuman } from "../utils/quota";
+import { NodeRuntimeActivityChart } from "./NodeRuntimeActivityChart";
 import { resourceListCache, syncNode } from "./adminEndpointsCache";
 import {
 	NodeDeleteOperationStatus,
@@ -96,7 +96,6 @@ import {
 import {
 	componentBadgeVariant,
 	eventBadgeVariant,
-	historySlotClass,
 	summaryBadgeVariant,
 } from "./nodeDetailsStatus";
 import {
@@ -104,8 +103,6 @@ import {
 	nodeQuotaDraftFromNode,
 	toNodeQuotaReset,
 } from "./nodeQuotaDraft";
-const SLOTS_PER_DAY = 48;
-const ACTIVITY_DAYS = 7;
 const quotaResetSchema = z
 	.object({
 		resetPolicy: z.enum(["monthly", "unlimited"]),
@@ -133,12 +130,6 @@ const quotaResetSchema = z
 	});
 type QuotaResetFormValues = z.infer<typeof quotaResetSchema>;
 type QuotaResetFormInput = z.input<typeof quotaResetSchema>;
-type RuntimeActivityRow = {
-	key: string;
-	label: string;
-	sortKey: number;
-	slots: Array<NodeRuntimeHistorySlot | null>;
-};
 type NodeDetailsTab =
 	| "resources"
 	| "runtime"
@@ -159,67 +150,6 @@ const NODE_DETAILS_TAB_OPTIONS: Array<{
 	{ value: "tcpConnections", label: "TCP connections" },
 	{ value: "settings", label: "Node settings" },
 ];
-function buildRuntimeActivityRows(
-	recentSlots: NodeRuntimeHistorySlot[],
-): RuntimeActivityRow[] {
-	const byDay = new Map<string, RuntimeActivityRow>();
-	for (const slot of recentSlots) {
-		const at = new Date(slot.slot_start);
-		if (Number.isNaN(at.getTime())) continue;
-		const dayStart = new Date(at.getFullYear(), at.getMonth(), at.getDate());
-		const month = String(dayStart.getMonth() + 1).padStart(2, "0");
-		const day = String(dayStart.getDate()).padStart(2, "0");
-		const key = `${dayStart.getFullYear()}-${month}-${day}`;
-
-		let row = byDay.get(key);
-		if (!row) {
-			row = {
-				key,
-				sortKey: dayStart.getTime(),
-				label: dayStart.toLocaleDateString(undefined, {
-					month: "numeric",
-					day: "numeric",
-					weekday: "short",
-				}),
-				slots: new Array(SLOTS_PER_DAY).fill(null),
-			};
-			byDay.set(key, row);
-		}
-
-		const slotIndex = at.getHours() * 2 + (at.getMinutes() >= 30 ? 1 : 0);
-		if (slotIndex >= 0 && slotIndex < SLOTS_PER_DAY) {
-			row.slots[slotIndex] = slot;
-		}
-	}
-
-	const rows = Array.from(byDay.values()).sort((a, b) => a.sortKey - b.sortKey);
-	if (rows.length > 0) {
-		return rows.slice(-ACTIVITY_DAYS);
-	}
-
-	const fallbackRows: RuntimeActivityRow[] = [];
-	const fallbackSlots = recentSlots.slice(-SLOTS_PER_DAY * ACTIVITY_DAYS);
-	for (let dayIndex = 0; dayIndex < ACTIVITY_DAYS; dayIndex += 1) {
-		const sliceStart = dayIndex * SLOTS_PER_DAY;
-		const daySlots = fallbackSlots.slice(
-			sliceStart,
-			sliceStart + SLOTS_PER_DAY,
-		);
-		if (daySlots.length === 0) continue;
-		fallbackRows.push({
-			key: `fallback-${dayIndex}`,
-			label: `day ${dayIndex + 1}`,
-			sortKey: dayIndex,
-			slots: [
-				...daySlots,
-				...new Array(Math.max(0, SLOTS_PER_DAY - daySlots.length)).fill(null),
-			],
-		});
-	}
-
-	return fallbackRows;
-}
-
 function formatTime(value: string | null | undefined): string {
 	if (!value) return "-";
 	const dt = new Date(value);
@@ -1110,67 +1040,9 @@ export function NodeDetailsPage() {
 												</span>
 											</div>
 										</div>
-										<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
-											<div className="overflow-x-auto">
-												<div className="min-w-[28rem]">
-													<div
-														className="mb-1 grid items-center gap-2 text-xs text-muted-foreground"
-														style={{
-															gridTemplateColumns: "4.5rem minmax(0,1fr)",
-														}}
-													>
-														<span />
-														<div className="flex items-center justify-between">
-															<span>00:00</span>
-															<span>06:00</span>
-															<span>12:00</span>
-															<span>18:00</span>
-															<span>24:00</span>
-														</div>
-													</div>
-													<div className="space-y-1.5">
-														{buildRuntimeActivityRows(runtime.recent_slots).map(
-															(row) => (
-																<div
-																	key={row.key}
-																	className="grid items-center gap-2"
-																	style={{
-																		gridTemplateColumns: "4.5rem minmax(0,1fr)",
-																	}}
-																>
-																	<span className="truncate font-mono text-xs text-muted-foreground">
-																		{row.label}
-																	</span>
-																	<div
-																		className="grid h-3 min-w-0 gap-px"
-																		style={{
-																			gridTemplateColumns:
-																				"repeat(48, minmax(0, 1fr))",
-																		}}
-																	>
-																		{row.slots.map((slot, index) => (
-																			<div
-																				key={`${row.key}-${index}`}
-																				className={`rounded-[1px] ${
-																					slot
-																						? historySlotClass(slot.status)
-																						: "bg-muted/60"
-																				}`}
-																				title={
-																					slot
-																						? `${slot.slot_start} • ${slot.status}`
-																						: undefined
-																				}
-																			/>
-																		))}
-																	</div>
-																</div>
-															),
-														)}
-													</div>
-												</div>
-											</div>
-										</div>
+										<NodeRuntimeActivityChart
+											recentSlots={runtime.recent_slots}
+										/>
 									</div>
 
 									<div className="space-y-2">
