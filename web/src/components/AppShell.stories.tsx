@@ -7,8 +7,35 @@ const meta: Meta<typeof AppShell> = {
 	title: "Components/AppShell",
 	component: AppShell,
 	tags: ["autodocs", "coverage-ui"],
+	parameters: {
+		viewport: {
+			defaultViewport: "appShellMobile393",
+			viewports: {
+				appShellMobile320: {
+					name: "AppShell mobile (320x852)",
+					styles: { height: "852px", width: "320px" },
+					type: "mobile",
+				},
+				appShellMobile360: {
+					name: "AppShell mobile (360x800)",
+					styles: { height: "800px", width: "360px" },
+					type: "mobile",
+				},
+				appShellMobile393: {
+					name: "AppShell mobile (393x852)",
+					styles: { height: "852px", width: "393px" },
+					type: "mobile",
+				},
+				appShellDesktop1280: {
+					name: "AppShell desktop (1280x900)",
+					styles: { height: "900px", width: "1280px" },
+					type: "desktop",
+				},
+			},
+		},
+	},
 	args: {
-		brand: { name: "xp", subtitle: "cluster manager" },
+		brand: { name: "xp", subtitle: "cluster manager", logo: "xp-lockup" },
 		navItems: [
 			{ label: "Dashboard", to: "/", icon: "tabler:layout-dashboard" },
 			{ label: "Nodes", to: "/nodes", icon: "tabler:server" },

@@ -107,7 +107,7 @@ ADR 0012 and does not alter this embedded-PWA contract.
 - source_type: storybook_canvas
   target_program: mock-only
   capture_scope: element
-  requested_viewport: 1280x720
+  requested_viewport: 1280x900
   viewport_strategy: storybook-viewport
   margin_policy: require_margin
   evidence_surface: component
@@ -116,8 +116,8 @@ ADR 0012 and does not alter this embedded-PWA contract.
   sensitive_exclusion: N/A
   submission_gate: approved
   story_id_or_title: Components/AppShell/Default
-  state: AppShell header, primary backend is the rightmost control, desktop
-  evidence_note: verifies Status -> Settings -> Primary backend ordering in the dark theme.
+  state: AppShell header with the XP lockup, primary backend is the rightmost control, desktop
+  evidence_note: verifies single-row layout and Status -> Settings -> Primary backend order.
   image:
   ![Desktop header](./assets/app-shell-header-desktop-primary-right.png)
 
@@ -133,7 +133,7 @@ ADR 0012 and does not alter this embedded-PWA contract.
   sensitive_exclusion: N/A
   submission_gate: approved
   story_id_or_title: Components/AppShell/Default
-  state: AppShell header, primary backend is the rightmost control, 393x852 narrow viewport
-  evidence_note: verifies right-edge ordering without overlap.
+  state: AppShell header with XP lockup and rightmost primary backend, 393x852 mobile
+  evidence_note: verifies two-row layout, touch-sized controls, and right-edge ordering.
   image:
   ![Mobile header](./assets/app-shell-header-mobile-primary-right.png)

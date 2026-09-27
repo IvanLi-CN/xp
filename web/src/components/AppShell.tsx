@@ -753,8 +753,8 @@ export function AppShell({
 					} flex-col gap-2.5 sm:gap-4`}
 				>
 					<header className="xp-panel px-2 py-2 sm:px-4 sm:py-3">
-						<div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 sm:gap-4">
-							<div className="flex min-w-0 items-center gap-3">
+						<div className="grid w-full grid-cols-1 items-center gap-2 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:gap-4">
+							<div className="flex min-w-0 items-center gap-3 lg:col-start-1 lg:row-start-1">
 								<Button
 									variant="ghost"
 									size="sm"
@@ -791,7 +791,7 @@ export function AppShell({
 								</Link>
 							</div>
 
-							<div className="hidden items-center justify-center lg:flex">
+							<div className="hidden items-center justify-center lg:col-start-2 lg:row-start-1 lg:flex">
 								<div className="relative w-full max-w-md">
 									<button
 										type="button"
@@ -813,7 +813,7 @@ export function AppShell({
 								</div>
 							</div>
 
-							<div className="flex items-center justify-end gap-1 sm:gap-2">
+							<div className="flex items-center justify-end gap-1 sm:gap-2 lg:col-start-3 lg:row-start-1">
 								<div className="flex items-center gap-1 sm:gap-2">
 									<span className="hidden items-center sm:inline-flex">
 										{globalReadStateIndicator}
@@ -835,7 +835,7 @@ export function AppShell({
 											<span className="hidden sm:inline">Status</span>
 										</Button>
 									</DropdownMenuTrigger>
-									<DropdownMenuContent align="end" className="w-80 p-3">
+									<DropdownMenuContent align="end" className="xp-menu-content">
 										<DropdownMenuLabel className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
 											Status
 										</DropdownMenuLabel>
@@ -856,7 +856,7 @@ export function AppShell({
 											<span className="hidden sm:inline">Settings</span>
 										</Button>
 									</DropdownMenuTrigger>
-									<DropdownMenuContent align="end" className="w-80 p-3">
+									<DropdownMenuContent align="end" className="xp-menu-content">
 										<DropdownMenuLabel className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
 											Theme
 										</DropdownMenuLabel>
@@ -982,7 +982,7 @@ export function AppShell({
 			<Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
 				<SheetContent
 					side="left"
-					className="flex w-[20rem] flex-col gap-4 p-4 sm:max-w-[20rem]"
+					className="flex w-[min(20rem,calc(100vw-1rem))] flex-col gap-4 p-4 sm:max-w-[20rem]"
 				>
 					<SheetHeader>
 						<SheetTitle>{brand.name}</SheetTitle>
