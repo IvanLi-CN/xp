@@ -1,5 +1,93 @@
 use super::*;
 
+#[derive(Debug)]
+pub(crate) enum SignedSendError {
+    PreDispatch(MeshRequestError),
+    Transport(reqwest::Error),
+}
+
+pub(crate) async fn signed_send(
+    client: &reqwest::Client,
+    url: &str,
+    request: &MeshRequest,
+    target_id: &str,
+    cluster_ca_key_pem: &str,
+    cluster_ca_cert_pem: &str,
+) -> Result<(reqwest::Response, internal_auth::VerifiedRequest), SignedSendError> {
+    let context = RequestContext::now(
+        request.route,
+        request.cluster_id.clone(),
+        request.sender_id.clone(),
+        target_id.to_string(),
+        request.request_id.clone(),
+    );
+    let (headers, verified) =
+        signed_headers(request, &context, cluster_ca_key_pem, cluster_ca_cert_pem)
+            .map_err(SignedSendError::PreDispatch)?;
+    let mut builder = client
+        .request(request.method.clone(), url)
+        .body(request.body.clone());
+    for (name, value) in &headers {
+        builder = builder.header(name, value);
+    }
+    let response = builder.send().await.map_err(SignedSendError::Transport)?;
+    Ok((response, verified))
+}
+
+pub(crate) fn signed_headers(
+    request: &MeshRequest,
+    context: &RequestContext,
+    cluster_ca_key_pem: &str,
+    cluster_ca_cert_pem: &str,
+) -> Result<(axum::http::HeaderMap, internal_auth::VerifiedRequest), MeshRequestError> {
+    let uri = request
+        .path_and_query
+        .parse::<axum::http::Uri>()
+        .map_err(|error| MeshRequestError::InvalidTarget(error.to_string()))?;
+    let mut headers = axum::http::HeaderMap::new();
+    if let Some(content_type) = request.content_type.as_deref() {
+        headers.insert(
+            "content-type",
+            content_type
+                .parse()
+                .map_err(|_| MeshRequestError::InvalidTarget("invalid content type".into()))?,
+        );
+    }
+    headers.insert(
+        "content-length",
+        request
+            .body
+            .len()
+            .to_string()
+            .parse()
+            .map_err(|_| MeshRequestError::InvalidTarget("invalid content length".into()))?,
+    );
+    // Signing failures are malformed local inputs, not network errors.
+    internal_auth::sign_request_v2(
+        cluster_ca_key_pem,
+        cluster_ca_cert_pem,
+        &request.method,
+        &uri,
+        request.content_type.as_deref(),
+        &request.body,
+        context,
+        &mut headers,
+    )
+    .map_err(MeshRequestError::PreDispatchAuth)?;
+    let verified = internal_auth::verify_request_v2(
+        cluster_ca_key_pem,
+        cluster_ca_cert_pem,
+        &request.method,
+        &uri,
+        &headers,
+        &request.body,
+        &context.cluster_id,
+        &context.target_id,
+    )
+    .map_err(MeshRequestError::PreDispatchAuth)?;
+    Ok((headers, verified))
+}
+
 const PUBLIC_GATEWAY_RETRY_DELAYS: [Duration; 2] =
     [Duration::from_millis(200), Duration::from_millis(500)];
 
@@ -19,7 +107,7 @@ pub(super) async fn signed_send_with_public_gateway_retries(
     client: &reqwest::Client,
     url: &str,
     request: &MeshRequest,
-    context: &RequestContext,
+    target_id: &str,
     cluster_ca_key_pem: &str,
     cluster_ca_cert_pem: &str,
     budget: Duration,
@@ -44,7 +132,7 @@ pub(super) async fn signed_send_with_public_gateway_retries(
                 client,
                 url,
                 request,
-                context,
+                target_id,
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
             ),
@@ -52,7 +140,8 @@ pub(super) async fn signed_send_with_public_gateway_retries(
         .await;
         let (response, verified) = match sent {
             Ok(Ok(result)) => result,
-            Ok(Err(error)) => {
+            Ok(Err(SignedSendError::PreDispatch(error))) => return Err(error),
+            Ok(Err(SignedSendError::Transport(error))) => {
                 confirmed_timeout |= error.is_timeout() && !error.is_connect();
                 if allow_retry
                     && is_retryable_public_transport_error(&error)

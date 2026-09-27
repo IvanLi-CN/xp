@@ -411,7 +411,11 @@ impl MeshAwareHttpClient {
                 {
                     return Err(error);
                 }
-                Err(error @ (MeshRequestError::Auth(_) | MeshRequestError::Protocol(_))) => {
+                Err(
+                    error @ (MeshRequestError::PreDispatchAuth(_)
+                    | MeshRequestError::Auth(_)
+                    | MeshRequestError::Protocol(_)),
+                ) => {
                     return Err(error);
                 }
                 Err(error) => last_error = Some(error),

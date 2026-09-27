@@ -100,7 +100,6 @@ impl MeshAwareHttpClient {
         &self,
         peer: &MeshPeerTarget,
         request: &MeshRequest,
-        context: &RequestContext,
         mesh_url: &str,
         budget: Duration,
         mesh_epoch: u64,
@@ -119,7 +118,7 @@ impl MeshAwareHttpClient {
                         &self.mesh,
                         mesh_url,
                         request,
-                        context,
+                        &peer.node_id,
                         cluster_ca_key_pem,
                         cluster_ca_cert_pem,
                     ),
@@ -231,7 +230,13 @@ impl MeshAwareHttpClient {
                     )
                     .await)
             }
-            Some((Ok(Err(error)), gate_guard)) => {
+            Some((Ok(Err(SignedSendError::PreDispatch(error))), gate_guard)) => {
+                drop(gate_guard);
+                self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
+                    .await;
+                Err(error)
+            }
+            Some((Ok(Err(SignedSendError::Transport(error))), gate_guard)) => {
                 drop(gate_guard);
                 self.record_mesh_transport_failure(
                     peer,
@@ -475,11 +480,13 @@ impl MeshAwareHttpClient {
         }
         if let Err(error) = &result {
             let validation_state = match error {
+                MeshRequestError::PreDispatchAuth(_)
+                | MeshRequestError::InvalidTarget(_)
+                | MeshRequestError::CircuitOpen { .. } => {
+                    return result;
+                }
                 MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => {
                     DirectValidationState::ProtocolRejected
-                }
-                MeshRequestError::InvalidTarget(_) | MeshRequestError::CircuitOpen { .. } => {
-                    return result;
                 }
                 _ => DirectValidationState::TransportFailed,
             };

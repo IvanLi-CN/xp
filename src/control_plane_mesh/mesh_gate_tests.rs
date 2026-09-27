@@ -378,6 +378,87 @@ async fn stale_epoch_transport_failure_does_not_overwrite_current_validation() {
 }
 
 #[tokio::test]
+async fn direct_pre_dispatch_auth_failure_does_not_charge_peer() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
+    let peer = primary_reverse_target(
+        Some("http://127.0.0.1:1".to_owned()),
+        "https://public.example".to_owned(),
+    );
+    let error = client
+        .send_peer_direct_preflight(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: false,
+                request_id: "direct-pre-dispatch-auth".to_owned(),
+                route: InternalRoute::HealthV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+                sender_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+                updates_active_path: false,
+            },
+            "invalid-key",
+            "invalid-cert",
+        )
+        .await
+        .expect_err("local signing failure should stop before Direct dispatch");
+
+    assert!(matches!(error, MeshRequestError::PreDispatchAuth(_)));
+    assert_eq!(
+        client.circuits().state(&peer.node_id, true).await,
+        BreakerState::Closed
+    );
+    assert_eq!(
+        client.direct_validation_state_for(&peer).await,
+        DirectValidationState::ConfiguredUnverified
+    );
+    assert_eq!(
+        client.circuits().before_attempt(&peer.node_id, true).await,
+        MeshAttemptDecision::Attempt
+    );
+}
+
+#[tokio::test]
+async fn public_pre_dispatch_auth_failure_does_not_charge_peer() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    let peer = primary_reverse_target(None, "https://public.example".to_owned());
+    let error = client
+        .send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::POST,
+                path_and_query: "/api/admin/_internal/raft/client-write".to_owned(),
+                content_type: Some("application/json".to_owned()),
+                body: br#"{"op":"set"}"#.to_vec(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: true,
+                request_id: "public-pre-dispatch-auth".to_owned(),
+                route: InternalRoute::MeshV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+                sender_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+                updates_active_path: true,
+            },
+            "invalid-key",
+            "invalid-cert",
+        )
+        .await
+        .expect_err("local signing failure should stop before Public dispatch");
+
+    assert!(matches!(error, MeshRequestError::PreDispatchAuth(_)));
+    assert_eq!(
+        client.circuits().public_state(&peer.node_id).await,
+        BreakerState::Closed
+    );
+    assert_eq!(
+        client.circuits().before_public_attempt(&peer.node_id).await,
+        MeshAttemptDecision::Attempt
+    );
+}
+
+#[tokio::test]
 async fn invalid_public_target_releases_half_open_probe() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new());
     let mut peer = primary_reverse_target(None, "not-a-url".to_owned());

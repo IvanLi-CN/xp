@@ -10,6 +10,8 @@
 - The canonical request covers version, route, uppercase method, raw URI,
   content type, body length, body SHA-256, cluster, sender, target,
   request ID and issued-at.
+- The sender creates a fresh issued-at and signature immediately before every actual dispatch,
+  including each bounded retry; pre-send admission or wait time must not age a request signature.
 - The receiver requires timestamp skew within 120 seconds, a matching cluster
   and target, a current sender member and a valid HMAC.
 - Durable idempotency binds `request_id` to the authenticated semantic request
@@ -28,6 +30,8 @@
 - Accepted responses carry `X-XP-Internal-Ack`.
 - The ack binds request ID, the SHA-256 digest of the full canonical request, issued-at,
   responder ID and status.
+- A sender verifies an acknowledgement against the `VerifiedRequest` returned by that actual
+  dispatch, so a retry's fresh issued-at is part of the acknowledgement binding.
 - Response bodies and SSE rely on the trusted TLS termination boundary.
 
 ## Authorization
@@ -36,3 +40,5 @@
 - Normal `/api/admin/*` requires administrator Bearer auth.
 - Literal v1 authentication is rejected after cutover.
 - There is no nonce header or nonce cache.
+- A local signing or self-verification failure before dispatch fails closed, releases any
+  half-open admission slot, and does not charge a peer circuit or trigger a transport fallback.

@@ -11,7 +11,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use tokio::task::JoinHandle;
+use tokio::{sync::Mutex, task::JoinHandle};
 
 #[derive(Clone)]
 struct GatewayState {
@@ -92,6 +92,202 @@ async fn spawn_gateway(
     });
     (format!("http://{address}"), requests, task)
 }
+
+#[derive(Debug, Clone)]
+struct AttemptObservation {
+    request_id: String,
+    issued_at: i64,
+    idempotency_sha256: String,
+}
+
+#[derive(Clone)]
+struct ObservationGatewayState {
+    ca_key_pem: String,
+    ca_cert_pem: String,
+    observations: Arc<Mutex<Vec<AttemptObservation>>>,
+    applied_idempotencies: Arc<Mutex<Vec<String>>>,
+}
+
+async fn observation_gateway(
+    State(state): State<ObservationGatewayState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let verified = crate::internal_auth::verify_request_v2(
+        &state.ca_key_pem,
+        &state.ca_cert_pem,
+        &method,
+        &uri,
+        &headers,
+        &body,
+        xp_test_fixtures::cluster_fixture53(),
+        xp_test_fixtures::primary_node_id(),
+    )
+    .expect("observed dispatch receives a fresh valid signature");
+    state.observations.lock().await.push(AttemptObservation {
+        request_id: verified.context.request_id.clone(),
+        issued_at: verified.context.issued_at,
+        idempotency_sha256: verified.idempotency_sha256.clone(),
+    });
+    let mut applied = state.applied_idempotencies.lock().await;
+    if !applied.contains(&verified.idempotency_sha256) {
+        applied.push(verified.idempotency_sha256.clone());
+    }
+    let acknowledgement = crate::internal_auth::sign_ack_v2(
+        &state.ca_key_pem,
+        &state.ca_cert_pem,
+        &verified,
+        xp_test_fixtures::primary_node_id(),
+        StatusCode::NO_CONTENT.as_u16(),
+    )
+    .expect("observation acknowledgement");
+    Response::builder()
+        .status(StatusCode::NO_CONTENT)
+        .header(crate::internal_auth::INTERNAL_ACK_HEADER, acknowledgement)
+        .body(axum::body::Body::empty())
+        .expect("observation response")
+}
+
+async fn spawn_observation_gateway(
+    ca_key_pem: &str,
+    ca_cert_pem: &str,
+) -> (
+    String,
+    Arc<Mutex<Vec<AttemptObservation>>>,
+    Arc<Mutex<Vec<String>>>,
+    JoinHandle<()>,
+) {
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    let applied_idempotencies = Arc::new(Mutex::new(Vec::new()));
+    let state = ObservationGatewayState {
+        ca_key_pem: ca_key_pem.to_owned(),
+        ca_cert_pem: ca_cert_pem.to_owned(),
+        observations: observations.clone(),
+        applied_idempotencies: applied_idempotencies.clone(),
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("observation listener");
+    let address = listener.local_addr().expect("observation address");
+    let task = tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            Router::new()
+                .fallback(any(observation_gateway))
+                .with_state(state),
+        )
+        .await;
+    });
+    (
+        format!("http://{address}"),
+        observations,
+        applied_idempotencies,
+        task,
+    )
+}
+
+#[test]
+fn stale_pre_dispatch_context_fails_closed_without_panicking() {
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let request = MeshRequest {
+        method: reqwest::Method::GET,
+        path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
+        content_type: None,
+        body: Vec::new(),
+        total_budget: Duration::from_secs(1),
+        allow_ambiguous_fallback: false,
+        request_id: "stale-pre-dispatch-context".to_owned(),
+        route: InternalRoute::HealthV2,
+        cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+        sender_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+        updates_active_path: false,
+    };
+    let mut context = RequestContext::now(
+        request.route,
+        request.cluster_id.clone(),
+        request.sender_id.clone(),
+        xp_test_fixtures::primary_node_id(),
+        request.request_id.clone(),
+    );
+    context.issued_at = context
+        .issued_at
+        .saturating_sub(crate::internal_auth::AUTH_WINDOW_SECS + 1);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        signed_headers(&request, &context, &ca.key_pem, &ca.cert_pem)
+    }))
+    .expect("stale local auth must not panic");
+    assert!(matches!(
+        result,
+        Err(MeshRequestError::PreDispatchAuth(
+            crate::internal_auth::AuthError::Invalid(message)
+        )) if message == "request signature is outside the accepted clock window"
+    ));
+}
+
+#[tokio::test]
+async fn each_actual_dispatch_refreshes_timestamp_but_preserves_idempotency() {
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let (base_url, observations, applied_idempotencies, task) =
+        spawn_observation_gateway(&ca.key_pem, &ca.cert_pem).await;
+    let request = MeshRequest {
+        method: reqwest::Method::POST,
+        path_and_query: "/api/admin/_internal/raft/client-write".to_owned(),
+        content_type: Some("application/json".to_owned()),
+        body: br#"{"op":"set"}"#.to_vec(),
+        total_budget: Duration::from_secs(2),
+        allow_ambiguous_fallback: true,
+        request_id: "fresh-dispatch-idempotency".to_owned(),
+        route: InternalRoute::MeshV2,
+        cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+        sender_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+        updates_active_path: true,
+    };
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    let url = format!("{base_url}{}", request.path_and_query);
+
+    client
+        .send_public_signed(
+            &url,
+            &request,
+            xp_test_fixtures::primary_node_id(),
+            &ca.key_pem,
+            &ca.cert_pem,
+            Duration::from_secs(2),
+            false,
+        )
+        .await
+        .expect("first dispatch and acknowledgement");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    client
+        .send_public_signed(
+            &url,
+            &request,
+            xp_test_fixtures::primary_node_id(),
+            &ca.key_pem,
+            &ca.cert_pem,
+            Duration::from_secs(2),
+            false,
+        )
+        .await
+        .expect("retry dispatch and acknowledgement");
+
+    let observations = observations.lock().await.clone();
+    assert_eq!(observations.len(), 2);
+    assert_eq!(observations[0].request_id, observations[1].request_id);
+    assert_eq!(
+        observations[0].idempotency_sha256,
+        observations[1].idempotency_sha256
+    );
+    assert_ne!(observations[0].issued_at, observations[1].issued_at);
+    assert_eq!(applied_idempotencies.lock().await.len(), 1);
+    task.abort();
+}
+
 #[tokio::test]
 async fn public_gateway_missing_ack_is_terminal_without_retry() {
     let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())

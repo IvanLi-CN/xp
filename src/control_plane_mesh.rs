@@ -36,6 +36,7 @@ pub use error::MeshRequestError;
 pub(crate) use request::CapabilityProbeResponse;
 use request::PeerRequestResponse;
 pub use request::{MeshRequest, PeerDirectPath};
+pub(super) use retry::{SignedSendError, signed_headers, signed_send};
 #[cfg(test)]
 pub(crate) use transport::build_mesh_http_client_with_policy;
 pub(crate) use transport::build_unauthenticated_mesh_http_client;
@@ -51,6 +52,7 @@ pub const MESH_BACKOFF: [Duration; 5] = [
 ];
 pub const DIRECT_VALIDATION_TTL: Duration = Duration::from_secs(5 * 60);
 const LEGACY_CAPABILITIES_PROBE_PATH: &str = "/api/admin/_internal/capabilities";
+
 #[derive(Debug, Clone)]
 pub struct MeshPeerTarget {
     pub node_id: String,
@@ -342,13 +344,6 @@ impl MeshAwareHttpClient {
             &request.path_and_query,
             path == PeerDirectPath::ApiBaseUrl,
         )?;
-        let context = RequestContext::now(
-            request.route,
-            request.cluster_id.clone(),
-            request.sender_id.clone(),
-            peer.node_id.clone(),
-            request.request_id.clone(),
-        );
         let client = match path {
             PeerDirectPath::RealityMesh => &self.mesh,
             PeerDirectPath::ApiBaseUrl => &self.public_direct,
@@ -357,7 +352,7 @@ impl MeshAwareHttpClient {
             client,
             &url,
             &request,
-            &context,
+            &peer.node_id,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
             request.total_budget,
@@ -466,13 +461,6 @@ impl MeshAwareHttpClient {
         public_fallback_policy: gate::PublicFallbackPolicy,
     ) -> Result<PeerRequestResponse, MeshRequestError> {
         let started = Instant::now();
-        let context = RequestContext::now(
-            request.route,
-            request.cluster_id.clone(),
-            request.sender_id.clone(),
-            peer.node_id.clone(),
-            request.request_id.clone(),
-        );
         let cluster_mesh_enabled = self.observe_mesh_gate().await;
         #[cfg(test)]
         if let Some((observed, release)) = &self.mesh_observation_pause {
@@ -546,7 +534,6 @@ impl MeshAwareHttpClient {
                 .attempt_mesh_request(
                     peer,
                     &request,
-                    &context,
                     &mesh_url,
                     budget,
                     mesh_epoch,
@@ -647,6 +634,9 @@ impl MeshAwareHttpClient {
                             self.record_terminal_failure(peer).await;
                             return Err(error);
                         }
+                        if matches!(error, MeshRequestError::PreDispatchAuth(_)) {
+                            return Err(error);
+                        }
                         if matches!(
                             error,
                             MeshRequestError::Auth(_) | MeshRequestError::Protocol(_)
@@ -741,7 +731,7 @@ impl MeshAwareHttpClient {
             .send_public_signed(
                 &public_url,
                 &request,
-                &context,
+                &peer.node_id,
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
                 remaining,
@@ -750,6 +740,14 @@ impl MeshAwareHttpClient {
             .await
         {
             Ok(response) => response,
+            Err(
+                error @ (MeshRequestError::PreDispatchAuth(_) | MeshRequestError::InvalidTarget(_)),
+            ) => {
+                self.circuits
+                    .release_public_half_open_probe(&peer.node_id)
+                    .await;
+                return Err(error);
+            }
             Err(error) => {
                 let public_breaker = self.circuits.record_public_failure(&peer.node_id).await;
                 if let Some(telemetry) = &self.telemetry {
@@ -805,7 +803,7 @@ impl MeshAwareHttpClient {
         &self,
         url: &str,
         request: &MeshRequest,
-        context: &RequestContext,
+        target_id: &str,
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
         budget: Duration,
@@ -815,7 +813,7 @@ impl MeshAwareHttpClient {
             &self.public_direct,
             url,
             request,
-            context,
+            target_id,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
             budget,
@@ -840,7 +838,7 @@ impl MeshAwareHttpClient {
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
             &verified,
-            &context.target_id,
+            target_id,
             response.status().as_u16(),
             ack,
         ) {
@@ -896,7 +894,7 @@ impl MeshAwareHttpClient {
             &inner_context,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
-        );
+        )?;
         let inner_signature = inner_headers
             .get(internal_auth::INTERNAL_SIGNATURE_HEADER)
             .and_then(|value| value.to_str().ok())
@@ -912,7 +910,7 @@ impl MeshAwareHttpClient {
             route: request.route.as_str().to_string(),
             sender_node_id: request.sender_id.clone(),
             request_id: request.request_id.clone(),
-            issued_at: inner_context.issued_at,
+            issued_at: inner_verified.context.issued_at,
             content_length: request.body.len(),
             reverse_authority,
             inner_signature: inner_signature.to_string(),
@@ -945,7 +943,7 @@ impl MeshAwareHttpClient {
             &outer_context,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
-        );
+        )?;
         envelope
             .insert_headers(&mut outer_headers)
             .map_err(|error| MeshRequestError::Reverse(error.to_string()))?;
@@ -1109,77 +1107,6 @@ fn direct_mesh_is_eligible(
         && validation == DirectValidationState::Verified
 }
 
-async fn signed_send(
-    client: &reqwest::Client,
-    url: &str,
-    request: &MeshRequest,
-    context: &RequestContext,
-    cluster_ca_key_pem: &str,
-    cluster_ca_cert_pem: &str,
-) -> Result<(reqwest::Response, internal_auth::VerifiedRequest), reqwest::Error> {
-    let (headers, verified) =
-        signed_headers(request, context, cluster_ca_key_pem, cluster_ca_cert_pem);
-    let mut builder = client
-        .request(request.method.clone(), url)
-        .body(request.body.clone());
-    for (name, value) in &headers {
-        builder = builder.header(name, value);
-    }
-    let response = builder.send().await?;
-    Ok((response, verified))
-}
-
-fn signed_headers(
-    request: &MeshRequest,
-    context: &RequestContext,
-    cluster_ca_key_pem: &str,
-    cluster_ca_cert_pem: &str,
-) -> (axum::http::HeaderMap, internal_auth::VerifiedRequest) {
-    let uri = request
-        .path_and_query
-        .parse::<axum::http::Uri>()
-        .expect("validated request path");
-    let mut headers = axum::http::HeaderMap::new();
-    if let Some(content_type) = request.content_type.as_deref() {
-        headers.insert(
-            "content-type",
-            content_type.parse().expect("valid content type"),
-        );
-    }
-    headers.insert(
-        "content-length",
-        request
-            .body
-            .len()
-            .to_string()
-            .parse()
-            .expect("valid content length"),
-    );
-    // Signing failures are malformed local inputs, not network errors.
-    internal_auth::sign_request_v2(
-        cluster_ca_key_pem,
-        cluster_ca_cert_pem,
-        &request.method,
-        &uri,
-        request.content_type.as_deref(),
-        &request.body,
-        context,
-        &mut headers,
-    )
-    .expect("validated internal request context");
-    let verified = internal_auth::verify_request_v2(
-        cluster_ca_key_pem,
-        cluster_ca_cert_pem,
-        &request.method,
-        &uri,
-        &headers,
-        &request.body,
-        &context.cluster_id,
-        &context.target_id,
-    )
-    .expect("locally signed internal request verifies");
-    (headers, verified)
-}
 #[cfg(test)]
 mod mesh_fallback_tests;
 #[cfg(test)]
