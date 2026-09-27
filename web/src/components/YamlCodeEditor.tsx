@@ -4,6 +4,8 @@ import CodeMirror from "@uiw/react-codemirror";
 import type { EditorView } from "@uiw/react-codemirror";
 import { type ReactNode, useId, useMemo } from "react";
 
+import { cn } from "@/lib/utils";
+
 import { EditorShortcutHint } from "./EditorShortcutHint";
 import { useUiPrefsOptional } from "./UiPrefs";
 import { textareaClass } from "./ui-helpers";
@@ -86,7 +88,7 @@ export function YamlCodeEditor({
 	}
 
 	return (
-		<div className="space-y-2">
+		<div className="min-w-0 max-w-full space-y-2">
 			<span
 				className={
 					hideLabel ? "sr-only" : "text-sm font-medium text-foreground"
@@ -95,7 +97,12 @@ export function YamlCodeEditor({
 			>
 				{label}
 			</span>
-			<div className="overflow-hidden rounded-2xl border border-border bg-background">
+			<div
+				className={cn(
+					"min-w-0 max-w-full overflow-hidden",
+					"rounded-2xl border border-border bg-background",
+				)}
+			>
 				<CodeMirror
 					value={value}
 					height={editorHeight}
@@ -108,7 +115,7 @@ export function YamlCodeEditor({
 					onChange={(nextValue) => onChange(nextValue)}
 					onCreateEditor={(view) => onCreateEditor?.(view)}
 					aria-labelledby={labelId}
-					className="text-sm font-mono"
+					className="min-w-0 max-w-full text-sm font-mono"
 				/>
 			</div>
 			{resolvedHelperText ? (
