@@ -106,6 +106,7 @@ struct ObservationGatewayState {
     ca_cert_pem: String,
     observations: Arc<Mutex<Vec<AttemptObservation>>>,
     applied_idempotencies: Arc<Mutex<Vec<String>>>,
+    applied_mutations: Arc<AtomicUsize>,
 }
 
 async fn observation_gateway(
@@ -157,6 +158,7 @@ async fn observe_request(
     let mut applied = state.applied_idempotencies.lock().await;
     if !applied.contains(&verified.idempotency_sha256) {
         applied.push(verified.idempotency_sha256.clone());
+        state.applied_mutations.fetch_add(1, Ordering::SeqCst);
     }
     verified
 }
@@ -224,15 +226,18 @@ async fn spawn_retry_observation_gateway(
     String,
     Arc<Mutex<Vec<AttemptObservation>>>,
     Arc<Mutex<Vec<String>>>,
+    Arc<AtomicUsize>,
     JoinHandle<()>,
 ) {
     let observations = Arc::new(Mutex::new(Vec::new()));
     let applied_idempotencies = Arc::new(Mutex::new(Vec::new()));
+    let applied_mutations = Arc::new(AtomicUsize::new(0));
     let state = ObservationGatewayState {
         ca_key_pem: ca_key_pem.to_owned(),
         ca_cert_pem: ca_cert_pem.to_owned(),
         observations: observations.clone(),
         applied_idempotencies: applied_idempotencies.clone(),
+        applied_mutations: applied_mutations.clone(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -256,6 +261,7 @@ async fn spawn_retry_observation_gateway(
         format!("http://{address}"),
         observations,
         applied_idempotencies,
+        applied_mutations,
         task,
     )
 }
@@ -301,10 +307,32 @@ fn stale_pre_dispatch_context_fails_closed_without_panicking() {
 }
 
 #[tokio::test]
+async fn expired_dispatch_budget_fails_closed_before_transport() {
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let result = signed_send(
+        &reqwest::Client::new(),
+        "http://127.0.0.1:1",
+        &peer_target_tests::reverse_request(),
+        xp_test_fixtures::primary_node_id(),
+        &ca.key_pem,
+        &ca.cert_pem,
+        Duration::ZERO,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(SignedSendError::PreDispatch(
+            MeshRequestError::PreDispatchTimeout
+        ))
+    ));
+}
+
+#[tokio::test]
 async fn public_transport_retry_refreshes_timestamp_but_preserves_idempotency() {
     let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
         .expect("cluster CA");
-    let (base_url, observations, applied_idempotencies, task) =
+    let (base_url, observations, applied_idempotencies, applied_mutations, task) =
         spawn_retry_observation_gateway(&ca.key_pem, &ca.cert_pem).await;
     let peer = peer_target_tests::primary_reverse_target(None, base_url);
     let request = MeshRequest {
@@ -335,6 +363,7 @@ async fn public_transport_retry_refreshes_timestamp_but_preserves_idempotency() 
     );
     assert_ne!(observations[0].issued_at, observations[1].issued_at);
     assert_eq!(applied_idempotencies.lock().await.len(), 1);
+    assert_eq!(applied_mutations.load(Ordering::SeqCst), 1);
     task.abort();
 }
 
@@ -356,7 +385,7 @@ async fn record_issued_at_relay(
         .expect("reverse relay issued-at header parses");
     state.issued_at.lock().await.push(issued_at);
     if state.stall {
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
     }
     StatusCode::SERVICE_UNAVAILABLE
 }
@@ -404,13 +433,10 @@ async fn reverse_public_fallback_refreshes_outer_signature_timestamp() {
         )
         .await;
 
+    let mut request = peer_target_tests::reverse_request();
+    request.total_budget = Duration::from_secs(6);
     client
-        .send_peer_reverse_request(
-            &peer,
-            peer_target_tests::reverse_request(),
-            &ca.key_pem,
-            &ca.cert_pem,
-        )
+        .send_peer_reverse_request(&peer, request, &ca.key_pem, &ca.cert_pem)
         .await
         .expect_err("relay responses omit signed acknowledgements");
 
@@ -418,7 +444,7 @@ async fn reverse_public_fallback_refreshes_outer_signature_timestamp() {
     let public_issued_at = public_issued_at.lock().await.clone();
     assert_eq!(mesh_issued_at.len(), 1);
     assert_eq!(public_issued_at.len(), 1);
-    assert_ne!(mesh_issued_at[0], public_issued_at[0]);
+    assert!(public_issued_at[0] > mesh_issued_at[0]);
     mesh_task.abort();
     public_task.abort();
 }
@@ -454,11 +480,11 @@ async fn invalid_reverse_target_is_not_reported_as_an_unknown_outcome() {
 }
 
 #[tokio::test]
-async fn public_gateway_missing_ack_is_terminal_without_retry() {
+async fn public_gateway_5xx_retries_for_idempotent_request() {
     let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
         .expect("cluster CA");
     let (public_base_url, public_requests, public_task) =
-        spawn_gateway(&ca.key_pem, &ca.cert_pem, 1).await;
+        spawn_gateway(&ca.key_pem, &ca.cert_pem, 2).await;
     let peer = peer_target_tests::primary_reverse_target(None, public_base_url);
     let client =
         MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new());
@@ -484,8 +510,11 @@ async fn public_gateway_missing_ack_is_terminal_without_retry() {
         )
         .await;
 
-    assert!(matches!(result, Err(MeshRequestError::Protocol(_))));
-    assert_eq!(public_requests.load(Ordering::SeqCst), 1);
+    assert!(
+        result.is_ok(),
+        "unsigned gateway 5xx should retry: {result:?}"
+    );
+    assert_eq!(public_requests.load(Ordering::SeqCst), 3);
     public_task.abort();
 }
 

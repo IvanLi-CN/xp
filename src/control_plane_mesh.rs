@@ -637,6 +637,7 @@ impl MeshAwareHttpClient {
                         if matches!(
                             error,
                             MeshRequestError::PreDispatchAuth(_)
+                                | MeshRequestError::PreDispatchTimeout
                                 | MeshRequestError::InvalidTarget(_)
                         ) {
                             return Err(error);
@@ -745,7 +746,9 @@ impl MeshAwareHttpClient {
         {
             Ok(response) => response,
             Err(
-                error @ (MeshRequestError::PreDispatchAuth(_) | MeshRequestError::InvalidTarget(_)),
+                error @ (MeshRequestError::PreDispatchAuth(_)
+                | MeshRequestError::PreDispatchTimeout
+                | MeshRequestError::InvalidTarget(_)),
             ) => {
                 self.circuits
                     .release_public_half_open_probe(&peer.node_id)
@@ -903,46 +906,34 @@ impl MeshAwareHttpClient {
         let mut response = None;
         if let Some(local) = local_rendezvous {
             let local_url = join_url(&local.base_url, &outer_request.path_and_query, false)?;
-            let dispatch = reverse::signed_reverse_dispatch(
+            let local_response = reverse::send_outer_request(
+                &self.public_direct,
                 peer,
                 route,
                 request,
                 &outer_request,
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
-            )?;
-            let local_response = reverse::send_outer_request(
-                &self.public_direct,
-                &outer_request,
                 &local_url,
-                &dispatch.headers,
                 budget,
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
                 &self.mesh_gate_lock,
             )
             .await?;
-            response = Some((
-                local_response,
-                dispatch.inner_verified,
-                dispatch.outer_verified,
-            ));
+            response = Some(local_response);
         } else if let Some(mesh_base_url) = route.rendezvous.mesh_base_url.as_deref() {
             let mesh_budget = mesh_attempt_budget(budget).min(budget);
             let mesh_url = join_url(mesh_base_url, &outer_request.path_and_query, false)?;
-            let dispatch = reverse::signed_reverse_dispatch(
+            match reverse::send_outer_request(
+                &self.mesh,
                 peer,
                 route,
                 request,
                 &outer_request,
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
-            )?;
-            match reverse::send_outer_request(
-                &self.mesh,
-                &outer_request,
                 &mesh_url,
-                &dispatch.headers,
                 mesh_budget,
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
@@ -951,11 +942,7 @@ impl MeshAwareHttpClient {
             .await
             {
                 Ok(mesh_response) => {
-                    response = Some((
-                        mesh_response,
-                        dispatch.inner_verified,
-                        dispatch.outer_verified,
-                    ));
+                    response = Some(mesh_response);
                 }
                 Err(error @ MeshRequestError::TransportTimeout) => {
                     return Err(error);
@@ -983,30 +970,21 @@ impl MeshAwareHttpClient {
                     &outer_request.path_and_query,
                     false,
                 )?;
-                let dispatch = reverse::signed_reverse_dispatch(
+                reverse::send_outer_request(
+                    &self.public_direct,
                     peer,
                     route,
                     request,
                     &outer_request,
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
-                )?;
-                let public_response = reverse::send_outer_request(
-                    &self.public_direct,
-                    &outer_request,
                     &outer_url,
-                    &dispatch.headers,
                     remaining,
                     request.allow_ambiguous_fallback,
                     &self.cluster_mesh_enabled,
                     &self.mesh_gate_lock,
                 )
-                .await?;
-                (
-                    public_response,
-                    dispatch.inner_verified,
-                    dispatch.outer_verified,
-                )
+                .await?
             }
         };
         reverse::verify_relay_ack(

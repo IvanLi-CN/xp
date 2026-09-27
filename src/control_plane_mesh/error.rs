@@ -4,6 +4,7 @@ use super::internal_auth;
 pub enum MeshRequestError {
     InvalidTarget(String),
     PreDispatchAuth(internal_auth::AuthError),
+    PreDispatchTimeout,
     Auth(internal_auth::AuthError),
     OutcomeUnknown,
     TransportTimeout,
@@ -33,6 +34,7 @@ impl std::fmt::Display for MeshRequestError {
                     "local internal authentication failed before dispatch: {value}"
                 )
             }
+            Self::PreDispatchTimeout => f.write_str("request budget expired before dispatch"),
             Self::Auth(value) => write!(f, "internal authentication error: {value}"),
             Self::OutcomeUnknown => {
                 f.write_str("Mesh request outcome is unknown; it may already have been applied")

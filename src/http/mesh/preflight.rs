@@ -349,6 +349,7 @@ fn classify_preflight_error(error: &MeshRequestError) -> MeshPreflightFailureKin
     match error {
         MeshRequestError::InvalidTarget(_) => MeshPreflightFailureKind::InvalidTarget,
         MeshRequestError::PreDispatchAuth(_)
+        | MeshRequestError::PreDispatchTimeout
         | MeshRequestError::Auth(_)
         | MeshRequestError::Protocol(_) => MeshPreflightFailureKind::Protocol,
         MeshRequestError::CircuitOpen { .. }
