@@ -35,6 +35,12 @@ tables at startup; the first upgraded start can take longer while SQLite counts 
 Subsequent status requests do not traverse either history table. The status calculation runs on a
 blocking worker so a slow SQLite operation cannot occupy a Tokio request worker.
 
+Repository history queries also run on blocking workers. Subject-specific coverage uses the
+`repository_history_records_coverage` covering index; incomplete aggregate checks seek by subject
+through `repository_history_records_aggregate_completeness`. Slow coverage and incomplete aggregate
+queries appear as `repository_history.coverage` and `repository_history.incomplete_aggregate` in the
+bounded diagnostic file. The first start after this index is added builds it from existing rows.
+
 An operation records its in-flight description in memory before the blocking boundary and queues it
 to one dedicated, coalescing writer. The writer is rate-limited to one atomic replacement per 100 ms
 and runs outside SQLite/backend locks, so diagnostics do not add a synchronous fsync to each query.

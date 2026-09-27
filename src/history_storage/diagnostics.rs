@@ -38,6 +38,8 @@ pub(crate) enum HistoryStorageDiagnosticOperation {
     RuntimeStatusRecordCount,
     RuntimeStatusSegmentCount,
     RepositoryHistoryUsedBytes,
+    RepositoryHistoryCoverage,
+    RepositoryHistoryIncompleteAggregate,
     SourceDeliveryJournalSummary,
     SourceDeliveryJournalState,
     SourceDeliveryJournalOldest,
@@ -66,6 +68,8 @@ impl HistoryStorageDiagnosticOperation {
             Self::RuntimeStatusRecordCount => "runtime_status.record_count",
             Self::RuntimeStatusSegmentCount => "runtime_status.segment_count",
             Self::RepositoryHistoryUsedBytes => "repository_history.used_bytes",
+            Self::RepositoryHistoryCoverage => "repository_history.coverage",
+            Self::RepositoryHistoryIncompleteAggregate => "repository_history.incomplete_aggregate",
             Self::SourceDeliveryJournalSummary => "source_delivery.journal_summary",
             Self::SourceDeliveryJournalState => "source_delivery.journal_state",
             Self::SourceDeliveryJournalOldest => "source_delivery.journal_oldest",
@@ -106,6 +110,18 @@ impl HistoryStorageDiagnosticOperation {
             Self::RepositoryHistoryUsedBytes => concat!(
                 "PRAGMA page_count; PRAGMA page_size; stat ",
                 "history.sqlite3-wal"
+            ),
+            Self::RepositoryHistoryCoverage => concat!(
+                "SELECT MIN(observed_start), MAX(observed_end), MIN(received_at), ",
+                "MAX(received_at) FROM repository_history_records INDEXED BY ",
+                "repository_history_records_coverage WHERE is_tombstone = 0 ",
+                "AND optional subject_node_id = ?1"
+            ),
+            Self::RepositoryHistoryIncompleteAggregate => concat!(
+                "SELECT MIN(aggregate_start), MAX(aggregate_end) FROM ",
+                "repository_history_records INDEXED BY ",
+                "repository_history_records_aggregate_completeness ",
+                "WHERE aggregate_complete is incomplete AND optional subject/schema/range"
             ),
             Self::SourceDeliveryJournalSummary => "composite source delivery journal summary",
             Self::SourceDeliveryJournalState => concat!(

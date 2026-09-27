@@ -516,7 +516,10 @@ fn ensure_schema(connection: &mut Connection) -> Result<()> {
              CREATE INDEX IF NOT EXISTS repository_history_records_export_filter
                ON repository_history_records
                   (is_tombstone, observed_end, received_at, observed_start, source_node_id,
-                   source_epoch, stream, sequence);",
+                   source_epoch, stream, sequence);
+             CREATE INDEX IF NOT EXISTS repository_history_records_coverage
+               ON repository_history_records
+                  (subject_node_id, is_tombstone, observed_start, observed_end, received_at);",
         )
         .map_err(sqlite_error)?;
     counts::ensure_repository_history_counts(connection)

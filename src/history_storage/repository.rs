@@ -6,6 +6,24 @@ mod segments;
 mod summary;
 #[cfg(test)]
 pub(crate) use segments::segment_phase_sql;
+
+pub(super) const COVERAGE_SUBJECT_SQL: &str = "
+    SELECT MIN(observed_start), MAX(observed_end), MIN(received_at), MAX(received_at)
+    FROM repository_history_records INDEXED BY repository_history_records_coverage
+    WHERE subject_node_id = ?1 AND is_tombstone = 0
+";
+
+pub(super) const INCOMPLETE_AGGREGATE_SUBJECT_SQL: &str = "
+    SELECT MIN(COALESCE(aggregate_start, observed_start)),
+           MAX(COALESCE(aggregate_end, observed_end))
+    FROM repository_history_records
+    INDEXED BY repository_history_records_aggregate_completeness
+    WHERE subject_node_id = ?1 AND is_tombstone = 0
+      AND (?2 IS NULL OR schema_id = ?2)
+      AND (aggregate_complete = 0 OR aggregate_complete IS NULL)
+      AND COALESCE(aggregate_start, observed_start) <= ?3
+      AND COALESCE(aggregate_end, observed_end) >= ?4
+";
 /// A repository-history row is deliberately stored outside the control snapshot.
 /// The metadata columns keep retention and paged queries in SQLite rather than loading the
 /// two-year repository window into the replica process.
@@ -427,37 +445,45 @@ impl HistoryStorage {
         &self,
         subject_node_id: Option<&str>,
     ) -> Result<Option<super::RepositoryHistoryCoverage>> {
+        let diagnostic = self.begin_diagnostic(
+            HistoryStorageDiagnosticOperation::RepositoryHistoryCoverage,
+            "history_repository.query",
+        );
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
+            diagnostic.finish();
             return Ok(None);
         };
-        connection
-            .query_row(
-                "
+        let sql = if subject_node_id.is_some() {
+            COVERAGE_SUBJECT_SQL
+        } else {
+            "
                 SELECT MIN(observed_start), MAX(observed_end), MIN(received_at), MAX(received_at)
-                FROM repository_history_records
-                WHERE is_tombstone = 0
-                  AND (?1 IS NULL OR subject_node_id = ?1)
-                ",
-                [subject_node_id],
-                |row| {
-                    let observed_start = row.get::<_, Option<i64>>(0)?;
-                    let Some(observed_start) = observed_start else {
-                        return Ok(None);
-                    };
-                    Ok(Some(RepositoryHistoryCoverage {
-                        observed_start_unix_seconds: u64::try_from(observed_start)
-                            .unwrap_or(u64::MAX),
-                        observed_end_unix_seconds: u64::try_from(row.get::<_, i64>(1)?)
-                            .unwrap_or(u64::MAX),
-                        received_start_unix_seconds: u64::try_from(row.get::<_, i64>(2)?)
-                            .unwrap_or(u64::MAX),
-                        received_end_unix_seconds: u64::try_from(row.get::<_, i64>(3)?)
-                            .unwrap_or(u64::MAX),
-                    }))
-                },
-            )
-            .map_err(sqlite_error)
+                FROM repository_history_records INDEXED BY repository_history_records_coverage
+                WHERE is_tombstone = 0 AND ?1 IS NULL
+            "
+        };
+        let result = connection
+            .query_row(sql, params![subject_node_id], |row| {
+                let observed_start = row.get::<_, Option<i64>>(0)?;
+                let Some(observed_start) = observed_start else {
+                    return Ok(None);
+                };
+                Ok(Some(RepositoryHistoryCoverage {
+                    observed_start_unix_seconds: u64::try_from(observed_start).unwrap_or(u64::MAX),
+                    observed_end_unix_seconds: u64::try_from(row.get::<_, i64>(1)?)
+                        .unwrap_or(u64::MAX),
+                    received_start_unix_seconds: u64::try_from(row.get::<_, i64>(2)?)
+                        .unwrap_or(u64::MAX),
+                    received_end_unix_seconds: u64::try_from(row.get::<_, i64>(3)?)
+                        .unwrap_or(u64::MAX),
+                }))
+            })
+            .map_err(sqlite_error);
+        if result.is_ok() {
+            diagnostic.finish();
+        }
+        result
     }
 
     pub(crate) fn repository_history_incomplete_aggregate_range_for_schema(
@@ -467,23 +493,33 @@ impl HistoryStorage {
         start_unix_seconds: u64,
         end_unix_seconds: u64,
     ) -> Result<Option<(u64, u64)>> {
+        let diagnostic = self.begin_diagnostic(
+            HistoryStorageDiagnosticOperation::RepositoryHistoryIncompleteAggregate,
+            "history_repository.query",
+        );
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
+            diagnostic.finish();
             return Ok(None);
         };
-        connection
-            .query_row(
-                "
+        let sql = if subject_node_id.is_some() {
+            INCOMPLETE_AGGREGATE_SUBJECT_SQL
+        } else {
+            "
                 SELECT MIN(COALESCE(aggregate_start, observed_start)),
                        MAX(COALESCE(aggregate_end, observed_end))
                 FROM repository_history_records
-                WHERE is_tombstone = 0
-                  AND (?1 IS NULL OR subject_node_id = ?1)
+                INDEXED BY repository_history_records_aggregate_completeness
+                WHERE is_tombstone = 0 AND ?1 IS NULL
                   AND (?2 IS NULL OR schema_id = ?2)
                   AND (aggregate_complete = 0 OR aggregate_complete IS NULL)
                   AND COALESCE(aggregate_start, observed_start) <= ?3
                   AND COALESCE(aggregate_end, observed_end) >= ?4
-                ",
+            "
+        };
+        let result = connection
+            .query_row(
+                sql,
                 params![
                     subject_node_id,
                     schema_id,
@@ -500,7 +536,11 @@ impl HistoryStorage {
                     )))
                 },
             )
-            .map_err(sqlite_error)
+            .map_err(sqlite_error);
+        if result.is_ok() {
+            diagnostic.finish();
+        }
+        result
     }
 
     pub(crate) fn clear_repository_history(&self) -> Result<()> {
