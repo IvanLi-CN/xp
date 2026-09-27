@@ -434,7 +434,9 @@ async fn reverse_public_fallback_refreshes_outer_signature_timestamp() {
         .await;
 
     let mut request = peer_target_tests::reverse_request();
-    request.total_budget = Duration::from_secs(6);
+    // route_budget caps at five seconds, so this gives the Mesh sub-budget about 1.66s.
+    // That keeps integer-second issued_at values distinct after the stalled Mesh attempt.
+    request.total_budget = Duration::from_secs(30);
     client
         .send_peer_reverse_request(&peer, request, &ca.key_pem, &ca.cert_pem)
         .await
