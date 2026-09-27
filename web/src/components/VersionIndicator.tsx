@@ -176,7 +176,7 @@ export function VersionIndicator({
 								tone,
 								"sm",
 								[
-									"cursor-pointer font-mono transition-colors",
+									"min-h-11 cursor-pointer font-mono transition-colors sm:min-h-5",
 									"hover:bg-accent focus-visible:ring-[3px]",
 									"focus-visible:ring-ring/20",
 								].join(" "),
@@ -190,7 +190,7 @@ export function VersionIndicator({
 					</PopoverTrigger>
 					<PopoverContent
 						align="end"
-						className="w-[22rem] p-4"
+						className="w-[22rem] max-w-[calc(100vw-1rem)] p-4"
 						onPointerEnter={handlePointerEnter}
 						onPointerLeave={handlePointerLeave}
 					>

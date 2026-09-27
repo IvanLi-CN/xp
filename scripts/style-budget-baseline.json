@@ -635,10 +635,6 @@
     "long_line_count": 1,
     "max_line_length": 182
   },
-  "web/src/components/ui/alert-dialog.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 178
-  },
   "web/src/components/ui/badge.stories.tsx": {
     "long_line_count": 1,
     "max_line_length": 178

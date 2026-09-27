@@ -65,6 +65,76 @@ test("demo user details follow the production user-management layout", async ({
 	await expect(dialog).toContainText("vless://");
 });
 
+for (const viewport of [
+	{ width: 320, height: 852 },
+	{ width: 360, height: 800 },
+	{ width: 393, height: 852 },
+]) {
+	test(`keeps the mobile YAML editor and delete dialog within ${viewport.width}px`, async ({
+		page,
+	}) => {
+		await page.setViewportSize(viewport);
+		await page.goto("/demo/login");
+		await page.getByRole("button", { name: "Enter demo" }).click();
+		await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+
+		const editor = page.locator(".cm-content").first();
+		await editor.click();
+		await page.keyboard.press("ControlOrMeta+A");
+		await page.keyboard.insertText(`proxy: ${"x".repeat(1200)}`);
+
+		const layout = await page.evaluate(() => ({
+			clientWidth: document.documentElement.clientWidth,
+			documentScrollWidth: document.documentElement.scrollWidth,
+			bodyScrollWidth: document.body.scrollWidth,
+			editors: [...document.querySelectorAll(".cm-editor")].map((node) => {
+				const rect = node.getBoundingClientRect();
+				return { left: rect.left, right: rect.right };
+			}),
+			scrollers: [...document.querySelectorAll(".cm-scroller")].map((node) => ({
+				clientWidth: node.clientWidth,
+				scrollWidth: node.scrollWidth,
+			})),
+		}));
+
+		expect(layout.documentScrollWidth).toBeLessThanOrEqual(layout.clientWidth);
+		expect(layout.bodyScrollWidth).toBeLessThanOrEqual(layout.clientWidth);
+		expect(
+			layout.editors.every(
+				(editorBounds) =>
+					editorBounds.left >= 0 &&
+					editorBounds.right <= layout.clientWidth + 1,
+			),
+		).toBe(true);
+		expect(layout.scrollers[0]?.scrollWidth).toBeGreaterThan(
+			layout.scrollers[0]?.clientWidth ?? 0,
+		);
+
+		await page
+			.getByRole("button", { name: "Delete user", exact: true })
+			.click();
+		const dialog = page.getByRole("alertdialog", { name: "Delete user" });
+		await expect(dialog).toBeVisible();
+		const dialogBounds = await dialog.evaluate((node) => {
+			const rect = node.getBoundingClientRect();
+			return {
+				left: rect.left,
+				right: rect.right,
+				top: rect.top,
+				bottom: rect.bottom,
+				visualWidth: window.visualViewport?.width ?? window.innerWidth,
+				visualHeight: window.visualViewport?.height ?? window.innerHeight,
+			};
+		});
+		expect(dialogBounds.left).toBeGreaterThanOrEqual(0);
+		expect(dialogBounds.right).toBeLessThanOrEqual(dialogBounds.visualWidth);
+		expect(dialogBounds.top).toBeGreaterThanOrEqual(0);
+		expect(dialogBounds.bottom).toBeLessThanOrEqual(dialogBounds.visualHeight);
+		await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+		await expect(dialog).toBeHidden();
+	});
+}
+
 test("demo service config reflects provider-only mihomo delivery", async ({
 	page,
 }) => {

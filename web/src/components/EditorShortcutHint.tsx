@@ -196,15 +196,16 @@ export function EditorShortcutHint({
 		<div className="relative w-full">
 			<div
 				aria-hidden
-				className="pointer-events-none absolute left-0 top-0 -z-10 invisible w-max"
-				ref={measureRef}
+				className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
 			>
-				<div className="flex items-center gap-3 whitespace-nowrap">
-					<div className="flex shrink-0 items-center gap-1.5">
-						<Icon name="tabler:keyboard" size={14} />
-						<span className="font-medium text-foreground/80">Shortcuts</span>
+				<div className="invisible absolute left-0 top-0 w-max" ref={measureRef}>
+					<div className="flex items-center gap-3 whitespace-nowrap">
+						<div className="flex shrink-0 items-center gap-1.5">
+							<Icon name="tabler:keyboard" size={14} />
+							<span className="font-medium text-foreground/80">Shortcuts</span>
+						</div>
+						<ShortcutInlinePreview shortcuts={shortcuts} />
 					</div>
-					<ShortcutInlinePreview shortcuts={shortcuts} />
 				</div>
 			</div>
 			<div
