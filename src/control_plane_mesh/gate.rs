@@ -100,7 +100,6 @@ impl MeshAwareHttpClient {
         &self,
         peer: &MeshPeerTarget,
         request: &MeshRequest,
-        context: &RequestContext,
         mesh_url: &str,
         budget: Duration,
         mesh_epoch: u64,
@@ -113,16 +112,14 @@ impl MeshAwareHttpClient {
     ) -> Result<MeshAttemptResult, MeshRequestError> {
         let send_result = self
             .with_mesh_send(mesh_epoch, || async {
-                tokio::time::timeout(
+                signed_send(
+                    &self.mesh,
+                    mesh_url,
+                    request,
+                    &peer.node_id,
+                    cluster_ca_key_pem,
+                    cluster_ca_cert_pem,
                     budget,
-                    signed_send(
-                        &self.mesh,
-                        mesh_url,
-                        request,
-                        context,
-                        cluster_ca_key_pem,
-                        cluster_ca_cert_pem,
-                    ),
                 )
                 .await
             })
@@ -133,7 +130,7 @@ impl MeshAwareHttpClient {
                 ambiguous: false,
                 timed_out: false,
             }),
-            Some((Ok(Ok((response, verified))), gate_guard)) => {
+            Some((Ok((response, verified)), gate_guard)) => {
                 let transport = mesh_transport_observation(&response);
                 if transport.protocol != MeshTransportProtocol::H2 {
                     return Err(self
@@ -231,7 +228,13 @@ impl MeshAwareHttpClient {
                     )
                     .await)
             }
-            Some((Ok(Err(error)), gate_guard)) => {
+            Some((Err(SignedSendError::PreDispatch(error)), gate_guard)) => {
+                drop(gate_guard);
+                self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
+                    .await;
+                Err(error)
+            }
+            Some((Err(SignedSendError::Transport(error)), gate_guard)) => {
                 drop(gate_guard);
                 self.record_mesh_transport_failure(
                     peer,
@@ -252,7 +255,7 @@ impl MeshAwareHttpClient {
                     timed_out: error.is_timeout() && !error.is_connect(),
                 })
             }
-            Some((Err(_), gate_guard)) => {
+            Some((Err(SignedSendError::Timeout), gate_guard)) => {
                 drop(gate_guard);
                 self.record_mesh_transport_failure(
                     peer,
@@ -475,11 +478,14 @@ impl MeshAwareHttpClient {
         }
         if let Err(error) = &result {
             let validation_state = match error {
+                MeshRequestError::PreDispatchAuth(_)
+                | MeshRequestError::PreDispatchTimeout
+                | MeshRequestError::InvalidTarget(_)
+                | MeshRequestError::CircuitOpen { .. } => {
+                    return result;
+                }
                 MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => {
                     DirectValidationState::ProtocolRejected
-                }
-                MeshRequestError::InvalidTarget(_) | MeshRequestError::CircuitOpen { .. } => {
-                    return result;
                 }
                 _ => DirectValidationState::TransportFailed,
             };

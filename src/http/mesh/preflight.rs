@@ -348,9 +348,10 @@ async fn run_peer_health_preflight(
 fn classify_preflight_error(error: &MeshRequestError) -> MeshPreflightFailureKind {
     match error {
         MeshRequestError::InvalidTarget(_) => MeshPreflightFailureKind::InvalidTarget,
-        MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => {
-            MeshPreflightFailureKind::Protocol
-        }
+        MeshRequestError::PreDispatchAuth(_)
+        | MeshRequestError::PreDispatchTimeout
+        | MeshRequestError::Auth(_)
+        | MeshRequestError::Protocol(_) => MeshPreflightFailureKind::Protocol,
         MeshRequestError::CircuitOpen { .. }
         | MeshRequestError::OutcomeUnknown
         | MeshRequestError::TransportTimeout

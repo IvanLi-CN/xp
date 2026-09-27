@@ -26,6 +26,79 @@ pub(super) fn reverse_authority(route: &ReverseRelayRoute, peer: &MeshPeerTarget
     )
 }
 
+pub(super) struct SignedReverseDispatch {
+    pub(super) headers: axum::http::HeaderMap,
+    pub(super) inner_verified: internal_auth::VerifiedRequest,
+    pub(super) outer_verified: internal_auth::VerifiedRequest,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn signed_reverse_dispatch(
+    peer: &MeshPeerTarget,
+    route: &ReverseRelayRoute,
+    request: &MeshRequest,
+    outer_request: &MeshRequest,
+    cluster_ca_key_pem: &str,
+    cluster_ca_cert_pem: &str,
+) -> Result<SignedReverseDispatch, MeshRequestError> {
+    let inner_context = RequestContext::now(
+        request.route,
+        request.cluster_id.clone(),
+        request.sender_id.clone(),
+        peer.node_id.clone(),
+        request.request_id.clone(),
+    );
+    let (inner_headers, inner_verified) = signed_headers(
+        request,
+        &inner_context,
+        cluster_ca_key_pem,
+        cluster_ca_cert_pem,
+    )?;
+    let inner_signature = inner_headers
+        .get(internal_auth::INTERNAL_SIGNATURE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| MeshRequestError::Reverse("inner signature is missing".to_string()))?;
+    let mut envelope = ReverseRelayEnvelope {
+        version: String::new(),
+        assignment_generation: route.assignment.generation,
+        target_node_id: peer.node_id.clone(),
+        method: request.method.as_str().to_string(),
+        uri: request.path_and_query.clone(),
+        content_type: request.content_type.clone().unwrap_or_default(),
+        route: request.route.as_str().to_string(),
+        sender_node_id: request.sender_id.clone(),
+        request_id: request.request_id.clone(),
+        issued_at: inner_verified.context.issued_at,
+        content_length: request.body.len(),
+        reverse_authority: reverse_authority(route, peer),
+        inner_signature: inner_signature.to_string(),
+        outer_signature: String::new(),
+    };
+    envelope.sign(cluster_ca_key_pem);
+
+    let outer_context = RequestContext::now(
+        outer_request.route,
+        outer_request.cluster_id.clone(),
+        outer_request.sender_id.clone(),
+        route.rendezvous.node_id.clone(),
+        outer_request.request_id.clone(),
+    );
+    let (mut headers, outer_verified) = signed_headers(
+        outer_request,
+        &outer_context,
+        cluster_ca_key_pem,
+        cluster_ca_cert_pem,
+    )?;
+    envelope
+        .insert_headers(&mut headers)
+        .map_err(|error| MeshRequestError::Reverse(error.to_string()))?;
+    Ok(SignedReverseDispatch {
+        headers,
+        inner_verified,
+        outer_verified,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn verify_relay_ack(
     request: &MeshRequest,
@@ -411,7 +484,13 @@ impl MeshAwareHttpClient {
                 {
                     return Err(error);
                 }
-                Err(error @ (MeshRequestError::Auth(_) | MeshRequestError::Protocol(_))) => {
+                Err(
+                    error @ (MeshRequestError::InvalidTarget(_)
+                    | MeshRequestError::PreDispatchAuth(_)
+                    | MeshRequestError::PreDispatchTimeout
+                    | MeshRequestError::Auth(_)
+                    | MeshRequestError::Protocol(_)),
+                ) => {
                     return Err(error);
                 }
                 Err(error) => last_error = Some(error),
@@ -426,30 +505,52 @@ impl MeshAwareHttpClient {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn send_outer_request(
     client: &reqwest::Client,
+    peer: &MeshPeerTarget,
+    route: &ReverseRelayRoute,
     request: &MeshRequest,
+    outer_request: &MeshRequest,
+    cluster_ca_key_pem: &str,
+    cluster_ca_cert_pem: &str,
     url: &str,
-    headers: &axum::http::HeaderMap,
     budget: Duration,
     allow_ambiguous_fallback: bool,
     cluster_mesh_enabled: &Arc<AtomicBool>,
     mesh_gate_lock: &Arc<tokio::sync::RwLock<()>>,
-) -> Result<reqwest::Response, MeshRequestError> {
+) -> Result<
+    (
+        reqwest::Response,
+        internal_auth::VerifiedRequest,
+        internal_auth::VerifiedRequest,
+    ),
+    MeshRequestError,
+> {
     let gate_guard = mesh_gate_lock.clone().read_owned().await;
     if !cluster_mesh_enabled.load(Ordering::Acquire) {
         return Err(MeshRequestError::Reverse(
             "cluster Mesh gate is disabled".to_string(),
         ));
     }
+    let dispatch = signed_reverse_dispatch(
+        peer,
+        route,
+        request,
+        outer_request,
+        cluster_ca_key_pem,
+        cluster_ca_cert_pem,
+    )?;
     let mut builder = client
-        .request(request.method.clone(), url)
-        .body(request.body.clone());
-    for (name, value) in headers {
+        .request(outer_request.method.clone(), url)
+        .body(outer_request.body.clone());
+    for (name, value) in &dispatch.headers {
         builder = builder.header(name, value);
     }
     match tokio::time::timeout(budget, builder.send()).await {
-        Ok(result) => result
-            .map(|response| attach_mesh_gate(response, gate_guard))
-            .map_err(|error| public_transport_error(error, allow_ambiguous_fallback)),
+        Ok(Ok(response)) => Ok((
+            attach_mesh_gate(response, gate_guard),
+            dispatch.inner_verified,
+            dispatch.outer_verified,
+        )),
+        Ok(Err(error)) => Err(public_transport_error(error, allow_ambiguous_fallback)),
         Err(_) => Err(MeshRequestError::OutcomeUnknown),
     }
 }

@@ -26,6 +26,10 @@ outcome question.
 - Bind v2 signatures to method, raw URI, content metadata, actual body hash,
   cluster/sender/target IDs, request ID and issued-at. Derive distinct request
   and acknowledgement keys from the parsed CA key and certificate fingerprint.
+- Create the issued-at and signature immediately before each actual dispatch,
+  including bounded retries. A local signing or self-verification failure is a
+  confirmed pre-dispatch error: fail closed without charging the peer breaker
+  or treating the request as a transport fallback.
 - Reuse a stable request ID when a side-effecting operation can retry across
   paths. Persist the first outcome for the bounded retention window; a caller
   without that guarantee must surface `outcome_unknown` rather than blindly
@@ -76,6 +80,10 @@ outcome question.
   result across restart.
 - Test headers/body/timestamp/target tampering, untrusted member identity,
   and reserved-route requests before the canary forwards any body.
+- Reproduce an expired pre-send context and assert it returns a local auth error
+  without panicking; then observe two valid dispatches and assert fresh issued-at,
+  stable request ID/idempotency digest, ACK binding to the current request, and
+  one durable mutation identity.
 - Test Mesh-only, public-only and dual-path faults separately. The first should
   show fallback; the second should surface a Mesh success with standby failure;
   the third should mark the peer unavailable.
