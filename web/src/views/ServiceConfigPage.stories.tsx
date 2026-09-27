@@ -41,3 +41,29 @@ export const NodeLocalPrivateMirrorPolicy: Story = {
 		).resolves.toBeInTheDocument();
 	},
 };
+
+export const Mobile393x852: Story = {
+	tags: ["responsive-service-config"],
+	parameters: {
+		viewport: {
+			defaultViewport: "serviceConfigMobile393",
+			viewports: {
+				serviceConfigMobile393: {
+					name: "393x852",
+					styles: { width: "393px", height: "852px" },
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const longEnvironmentName = await canvas.findByText(
+			"XP_MIHOMO_ALLOWED_PRIVATE_CIDRS",
+			{ exact: true },
+		);
+		await expect(longEnvironmentName).toBeVisible();
+		await expect(
+			await canvas.findByRole("heading", { name: "Cluster settings" }),
+		).toBeInTheDocument();
+	},
+};
