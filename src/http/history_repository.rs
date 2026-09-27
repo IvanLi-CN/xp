@@ -707,8 +707,8 @@ async fn local_repository_query(
 ) -> Result<RepositoryHistoryQueryResponse, ApiError> {
     let replica = state.repository_replica.clone();
     let node_id = state.cluster.node_id.clone();
+    let mut runtime = replica.lock_owned().await;
     tokio::task::spawn_blocking(move || {
-        let mut runtime = replica.blocking_lock();
         runtime.prepare_for_replication(now)?;
         let local = LocalQueryMetadata::current_window(now);
         if local_is_ready {
