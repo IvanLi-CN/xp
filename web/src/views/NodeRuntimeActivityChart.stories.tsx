@@ -12,17 +12,32 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-function runtimeActivityViewport(width: number) {
-	const viewportName = `nodeActivity${width}`;
+const runtimeActivityViewports = {
+	nodeActivity320: {
+		name: "Node activity 320px",
+		styles: { width: "320px", height: "852px" },
+	},
+	nodeActivity360: {
+		name: "Node activity 360px",
+		styles: { width: "360px", height: "852px" },
+	},
+	nodeActivity393: {
+		name: "Node activity 393px",
+		styles: { width: "393px", height: "852px" },
+	},
+	nodeActivity1280: {
+		name: "Node activity 1280px",
+		styles: { width: "1280px", height: "852px" },
+	},
+};
+
+function runtimeActivityViewport(
+	viewportName: keyof typeof runtimeActivityViewports,
+) {
 	return {
 		viewport: {
 			defaultViewport: viewportName,
-			viewports: {
-				[viewportName]: {
-					name: `Node activity ${width}px`,
-					styles: { width: `${width}px`, height: "852px" },
-				},
-			},
+			viewports: runtimeActivityViewports,
 		},
 	};
 }
@@ -55,28 +70,28 @@ async function verifyRuntimeActivityResponsive(canvasElement: HTMLElement) {
 }
 
 export const RuntimeActivityMobile320: Story = {
-	parameters: runtimeActivityViewport(320),
+	parameters: runtimeActivityViewport("nodeActivity320"),
 	play: async ({ canvasElement }) => {
 		await verifyRuntimeActivityResponsive(canvasElement);
 	},
 };
 
 export const RuntimeActivityMobile360: Story = {
-	parameters: runtimeActivityViewport(360),
+	parameters: runtimeActivityViewport("nodeActivity360"),
 	play: async ({ canvasElement }) => {
 		await verifyRuntimeActivityResponsive(canvasElement);
 	},
 };
 
 export const RuntimeActivityMobile393: Story = {
-	parameters: runtimeActivityViewport(393),
+	parameters: runtimeActivityViewport("nodeActivity393"),
 	play: async ({ canvasElement }) => {
 		await verifyRuntimeActivityResponsive(canvasElement);
 	},
 };
 
 export const RuntimeActivityDesktop: Story = {
-	parameters: runtimeActivityViewport(1280),
+	parameters: runtimeActivityViewport("nodeActivity1280"),
 	play: async ({ canvasElement }) => {
 		await verifyRuntimeActivityResponsive(canvasElement);
 	},

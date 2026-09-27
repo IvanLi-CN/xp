@@ -2,11 +2,15 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { NodeRuntimeHistorySlot } from "../api/adminNodeRuntime";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { NodeRuntimeActivityChart } from "./NodeRuntimeActivityChart";
 
 const recentSlots: NodeRuntimeHistorySlot[] = [
-	{ slot_start: "2026-03-08T00:00:00Z", status: "up" },
-	{ slot_start: "2026-03-08T12:00:00Z", status: "degraded" },
+	{ slot_start: fixtureCatalog.timestamp.t20260308T000000(), status: "up" },
+	{
+		slot_start: fixtureCatalog.timestamp.t20260308T003000(),
+		status: "degraded",
+	},
 ];
 
 afterEach(() => {
