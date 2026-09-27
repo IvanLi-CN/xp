@@ -448,17 +448,7 @@ pub(super) async fn admin_internal_query_history_repository(
     .and_then(|query| query.with_schema_id(request.schema_id.as_deref()))
     .map_err(|error| ApiError::invalid_request(error.to_string()))?;
     let now = u64::try_from(Utc::now().timestamp()).unwrap_or_default();
-    let mut runtime = state.repository_replica.lock().await;
-    runtime
-        .prepare_for_replication(now)
-        .map_err(repository_error)?;
-    let response = runtime
-        .query(
-            &state.cluster.node_id,
-            query,
-            LocalQueryMetadata::current_window(now),
-        )
-        .map_err(repository_error)?;
+    let response = local_repository_query(&state, query, now, true).await?;
     Ok(Json(response))
 }
 
@@ -642,25 +632,7 @@ pub(super) async fn query_history_repository(
     let local_is_ready = ready_repository_ids
         .iter()
         .any(|repository_id| repository_id == &state.cluster.node_id);
-    let local_response = {
-        let mut runtime = state.repository_replica.lock().await;
-        runtime
-            .prepare_for_replication(now)
-            .map_err(repository_error)?;
-        if local_is_ready {
-            runtime
-                .query(
-                    &state.cluster.node_id,
-                    query.clone(),
-                    LocalQueryMetadata::current_window(now),
-                )
-                .map_err(repository_error)?
-        } else {
-            runtime
-                .query_local_only(query.clone(), LocalQueryMetadata::current_window(now))
-                .map_err(repository_error)?
-        }
-    };
+    let local_response = local_repository_query(state, query.clone(), now, local_is_ready).await?;
     let body = serde_json::to_vec(&RepositoryHistoryQuery {
         start_unix_seconds: request.start_unix_seconds,
         end_unix_seconds: request.end_unix_seconds,
@@ -725,6 +697,36 @@ pub(super) async fn query_history_repository(
             .ok_or_else(|| ApiError::internal("local history response is unavailable"))?,
     };
     Ok(response)
+}
+
+async fn local_repository_query(
+    state: &AppState,
+    query: HistoryQuery,
+    now: u64,
+    local_is_ready: bool,
+) -> Result<RepositoryHistoryQueryResponse, ApiError> {
+    let query_permit = state
+        .repository_query_gate
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| ApiError::internal("repository query gate is closed"))?;
+    let replica = state.repository_replica.clone();
+    let node_id = state.cluster.node_id.clone();
+    tokio::task::spawn_blocking(move || {
+        let _query_permit = query_permit;
+        let mut runtime = replica.blocking_lock();
+        runtime.prepare_for_replication(now)?;
+        let local = LocalQueryMetadata::current_window(now);
+        if local_is_ready {
+            runtime.query(&node_id, query, local)
+        } else {
+            runtime.query_local_only(query, local)
+        }
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("repository query task failed: {error}")))?
+    .map_err(repository_error)
 }
 
 pub(super) async fn query_resource_history_repository(

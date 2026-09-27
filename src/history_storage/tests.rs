@@ -483,6 +483,126 @@ fn repository_keyset_indexes_avoid_a_full_sort_for_compaction_and_export() {
 }
 
 #[test]
+fn repository_coverage_query_uses_a_subject_seek_without_table_reads() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    let backend = storage.lock_backend();
+    let Backend::Sqlite(connection) = &*backend else {
+        panic!("test storage should use SQLite");
+    };
+    let coverage_plan =
+        query_plan_with_params(connection, repository::COVERAGE_SUBJECT_SQL, ["subject-a"]);
+    assert!(coverage_plan.iter().any(|detail| {
+        detail.contains("USING COVERING INDEX repository_history_records_coverage")
+            && detail.contains("subject_node_id=?")
+    }));
+    let incomplete_plan = query_plan_with_params(
+        connection,
+        repository::INCOMPLETE_AGGREGATE_SUBJECT_SQL,
+        rusqlite::params!["subject-a", "runtime.v1", 100_i64, 1_i64],
+    );
+    assert!(incomplete_plan.iter().any(|detail| {
+        detail.contains("repository_history_records_aggregate_completeness")
+            && detail.contains("subject_node_id=?")
+    }));
+}
+
+#[test]
+fn repository_coverage_and_incomplete_ranges_keep_subject_and_tombstone_semantics() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    let record = RepositoryHistoryRecordRow {
+        source_node_id: "source-a".to_owned(),
+        source_epoch: 1,
+        stream: "runtime".to_owned(),
+        sequence: 1,
+        subject_node_id: "subject-a".to_owned(),
+        observer_node_id: "observer-a".to_owned(),
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key: vec![1],
+        tombstone: false,
+        observed_start_unix_seconds: 10,
+        observed_end_unix_seconds: 20,
+        received_at_unix_seconds: 30,
+        aggregate_complete: Some(true),
+        aggregate_start_unix_seconds: None,
+        aggregate_end_unix_seconds: None,
+        payload: b"payload".to_vec(),
+    };
+    let other = RepositoryHistoryRecordRow {
+        sequence: 2,
+        subject_node_id: "subject-b".to_owned(),
+        observed_start_unix_seconds: 5,
+        observed_end_unix_seconds: 40,
+        received_at_unix_seconds: 50,
+        aggregate_complete: Some(false),
+        aggregate_start_unix_seconds: Some(4),
+        aggregate_end_unix_seconds: Some(45),
+        ..record.clone()
+    };
+    let tombstone = RepositoryHistoryRecordRow {
+        sequence: 3,
+        tombstone: true,
+        observed_start_unix_seconds: 1,
+        observed_end_unix_seconds: 100,
+        received_at_unix_seconds: 1,
+        ..record.clone()
+    };
+    storage
+        .upsert_repository_history_records(&[record, other, tombstone])
+        .unwrap();
+    let subject_a = storage
+        .repository_history_coverage(Some("subject-a"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(subject_a.observed_start_unix_seconds, 10);
+    assert_eq!(subject_a.observed_end_unix_seconds, 20);
+    assert_eq!(subject_a.received_start_unix_seconds, 30);
+    let coverage = storage
+        .repository_history_coverage(Some("subject-b"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(coverage.observed_start_unix_seconds, 5);
+    assert_eq!(coverage.observed_end_unix_seconds, 40);
+    assert_eq!(coverage.received_start_unix_seconds, 50);
+    assert_eq!(coverage.received_end_unix_seconds, 50);
+    let global = storage.repository_history_coverage(None).unwrap().unwrap();
+    assert_eq!(global.observed_start_unix_seconds, 5);
+    assert_eq!(global.observed_end_unix_seconds, 40);
+    assert_eq!(global.received_start_unix_seconds, 30);
+    assert_eq!(global.received_end_unix_seconds, 50);
+    assert_eq!(
+        storage
+            .repository_history_incomplete_aggregate_range_for_schema(
+                Some("subject-b"),
+                Some("runtime.v1"),
+                1,
+                100,
+            )
+            .unwrap(),
+        Some((4, 45))
+    );
+    assert_eq!(
+        storage
+            .repository_history_incomplete_aggregate_range_for_schema(None, None, 1, 100)
+            .unwrap(),
+        Some((4, 45))
+    );
+    assert_eq!(
+        storage
+            .repository_history_incomplete_aggregate_range_for_schema(
+                Some("subject-a"),
+                Some("runtime.v1"),
+                1,
+                100,
+            )
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
 fn repository_record_count_reads_materialized_count_without_scanning_history() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());

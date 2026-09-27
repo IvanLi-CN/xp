@@ -26,6 +26,13 @@
   SQLite's `Count` opcode. Runtime status runs on a blocking worker, leaving Tokio request workers
   available while SQLite operations wait. Counts remain exact through mutation, retention, restart
   and upgrade.
+- Repository query preparation and reads run on blocking workers, not Tokio request workers.
+  One local query at a time may enter the blocking pool; others await an asynchronous permit
+  without holding a repository mutex or a blocking thread.
+  Node-scoped coverage reads only the covering `repository_history_records_coverage` index;
+  incomplete aggregate checks seek the existing completeness index by subject. Both operations
+  expose bounded slow-query diagnostics. The covering index is built from existing history at the
+  first upgraded start without changing stored records or query results.
 - Initial repository bootstrap is deliberately yieldable: each worker tick exports at most one
   local page and one bounded page per peer (128 records / 192 KiB). Before any member is `ready`,
   a syncing repository imports each peer's node-local history, including another configured
