@@ -986,15 +986,16 @@ pub(crate) async fn local_repository_runtime_status(
     state: &AppState,
     caller_class: &'static str,
 ) -> Result<RepositoryRuntimeStatus, ApiError> {
-    state
-        .repository_replica
-        .lock()
-        .await
-        .runtime_status_with_caller(
+    let replica = state.repository_replica.clone();
+    tokio::task::spawn_blocking(move || {
+        replica.blocking_lock().runtime_status_with_caller(
             u64::try_from(Utc::now().timestamp()).unwrap_or_default(),
             caller_class,
         )
-        .map_err(repository_error)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("repository status task failed: {error}")))?
+    .map_err(repository_error)
 }
 
 fn repository_error(error: RepositoryRuntimeError) -> ApiError {

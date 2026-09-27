@@ -23,6 +23,7 @@ pub(crate) const TCP_CONNECTION_USAGE_KEY: &str = "tcp_connection_usage";
 pub(crate) const NODE_HISTORY_KEY: &str = "node_history";
 pub(crate) const MESH_TELEMETRY_KEY: &str = "mesh_telemetry";
 pub(crate) const REPOSITORY_REPLICA_KEY: &str = "repository_replica";
+mod counts;
 mod repository;
 mod source_journal;
 mod source_journal_tail;
@@ -46,7 +47,8 @@ pub(crate) use startup::HistoryStorageMode;
 #[cfg(test)]
 use startup::{
     fail_next_post_publish_history_storage_failure_for_test,
-    fail_next_segment_keyset_index_for_test, take_segment_keyset_index_failure_for_test,
+    fail_next_repository_history_counts_for_test, fail_next_segment_keyset_index_for_test,
+    take_repository_history_counts_failure_for_test, take_segment_keyset_index_failure_for_test,
 };
 use startup::{open_backend, repository_history_is_external, sqlite_connection};
 const SQLITE_FILE: &str = "history.sqlite3";
@@ -516,7 +518,8 @@ fn ensure_schema(connection: &mut Connection) -> Result<()> {
                   (is_tombstone, observed_end, received_at, observed_start, source_node_id,
                    source_epoch, stream, sequence);",
         )
-        .map_err(sqlite_error)
+        .map_err(sqlite_error)?;
+    counts::ensure_repository_history_counts(connection)
 }
 
 fn ensure_repository_history_segment_columns(connection: &Connection) -> Result<()> {

@@ -77,7 +77,7 @@ pub(crate) fn history_status_count_query_for_test(
         };
         if selected_query.contains("INDEXED BY") {
             HISTORY_STATUS_COUNT_USED_LEGACY_QUERY.store(true, Ordering::SeqCst);
-        } else if selected_query.contains("COUNT(*)") {
+        } else if selected_query.contains("repository_history_counts") {
             HISTORY_STATUS_COUNT_USED_FIXED_QUERY.store(true, Ordering::SeqCst);
         }
         selected_query
@@ -87,7 +87,7 @@ pub(crate) fn history_status_count_query_for_test(
 }
 
 pub(crate) fn maybe_delay_legacy_history_count_for_test(caller_class: &'static str, query: &str) {
-    // Model the old synchronous index scan without slowing the fixed COUNT(*) path.
+    // Model the old synchronous index scan without slowing the materialized count path.
     if caller_class == "http.internal_history_repository_status" {
         HISTORY_STATUS_COUNT_STARTED.store(true, Ordering::SeqCst);
     }

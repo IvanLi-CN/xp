@@ -234,6 +234,8 @@ thread_local! {
         const { std::cell::Cell::new(false) };
     static FAIL_NEXT_POST_PUBLISH_HISTORY_STORAGE: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+    static FAIL_NEXT_REPOSITORY_HISTORY_COUNTS: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
@@ -254,4 +256,14 @@ pub(super) fn fail_next_post_publish_history_storage_failure_for_test() {
 #[cfg(test)]
 fn take_post_publish_history_storage_failure_for_test() -> bool {
     FAIL_NEXT_POST_PUBLISH_HISTORY_STORAGE.with(|failure| failure.replace(false))
+}
+
+#[cfg(test)]
+pub(super) fn fail_next_repository_history_counts_for_test() {
+    FAIL_NEXT_REPOSITORY_HISTORY_COUNTS.with(|failure| failure.set(true));
+}
+
+#[cfg(test)]
+pub(super) fn take_repository_history_counts_failure_for_test() -> bool {
+    FAIL_NEXT_REPOSITORY_HISTORY_COUNTS.with(|failure| failure.replace(false))
 }
