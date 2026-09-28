@@ -43,6 +43,8 @@ None
 - 当同名远端 Tunnel 与持久化的 XP account、zone、hostname、Tunnel ID 及本地凭据中的
   `TunnelID` 全部匹配时，非交互 deploy 必须直接复用该 Tunnel；不得将其当作名称冲突而生成
   随机 Tunnel 名称。
+- 当持久化 DNS record ID 也对应远端相同 hostname、指向该 Tunnel 的 CNAME 时，重复 deploy
+  必须直接复用该记录；ID 或指向不匹配时保持 hostname conflict，不得自动覆盖。
 - 本地配置存在 `ingress` 时，修改前必须运行 `cloudflared tunnel ingress validate`；没有本地
   `ingress` 的远程 Tunnel 配置不得运行这个不适用的校验。本地文件原子替换且服务启动/健康检查
   失败时恢复原始文件和服务状态。

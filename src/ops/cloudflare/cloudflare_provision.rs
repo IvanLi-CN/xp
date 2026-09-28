@@ -714,7 +714,11 @@ pub(super) fn select_dns_record(
     }
 }
 
-fn is_owned_tunnel_record(record: &DnsRecordInfo, hostname: &str, tunnel_id: &str) -> bool {
+pub(super) fn is_owned_tunnel_record(
+    record: &DnsRecordInfo,
+    hostname: &str,
+    tunnel_id: &str,
+) -> bool {
     record.record_type.eq_ignore_ascii_case("CNAME")
         && record.name.eq_ignore_ascii_case(hostname)
         && record

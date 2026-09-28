@@ -57,7 +57,9 @@ existing Tunnel, or any other error, remains terminal and follows the normal rol
 When a rerun finds a same-named Tunnel that matches the persisted XP account, zone, hostname,
 Tunnel ID, and local credentials whose `TunnelID` matches, `xp-ops deploy --non-interactive -y`
 reuses it directly. It does not generate a suffixed Tunnel name for that verified local deployment
-state.
+state. If the persisted DNS record ID also matches the remote CNAME pointing at that Tunnel,
+deploy reuses the record without `--overwrite-existing`. A different record ID or target remains
+a hostname conflict; resolve ownership before retrying.
 
 ### Moving an existing XP Tunnel
 
