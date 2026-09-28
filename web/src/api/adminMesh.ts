@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const MeshTelemetryPathSchema = z.enum(["mesh", "public"]);
 export const MeshActiveRouteKindSchema = z.enum([
@@ -200,15 +201,17 @@ export async function fetchAdminMeshStatus(
 	adminToken: string,
 	signal?: AbortSignal,
 ): Promise<AdminMeshStatus> {
-	const response = await fetch("/api/admin/mesh/status", {
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		"/api/admin/mesh/status",
+		{
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-	await throwIfNotOk(response);
-	return AdminMeshStatusSchema.parse(await response.json());
+		(value) => AdminMeshStatusSchema.parse(value),
+	);
 }
 
 export async function runAdminMeshProbes(

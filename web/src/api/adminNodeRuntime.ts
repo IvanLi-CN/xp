@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { AdminNodeSchema } from "./adminNodes";
-import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 import { type SseMessage, type SseStreamHandle, startSseStream } from "./sse";
 
 export const RuntimeSummaryStatusSchema = z.enum([
@@ -146,18 +146,18 @@ export async function fetchAdminNodesRuntime(
 	adminToken: string,
 	signal?: AbortSignal,
 ): Promise<AdminNodesRuntimeResponse> {
-	const res = await fetch("/api/admin/nodes/runtime", {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		"/api/admin/nodes/runtime",
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-	const json: unknown = await res.json();
-	return AdminNodesRuntimeResponseSchema.parse(json);
+		(value) => AdminNodesRuntimeResponseSchema.parse(value),
+	);
 }
 
 export async function fetchAdminNodeRuntime(
@@ -169,18 +169,18 @@ export async function fetchAdminNodeRuntime(
 		typeof opts?.eventsLimit === "number"
 			? `?events_limit=${Math.max(0, Math.floor(opts.eventsLimit))}`
 			: "";
-	const res = await fetch(`/api/admin/nodes/${nodeId}/runtime${query}`, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		`/api/admin/nodes/${nodeId}/runtime${query}`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal: opts?.signal,
 		},
-		signal: opts?.signal,
-	});
-
-	await throwIfNotOk(res);
-	const json: unknown = await res.json();
-	return AdminNodeRuntimeDetailResponseSchema.parse(json);
+		(value) => AdminNodeRuntimeDetailResponseSchema.parse(value),
+	);
 }
 
 function parseNodeRuntimeSse(

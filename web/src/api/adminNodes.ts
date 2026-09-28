@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AdminEndpointKindSchema } from "./adminEndpoints";
 import { throwIfNotOk } from "./backendError";
 import { type NodeQuotaReset, NodeQuotaResetSchema } from "./quotaReset";
+import { fetchJsonWithTimeout } from "./request";
 
 export const AdminNodeEgressProbeSchema = z.object({
 	public_ipv4: z.string().nullable().optional(),
@@ -151,19 +152,18 @@ export async function fetchAdminNodes(
 	adminToken: string,
 	signal?: AbortSignal,
 ): Promise<AdminNodesResponse> {
-	const res = await fetch("/api/admin/nodes", {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		"/api/admin/nodes",
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminNodesResponseSchema.parse(json);
+		(value) => AdminNodesResponseSchema.parse(value),
+	);
 }
 
 export async function fetchAdminNode(
@@ -171,19 +171,18 @@ export async function fetchAdminNode(
 	nodeId: string,
 	signal?: AbortSignal,
 ): Promise<AdminNode> {
-	const res = await fetch(`/api/admin/nodes/${nodeId}`, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		`/api/admin/nodes/${nodeId}`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminNodeSchema.parse(json);
+		(value) => AdminNodeSchema.parse(value),
+	);
 }
 
 export async function fetchAdminNodeMihomoResourcePolicy(
@@ -191,7 +190,7 @@ export async function fetchAdminNodeMihomoResourcePolicy(
 	nodeId: string,
 	signal?: AbortSignal,
 ): Promise<AdminNodeMihomoResourcePolicy> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/nodes/${encodeURIComponent(nodeId)}/mihomo-resource-policy`,
 		{
 			method: "GET",
@@ -201,9 +200,8 @@ export async function fetchAdminNodeMihomoResourcePolicy(
 			},
 			signal,
 		},
+		(value) => AdminNodeMihomoResourcePolicySchema.parse(value),
 	);
-	await throwIfNotOk(res);
-	return AdminNodeMihomoResourcePolicySchema.parse(await res.json());
 }
 
 export async function putAdminNodeMihomoResourcePolicy(

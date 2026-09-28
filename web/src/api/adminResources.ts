@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const ResourceCapabilitySchema = z.enum([
 	"supported",
@@ -188,16 +188,18 @@ async function getJson<T>(
 	schema: z.ZodType<T>,
 	signal?: AbortSignal,
 ): Promise<T> {
-	const res = await fetch(path, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		path,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-	await throwIfNotOk(res);
-	return schema.parse(await res.json());
+		(value) => schema.parse(value),
+	);
 }
 
 export function fetchAdminNodesResources(

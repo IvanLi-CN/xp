@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { AdminNodeSchema } from "./adminNodes";
-import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const AdminIpUsageWindowSchema = z.enum(["24h", "7d"]);
 
@@ -109,7 +109,7 @@ export async function fetchAdminNodeIpUsage(
 	window: AdminIpUsageWindow,
 	signal?: AbortSignal,
 ): Promise<AdminNodeIpUsageResponse> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/nodes/${encodeURIComponent(nodeId)}/ip-usage?window=${window}`,
 		{
 			method: "GET",
@@ -119,11 +119,8 @@ export async function fetchAdminNodeIpUsage(
 			},
 			signal,
 		},
+		(value) => AdminNodeIpUsageResponseSchema.parse(value),
 	);
-
-	await throwIfNotOk(res);
-	const json: unknown = await res.json();
-	return AdminNodeIpUsageResponseSchema.parse(json);
 }
 
 export async function fetchAdminUserIpUsage(
@@ -132,7 +129,7 @@ export async function fetchAdminUserIpUsage(
 	window: AdminIpUsageWindow,
 	signal?: AbortSignal,
 ): Promise<AdminUserIpUsageResponse> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/users/${encodeURIComponent(userId)}/ip-usage?window=${window}`,
 		{
 			method: "GET",
@@ -142,9 +139,6 @@ export async function fetchAdminUserIpUsage(
 			},
 			signal,
 		},
+		(value) => AdminUserIpUsageResponseSchema.parse(value),
 	);
-
-	await throwIfNotOk(res);
-	const json: unknown = await res.json();
-	return AdminUserIpUsageResponseSchema.parse(json);
 }

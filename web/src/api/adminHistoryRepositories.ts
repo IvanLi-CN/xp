@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const HistoryRepositoryCapacitySchema = z.object({
 	quota_bytes: z.number(),
@@ -78,16 +79,18 @@ export async function fetchAdminHistoryRepositories(
 	adminToken: string,
 	signal?: AbortSignal,
 ): Promise<AdminHistoryRepositoriesResponse> {
-	const response = await fetch("/api/admin/history-repositories", {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		"/api/admin/history-repositories",
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-	await throwIfNotOk(response);
-	return AdminHistoryRepositoriesResponseSchema.parse(await response.json());
+		(value) => AdminHistoryRepositoriesResponseSchema.parse(value),
+	);
 }
 
 export async function replaceAdminHistoryRepositories(

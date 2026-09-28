@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const AlertItemSchema = z.object({
 	type: z.string(),
@@ -37,17 +37,16 @@ export async function fetchAdminAlerts(
 	adminToken: string,
 	signal?: AbortSignal,
 ): Promise<AlertsResponse> {
-	const res = await fetch("/api/admin/alerts", {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		"/api/admin/alerts",
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AlertsResponseSchema.parse(json);
+		(value) => AlertsResponseSchema.parse(value),
+	);
 }
