@@ -177,10 +177,10 @@ describe("<HomePage />", () => {
 			items: [
 				{
 					type: "quota_banned_membership",
-					membership_key: "u_fixture::ep_fixture",
-					user_id: "u_fixture",
-					endpoint_id: "ep_fixture",
-					owner_node_id: "node_fixture",
+					membership_key: fixtureCatalog.identifier.userPrimary(),
+					user_id: fixtureCatalog.identifier.userPrimary(),
+					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+					owner_node_id: fixtureCatalog.identifier.nodePrimary(),
 					quota_banned: true,
 					quota_banned_at: "2026-03-01T00:00:00Z",
 					message: "Quota enforced on owner node (membership is blocked).",
