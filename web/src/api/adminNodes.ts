@@ -275,7 +275,7 @@ export async function fetchAdminNodeDeletePreview(
 	nodeId: string,
 	signal?: AbortSignal,
 ): Promise<AdminNodeDeletePreviewResponse> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/nodes/${encodeURIComponent(nodeId)}/delete-preview`,
 		{
 			method: "GET",
@@ -285,12 +285,8 @@ export async function fetchAdminNodeDeletePreview(
 			},
 			signal,
 		},
+		(value) => AdminNodeDeletePreviewResponseSchema.parse(value),
 	);
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminNodeDeletePreviewResponseSchema.parse(json);
 }
 
 export async function refreshAdminNodeEgressProbe(

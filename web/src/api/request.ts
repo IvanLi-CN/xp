@@ -52,7 +52,11 @@ export async function fetchJsonWithTimeout<T>(
 			if (callerSignal?.aborted) throw error;
 			throw new ApiResponseError();
 		}
-		return parse(json);
+		try {
+			return parse(json);
+		} catch {
+			throw new ApiResponseError();
+		}
 	} catch (error) {
 		if (timedOut) throw new ApiRequestTimeoutError(timeoutMs);
 		throw error;

@@ -302,6 +302,14 @@ test("shows node runtime retry and recovers after the request succeeds", async (
 				});
 				return;
 			}
+			if (runtimeRequestCount > 3) {
+				await route.fulfill({
+					status: 200,
+					contentType: "application/json",
+					body: "",
+				});
+				return;
+			}
 			await route.fulfill({
 				contentType: "application/json",
 				body: JSON.stringify({
@@ -341,4 +349,11 @@ test("shows node runtime retry and recovers after the request succeeds", async (
 		page.getByRole("button", { name: "Refresh runtime" }),
 	).toBeVisible();
 	expect(runtimeRequestCount).toBe(initialRequestCount + 1);
+	await page.getByRole("button", { name: "Refresh runtime" }).click();
+	await expect(
+		page.getByRole("alert").filter({ hasText: "Runtime refresh failed" }),
+	).toBeVisible();
+	const failedRefreshRequestCount = runtimeRequestCount;
+	await page.waitForTimeout(10_250);
+	expect(runtimeRequestCount).toBe(failedRefreshRequestCount);
 });

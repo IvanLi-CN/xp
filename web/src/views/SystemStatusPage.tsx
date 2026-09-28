@@ -778,7 +778,7 @@ export function SystemStatusPage() {
 		queryKey: ["adminMeshStatus", adminToken],
 		enabled: adminToken.length > 0 && meshCapability.available,
 		queryFn: ({ signal }) => fetchAdminMeshStatus(adminToken, signal),
-		refetchOnMount: false,
+		refetchOnMount: runtime.isOnline,
 		refetchOnWindowFocus: false,
 		refetchInterval: (query) =>
 			query.state.status === "error" ? false : 30_000,
@@ -791,14 +791,14 @@ export function SystemStatusPage() {
 		queryKey: ["adminNodesRuntime", adminToken],
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodesRuntime(adminToken, signal),
-		refetchOnMount: false,
+		refetchOnMount: runtime.isOnline,
 		refetchOnWindowFocus: false,
 	});
 	const alertsQuery = useQuery({
 		queryKey: ["adminAlerts", adminToken],
 		enabled: adminToken.length > 0 && alertsCapability.available,
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
-		refetchOnMount: false,
+		refetchOnMount: runtime.isOnline,
 		refetchOnWindowFocus: false,
 	});
 	const repositoriesQuery = useQuery({
@@ -807,7 +807,7 @@ export function SystemStatusPage() {
 			adminToken.length > 0 &&
 			(historyRepositoriesCapability.available || !runtime.isOnline),
 		queryFn: ({ signal }) => fetchAdminHistoryRepositories(adminToken, signal),
-		refetchOnMount: false,
+		refetchOnMount: runtime.isOnline,
 		refetchOnWindowFocus: false,
 	});
 	const repositoriesState = useQueryWithOfflineFallback(

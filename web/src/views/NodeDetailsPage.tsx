@@ -377,7 +377,7 @@ export function NodeDetailsPage() {
 		queryKey: ["adminNode", adminToken, nodeId],
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNode(adminToken, nodeId, signal),
-		refetchOnMount: false,
+		refetchOnMount: appRuntime.isOnline,
 		refetchOnWindowFocus: false,
 	});
 	const mihomoPolicyQuery = useQuery({
@@ -388,7 +388,7 @@ export function NodeDetailsPage() {
 			mihomoPrivateCidrsCapability.available,
 		queryFn: ({ signal }) =>
 			fetchAdminNodeMihomoResourcePolicy(adminToken, nodeId, signal),
-		refetchOnMount: false,
+		refetchOnMount: appRuntime.isOnline,
 		refetchOnWindowFocus: false,
 	});
 	const runtimeQuery = useQuery({
@@ -396,14 +396,14 @@ export function NodeDetailsPage() {
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) =>
 			fetchAdminNodeRuntime(adminToken, nodeId, { eventsLimit: 200, signal }),
-		refetchOnMount: false,
+		refetchOnMount: appRuntime.isOnline,
 		refetchOnWindowFocus: false,
 	});
 	const historyQuery = useQuery({
 		queryKey: ["adminNodeHistory", adminToken, nodeId],
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodeHistory(adminToken, nodeId, signal),
-		refetchOnMount: false,
+		refetchOnMount: appRuntime.isOnline,
 		refetchOnWindowFocus: false,
 	});
 	const { resourceCapability, resourceQuery, resourceTabProps } =
@@ -584,19 +584,13 @@ export function NodeDetailsPage() {
 		};
 	}, [adminToken, canReadRuntime, nodeId, runtimeQuery.refetch]);
 	useEffect(() => {
-		if (
-			!canReadRuntime ||
-			runtimeSseConnected ||
-			(runtimeQuery.isError && runtimeQuery.data === undefined)
-		)
-			return;
+		if (!canReadRuntime || runtimeSseConnected || runtimeQuery.isError) return;
 		const timer = window.setInterval(() => {
 			void runtimeQuery.refetch();
 		}, 10000);
 		return () => window.clearInterval(timer);
 	}, [
 		canReadRuntime,
-		runtimeQuery.data,
 		runtimeQuery.isError,
 		runtimeQuery.refetch,
 		runtimeSseConnected,
