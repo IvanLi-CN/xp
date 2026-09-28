@@ -101,7 +101,7 @@ export function EndpointsTable(props: {
 											iconOnly
 											variant="ghost"
 											size="sm"
-											ariaLabel="Copy endpoint ID"
+											ariaLabel={`Copy endpoint ID ${endpoint.endpoint_id}`}
 											className="shrink-0 px-2"
 										/>
 									</div>
@@ -149,7 +149,7 @@ export function EndpointsTable(props: {
 									iconOnly
 									variant="ghost"
 									size="sm"
-									ariaLabel="Copy endpoint ID"
+									ariaLabel={`Copy endpoint ID ${endpoint.endpoint_id}`}
 									className="shrink-0 px-2"
 								/>
 							</div>

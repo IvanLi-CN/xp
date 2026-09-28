@@ -299,7 +299,7 @@ export const MobileActionsVisible: Story = {
 			// Storybook's test runner does not apply viewport addon media queries.
 			expect(
 				cardCanvas.getByRole("button", {
-					name: "Copy endpoint ID",
+					name: /Copy endpoint ID/,
 					hidden: true,
 				}),
 			).toBeInTheDocument();
