@@ -75,7 +75,9 @@ export const MainFlow: Story = {
 			await canvas.findByRole("heading", { name: "Users" }),
 		).toBeInTheDocument();
 		await userEvent.type(await canvas.findByLabelText("Search users"), "sato");
-		await expect(await canvas.findByText("佐藤 未来")).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("link", { name: "佐藤 未来" }),
+		).toBeInTheDocument();
 		await userEvent.click(
 			await canvas.findByRole("link", { name: "佐藤 未来" }),
 		);
@@ -161,5 +163,22 @@ export const MainFlow: Story = {
 		await expect(
 			await canvas.findByRole("heading", { name: "Endpoint probe stats" }),
 		).toBeInTheDocument();
+	},
+};
+
+export const MainFlowMobile: Story = {
+	...MainFlow,
+	parameters: {
+		...MainFlow.parameters,
+		viewport: {
+			defaultViewport: "demoMobile393",
+			viewports: {
+				demoMobile393: {
+					name: "Demo mobile (393x852)",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
 	},
 };

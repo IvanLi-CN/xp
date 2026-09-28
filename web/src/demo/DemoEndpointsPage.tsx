@@ -8,6 +8,7 @@ import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { TableScrollFrame } from "../components/TableScrollFrame";
 import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
 import { buttonVariants } from "../components/ui/button";
@@ -195,7 +196,7 @@ export function DemoEndpointsPage() {
 				/>
 			) : (
 				<>
-					<div className="xp-table-wrap">
+					<TableScrollFrame ariaLabel="Demo endpoints">
 						<table className="xp-table xp-table-zebra">
 							<thead>
 								<tr>
@@ -251,7 +252,7 @@ export function DemoEndpointsPage() {
 								})}
 							</tbody>
 						</table>
-					</div>
+					</TableScrollFrame>
 					<div className="flex items-center justify-between gap-3">
 						<p className="text-sm text-muted-foreground">
 							Page {safePage} of {pages}, {filtered.length} endpoint(s)
@@ -810,7 +811,7 @@ export function DemoEndpointProbeStatsPage() {
 				<section className="xp-card">
 					<div className="xp-card-body">
 						<h2 className="xp-card-title">Recent runs</h2>
-						<div className="xp-table-wrap">
+						<TableScrollFrame ariaLabel="Recent probe runs">
 							<table className="xp-table xp-table-zebra">
 								<thead>
 									<tr>
@@ -855,7 +856,7 @@ export function DemoEndpointProbeStatsPage() {
 									))}
 								</tbody>
 							</table>
-						</div>
+						</TableScrollFrame>
 					</div>
 				</section>
 			)}
@@ -942,7 +943,7 @@ export function DemoEndpointProbeRunPage() {
 			<section className="xp-card">
 				<div className="xp-card-body">
 					<h2 className="xp-card-title">Node samples</h2>
-					<div className="xp-table-wrap">
+					<TableScrollFrame ariaLabel="Probe node samples">
 						<table className="xp-table xp-table-zebra">
 							<thead>
 								<tr>
@@ -983,7 +984,7 @@ export function DemoEndpointProbeRunPage() {
 								})}
 							</tbody>
 						</table>
-					</div>
+					</TableScrollFrame>
 				</div>
 			</section>
 		</div>

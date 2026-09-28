@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { expect, within } from "@storybook/test";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AlertsResponse } from "../api/adminAlerts";
@@ -202,6 +203,28 @@ function pageStory(options: {
 export const Login: Story = pageStory({ path: "/login", adminToken: null });
 export const Dashboard: Story = pageStory({ path: "/" });
 const DASHBOARD_BASE = pageStory({ path: "/" });
+export const DashboardMobile: Story = {
+	...DASHBOARD_BASE,
+	tags: ["test"],
+	parameters: {
+		...DASHBOARD_BASE.parameters,
+		viewport: {
+			defaultViewport: "dashboardMobile393",
+			viewports: {
+				dashboardMobile393: {
+					name: "Dashboard mobile (393x852)",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		expect(
+			within(canvasElement).getByTestId("dashboard-alert-mobile-list"),
+		).toBeInTheDocument();
+	},
+};
 export const DashboardUpdateAvailable: Story = {
 	...DASHBOARD_BASE,
 	parameters: {

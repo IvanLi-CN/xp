@@ -9,15 +9,21 @@ type ResourceTableProps = {
 	headers: ResourceTableHeader[];
 	children: ReactNode;
 	tableClassName?: string;
+	ariaLabel?: string;
 };
 
 export function ResourceTable({
 	headers,
 	children,
 	tableClassName,
+	ariaLabel,
 }: ResourceTableProps) {
 	return (
-		<DataTable headers={headers} tableClassName={tableClassName}>
+		<DataTable
+			ariaLabel={ariaLabel}
+			headers={headers}
+			tableClassName={tableClassName}
+		>
 			{children}
 		</DataTable>
 	);

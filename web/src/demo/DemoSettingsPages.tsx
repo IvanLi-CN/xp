@@ -6,6 +6,7 @@ import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
+import { TableScrollFrame } from "../components/TableScrollFrame";
 import { useToast } from "../components/Toast";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -513,7 +514,7 @@ export function DemoToolsPage() {
 							description="Tool runs appear here after a mock operation."
 						/>
 					) : (
-						<div className="xp-table-wrap">
+						<TableScrollFrame ariaLabel="Tool history">
 							<table className="xp-table xp-table-zebra">
 								<thead>
 									<tr>
@@ -542,7 +543,7 @@ export function DemoToolsPage() {
 									))}
 								</tbody>
 							</table>
-						</div>
+						</TableScrollFrame>
 					)}
 				</div>
 			</section>
