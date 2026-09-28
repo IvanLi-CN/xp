@@ -20,6 +20,7 @@ import { Icon } from "@/components/Icon";
 import { MeshUptimeStrip } from "@/components/MeshUptimeStrip";
 import { PageHeader } from "@/components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "@/components/PageState";
+import { QueryRefreshError } from "@/components/QueryRefreshError";
 import { ReadStateBanner } from "@/components/ReadStateBanner";
 import { readAdminToken } from "@/components/auth";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +32,7 @@ import {
 	queryIsOfflineBlocked,
 } from "@/offline/queryReadState";
 import { useQueryWithOfflineFallback } from "@/offline/useQueryWithOfflineFallback";
+import { formatBackendError } from "@/utils/backendErrorMessage";
 import { useApiCapability } from "../api/useApiCompatibility";
 
 export type SystemStatusSurfaceProps = {
@@ -776,7 +778,10 @@ export function SystemStatusPage() {
 		queryKey: ["adminMeshStatus", adminToken],
 		enabled: adminToken.length > 0 && meshCapability.available,
 		queryFn: ({ signal }) => fetchAdminMeshStatus(adminToken, signal),
-		refetchInterval: 30_000,
+		refetchOnMount: runtime.isOnline,
+		refetchOnWindowFocus: false,
+		refetchInterval: (query) =>
+			query.state.status === "error" ? false : 30_000,
 	});
 	const meshState = useQueryWithOfflineFallback(
 		["adminMeshStatus", adminToken],
@@ -786,11 +791,15 @@ export function SystemStatusPage() {
 		queryKey: ["adminNodesRuntime", adminToken],
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodesRuntime(adminToken, signal),
+		refetchOnMount: runtime.isOnline,
+		refetchOnWindowFocus: false,
 	});
 	const alertsQuery = useQuery({
 		queryKey: ["adminAlerts", adminToken],
 		enabled: adminToken.length > 0 && alertsCapability.available,
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
+		refetchOnMount: runtime.isOnline,
+		refetchOnWindowFocus: false,
 	});
 	const repositoriesQuery = useQuery({
 		queryKey: ["adminHistoryRepositories", adminToken],
@@ -798,6 +807,8 @@ export function SystemStatusPage() {
 			adminToken.length > 0 &&
 			(historyRepositoriesCapability.available || !runtime.isOnline),
 		queryFn: ({ signal }) => fetchAdminHistoryRepositories(adminToken, signal),
+		refetchOnMount: runtime.isOnline,
+		refetchOnWindowFocus: false,
 	});
 	const repositoriesState = useQueryWithOfflineFallback(
 		["adminHistoryRepositories", adminToken],
@@ -884,6 +895,44 @@ export function SystemStatusPage() {
 			</div>
 		);
 	}
+	const partialErrors = [
+		meshState.isError && hasQueryData(meshState)
+			? {
+					key: "mesh",
+					title: "System status refresh failed",
+					description: formatBackendError(meshState.error),
+					onRetry: () => meshState.refetch(),
+					loading: meshState.isFetching,
+				}
+			: null,
+		runtimeQuery.isError
+			? {
+					key: "runtime",
+					title: "Runtime data unavailable",
+					description: formatBackendError(runtimeQuery.error),
+					onRetry: () => runtimeQuery.refetch(),
+					loading: runtimeQuery.isFetching,
+				}
+			: null,
+		alertsQuery.isError
+			? {
+					key: "alerts",
+					title: "Alert data unavailable",
+					description: formatBackendError(alertsQuery.error),
+					onRetry: () => alertsQuery.refetch(),
+					loading: alertsQuery.isFetching,
+				}
+			: null,
+		repositoriesState.isError
+			? {
+					key: "repositories",
+					title: "Repository status unavailable",
+					description: formatBackendError(repositoriesState.error),
+					onRetry: () => repositoriesState.refetch(),
+					loading: repositoriesState.isFetching,
+				}
+			: null,
+	].filter((item): item is NonNullable<typeof item> => item !== null);
 
 	return (
 		<div className="space-y-5">
@@ -899,6 +948,29 @@ export function SystemStatusPage() {
 					}
 					description={`Last successful sync: ${formatSyncTimestamp(latestAt)}.`}
 				/>
+			) : null}
+			{partialErrors.length > 0 ? (
+				<div className="space-y-2">
+					{partialErrors.map((item) => (
+						<QueryRefreshError
+							key={item.key}
+							description={item.description}
+							disabled={!runtime.isOnline}
+							error={
+								item.key === "mesh"
+									? meshState.error
+									: item.key === "runtime"
+										? runtimeQuery.error
+										: item.key === "alerts"
+											? alertsQuery.error
+											: repositoriesState.error
+							}
+							loading={item.loading}
+							onRetry={item.onRetry}
+							title={item.title}
+						/>
+					))}
+				</div>
 			) : null}
 			<SystemStatusSurface
 				status={meshData}

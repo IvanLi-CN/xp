@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { AdminNodeSchema } from "./adminNodes";
-import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const TrafficWindowSchema = z.enum(["24h", "31d"]);
 export type TrafficWindow = z.infer<typeof TrafficWindowSchema>;
@@ -75,7 +75,7 @@ export async function fetchAdminNodeTraffic(
 	window: TrafficWindow,
 	signal?: AbortSignal,
 ): Promise<AdminNodeTrafficResponse> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/nodes/${encodeURIComponent(nodeId)}/traffic?window=${window}`,
 		{
 			method: "GET",
@@ -85,9 +85,8 @@ export async function fetchAdminNodeTraffic(
 			},
 			signal,
 		},
+		(value) => AdminNodeTrafficResponseSchema.parse(value),
 	);
-	await throwIfNotOk(res);
-	return AdminNodeTrafficResponseSchema.parse(await res.json());
 }
 
 export async function fetchAdminUserTraffic(
@@ -99,7 +98,7 @@ export async function fetchAdminUserTraffic(
 ): Promise<AdminUserTrafficResponse> {
 	const params = new URLSearchParams({ window });
 	if (nodeId) params.set("node_id", nodeId);
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/users/${encodeURIComponent(userId)}/traffic?${params.toString()}`,
 		{
 			method: "GET",
@@ -109,7 +108,6 @@ export async function fetchAdminUserTraffic(
 			},
 			signal,
 		},
+		(value) => AdminUserTrafficResponseSchema.parse(value),
 	);
-	await throwIfNotOk(res);
-	return AdminUserTrafficResponseSchema.parse(await res.json());
 }

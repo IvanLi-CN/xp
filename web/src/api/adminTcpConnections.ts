@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { AdminNodeSchema } from "./adminNodes";
-import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const AdminTcpConnectionUsageWindowSchema = z.enum(["24h", "7d"]);
 
@@ -63,7 +63,7 @@ export async function fetchAdminNodeTcpConnections(
 	window: AdminTcpConnectionUsageWindow,
 	signal?: AbortSignal,
 ): Promise<AdminNodeTcpConnectionsResponse> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/nodes/${encodeURIComponent(nodeId)}/tcp-connections?window=${window}`,
 		{
 			method: "GET",
@@ -73,9 +73,6 @@ export async function fetchAdminNodeTcpConnections(
 			},
 			signal,
 		},
+		(value) => AdminNodeTcpConnectionsResponseSchema.parse(value),
 	);
-
-	await throwIfNotOk(res);
-	const json: unknown = await res.json();
-	return AdminNodeTcpConnectionsResponseSchema.parse(json);
 }

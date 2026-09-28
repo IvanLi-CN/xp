@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const AdminUserQuotaSummaryItemSchema = z.object({
 	user_id: z.string(),
@@ -34,17 +34,16 @@ export async function fetchAdminUserQuotaSummaries(
 	adminToken: string,
 	signal?: AbortSignal,
 ): Promise<AdminUserQuotaSummariesResponse> {
-	const res = await fetch("/api/admin/users/quota-summaries", {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		"/api/admin/users/quota-summaries",
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminUserQuotaSummariesResponseSchema.parse(json);
+		(value) => AdminUserQuotaSummariesResponseSchema.parse(value),
+	);
 }

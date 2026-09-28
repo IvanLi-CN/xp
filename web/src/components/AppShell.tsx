@@ -752,24 +752,24 @@ export function AppShell({
 						serviceMonitorWorkspace ? "max-w-[90rem]" : "max-w-7xl"
 					} flex-col gap-2.5 sm:gap-4`}
 				>
-					<header className="xp-panel px-2 py-2 sm:px-4 sm:py-3">
-						<div className="grid w-full grid-cols-1 items-center gap-2 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:gap-4">
-							<div className="flex min-w-0 items-center gap-3 lg:col-start-1 lg:row-start-1">
+					<header className="xp-panel px-0.5 py-2 sm:px-4 sm:py-3">
+						<div className="flex w-full min-w-0 items-center gap-px lg:grid lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:gap-4">
+							<div className="flex min-w-0 shrink-0 items-center gap-px lg:gap-3">
 								<Button
 									variant="ghost"
 									size="sm"
-									className="lg:hidden"
+									className="size-11 min-h-11 min-w-11 shrink-0 p-0 lg:hidden"
 									aria-label="Open menu"
 									onClick={() => setMobileNavOpen(true)}
 								>
 									<Icon name="tabler:menu-2" ariaLabel="Menu" />
 								</Button>
-								<Link to="/" className="flex min-w-0 items-center gap-2">
+								<Link to="/" className="xp-brand-link">
 									{brand.logo === "xp-lockup" ? (
-										<XpBrandLogo
-											kind="lockup"
-											className="block h-8 w-[6.7rem] shrink-0 sm:h-9 sm:w-[7.55rem]"
-										/>
+										<>
+											<XpBrandLogo kind="mark" className="size-10 lg:hidden" />
+											<XpBrandLogo kind="lockup" className="xp-brand-lockup" />
+										</>
 									) : brand.markSrc ? (
 										<img
 											src={brand.markSrc}
@@ -813,8 +813,8 @@ export function AppShell({
 								</div>
 							</div>
 
-							<div className="flex items-center justify-end gap-1 sm:gap-2 lg:col-start-3 lg:row-start-1">
-								<div className="flex items-center gap-1 sm:gap-2">
+							<div className="flex min-w-0 flex-1 items-center justify-end gap-px sm:gap-2 lg:flex-none">
+								<div className="flex min-w-0 items-center gap-px sm:gap-2">
 									<span className="hidden items-center sm:inline-flex">
 										{globalReadStateIndicator}
 									</span>

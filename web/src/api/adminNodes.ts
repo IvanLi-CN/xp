@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AdminEndpointKindSchema } from "./adminEndpoints";
 import { throwIfNotOk } from "./backendError";
 import { type NodeQuotaReset, NodeQuotaResetSchema } from "./quotaReset";
+import { fetchJsonWithTimeout } from "./request";
 
 export const AdminNodeEgressProbeSchema = z.object({
 	public_ipv4: z.string().nullable().optional(),
@@ -151,19 +152,18 @@ export async function fetchAdminNodes(
 	adminToken: string,
 	signal?: AbortSignal,
 ): Promise<AdminNodesResponse> {
-	const res = await fetch("/api/admin/nodes", {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		"/api/admin/nodes",
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminNodesResponseSchema.parse(json);
+		(value) => AdminNodesResponseSchema.parse(value),
+	);
 }
 
 export async function fetchAdminNode(
@@ -171,19 +171,18 @@ export async function fetchAdminNode(
 	nodeId: string,
 	signal?: AbortSignal,
 ): Promise<AdminNode> {
-	const res = await fetch(`/api/admin/nodes/${nodeId}`, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		`/api/admin/nodes/${nodeId}`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminNodeSchema.parse(json);
+		(value) => AdminNodeSchema.parse(value),
+	);
 }
 
 export async function fetchAdminNodeMihomoResourcePolicy(
@@ -191,7 +190,7 @@ export async function fetchAdminNodeMihomoResourcePolicy(
 	nodeId: string,
 	signal?: AbortSignal,
 ): Promise<AdminNodeMihomoResourcePolicy> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/nodes/${encodeURIComponent(nodeId)}/mihomo-resource-policy`,
 		{
 			method: "GET",
@@ -201,9 +200,8 @@ export async function fetchAdminNodeMihomoResourcePolicy(
 			},
 			signal,
 		},
+		(value) => AdminNodeMihomoResourcePolicySchema.parse(value),
 	);
-	await throwIfNotOk(res);
-	return AdminNodeMihomoResourcePolicySchema.parse(await res.json());
 }
 
 export async function putAdminNodeMihomoResourcePolicy(
@@ -277,7 +275,7 @@ export async function fetchAdminNodeDeletePreview(
 	nodeId: string,
 	signal?: AbortSignal,
 ): Promise<AdminNodeDeletePreviewResponse> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/nodes/${encodeURIComponent(nodeId)}/delete-preview`,
 		{
 			method: "GET",
@@ -287,12 +285,8 @@ export async function fetchAdminNodeDeletePreview(
 			},
 			signal,
 		},
+		(value) => AdminNodeDeletePreviewResponseSchema.parse(value),
 	);
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminNodeDeletePreviewResponseSchema.parse(json);
 }
 
 export async function refreshAdminNodeEgressProbe(
@@ -386,7 +380,7 @@ export async function fetchAdminMembershipOperation(
 	operationId: string,
 	signal?: AbortSignal,
 ): Promise<AdminMembershipOperation> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/membership-operations/${encodeURIComponent(operationId)}`,
 		{
 			method: "GET",
@@ -396,8 +390,6 @@ export async function fetchAdminMembershipOperation(
 			},
 			signal,
 		},
+		(value) => AdminMembershipOperationResponseSchema.parse(value).operation,
 	);
-	await throwIfNotOk(res);
-	const json: unknown = await res.json();
-	return AdminMembershipOperationResponseSchema.parse(json).operation;
 }

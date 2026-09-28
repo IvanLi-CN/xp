@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { AdminEndpointKindSchema } from "./adminEndpoints";
 import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const AdminUserAccessItemSchema = z.object({
 	user_id: z.string(),
@@ -40,19 +41,18 @@ export async function fetchAdminUserAccess(
 	userId: string,
 	signal?: AbortSignal,
 ): Promise<GetAdminUserAccessResponse> {
-	const res = await fetch(`/api/admin/users/${userId}/access`, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		`/api/admin/users/${userId}/access`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return GetAdminUserAccessResponseSchema.parse(json);
+		(value) => GetAdminUserAccessResponseSchema.parse(value),
+	);
 }
 
 export async function putAdminUserAccess(

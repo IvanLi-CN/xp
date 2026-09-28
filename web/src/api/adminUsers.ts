@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { throwIfNotOk } from "./backendError";
 import { type UserQuotaReset, UserQuotaResetSchema } from "./quotaReset";
+import { fetchJsonWithTimeout } from "./request";
 
 export const AdminUserSchema = z.object({
 	user_id: z.string(),
@@ -62,19 +63,18 @@ export async function fetchAdminUsers(
 	adminToken: string,
 	signal?: AbortSignal,
 ): Promise<AdminUsersResponse> {
-	const res = await fetch("/api/admin/users", {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		"/api/admin/users",
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminUsersResponseSchema.parse(json);
+		(value) => AdminUsersResponseSchema.parse(value),
+	);
 }
 
 export async function fetchAdminUser(
@@ -82,19 +82,18 @@ export async function fetchAdminUser(
 	userId: string,
 	signal?: AbortSignal,
 ): Promise<AdminUser> {
-	const res = await fetch(`/api/admin/users/${userId}`, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		`/api/admin/users/${userId}`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminUserSchema.parse(json);
+		(value) => AdminUserSchema.parse(value),
+	);
 }
 
 export async function createAdminUser(
@@ -204,7 +203,7 @@ export async function fetchAdminUserMihomoProfile(
 	userId: string,
 	signal?: AbortSignal,
 ): Promise<AdminUserMihomoProfile> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/users/${userId}/subscription-mihomo-profile`,
 		{
 			method: "GET",
@@ -214,12 +213,8 @@ export async function fetchAdminUserMihomoProfile(
 			},
 			signal,
 		},
+		(value) => AdminUserMihomoProfileSchema.parse(value),
 	);
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminUserMihomoProfileSchema.parse(json);
 }
 
 export async function putAdminUserMihomoProfile(

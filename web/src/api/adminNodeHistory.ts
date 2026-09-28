@@ -5,7 +5,7 @@ import {
 	RuntimeStatusSchema,
 } from "./adminNodeRuntime";
 import { AdminNodeSchema } from "./adminNodes";
-import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const NodeHistoryDailyTrafficSchema = z.object({
 	date: z.string(),
@@ -64,7 +64,7 @@ export async function fetchAdminNodeHistory(
 	nodeId: string,
 	signal?: AbortSignal,
 ): Promise<AdminNodeHistoryResponse> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/nodes/${encodeURIComponent(nodeId)}/history`,
 		{
 			method: "GET",
@@ -74,9 +74,6 @@ export async function fetchAdminNodeHistory(
 			},
 			signal,
 		},
+		(value) => AdminNodeHistoryResponseSchema.parse(value),
 	);
-
-	await throwIfNotOk(res);
-	const json: unknown = await res.json();
-	return AdminNodeHistoryResponseSchema.parse(json);
 }

@@ -196,7 +196,7 @@ function setupMocks(args?: {
 		egress_probe: refreshEgressProbe,
 	});
 	vi.mocked(fetchAdminNodeDeletePreview).mockResolvedValue({
-		node_id: fixtureCatalog.nodeId.fixture17(),
+		node_id: fixtureCatalog.nodeId.fixture134(),
 		endpoints: [],
 	});
 	vi.mocked(deleteAdminNode).mockResolvedValue({ status: "completed" });
@@ -785,7 +785,6 @@ describe("<NodeDetailsPage />", () => {
 		});
 		expect(fetchAdminNode).toHaveBeenCalledTimes(1);
 	});
-
 	it("previews endpoint cleanup before deleting a node", async () => {
 		setupMocks();
 		vi.mocked(fetchAdminNodeDeletePreview).mockResolvedValueOnce({
@@ -814,6 +813,7 @@ describe("<NodeDetailsPage />", () => {
 		expect(fetchAdminNodeDeletePreview).toHaveBeenCalledWith(
 			"admintoken",
 			fixtureCatalog.nodeId.fixture134(),
+			expect.any(AbortSignal),
 		);
 		expect(deleteAdminNode).not.toHaveBeenCalled();
 	});

@@ -207,3 +207,153 @@ test("keeps the stacked mobile peer actions free of horizontal overflow", async 
 	}));
 	expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
 });
+
+test("shows a retryable error for an empty response without retrying in a loop", async ({
+	page,
+}) => {
+	await setAdminToken(page);
+	await setupApiMocks(page, { mockStatusEvents: false });
+	let requestCount = 0;
+	await page.route("**/api/admin/mesh/status", async (route) => {
+		requestCount += 1;
+		if (requestCount <= 2) {
+			await route.fulfill({
+				status: 200,
+				contentType: "application/json",
+				body: "",
+			});
+			return;
+		}
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify(meshStatus),
+		});
+	});
+
+	await page.goto("/system-status");
+	await expect(
+		page.getByRole("heading", { name: "Failed to load system status" }),
+	).toBeVisible();
+	await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+	const initialRequestCount = requestCount;
+	expect(initialRequestCount).toBeGreaterThanOrEqual(1);
+	expect(initialRequestCount).toBeLessThanOrEqual(2);
+	await page.waitForTimeout(250);
+	expect(requestCount).toBe(initialRequestCount);
+
+	await page.getByRole("button", { name: "Retry" }).click();
+	await expect(
+		page.getByRole("heading", { name: "System status", exact: true }),
+	).toBeVisible();
+	expect(requestCount).toBe(initialRequestCount + 1);
+});
+
+test("keeps the system status surface visible when runtime data is unavailable", async ({
+	page,
+}) => {
+	await setAdminToken(page);
+	await setupApiMocks(page, { mockStatusEvents: false });
+	await page.route("**/api/admin/mesh/status", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify(meshStatus),
+		});
+	});
+	await page.route("**/api/admin/nodes/runtime", async (route) => {
+		await route.fulfill({
+			status: 200,
+			contentType: "application/json",
+			body: "",
+		});
+	});
+
+	await page.goto("/system-status");
+	await expect(
+		page.getByRole("heading", { name: "System status", exact: true }),
+	).toBeVisible();
+	await expect(
+		page.getByRole("alert").filter({ hasText: "Runtime data unavailable" }),
+	).toBeVisible();
+	await expect(page.locator("[data-peer-row]").first()).toBeVisible();
+});
+
+test("shows node runtime retry and recovers after the request succeeds", async ({
+	page,
+}) => {
+	await setAdminToken(page);
+	const state = await setupApiMocks(page, { mockStatusEvents: false });
+	const node = state.nodes[0];
+	if (!node) throw new Error("Fixture node is missing");
+	let runtimeRequestCount = 0;
+	await page.route(
+		`**/api/admin/nodes/${node.node_id}/runtime*`,
+		async (route) => {
+			const path = new URL(route.request().url()).pathname;
+			if (!path.endsWith("/runtime")) {
+				await route.continue();
+				return;
+			}
+			runtimeRequestCount += 1;
+			if (runtimeRequestCount <= 2) {
+				await route.fulfill({
+					status: 200,
+					contentType: "application/json",
+					body: "",
+				});
+				return;
+			}
+			if (runtimeRequestCount > 3) {
+				await route.fulfill({
+					status: 200,
+					contentType: "application/json",
+					body: "",
+				});
+				return;
+			}
+			await route.fulfill({
+				contentType: "application/json",
+				body: JSON.stringify({
+					node,
+					summary: {
+						status: "up",
+						updated_at: fixtureCatalog.timestamp.recent(),
+					},
+					components: [],
+					recent_slots: [],
+					events: [],
+				}),
+			});
+		},
+	);
+	await page.route(
+		`**/api/admin/nodes/${node.node_id}/history`,
+		async (route) => {
+			await route.fulfill({
+				status: 200,
+				contentType: "application/json",
+				body: "",
+			});
+		},
+	);
+
+	await page.goto(`/nodes/${node.node_id}`);
+	await expect(
+		page.getByRole("heading", { name: "Failed to load runtime" }),
+	).toBeVisible();
+	await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+	const initialRequestCount = runtimeRequestCount;
+	expect(initialRequestCount).toBeGreaterThanOrEqual(1);
+	expect(initialRequestCount).toBeLessThanOrEqual(2);
+	await page.getByRole("button", { name: "Retry" }).click();
+	await expect(
+		page.getByRole("button", { name: "Refresh runtime" }),
+	).toBeVisible();
+	expect(runtimeRequestCount).toBe(initialRequestCount + 1);
+	await page.getByRole("button", { name: "Refresh runtime" }).click();
+	await expect(
+		page.getByRole("alert").filter({ hasText: "Runtime refresh failed" }),
+	).toBeVisible();
+	const failedRefreshRequestCount = runtimeRequestCount;
+	await page.waitForTimeout(10_250);
+	expect(runtimeRequestCount).toBe(failedRefreshRequestCount);
+});

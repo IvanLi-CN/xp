@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 const RepositoryHistoryRangeSchema = z.object({
 	start_unix_seconds: z.number(),
@@ -59,14 +59,16 @@ export async function fetchAdminRepositoryHistory(
 	});
 	if (query.pageCursor) params.set("page_cursor", query.pageCursor);
 	if (query.subjectNodeId) params.set("subject_node_id", query.subjectNodeId);
-	const response = await fetch(`/api/admin/history-repository?${params}`, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		`/api/admin/history-repository?${params}`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-	await throwIfNotOk(response);
-	return AdminRepositoryHistorySchema.parse(await response.json());
+		(value) => AdminRepositoryHistorySchema.parse(value),
+	);
 }
