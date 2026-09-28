@@ -472,6 +472,9 @@ export function NodeDetailsPage() {
 	const {
 		operation: pendingDeleteOperation,
 		operationId: pendingDeleteOperationId,
+		operationError: pendingDeleteOperationError,
+		operationIsFetching: pendingDeleteOperationIsFetching,
+		retryOperation: retryPendingDeleteOperation,
 		isDeleting,
 		submitDelete,
 	} = useNodeDeleteFlow({
@@ -1675,6 +1678,9 @@ export function NodeDetailsPage() {
 								</div>
 								<NodeDeleteOperationStatus
 									operation={pendingDeleteOperation}
+									error={pendingDeleteOperationError}
+									isFetching={pendingDeleteOperationIsFetching}
+									onRetry={() => void retryPendingDeleteOperation()}
 									visible={hasPendingDeleteOperation}
 								/>
 								<p className="text-sm text-muted-foreground">

@@ -8,6 +8,7 @@ import {
 	fetchAdminMembershipOperation,
 } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
+import { Button } from "../components/Button";
 import { alertClass } from "../components/ui-helpers";
 import { Badge } from "../components/ui/badge";
 import { formatBackendError } from "../utils/backendErrorMessage";
@@ -100,6 +101,9 @@ export function useNodeDeleteOperation({
 		operation: query.data,
 		operationId,
 		setPendingOperation,
+		error: query.error,
+		isFetching: query.isFetching,
+		retry: query.refetch,
 	};
 }
 
@@ -138,13 +142,19 @@ export function useNodeDeleteFlow({
 		pushToast({ variant: "success", message: "Node deleted." });
 		navigateToNodes();
 	}, [adminToken, navigateToNodes, pushToast, queryClient]);
-	const { operation, operationId, setPendingOperation } =
-		useNodeDeleteOperation({
-			adminToken,
-			isOnline,
-			nodeId,
-			onCompleted,
-		});
+	const {
+		operation,
+		operationId,
+		setPendingOperation,
+		error: operationError,
+		isFetching: operationIsFetching,
+		retry: retryOperation,
+	} = useNodeDeleteOperation({
+		adminToken,
+		isOnline,
+		nodeId,
+		onCompleted,
+	});
 	const submitDelete = useCallback(async () => {
 		setIsDeleting(true);
 		try {
@@ -180,32 +190,68 @@ export function useNodeDeleteFlow({
 		operation,
 		operationId,
 		setPendingOperation,
+		operationError,
+		operationIsFetching,
+		retryOperation,
 		isDeleting,
 		submitDelete,
 	};
 }
 
 export function NodeDeleteOperationStatus({
+	error,
+	isFetching,
 	operation,
+	onRetry,
 	visible,
 }: {
+	error: unknown;
+	isFetching: boolean;
 	operation: AdminMembershipOperation | undefined;
+	onRetry: () => void;
 	visible: boolean;
 }) {
 	if (!visible) return null;
+	const hasError = error !== null;
 	return (
-		<output className={alertClass("warning", "items-center gap-2 py-2")}>
-			<Badge variant="warning" size="sm">
-				{operation?.phase ?? "pending"}
-			</Badge>
-			<span>
-				{operation?.phase === "blocked"
-					? "Node deletion is blocked."
-					: "Node deletion is continuing."}
-			</span>
-			{operation?.evidence ? (
-				<span className="text-xs opacity-80">{operation.evidence}</span>
+		<div
+			className={alertClass(
+				hasError ? "error" : "warning",
+				"flex items-center justify-between gap-2 py-2",
+			)}
+			role={hasError ? "alert" : "status"}
+		>
+			<div className="min-w-0 space-y-1">
+				<div className="flex items-center gap-2">
+					<Badge variant={hasError ? "destructive" : "warning"} size="sm">
+						{hasError ? "unavailable" : (operation?.phase ?? "pending")}
+					</Badge>
+					<span>
+						{hasError
+							? "Node deletion status is unavailable."
+							: operation?.phase === "blocked"
+								? "Node deletion is blocked."
+								: "Node deletion is continuing."}
+					</span>
+				</div>
+				{hasError ? (
+					<p className="truncate text-xs opacity-80">
+						{formatBackendError(error)}
+					</p>
+				) : operation?.evidence ? (
+					<p className="truncate text-xs opacity-80">{operation.evidence}</p>
+				) : null}
+			</div>
+			{hasError ? (
+				<Button
+					variant="secondary"
+					size="sm"
+					loading={isFetching}
+					onClick={onRetry}
+				>
+					Retry status
+				</Button>
 			) : null}
-		</output>
+		</div>
 	);
 }

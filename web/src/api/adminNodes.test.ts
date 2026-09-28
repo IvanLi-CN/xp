@@ -14,11 +14,10 @@ describe("fetchAdminNodeDeletePreview", () => {
 	});
 
 	it("uses the bounded read request helper", async () => {
-		const nodeId = fixtureCatalog.nodeId.fixture134();
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			new Response(
 				JSON.stringify({
-					node_id: nodeId,
+					node_id: fixtureCatalog.nodeId.fixture134(),
 					endpoints: [],
 				}),
 				{ status: 200, headers: { "Content-Type": "application/json" } },
@@ -26,10 +25,16 @@ describe("fetchAdminNodeDeletePreview", () => {
 		);
 
 		await expect(
-			fetchAdminNodeDeletePreview("admintoken", nodeId),
-		).resolves.toEqual({ node_id: nodeId, endpoints: [] });
+			fetchAdminNodeDeletePreview(
+				"admintoken",
+				fixtureCatalog.nodeId.fixture134(),
+			),
+		).resolves.toEqual({
+			node_id: fixtureCatalog.nodeId.fixture134(),
+			endpoints: [],
+		});
 		expect(fetchSpy).toHaveBeenCalledWith(
-			`/api/admin/nodes/${encodeURIComponent(nodeId)}/delete-preview`,
+			`/api/admin/nodes/${encodeURIComponent(fixtureCatalog.nodeId.fixture134())}/delete-preview`,
 			expect.objectContaining({
 				method: "GET",
 				signal: expect.any(AbortSignal),
