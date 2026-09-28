@@ -7,6 +7,8 @@
 - `xp-ops cloudflare provision` 和 `xp-ops deploy` 自动迁移已证明归属的 XP hostname；
   `--migrate-existing-tunnel` 仅保留为兼容选项。
 - Cloudflare DNS 更新使用最小 PATCH，只更新目标 CNAME 的 Tunnel 内容。
+- `xp-ops deploy` 只有在持久化 DNS record ID 与目标记录 ID 匹配，且记录仍是目标 hostname
+  指向已验证 XP Tunnel 的 CNAME 时才复用已有记录；其他记录继续进入 hostname conflict。
 
 ## Runtime safety
 

@@ -243,6 +243,8 @@
   A matching persisted XP Tunnel with a credentials payload naming that Tunnel ID is reused by
   non-interactive deploy; it is not treated as a name collision that can generate a suffixed
   Tunnel name.
+  A matching persisted DNS record ID is also reused only when the remote CNAME still targets that
+  verified Tunnel; unrelated records remain conflicts.
   A legacy Tunnel with additional hostnames is rejected before writes because one cloudflared
   process cannot keep both Tunnel connectors alive.
 - If an environment is only partially supported or blocked by current implementation limits, the limitation must be stated concretely in specs and ops docs together with the required operator intervention.

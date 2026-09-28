@@ -21,6 +21,7 @@ async fn build_plan_reuses_matching_persisted_tunnel_without_conflict() {
             "zone_id": "zone",
             "hostname": xp_test_fixtures::host_fixture553(),
             "tunnel_id": "existing",
+            "dns_record_id": "record",
         })
         .to_string(),
     )
@@ -56,7 +57,14 @@ async fn build_plan_reuses_matching_persisted_tunnel_without_conflict() {
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "success": true,
             "errors": [],
-            "result": []
+            "result": [{
+                "id": "record",
+                "type": "CNAME",
+                "name": xp_test_fixtures::host_fixture553(),
+                "content": "existing.cfargotunnel.com",
+                "proxied": true,
+                "ttl": 1
+            }]
         })))
         .expect(1)
         .mount(&server)
@@ -120,5 +128,16 @@ async fn build_plan_reuses_matching_persisted_tunnel_without_conflict() {
             .as_ref()
             .map(|tunnel| tunnel.id.as_str()),
         Some("existing")
+    );
+    assert!(
+        cloudflare.dns_conflict.is_none(),
+        "the matching persisted DNS record must not trigger hostname conflict"
+    );
+    assert_eq!(
+        cloudflare
+            .dns_override
+            .as_ref()
+            .map(|record| record.id.as_str()),
+        Some("record")
     );
 }

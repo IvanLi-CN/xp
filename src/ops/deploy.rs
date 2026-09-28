@@ -631,7 +631,6 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
 async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, ExitError> {
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
-
     let join_token_present = args.join_token.is_some() || args.join_token_stdin_value.is_some();
 
     let xp_path = paths.usr_local_bin_xp();
@@ -868,8 +867,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
                 tunnel.name, tunnel.id
             ));
         }
-
-        let dns_conflict = if let (Some(token), true) = (
+        let dns_record = if let (Some(token), true) = (
             token.as_ref(),
             !hostname.is_empty() && !zone_id_value.is_empty(),
         ) {
@@ -883,13 +881,21 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
         } else {
             None
         };
+        let (dns_conflict, dns_override) =
+            cloudflare::tunnel_config::classify_dns_record_for_deploy(
+                paths,
+                &account_id,
+                &zone_id_value,
+                &hostname,
+                tunnel_override.as_ref(),
+                dns_record,
+            );
         if let Some(rec) = dns_conflict.as_ref() {
             warnings.push(format!(
                 "hostname already exists: {} {} -> {}",
                 rec.record_type, rec.name, rec.content
             ));
         }
-
         cloudflare_plan = Some(CloudflarePlan {
             account_id,
             zone_id: zone_id_value,
@@ -905,7 +911,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
             tunnel_conflict,
             tunnel_override,
             dns_conflict,
-            dns_override: None,
+            dns_override,
         });
         api_base_url
     } else {

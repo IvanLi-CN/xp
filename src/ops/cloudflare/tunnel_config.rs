@@ -1,4 +1,4 @@
-use super::{CloudflareClient, TunnelInfo};
+use super::{CloudflareClient, DnsRecordInfo, TunnelInfo};
 use crate::ops::paths::Paths;
 use serde::Deserialize;
 use std::fs;
@@ -9,6 +9,7 @@ struct PersistedTunnelSettings {
     zone_id: String,
     hostname: String,
     tunnel_id: Option<String>,
+    dns_record_id: Option<String>,
 }
 
 pub(crate) fn classify_tunnel_for_deploy(
@@ -25,6 +26,32 @@ pub(crate) fn classify_tunnel_for_deploy(
         (None, Some(tunnel))
     } else {
         (Some(tunnel), None)
+    }
+}
+
+pub(crate) fn classify_dns_record_for_deploy(
+    paths: &Paths,
+    account_id: &str,
+    zone_id: &str,
+    hostname: &str,
+    tunnel_override: Option<&TunnelInfo>,
+    dns_record: Option<DnsRecordInfo>,
+) -> (Option<DnsRecordInfo>, Option<DnsRecordInfo>) {
+    let Some(record) = dns_record else {
+        return (None, None);
+    };
+    let owned = tunnel_override.is_some_and(|tunnel| {
+        let Some(settings) = load_persisted_settings(paths) else {
+            return false;
+        };
+        persisted_tunnel_matches_deploy_request(paths, account_id, zone_id, hostname, tunnel)
+            && settings.dns_record_id.as_deref() == Some(record.id.as_str())
+            && super::cloudflare_provision::is_owned_tunnel_record(&record, hostname, &tunnel.id)
+    });
+    if owned {
+        (None, Some(record))
+    } else {
+        (Some(record), None)
     }
 }
 
@@ -47,10 +74,7 @@ fn persisted_tunnel_matches_deploy_request(
     hostname: &str,
     tunnel: &TunnelInfo,
 ) -> bool {
-    let Ok(raw) = fs::read_to_string(paths.etc_xp_ops_cloudflare_settings()) else {
-        return false;
-    };
-    let Ok(settings) = serde_json::from_str::<PersistedTunnelSettings>(&raw) else {
+    let Some(settings) = load_persisted_settings(paths) else {
         return false;
     };
     settings.account_id == account_id
@@ -58,6 +82,11 @@ fn persisted_tunnel_matches_deploy_request(
         && settings.hostname == hostname
         && settings.tunnel_id.as_deref() == Some(tunnel.id.as_str())
         && credentials_belong_to_tunnel(paths, &tunnel.id).unwrap_or(false)
+}
+
+fn load_persisted_settings(paths: &Paths) -> Option<PersistedTunnelSettings> {
+    let raw = fs::read_to_string(paths.etc_xp_ops_cloudflare_settings()).ok()?;
+    serde_json::from_str(&raw).ok()
 }
 
 pub(super) async fn get_tunnel_config_after_create(
@@ -160,5 +189,73 @@ mod tests {
             xp_test_fixtures::host_fixture553(),
             &tunnel,
         ));
+    }
+
+    #[test]
+    fn persisted_dns_record_reuse_requires_matching_record_identity() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        fs::create_dir_all(paths.etc_xp_ops_cloudflare_dir()).unwrap();
+        fs::create_dir_all(paths.etc_cloudflared_dir()).unwrap();
+        fs::write(
+            paths.etc_xp_ops_cloudflare_settings(),
+            serde_json::json!({
+                "account_id": "account",
+                "zone_id": "zone",
+                "hostname": xp_test_fixtures::host_fixture553(),
+                "tunnel_id": "tunnel-id",
+                "dns_record_id": "record"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            paths.etc_cloudflared_dir().join("tunnel-id.json"),
+            r#"{"TunnelID":"tunnel-id"}"#,
+        )
+        .unwrap();
+        let tunnel = TunnelInfo {
+            id: "tunnel-id".to_string(),
+            name: "xp-node".to_string(),
+        };
+        let record = |id: &str, record_type: &str, content: &str| DnsRecordInfo {
+            id: id.to_string(),
+            record_type: record_type.to_string(),
+            name: xp_test_fixtures::host_fixture553().to_string(),
+            content: content.to_string(),
+            proxied: Some(true),
+            ttl: Some(1),
+        };
+
+        let (conflict, override_record) = classify_dns_record_for_deploy(
+            &paths,
+            "account",
+            "zone",
+            xp_test_fixtures::host_fixture553(),
+            Some(&tunnel),
+            Some(record("record", "CNAME", "tunnel-id.cfargotunnel.com")),
+        );
+        assert!(conflict.is_none());
+        assert_eq!(
+            override_record.as_ref().map(|record| record.id.as_str()),
+            Some("record")
+        );
+
+        for dns_record in [
+            record("other-record", "CNAME", "tunnel-id.cfargotunnel.com"),
+            record("record", "CNAME", "other-tunnel.cfargotunnel.com"),
+            record("record", "A", "192.0.2.1"),
+        ] {
+            let (conflict, override_record) = classify_dns_record_for_deploy(
+                &paths,
+                "account",
+                "zone",
+                xp_test_fixtures::host_fixture553(),
+                Some(&tunnel),
+                Some(dns_record),
+            );
+            assert!(conflict.is_some());
+            assert!(override_record.is_none());
+        }
     }
 }
