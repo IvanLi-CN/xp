@@ -150,7 +150,7 @@ test("keeps AppShell header controls in one non-wrapping mobile row", async ({
 		expect(layout.header?.height).toBeLessThan(70);
 		expect(layout.brand?.top).toBe(layout.version?.top);
 		expect(layout.brand?.bottom).toBe(layout.version?.bottom);
-		expect(layout.logo?.width).toBeLessThanOrEqual(32);
+		expect(layout.logo?.width).toBe(40);
 		expect(layout.logo?.left).toBeGreaterThanOrEqual(layout.menu?.right ?? 0);
 		expect(
 			(layout.logo?.left ?? 0) - (layout.menu?.right ?? 0),
