@@ -467,9 +467,14 @@ export function NodeDetailsPage() {
 	const [deletePreviewEndpoints, setDeletePreviewEndpoints] = useState<
 		AdminNodeDeletePreviewEndpoint[]
 	>([]);
+	const [deletePreviewNodeId, setDeletePreviewNodeId] = useState<string | null>(
+		null,
+	);
 	const deletePreviewAbortRef = useRef<AbortController | null>(null);
 	const activeNodeIdRef = useRef(nodeId);
 	activeNodeIdRef.current = nodeId;
+	const activeDeletePreviewEndpoints =
+		deletePreviewNodeId === nodeId ? deletePreviewEndpoints : [];
 	const {
 		operation: pendingDeleteOperation,
 		operationId: pendingDeleteOperationId,
@@ -482,7 +487,7 @@ export function NodeDetailsPage() {
 		adminToken,
 		isOnline: appRuntime.isOnline,
 		nodeId,
-		deletePreviewEndpoints,
+		deletePreviewEndpoints: activeDeletePreviewEndpoints,
 		queryClient,
 		pushToast,
 		navigateToNodes: () => navigate({ to: "/nodes" }),
@@ -491,7 +496,7 @@ export function NodeDetailsPage() {
 				queryClient,
 				adminToken,
 				nodeId,
-				deletePreviewEndpoints,
+				activeDeletePreviewEndpoints,
 			),
 	});
 	const quotaForm = useForm<QuotaResetFormInput, unknown, QuotaResetFormValues>(
@@ -519,6 +524,7 @@ export function NodeDetailsPage() {
 		deletePreviewAbortRef.current = null;
 		setDeleteOpen(false);
 		setIsPreparingDelete(false);
+		setDeletePreviewNodeId(null);
 		setDeletePreviewEndpoints([]);
 		return () => {
 			deletePreviewAbortRef.current?.abort();
@@ -821,6 +827,9 @@ export function NodeDetailsPage() {
 		const controller = new AbortController();
 		deletePreviewAbortRef.current = controller;
 		const requestedNodeId = nodeId;
+		setDeleteOpen(false);
+		setDeletePreviewNodeId(null);
+		setDeletePreviewEndpoints([]);
 		setIsPreparingDelete(true);
 		try {
 			const preview = await fetchAdminNodeDeletePreview(
@@ -837,6 +846,7 @@ export function NodeDetailsPage() {
 			if (preview.node_id !== requestedNodeId) {
 				throw new Error("Delete preview does not match the selected node.");
 			}
+			setDeletePreviewNodeId(requestedNodeId);
 			setDeletePreviewEndpoints(preview.endpoints);
 			setDeleteOpen(true);
 		} catch (error) {
@@ -1882,18 +1892,18 @@ export function NodeDetailsPage() {
 				</ModuleTabsLayout>
 
 				<ConfirmDialog
-					open={deleteOpen}
+					open={deleteOpen && deletePreviewNodeId === nodeId}
 					title="Delete node?"
 					description={
-						deletePreviewEndpoints.length > 0
+						activeDeletePreviewEndpoints.length > 0
 							? "This node still owns endpoints. Confirming will delete the node and the endpoints listed below."
 							: "This action cannot be undone."
 					}
 					body={
-						deletePreviewEndpoints.length > 0 ? (
+						activeDeletePreviewEndpoints.length > 0 ? (
 							<div className="space-y-3">
 								<p className="text-sm font-medium">
-									Endpoints to delete: {deletePreviewEndpoints.length}
+									Endpoints to delete: {activeDeletePreviewEndpoints.length}
 								</p>
 								<div className="max-h-56 overflow-auto rounded-md border border-border">
 									<table className="w-full text-left text-sm">
@@ -1905,7 +1915,7 @@ export function NodeDetailsPage() {
 											</tr>
 										</thead>
 										<tbody>
-											{deletePreviewEndpoints.map((endpoint) => (
+											{activeDeletePreviewEndpoints.map((endpoint) => (
 												<tr
 													key={endpoint.endpoint_id}
 													className="border-t border-border"
@@ -1944,7 +1954,7 @@ export function NodeDetailsPage() {
 									void submitDelete().finally(() => setDeleteOpen(false));
 								}}
 							>
-								{deletePreviewEndpoints.length > 0
+								{activeDeletePreviewEndpoints.length > 0
 									? "Delete node and endpoints"
 									: "Delete"}
 							</Button>
