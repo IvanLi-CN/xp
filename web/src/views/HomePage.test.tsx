@@ -182,7 +182,7 @@ describe("<HomePage />", () => {
 					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
 					owner_node_id: fixtureCatalog.identifier.nodePrimary(),
 					quota_banned: true,
-					quota_banned_at: "2026-03-01T00:00:00Z",
+					quota_banned_at: fixtureCatalog.timestamp.t20260301T000000(),
 					message: "Quota enforced on owner node (membership is blocked).",
 					action_hint: "Wait for rollover/unban or adjust quota policy.",
 				},

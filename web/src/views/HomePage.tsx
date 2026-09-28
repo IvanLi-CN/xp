@@ -441,9 +441,7 @@ export function HomePage() {
 										]}
 									>
 										{adminAlerts.data.items.map((item) => (
-											<tr
-												key={`${item.type}-${item.membership_key}-${item.owner_node_id}`}
-											>
+											<tr key={dashboardAlertKey(item)}>
 												<td>{item.type}</td>
 												<td className="font-mono text-xs">
 													{item.membership_key}
