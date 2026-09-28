@@ -177,14 +177,19 @@ export function VersionIndicator({
 								"sm",
 								[
 									"min-h-11 cursor-pointer font-mono transition-colors sm:min-h-5",
+									"max-[359px]:size-11 max-[359px]:min-h-11",
+									"max-[359px]:min-w-11 max-[359px]:gap-0 max-[359px]:p-0",
 									"hover:bg-accent focus-visible:ring-[3px]",
 									"focus-visible:ring-ring/20",
 								].join(" "),
 							)}
 							aria-label={statusText}
+							title={statusText}
 						>
-							<span>xp</span>
-							<span className="opacity-85">{xpVersion ?? "..."}</span>
+							<span className="max-[359px]:sr-only">xp</span>
+							<span className="opacity-85 max-[359px]:sr-only">
+								{xpVersion ?? "..."}
+							</span>
 							{icon}
 						</button>
 					</PopoverTrigger>

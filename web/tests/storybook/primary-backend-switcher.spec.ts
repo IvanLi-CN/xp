@@ -48,6 +48,12 @@ async function appShellLayout(page: Page) {
 		const commandButton = document.querySelector(
 			'header button[aria-label="Open command palette"]',
 		);
+		const logo = [...document.querySelectorAll('header img[alt="xp"]')].find(
+			(element) => {
+				const rect = element.getBoundingClientRect();
+				return rect.width > 0 && rect.height > 0;
+			},
+		);
 		const actionRects = actionLabels.map((label) => {
 			const rect = getButtonRect(label);
 			if (!rect) throw new Error(`Missing ${label}`);
@@ -62,6 +68,8 @@ async function appShellLayout(page: Page) {
 			bodyScrollWidth: document.body.scrollWidth,
 			header: getRect(document.querySelector("header")),
 			brand: getRect(document.querySelector("header > div > div:first-child")),
+			menu: getButtonRect("Open menu"),
+			logo: getRect(logo),
 			command: getRect(commandButton),
 			version: getRect(versionButton),
 			actions: actionRects,
@@ -121,7 +129,7 @@ test("keeps the switcher menu inside a narrow viewport", async ({ page }) => {
 	}
 });
 
-test("keeps AppShell header controls inside narrow mobile rows", async ({
+test("keeps AppShell header controls in one non-wrapping mobile row", async ({
 	page,
 }) => {
 	for (const viewport of mobileViewports) {
@@ -139,7 +147,14 @@ test("keeps AppShell header controls inside narrow mobile rows", async ({
 			expectInsideViewport(action.rect, layout.clientWidth);
 			expect(action.rect.height).toBeGreaterThanOrEqual(44);
 		}
-		expect(layout.brand?.bottom).toBeLessThanOrEqual(layout.version?.top ?? 0);
+		expect(layout.header?.height).toBeLessThan(70);
+		expect(layout.brand?.top).toBe(layout.version?.top);
+		expect(layout.brand?.bottom).toBe(layout.version?.bottom);
+		expect(layout.logo?.width).toBeLessThanOrEqual(32);
+		expect(layout.logo?.left).toBeGreaterThanOrEqual(layout.menu?.right ?? 0);
+		expect(
+			(layout.logo?.left ?? 0) - (layout.menu?.right ?? 0),
+		).toBeLessThanOrEqual(8);
 		expectNonOverlapping([
 			layout.version,
 			...layout.actions.map((action) => action.rect),

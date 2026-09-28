@@ -184,6 +184,14 @@ html[data-density="compact"] {
 		@apply rounded-2xl border border-border/70 bg-card text-card-foreground shadow-sm;
 	}
 
+	.xp-brand-link {
+		@apply flex items-center gap-1 lg:gap-2;
+	}
+
+	.xp-brand-lockup {
+		@apply hidden h-8 w-[6.7rem] shrink-0 lg:block sm:h-9 sm:w-[7.55rem];
+	}
+
 	.xp-panel-muted {
 		@apply rounded-2xl border border-border/70 bg-muted/35;
 	}
