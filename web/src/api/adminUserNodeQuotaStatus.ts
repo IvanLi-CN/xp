@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import { throwIfNotOk } from "./backendError";
 import { QuotaResetSourceSchema } from "./quotaReset";
+import { fetchJsonWithTimeout } from "./request";
 
 export const AdminUserNodeQuotaStatusItemSchema = z.object({
 	user_id: z.string(),
@@ -32,17 +32,16 @@ export async function fetchAdminUserNodeQuotaStatus(
 	userId: string,
 	signal?: AbortSignal,
 ): Promise<AdminUserNodeQuotaStatusResponse> {
-	const res = await fetch(`/api/admin/users/${userId}/node-quotas/status`, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		`/api/admin/users/${userId}/node-quotas/status`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminUserNodeQuotaStatusResponseSchema.parse(json);
+		(value) => AdminUserNodeQuotaStatusResponseSchema.parse(value),
+	);
 }

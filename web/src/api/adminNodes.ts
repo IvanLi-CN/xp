@@ -380,7 +380,7 @@ export async function fetchAdminMembershipOperation(
 	operationId: string,
 	signal?: AbortSignal,
 ): Promise<AdminMembershipOperation> {
-	const res = await fetch(
+	return fetchJsonWithTimeout(
 		`/api/admin/membership-operations/${encodeURIComponent(operationId)}`,
 		{
 			method: "GET",
@@ -390,8 +390,6 @@ export async function fetchAdminMembershipOperation(
 			},
 			signal,
 		},
+		(value) => AdminMembershipOperationResponseSchema.parse(value).operation,
 	);
-	await throwIfNotOk(res);
-	const json: unknown = await res.json();
-	return AdminMembershipOperationResponseSchema.parse(json).operation;
 }

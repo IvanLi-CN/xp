@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fixtureCatalog } from "../fixture-policy/catalog";
-import { fetchAdminNodeDeletePreview } from "./adminNodes";
+import {
+	fetchAdminMembershipOperation,
+	fetchAdminNodeDeletePreview,
+} from "./adminNodes";
 import { ApiRequestTimeoutError } from "./request";
 
 describe("fetchAdminNodeDeletePreview", () => {
@@ -49,6 +52,24 @@ describe("fetchAdminNodeDeletePreview", () => {
 			"admintoken",
 			fixtureCatalog.nodeId.fixture134(),
 		);
+		const rejection = request.catch((error: unknown) => error);
+		await vi.advanceTimersByTimeAsync(8_000);
+
+		await expect(rejection).resolves.toBeInstanceOf(ApiRequestTimeoutError);
+	});
+
+	it("bounds membership operation status reads", async () => {
+		vi.useFakeTimers();
+		vi.spyOn(globalThis, "fetch").mockImplementation(
+			(_input, init) =>
+				new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener("abort", () => {
+						reject(new DOMException("Aborted", "AbortError"));
+					});
+				}),
+		);
+
+		const request = fetchAdminMembershipOperation("admintoken", "operation-1");
 		const rejection = request.catch((error: unknown) => error);
 		await vi.advanceTimersByTimeAsync(8_000);
 

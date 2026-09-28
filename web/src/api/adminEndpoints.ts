@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const AdminEndpointKindSchema = z.enum([
 	"vless_reality_vision_tcp",
@@ -164,19 +165,18 @@ export async function fetchAdminEndpoints(
 	adminToken: string,
 	signal?: AbortSignal,
 ): Promise<AdminEndpointsResponse> {
-	const res = await fetch("/api/admin/endpoints", {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		"/api/admin/endpoints",
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminEndpointsResponseSchema.parse(json);
+		(value) => AdminEndpointsResponseSchema.parse(value),
+	);
 }
 
 export async function fetchAdminEndpoint(
@@ -184,19 +184,18 @@ export async function fetchAdminEndpoint(
 	endpointId: string,
 	signal?: AbortSignal,
 ): Promise<AdminEndpoint> {
-	const res = await fetch(`/api/admin/endpoints/${endpointId}`, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		`/api/admin/endpoints/${endpointId}`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminEndpointSchema.parse(json);
+		(value) => AdminEndpointSchema.parse(value),
+	);
 }
 
 export async function createAdminEndpoint(

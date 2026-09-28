@@ -72,7 +72,10 @@ export function useNodeDeleteOperation({
 		queryFn: ({ signal }) =>
 			fetchAdminMembershipOperation(adminToken, operationId ?? "", signal),
 		refetchInterval: (current) =>
-			isTerminal(current.state.data?.phase) ? false : 2_500,
+			current.state.error || isTerminal(current.state.data?.phase)
+				? false
+				: 2_500,
+		retry: false,
 	});
 	useEffect(() => {
 		const operation = query.data;

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const AdminConfigResponseSchema = z.object({
 	bind: z.string(),
@@ -25,19 +26,18 @@ export async function fetchAdminConfig(
 	adminToken: string,
 	signal?: AbortSignal,
 ): Promise<AdminConfigResponse> {
-	const res = await fetch("/api/admin/config", {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	return fetchJsonWithTimeout(
+		"/api/admin/config",
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
-
-	await throwIfNotOk(res);
-
-	const json: unknown = await res.json();
-	return AdminConfigResponseSchema.parse(json);
+		(value) => AdminConfigResponseSchema.parse(value),
+	);
 }
 
 export async function putMihomoResourcePolicy(

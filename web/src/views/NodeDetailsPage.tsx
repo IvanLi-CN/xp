@@ -467,6 +467,8 @@ export function NodeDetailsPage() {
 	const [deletePreviewEndpoints, setDeletePreviewEndpoints] = useState<
 		AdminNodeDeletePreviewEndpoint[]
 	>([]);
+	const deletePreviewAbortRef = useRef<AbortController | null>(null);
+	const activeNodeIdRef = useRef(nodeId);
 	const {
 		operation: pendingDeleteOperation,
 		operationId: pendingDeleteOperationId,
@@ -509,8 +511,16 @@ export function NodeDetailsPage() {
 	}, [resetQuotaDraft]);
 	useEffect(() => {
 		if (!nodeId) return;
+		activeNodeIdRef.current = nodeId;
+		deletePreviewAbortRef.current?.abort();
+		deletePreviewAbortRef.current = null;
 		setDeleteOpen(false);
+		setIsPreparingDelete(false);
 		setDeletePreviewEndpoints([]);
+		return () => {
+			deletePreviewAbortRef.current?.abort();
+			deletePreviewAbortRef.current = null;
+		};
 	}, [nodeId]);
 	useEffect(() => {
 		if (runtimeQuery.data) {
@@ -804,18 +814,41 @@ export function NodeDetailsPage() {
 		},
 	] as const;
 	const handleOpenDeleteDialog = async () => {
+		deletePreviewAbortRef.current?.abort();
+		const controller = new AbortController();
+		deletePreviewAbortRef.current = controller;
+		const requestedNodeId = nodeId;
 		setIsPreparingDelete(true);
 		try {
-			const preview = await fetchAdminNodeDeletePreview(adminToken, nodeId);
+			const preview = await fetchAdminNodeDeletePreview(
+				adminToken,
+				requestedNodeId,
+				controller.signal,
+			);
+			if (
+				controller.signal.aborted ||
+				activeNodeIdRef.current !== requestedNodeId
+			) {
+				return;
+			}
 			setDeletePreviewEndpoints(preview.endpoints);
 			setDeleteOpen(true);
 		} catch (error) {
+			if (
+				controller.signal.aborted ||
+				activeNodeIdRef.current !== requestedNodeId
+			) {
+				return;
+			}
 			pushToast({
 				variant: "error",
 				message: formatErrorMessage(error),
 			});
 		} finally {
-			setIsPreparingDelete(false);
+			if (deletePreviewAbortRef.current === controller) {
+				deletePreviewAbortRef.current = null;
+				setIsPreparingDelete(false);
+			}
 		}
 	};
 	const hasPendingDeleteOperation = pendingDeleteOperationId !== null;
