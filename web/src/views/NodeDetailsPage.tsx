@@ -469,6 +469,7 @@ export function NodeDetailsPage() {
 	>([]);
 	const deletePreviewAbortRef = useRef<AbortController | null>(null);
 	const activeNodeIdRef = useRef(nodeId);
+	activeNodeIdRef.current = nodeId;
 	const {
 		operation: pendingDeleteOperation,
 		operationId: pendingDeleteOperationId,
@@ -514,7 +515,6 @@ export function NodeDetailsPage() {
 	}, [resetQuotaDraft]);
 	useEffect(() => {
 		if (!nodeId) return;
-		activeNodeIdRef.current = nodeId;
 		deletePreviewAbortRef.current?.abort();
 		deletePreviewAbortRef.current = null;
 		setDeleteOpen(false);
