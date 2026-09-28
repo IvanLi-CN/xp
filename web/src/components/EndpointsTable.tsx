@@ -220,7 +220,7 @@ function EndpointNodeSummary({
 
 	if (compact) {
 		return (
-			<span className="truncate font-medium" title={nodeTitle}>
+			<span className="block min-w-0 truncate font-medium" title={nodeTitle}>
 				{nodeLabel}
 			</span>
 		);

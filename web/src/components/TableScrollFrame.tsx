@@ -39,11 +39,31 @@ export function TableScrollFrame({
 			typeof ResizeObserver === "undefined"
 				? null
 				: new ResizeObserver(measureOverflow);
+		const observeChildren = () => {
+			for (const child of Array.from(frame.children)) {
+				resizeObserver?.observe(child);
+			}
+		};
+		observeChildren();
+		const mutationObserver =
+			typeof MutationObserver === "undefined"
+				? null
+				: new MutationObserver(() => {
+						observeChildren();
+						measureOverflow();
+					});
+		mutationObserver?.observe(frame, {
+			attributes: true,
+			childList: true,
+			characterData: true,
+			subtree: true,
+		});
 		resizeObserver?.observe(frame);
 		window.addEventListener("resize", measureOverflow);
 
 		return () => {
 			resizeObserver?.disconnect();
+			mutationObserver?.disconnect();
 			window.removeEventListener("resize", measureOverflow);
 		};
 	}, [measureOverflow]);

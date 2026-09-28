@@ -95,4 +95,46 @@ describe("<DataTable />", () => {
 		expect(screen.getByText("More columns")).toBeInTheDocument();
 		expect(region).toHaveAttribute("tabindex", "0");
 	});
+
+	it("remeasures when table content changes size", async () => {
+		let tableWidth = 280;
+		vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
+			function getClientWidth(this: HTMLElement) {
+				return this.classList.contains("xp-table-wrap") ? 280 : 0;
+			},
+		);
+		vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(
+			function getScrollWidth(this: HTMLElement) {
+				return this.classList.contains("xp-table-wrap") ? tableWidth : 0;
+			},
+		);
+
+		const { rerender } = render(
+			<UiPrefsProvider>
+				<DataTable headers={[{ key: "id", label: "ID" }]}>
+					<tr>
+						<td>endpoint-1</td>
+					</tr>
+				</DataTable>
+			</UiPrefsProvider>,
+		);
+
+		await waitFor(() => {
+			expect(screen.queryByText("More columns")).not.toBeInTheDocument();
+		});
+		tableWidth = 360;
+		rerender(
+			<UiPrefsProvider>
+				<DataTable headers={[{ key: "id", label: "ID" }]}>
+					<tr>
+						<td>endpoint-1-expanded</td>
+					</tr>
+				</DataTable>
+			</UiPrefsProvider>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText("More columns")).toBeInTheDocument();
+		});
+	});
 });

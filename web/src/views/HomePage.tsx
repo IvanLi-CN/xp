@@ -72,10 +72,7 @@ function DashboardAlertList({ items }: { items: AlertItem[] }) {
 		>
 			<ul aria-label="Dashboard alerts" className="divide-y divide-border/60">
 				{items.map((item) => (
-					<li
-						key={`${item.type}-${item.membership_key}-${item.owner_node_id}`}
-						className="space-y-3 px-3 py-3"
-					>
+					<li key={dashboardAlertKey(item)} className="space-y-3 px-3 py-3">
 						<dl className="space-y-3">
 							<div className="space-y-1">
 								<dt className="text-xs uppercase text-muted-foreground">
@@ -113,6 +110,22 @@ function DashboardAlertList({ items }: { items: AlertItem[] }) {
 			</ul>
 		</div>
 	);
+}
+
+function dashboardAlertKey(item: AlertItem) {
+	return [
+		item.type,
+		item.membership_key,
+		item.user_id,
+		item.endpoint_id,
+		item.owner_node_id,
+		item.node_id ?? "",
+		item.resource_node_id ?? "",
+		item.scope ?? "",
+		item.metric ?? "",
+		item.opened_at ?? "",
+		item.latest_bucket_start_unix_seconds ?? "",
+	].join("|");
 }
 
 export function HomePage() {

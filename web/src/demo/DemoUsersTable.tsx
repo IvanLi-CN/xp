@@ -93,7 +93,10 @@ export function DemoUsersTable({ users }: { users: DemoUser[] }) {
 								>
 									{user.displayName}
 								</Link>
-								<p className="mt-1 truncate text-xs text-muted-foreground">
+								<p
+									className="mt-1 break-all text-xs text-muted-foreground"
+									title={user.email}
+								>
 									{user.email}
 								</p>
 							</div>
