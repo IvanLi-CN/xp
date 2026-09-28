@@ -289,9 +289,14 @@ export const MobileActionsVisible: Story = {
 		const canvas = within(canvasElement);
 		const cards = await canvas.findAllByTestId("endpoint-mobile-card");
 		expect(cards).toHaveLength(2);
+		const mobileList = cards[0]?.closest("ul");
+		expect(mobileList).toBeTruthy();
+		if (!mobileList) return;
+		expect(mobileList).toHaveClass("sm:hidden");
 		for (const card of cards) {
 			const cardCanvas = within(card);
 			expect(card).toBeInTheDocument();
+			// Storybook's test runner does not apply viewport addon media queries.
 			expect(
 				cardCanvas.getByRole("button", {
 					name: "Copy endpoint ID",

@@ -166,7 +166,7 @@ export function EndpointsTable(props: {
 								<span className="flex items-center justify-between gap-2 text-xs font-medium">
 									<span>Probe (24h)</span>
 									<span className="font-mono tabular-nums text-muted-foreground">
-										{latency ?? "-"} ms
+										{latency == null ? "-" : `${latency} ms`}
 									</span>
 								</span>
 								<EndpointProbeBar

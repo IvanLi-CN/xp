@@ -165,3 +165,20 @@ export const MainFlow: Story = {
 		).toBeInTheDocument();
 	},
 };
+
+export const MainFlowMobile: Story = {
+	...MainFlow,
+	parameters: {
+		...MainFlow.parameters,
+		viewport: {
+			defaultViewport: "demoMobile393",
+			viewports: {
+				demoMobile393: {
+					name: "Demo mobile (393x852)",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+};
