@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
@@ -168,5 +168,42 @@ describe("<HomePage />", () => {
 		expect(screen.getAllByRole("link", { name: "Open on node" })).toHaveLength(
 			2,
 		);
+	});
+
+	it("renders dashboard alerts as a readable list", async () => {
+		vi.mocked(fetchAdminAlerts).mockResolvedValue({
+			partial: false,
+			unreachable_nodes: [],
+			items: [
+				{
+					type: "quota_banned_membership",
+					membership_key: "u_fixture::ep_fixture",
+					user_id: "u_fixture",
+					endpoint_id: "ep_fixture",
+					owner_node_id: "node_fixture",
+					quota_banned: true,
+					quota_banned_at: "2026-03-01T00:00:00Z",
+					message: "Quota enforced on owner node (membership is blocked).",
+					action_hint: "Wait for rollover/unban or adjust quota policy.",
+				},
+			],
+		});
+
+		renderPage();
+
+		const list = await screen.findByRole("list", {
+			name: "Dashboard alerts",
+		});
+		expect(
+			within(list).getByText("quota_banned_membership"),
+		).toBeInTheDocument();
+		expect(
+			within(list).getByText(
+				"Quota enforced on owner node (membership is blocked).",
+			),
+		).toBeInTheDocument();
+		expect(
+			within(list).getByText("Wait for rollover/unban or adjust quota policy."),
+		).toBeInTheDocument();
 	});
 });

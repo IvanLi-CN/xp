@@ -570,10 +570,6 @@
     "long_line_count": 1,
     "max_line_length": 282
   },
-  "web/src/components/EndpointsTable.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 151
-  },
   "web/src/components/IpUsageView.tsx": {
     "long_line_count": 9,
     "max_line_length": 156,

@@ -202,6 +202,22 @@ function pageStory(options: {
 export const Login: Story = pageStory({ path: "/login", adminToken: null });
 export const Dashboard: Story = pageStory({ path: "/" });
 const DASHBOARD_BASE = pageStory({ path: "/" });
+export const DashboardMobile: Story = {
+	...DASHBOARD_BASE,
+	parameters: {
+		...DASHBOARD_BASE.parameters,
+		viewport: {
+			defaultViewport: "dashboardMobile393",
+			viewports: {
+				dashboardMobile393: {
+					name: "Dashboard mobile (393x852)",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+};
 export const DashboardUpdateAvailable: Story = {
 	...DASHBOARD_BASE,
 	parameters: {

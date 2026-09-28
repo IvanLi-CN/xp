@@ -141,6 +141,7 @@ export function UsersPage() {
 
 		return (
 			<ResourceTable
+				ariaLabel="Users"
 				tableClassName="table-fixed w-full"
 				headers={[
 					{ key: "user", label: "User" },

@@ -569,6 +569,7 @@ export function EndpointProbeRunPage() {
 
 		return (
 			<ResourceTable
+				ariaLabel="Endpoint probe results"
 				headers={[
 					{ key: "endpoint", label: "Endpoint" },
 					{ key: "result", label: "Result" },
@@ -656,6 +657,7 @@ export function EndpointProbeRunPage() {
 
 	const nodeRunnersContent = (
 		<ResourceTable
+			ariaLabel="Endpoint probe node runners"
 			headers={[
 				{ key: "node", label: "Node" },
 				{ key: "status", label: "Status" },

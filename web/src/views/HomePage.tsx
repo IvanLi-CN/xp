@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
-import { fetchAdminAlerts } from "../api/adminAlerts";
+import { type AlertItem, fetchAdminAlerts } from "../api/adminAlerts";
 import { verifyAdminToken } from "../api/adminAuth";
 import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
 import { fetchAdminNodesResources } from "../api/adminResources";
@@ -60,6 +60,57 @@ function DashboardCard(props: {
 					<div className="xp-card-actions justify-end">{props.actions}</div>
 				) : null}
 			</div>
+		</div>
+	);
+}
+
+function DashboardAlertList({ items }: { items: AlertItem[] }) {
+	return (
+		<div
+			className="overflow-hidden rounded-xl border border-border/70 bg-muted/20 sm:hidden"
+			data-testid="dashboard-alert-mobile-list"
+		>
+			<ul aria-label="Dashboard alerts" className="divide-y divide-border/60">
+				{items.map((item) => (
+					<li
+						key={`${item.type}-${item.membership_key}-${item.owner_node_id}`}
+						className="space-y-3 px-3 py-3"
+					>
+						<dl className="space-y-3">
+							<div className="space-y-1">
+								<dt className="text-xs uppercase text-muted-foreground">
+									Type
+								</dt>
+								<dd className="break-words font-mono text-sm">{item.type}</dd>
+							</div>
+							<div className="space-y-1">
+								<dt className="text-xs uppercase text-muted-foreground">
+									Membership
+								</dt>
+								<dd className="break-all font-mono text-xs leading-5 text-muted-foreground">
+									{item.membership_key}
+								</dd>
+							</div>
+							<div className="space-y-1">
+								<dt className="text-xs uppercase text-muted-foreground">
+									Message
+								</dt>
+								<dd className="break-words text-sm leading-6">
+									{item.message}
+								</dd>
+							</div>
+							<div className="space-y-1">
+								<dt className="text-xs uppercase text-muted-foreground">
+									Action hint
+								</dt>
+								<dd className="break-words text-sm leading-6">
+									{item.action_hint}
+								</dd>
+							</div>
+						</dl>
+					</li>
+				))}
+			</ul>
 		</div>
 	);
 }
@@ -366,27 +417,31 @@ export function HomePage() {
 										Warning: {adminAlerts.data.items.length} alert(s) detected.
 									</p>
 								</div>
-								<ResourceTable
-									headers={[
-										{ key: "type", label: "type" },
-										{ key: "membership_key", label: "membership_key" },
-										{ key: "message", label: "message" },
-										{ key: "action_hint", label: "action_hint" },
-									]}
-								>
-									{adminAlerts.data.items.map((item) => (
-										<tr
-											key={`${item.type}-${item.membership_key}-${item.owner_node_id}`}
-										>
-											<td>{item.type}</td>
-											<td className="font-mono text-xs">
-												{item.membership_key}
-											</td>
-											<td>{item.message}</td>
-											<td>{item.action_hint}</td>
-										</tr>
-									))}
-								</ResourceTable>
+								<div className="hidden sm:block">
+									<ResourceTable
+										ariaLabel="Dashboard alerts"
+										headers={[
+											{ key: "type", label: "type" },
+											{ key: "membership_key", label: "membership_key" },
+											{ key: "message", label: "message" },
+											{ key: "action_hint", label: "action_hint" },
+										]}
+									>
+										{adminAlerts.data.items.map((item) => (
+											<tr
+												key={`${item.type}-${item.membership_key}-${item.owner_node_id}`}
+											>
+												<td>{item.type}</td>
+												<td className="font-mono text-xs">
+													{item.membership_key}
+												</td>
+												<td>{item.message}</td>
+												<td>{item.action_hint}</td>
+											</tr>
+										))}
+									</ResourceTable>
+								</div>
+								<DashboardAlertList items={adminAlerts.data.items} />
 							</div>
 						) : (
 							<p className="text-sm text-muted-foreground">No alerts.</p>

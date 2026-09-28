@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
+import { TableScrollFrame } from "./TableScrollFrame";
 import { useUiPrefs } from "./UiPrefs";
 
 export type DataTableHeader = {
@@ -25,6 +26,7 @@ type DataTableProps = {
 	density?: "comfortable" | "compact";
 	caption?: ReactNode;
 	tableClassName?: string;
+	ariaLabel?: string;
 };
 
 export function DataTable({
@@ -33,18 +35,20 @@ export function DataTable({
 	density,
 	caption,
 	tableClassName,
+	ariaLabel,
 }: DataTableProps) {
 	const prefs = useUiPrefs();
 	const effectiveDensity = density ?? prefs.density;
 
 	return (
-		<div className="xp-table-wrap">
+		<TableScrollFrame ariaLabel={ariaLabel}>
 			{caption ? (
 				<div className="border-b border-border/70 px-4 py-3 text-sm text-muted-foreground">
 					{caption}
 				</div>
 			) : null}
 			<Table
+				scrollable={false}
 				className={cn(
 					"xp-table xp-table-zebra",
 					effectiveDensity === "compact" && "xp-table-compact",
@@ -72,7 +76,7 @@ export function DataTable({
 				</TableHeader>
 				<TableBody>{children}</TableBody>
 			</Table>
-		</div>
+		</TableScrollFrame>
 	);
 }
 

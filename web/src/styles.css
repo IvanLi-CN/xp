@@ -286,6 +286,11 @@ html[data-density="compact"] {
 		@apply max-w-full min-w-0 overflow-x-auto rounded-2xl border border-border/70 bg-card shadow-sm;
 	}
 
+	.xp-table-scroll-hint {
+		@apply flex items-center gap-2 border-b border-border/60
+			bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground;
+	}
+
 	.xp-table {
 		@apply w-full text-sm;
 	}

@@ -75,7 +75,9 @@ export const MainFlow: Story = {
 			await canvas.findByRole("heading", { name: "Users" }),
 		).toBeInTheDocument();
 		await userEvent.type(await canvas.findByLabelText("Search users"), "sato");
-		await expect(await canvas.findByText("佐藤 未来")).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("link", { name: "佐藤 未来" }),
+		).toBeInTheDocument();
 		await userEvent.click(
 			await canvas.findByRole("link", { name: "佐藤 未来" }),
 		);

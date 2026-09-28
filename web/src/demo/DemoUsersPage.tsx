@@ -31,9 +31,9 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { DemoUsersTable } from "./DemoUsersTable";
 import {
 	formatGb,
-	formatPercent,
 	shortDate,
 	subscriptionUrl,
 	userStatusVariant,
@@ -199,64 +199,7 @@ export function DemoUsersPage() {
 				/>
 			) : (
 				<>
-					<div className="xp-table-wrap">
-						<table className="xp-table xp-table-zebra">
-							<thead>
-								<tr>
-									<th>User</th>
-									<th>Status</th>
-									<th>Tier</th>
-									<th>Quota</th>
-									<th>Endpoints</th>
-									<th>Subscription</th>
-								</tr>
-							</thead>
-							<tbody>
-								{visible.map((user) => (
-									<tr key={user.id}>
-										<td>
-											<Link
-												className="font-medium hover:underline"
-												to="/demo/users/$userId"
-												params={{ userId: user.id }}
-											>
-												{user.displayName}
-											</Link>
-											<p className="max-w-72 truncate text-xs text-muted-foreground">
-												{user.email}
-											</p>
-										</td>
-										<td>
-											<Badge variant={userStatusVariant(user.status)} size="sm">
-												{user.status}
-											</Badge>
-										</td>
-										<td className="font-mono text-xs">{user.tier}</td>
-										<td>
-											<p className="font-mono text-xs">
-												{formatGb(user.quotaUsedGb)} /{" "}
-												{formatGb(user.quotaLimitGb)}
-											</p>
-											<p className="text-xs text-muted-foreground">
-												{formatPercent(user.quotaUsedGb, user.quotaLimitGb)}
-											</p>
-										</td>
-										<td className="font-mono text-xs">
-											{user.endpointIds.length}
-										</td>
-										<td>
-											<CopyButton
-												text={subscriptionUrl(user.subscriptionToken)}
-												label="Copy"
-												ariaLabel={`Copy subscription URL for ${user.displayName}`}
-												size="sm"
-											/>
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
+					<DemoUsersTable users={visible} />
 					<div className="flex items-center justify-between gap-3">
 						<p className="text-sm text-muted-foreground">
 							Page {safePage} of {pages}, {filtered.length} user(s)

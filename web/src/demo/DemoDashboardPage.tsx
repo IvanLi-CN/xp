@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "../components/Button";
 import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
+import { TableScrollFrame } from "../components/TableScrollFrame";
 import { useToast } from "../components/Toast";
 import { buttonVariants } from "../components/ui/button";
 import {
@@ -152,7 +153,7 @@ export function DemoDashboardPage() {
 								View nodes
 							</Link>
 						</div>
-						<div className="xp-table-wrap">
+						<TableScrollFrame ariaLabel="Cluster facts">
 							<table className="xp-table xp-table-zebra">
 								<thead>
 									<tr>
@@ -217,7 +218,7 @@ export function DemoDashboardPage() {
 									))}
 								</tbody>
 							</table>
-						</div>
+						</TableScrollFrame>
 					</div>
 				</section>
 

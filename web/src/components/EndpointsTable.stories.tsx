@@ -250,25 +250,60 @@ export const ResponsiveNoScroll: Story = {
 		const canvas = within(canvasElement);
 		for (const width of [648, 936]) {
 			const frame = canvas.getByTestId(`frame-${width}`);
-			const scroller = frame.querySelector(".overflow-x-auto");
+			const scroller = frame.querySelector(".xp-table-wrap");
 			expect(scroller).toBeTruthy();
 			if (!scroller) continue;
 			expect(scroller.scrollWidth).toBeLessThanOrEqual(scroller.clientWidth);
+			const table = scroller.querySelector<HTMLTableElement>("table");
+			expect(table).toBeTruthy();
+			if (!table) continue;
+			expect(
+				within(table).getByText(fixtureCatalog.endpointTag.fixture272()),
+			).toBeInTheDocument();
+			expect(within(table).getByText(LONG_NODE_NAME)).toBeInTheDocument();
 		}
+	},
+};
 
-		// Sanity-check key fields are rendered (CSS truncation doesn't change textContent).
-		const tags = await canvas.findAllByText(
-			fixtureCatalog.endpointTag.fixture272(),
-		);
-		expect(tags).toHaveLength(2);
-
-		const vless = await canvas.findAllByText("VLESS");
-		expect(vless).toHaveLength(2);
-
-		const ss2022 = await canvas.findAllByText("SS2022");
-		expect(ss2022).toHaveLength(2);
-
-		const nodeNames = await canvas.findAllByText(LONG_NODE_NAME);
-		expect(nodeNames).toHaveLength(2);
+export const MobileActionsVisible: Story = {
+	parameters: {
+		viewport: {
+			defaultViewport: "endpointsMobile320",
+			viewports: {
+				endpointsMobile320: {
+					name: "Endpoints mobile (320x852)",
+					styles: { width: "320px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	render: () => (
+		<div data-visual-evidence-surface className="min-h-full bg-background p-4">
+			<div data-visual-evidence-target>
+				<EndpointsTable endpoints={ENDPOINTS} nodeById={NODE_BY_ID} />
+			</div>
+		</div>
+	),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const cards = await canvas.findAllByTestId("endpoint-mobile-card");
+		expect(cards).toHaveLength(2);
+		for (const card of cards) {
+			const cardCanvas = within(card);
+			expect(card).toBeInTheDocument();
+			expect(
+				cardCanvas.getByRole("button", {
+					name: "Copy endpoint ID",
+					hidden: true,
+				}),
+			).toBeInTheDocument();
+			expect(
+				cardCanvas.getByRole("link", {
+					name: /Probe \(24h\)/,
+					hidden: true,
+				}),
+			).toBeInTheDocument();
+		}
 	},
 };

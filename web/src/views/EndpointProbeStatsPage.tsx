@@ -377,6 +377,7 @@ export function EndpointProbeStatsPage() {
 							</p>
 						) : (
 							<ResourceTable
+								ariaLabel="Endpoint probe node results"
 								headers={[
 									{ key: "node", label: "Node" },
 									{ key: "ok", label: "OK" },

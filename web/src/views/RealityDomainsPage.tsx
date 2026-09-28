@@ -105,7 +105,12 @@ const tableHeaders: ResourceTableHeader[] = [
 	{ key: "order", label: "Order", className: "w-24" },
 	{ key: "serverName", label: "serverName" },
 	{ key: "nodes", label: "Nodes" },
-	{ key: "actions", label: "Actions", align: "right", className: "w-24" },
+	{
+		key: "actions",
+		label: "Actions",
+		align: "right",
+		className: "sticky right-0 z-[2] w-24 border-l border-border/60 bg-card",
+	},
 ];
 
 export function RealityDomainsPage() {
@@ -427,7 +432,7 @@ export function RealityDomainsPage() {
 							description="Add at least one domain to use serverNamesSource=global."
 						/>
 					) : (
-						<ResourceTable headers={tableHeaders}>
+						<ResourceTable ariaLabel="Reality domains" headers={tableHeaders}>
 							{domains.map((domain, idx) => {
 								const disabled = domain.disabled_node_ids ?? [];
 								const canMoveUp = idx > 0;
@@ -532,7 +537,7 @@ export function RealityDomainsPage() {
 												})}
 											</div>
 										</TableCell>
-										<TableCell className="text-right">
+										<TableCell className="sticky right-0 z-[1] border-l border-border/60 bg-card text-right">
 											<Button
 												variant="ghost"
 												size="sm"
