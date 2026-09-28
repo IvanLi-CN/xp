@@ -834,6 +834,9 @@ export function NodeDetailsPage() {
 			) {
 				return;
 			}
+			if (preview.node_id !== requestedNodeId) {
+				throw new Error("Delete preview does not match the selected node.");
+			}
 			setDeletePreviewEndpoints(preview.endpoints);
 			setDeleteOpen(true);
 		} catch (error) {

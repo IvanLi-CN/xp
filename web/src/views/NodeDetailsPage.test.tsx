@@ -196,7 +196,7 @@ function setupMocks(args?: {
 		egress_probe: refreshEgressProbe,
 	});
 	vi.mocked(fetchAdminNodeDeletePreview).mockResolvedValue({
-		node_id: fixtureCatalog.nodeId.fixture17(),
+		node_id: fixtureCatalog.nodeId.fixture134(),
 		endpoints: [],
 	});
 	vi.mocked(deleteAdminNode).mockResolvedValue({ status: "completed" });
