@@ -40,6 +40,18 @@ describe("fetchJsonWithTimeout", () => {
 		).rejects.toBeInstanceOf(ApiResponseError);
 	});
 
+	it("preserves response body transport failures", async () => {
+		const transportError = new TypeError("body stream failed");
+		vi.spyOn(globalThis, "fetch").mockResolvedValue({
+			ok: true,
+			json: () => Promise.reject(transportError),
+		} as unknown as Response);
+
+		await expect(
+			fetchJsonWithTimeout("/api/test", {}, (value) => value, 50),
+		).rejects.toBe(transportError);
+	});
+
 	it("turns a schema parsing failure into a retryable response error", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			new Response(JSON.stringify({ ok: "not a boolean" }), { status: 200 }),

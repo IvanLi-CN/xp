@@ -50,6 +50,7 @@ export async function fetchJsonWithTimeout<T>(
 		} catch (error) {
 			if (timedOut) throw error;
 			if (callerSignal?.aborted) throw error;
+			if (!(error instanceof SyntaxError)) throw error;
 			throw new ApiResponseError();
 		}
 		try {
