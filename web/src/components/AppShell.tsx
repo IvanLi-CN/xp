@@ -752,9 +752,9 @@ export function AppShell({
 						serviceMonitorWorkspace ? "max-w-[90rem]" : "max-w-7xl"
 					} flex-col gap-2.5 sm:gap-4`}
 				>
-					<header className="xp-panel px-1.5 py-2 sm:px-4 sm:py-3">
-						<div className="flex w-full min-w-0 items-center gap-1 lg:grid lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:gap-4">
-							<div className="flex min-w-0 shrink-0 items-center gap-1 lg:gap-3">
+					<header className="xp-panel px-1 py-2 sm:px-4 sm:py-3">
+						<div className="flex w-full min-w-0 items-center gap-0.5 lg:grid lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:gap-4">
+							<div className="flex min-w-0 shrink-0 items-center gap-0.5 lg:gap-3">
 								<Button
 									variant="ghost"
 									size="sm"
@@ -767,7 +767,7 @@ export function AppShell({
 								<Link to="/" className="xp-brand-link">
 									{brand.logo === "xp-lockup" ? (
 										<>
-											<XpBrandLogo kind="mark" className="size-6 lg:hidden" />
+											<XpBrandLogo kind="mark" className="size-8 lg:hidden" />
 											<XpBrandLogo kind="lockup" className="xp-brand-lockup" />
 										</>
 									) : brand.markSrc ? (
