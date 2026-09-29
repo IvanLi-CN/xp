@@ -35,12 +35,19 @@ async fn stale_mesh_epoch_cannot_reopen_current_breaker() {
     epoch.store(1, Ordering::Release);
     assert!(client.observe_mesh_gate().await);
     for _ in 0..MESH_FAILURES_BEFORE_OPEN {
+        let gate_guard = client
+            .mesh_direct_read_guard_until(Instant::now() + Duration::from_secs(1))
+            .await
+            .expect("mesh gate is enabled");
         client
             .record_mesh_transport_failure(
                 &peer,
                 MeshPeerReason::TransportError,
                 "stale request".to_string(),
                 0,
+                gate_guard,
+                None,
+                Instant::now() + Duration::from_secs(1),
             )
             .await;
     }
@@ -235,6 +242,78 @@ async fn mesh_admission_timeout_keeps_public_fallback_available_behind_a_queued_
 }
 
 #[tokio::test]
+async fn mesh_admission_timeout_releases_half_open_probe_before_public_fallback() {
+    let reconcile = ReconcileHandle::noop();
+    let gate = reconcile.mesh_gate();
+    let epoch = reconcile.mesh_gate_epoch();
+    let in_flight_mesh_read = reconcile.mesh_gate_lock().read_owned().await;
+    let transition = tokio::spawn({
+        let reconcile = reconcile.clone();
+        async move { reconcile.initialize_mesh_gate(false).await }
+    });
+    tokio::task::yield_now().await;
+
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let (public_base_url, public_requests, public_task) =
+        super::peer_target_tests::spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
+    let (mesh_base_url, mesh_requests, mesh_task) =
+        super::peer_target_tests::spawn_stalling_mesh().await;
+    let peer = primary_reverse_target(Some(mesh_base_url), public_base_url);
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new())
+            .with_mesh_gate_epoch(gate, epoch)
+            .with_mesh_gate_lock(reconcile.mesh_gate_lock());
+    {
+        let circuits = client.circuits();
+        let mut peers = circuits.peers.lock().await;
+        let circuit = peers.entry(peer.node_id.clone()).or_default();
+        circuit.failures = MESH_FAILURES_BEFORE_OPEN;
+        circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+    }
+
+    let result = client
+        .send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: true,
+                request_id: "mesh-admission-timeout-half-open".to_owned(),
+                route: InternalRoute::HealthV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+                sender_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+                updates_active_path: true,
+            },
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await
+        .expect("Public fallback should receive the request");
+    drop(result);
+
+    assert_eq!(mesh_requests.load(Ordering::SeqCst), 0);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        client
+            .before_mesh_request(&peer.node_id, true, InternalRoute::HealthV2)
+            .await
+            .0,
+        MeshAttemptDecision::Probe
+    );
+
+    drop(in_flight_mesh_read);
+    transition
+        .await
+        .expect("gate transition task should finish");
+    mesh_task.abort();
+    public_task.abort();
+}
+
+#[tokio::test]
 async fn direct_mesh_admission_timeout_preserves_pre_dispatch_classification() {
     let reconcile = ReconcileHandle::noop();
     let gate = reconcile.mesh_gate();
@@ -410,6 +489,31 @@ async fn mesh_response_body_guard_is_released_when_response_is_dropped() {
 }
 
 #[tokio::test]
+async fn mesh_response_body_deadline_releases_unpolled_guard() {
+    let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
+    let gate_guard = gate_lock.clone().read_owned().await;
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(reqwest::StatusCode::OK)
+            .body(reqwest::Body::wrap_stream(futures_util::stream::pending::<
+                Result<bytes::Bytes, std::io::Error>,
+            >()))
+            .expect("synthetic response"),
+    );
+    let response = super::reverse::attach_mesh_gate(
+        response,
+        gate_guard,
+        Instant::now() + Duration::from_millis(40),
+    );
+    let body = response.bytes_stream();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::timeout(Duration::from_millis(100), gate_lock.write_owned())
+        .await
+        .expect("body deadline must release an unpolled guard");
+    drop(body);
+}
+
+#[tokio::test]
 async fn mesh_epoch_change_releases_half_open_probe_without_resetting_backoff() {
     let gate = Arc::new(AtomicBool::new(true));
     let epoch = Arc::new(AtomicU64::new(0));
@@ -578,6 +682,7 @@ async fn stale_epoch_protocol_failure_does_not_quarantine_current_circuit() {
                 1,
                 Some("stale-membership".to_owned()),
                 &gate_guard,
+                Instant::now() + Duration::from_secs(1),
             )
             .await
             .is_none()
@@ -599,12 +704,19 @@ async fn stale_epoch_transport_failure_does_not_overwrite_current_validation() {
 
     client.mark_direct_validation_success_at(&peer, None).await;
     epoch.store(1, Ordering::Release);
+    let gate_guard = client
+        .mesh_direct_read_guard_until(Instant::now() + Duration::from_secs(1))
+        .await
+        .expect("mesh gate is enabled");
     client
-        .mark_direct_validation_failure_for_epoch(
+        .record_mesh_transport_failure(
             &peer,
-            DirectValidationState::TransportFailed,
-            None,
+            MeshPeerReason::TransportError,
+            "stale request".to_owned(),
             0,
+            gate_guard,
+            None,
+            Instant::now() + Duration::from_secs(1),
         )
         .await;
 

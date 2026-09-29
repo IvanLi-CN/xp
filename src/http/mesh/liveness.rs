@@ -1,5 +1,6 @@
 use super::*;
 use super::{bootstrap, mesh_peer_target};
+use futures_util::TryStreamExt;
 
 pub(super) fn build_reverse_relay_response(
     response: reqwest::Response,
@@ -16,52 +17,8 @@ pub(super) fn build_reverse_relay_response(
         header::HeaderName::from_static(crate::reverse_mesh::RELAY_INNER_ACK_HEADER),
         inner_ack,
     );
-    let stream = response.bytes_stream();
-    let guarded_stream = futures_util::stream::unfold(
-        (stream, Some(gate_guard), false),
-        move |(mut stream, mut gate_guard, finished)| async move {
-            if finished {
-                drop(gate_guard.take());
-                return None;
-            }
-            if deadline <= std::time::Instant::now() {
-                drop(gate_guard.take());
-                return Some((
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "reverse relay response body deadline exceeded",
-                    )),
-                    (stream, gate_guard, true),
-                ));
-            }
-            match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), stream.next())
-                .await
-            {
-                Ok(Some(Ok(item))) => Some((Ok(item), (stream, gate_guard, false))),
-                Ok(Some(Err(error))) => {
-                    drop(gate_guard.take());
-                    Some((
-                        Err(std::io::Error::other(error)),
-                        (stream, gate_guard, true),
-                    ))
-                }
-                Ok(None) => {
-                    drop(gate_guard.take());
-                    None
-                }
-                Err(_) => {
-                    drop(gate_guard.take());
-                    Some((
-                        Err(std::io::Error::new(
-                            std::io::ErrorKind::TimedOut,
-                            "reverse relay response body deadline exceeded",
-                        )),
-                        (stream, gate_guard, true),
-                    ))
-                }
-            }
-        },
-    );
+    let stream = response.bytes_stream().map_err(std::io::Error::other);
+    let guarded_stream = crate::mesh_gate_body::guard_stream(stream, gate_guard, deadline);
     builder
         .body(Body::from_stream(guarded_stream))
         .map_err(|_| ApiError::internal("build reverse relay response"))

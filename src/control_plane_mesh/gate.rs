@@ -74,20 +74,6 @@ impl MeshAwareHttpClient {
             .await;
     }
 
-    pub(super) async fn mark_direct_validation_failure_for_epoch(
-        &self,
-        peer: &MeshPeerTarget,
-        state: DirectValidationState,
-        membership_revision: Option<String>,
-        epoch: u64,
-    ) {
-        if !self.mesh_gate_matches(epoch) {
-            return;
-        }
-        self.mark_direct_validation_failure_at(peer, state, membership_revision)
-            .await;
-    }
-
     pub async fn set_membership_revision(&self, revision: Option<String>) {
         self.direct_validation
             .set_membership_revision(revision)
@@ -109,6 +95,7 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<MeshAttemptResult, MeshRequestError> {
+        let request_deadline = started + request.total_budget;
         let send_result = self
             .with_mesh_send_until(mesh_epoch, started + budget, |remaining| async move {
                 signed_send(
@@ -140,6 +127,7 @@ impl MeshAwareHttpClient {
                             gate_guard,
                             validation_revision.clone(),
                             MeshRequestError::Protocol("Mesh response did not use HTTP/2".into()),
+                            request_deadline,
                         )
                         .await);
                 }
@@ -160,6 +148,7 @@ impl MeshAwareHttpClient {
                                         "Mesh response carries a malformed signed acknowledgement"
                                             .into(),
                                     ),
+                                    request_deadline,
                                 )
                                 .await);
                         }
@@ -180,40 +169,61 @@ impl MeshAwareHttpClient {
                                 gate_guard,
                                 validation_revision.clone(),
                                 error.into(),
+                                request_deadline,
                             )
                             .await);
                     }
-                    self.record_mesh_success(
-                        peer,
-                        started,
-                        request,
-                        transport,
-                        mesh_epoch,
-                        validation_revision.clone(),
-                        &gate_guard,
-                    )
-                    .await;
+                    let breaker_state = self
+                        .record_mesh_success_state(
+                            peer,
+                            mesh_epoch,
+                            validation_revision.clone(),
+                            &gate_guard,
+                            request_deadline,
+                        )
+                        .await;
+                    let response =
+                        reverse::attach_mesh_gate(response, gate_guard, request_deadline);
+                    if let Some(breaker_state) = breaker_state {
+                        self.record_mesh_success_telemetry(
+                            peer,
+                            started,
+                            request,
+                            transport,
+                            mesh_epoch,
+                            breaker_state,
+                            request_deadline,
+                        )
+                        .await;
+                    }
                     return Ok(MeshAttemptResult::Response(PeerRequestResponse::Verified(
-                        reverse::attach_mesh_gate(
-                            response,
-                            gate_guard,
-                            started + request.total_budget,
-                        ),
+                        response,
                     )));
                 }
                 if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
-                    self.record_mesh_success(
-                        peer,
-                        started,
-                        request,
-                        transport,
-                        mesh_epoch,
-                        validation_revision.clone(),
-                        &gate_guard,
-                    )
-                    .await;
+                    let breaker_state = self
+                        .record_mesh_success_state(
+                            peer,
+                            mesh_epoch,
+                            validation_revision.clone(),
+                            &gate_guard,
+                            request_deadline,
+                        )
+                        .await;
                     drop(response);
                     drop(gate_guard);
+                    if let Some(breaker_state) = breaker_state {
+                        self.record_mesh_success_telemetry(
+                            peer,
+                            started,
+                            request,
+                            transport,
+                            mesh_epoch,
+                            breaker_state,
+                            request_deadline,
+                        )
+                        .await;
+                    }
                     return Ok(MeshAttemptResult::Response(
                         PeerRequestResponse::PredecessorNotFound,
                     ));
@@ -228,6 +238,7 @@ impl MeshAwareHttpClient {
                         MeshRequestError::Protocol(
                             "Mesh response did not carry a valid signed acknowledgement".into(),
                         ),
+                        request_deadline,
                     )
                     .await)
             }
@@ -238,19 +249,14 @@ impl MeshAwareHttpClient {
                 Err(error)
             }
             Some((Err(SignedSendError::Transport(error)), gate_guard)) => {
-                drop(gate_guard);
                 self.record_mesh_transport_failure(
                     peer,
                     MeshPeerReason::TransportError,
                     error.to_string(),
                     mesh_epoch,
-                )
-                .await;
-                self.mark_direct_validation_failure_for_epoch(
-                    peer,
-                    DirectValidationState::TransportFailed,
+                    gate_guard,
                     validation_revision,
-                    mesh_epoch,
+                    request_deadline,
                 )
                 .await;
                 Ok(MeshAttemptResult::Fallback {
@@ -259,19 +265,14 @@ impl MeshAwareHttpClient {
                 })
             }
             Some((Err(SignedSendError::Timeout), gate_guard)) => {
-                drop(gate_guard);
                 self.record_mesh_transport_failure(
                     peer,
                     MeshPeerReason::TransportTimeout,
                     "Mesh request timed out".into(),
                     mesh_epoch,
-                )
-                .await;
-                self.mark_direct_validation_failure_for_epoch(
-                    peer,
-                    DirectValidationState::TransportFailed,
+                    gate_guard,
                     validation_revision,
-                    mesh_epoch,
+                    request_deadline,
                 )
                 .await;
                 Ok(MeshAttemptResult::Fallback {
@@ -293,28 +294,55 @@ impl MeshAwareHttpClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn record_mesh_success(
+    async fn record_mesh_success_state(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+        _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
+        deadline: Instant,
+    ) -> Option<BreakerState> {
+        if !self.mesh_gate_matches(epoch) {
+            return None;
+        }
+        let breaker_state = crate::control_plane_mesh::await_until(
+            deadline,
+            self.circuits.record_success(&peer.node_id),
+        )
+        .await?;
+        if !self.mesh_gate_matches(epoch) {
+            return None;
+        }
+        let _ = crate::control_plane_mesh::await_until(
+            deadline,
+            self.mark_direct_validation_success_at(peer, validation_revision),
+        )
+        .await;
+        Some(breaker_state)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn record_mesh_success_telemetry(
         &self,
         peer: &MeshPeerTarget,
         started: Instant,
         request: &MeshRequest,
         transport: MeshTransportObservation,
         epoch: u64,
-        validation_revision: Option<String>,
-        _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
+        breaker_state: BreakerState,
+        deadline: Instant,
     ) {
         if !self.mesh_gate_matches(epoch) {
             return;
         }
-        let breaker_state = self.circuits.record_success(&peer.node_id).await;
         if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .set_breaker(&peer.node_id, breaker_state, None)
-                .await;
-        }
-        self.mark_direct_validation_success_at(peer, validation_revision)
+            let _ = crate::control_plane_mesh::await_until(
+                deadline,
+                telemetry.set_breaker(&peer.node_id, breaker_state, None),
+            )
             .await;
-        self.record_sample(
+        }
+        self.record_sample_until(
             peer,
             telemetry_sample(
                 TelemetryPath::Mesh,
@@ -324,10 +352,12 @@ impl MeshAwareHttpClient {
                 request.updates_active_path,
                 Some(transport),
             ),
+            deadline,
         )
         .await;
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn reject_mesh_response(
         &self,
         peer: &MeshPeerTarget,
@@ -336,29 +366,40 @@ impl MeshAwareHttpClient {
         gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
         validation_revision: Option<String>,
         error: MeshRequestError,
+        deadline: Instant,
     ) -> MeshRequestError {
         drop(response);
         self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
             .await;
         let Some(breaker_state) = self
-            .record_protocol_failure_for_epoch(peer, epoch, validation_revision, &gate_guard)
+            .record_protocol_failure_for_epoch(
+                peer,
+                epoch,
+                validation_revision,
+                &gate_guard,
+                deadline,
+            )
             .await
         else {
             drop(gate_guard);
             return error;
         };
         drop(gate_guard);
-        self.record_mesh_protocol_failure(peer, epoch).await;
+        self.record_mesh_protocol_failure(peer, epoch, deadline)
+            .await;
         if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .set_breaker(
+            let _ = crate::control_plane_mesh::await_until(
+                deadline,
+                telemetry.set_breaker(
                     &peer.node_id,
                     breaker_state,
                     Some("Direct protocol rejection isolated the path".to_string()),
-                )
-                .await;
+                ),
+            )
+            .await;
         }
-        self.record_terminal_failure_for_epoch(peer, epoch).await;
+        self.record_terminal_failure_for_epoch(peer, epoch, deadline)
+            .await;
         error
     }
 
@@ -368,15 +409,26 @@ impl MeshAwareHttpClient {
         epoch: u64,
         validation_revision: Option<String>,
         _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
+        deadline: Instant,
     ) -> Option<BreakerState> {
         if !self.mesh_gate_matches(epoch) {
             return None;
         }
-        let breaker_state = self.circuits.record_protocol_failure(&peer.node_id).await;
-        self.mark_direct_validation_failure_at(
-            peer,
-            DirectValidationState::ProtocolRejected,
-            validation_revision,
+        let breaker_state = crate::control_plane_mesh::await_until(
+            deadline,
+            self.circuits.record_protocol_failure(&peer.node_id),
+        )
+        .await?;
+        if !self.mesh_gate_matches(epoch) {
+            return None;
+        }
+        let _ = crate::control_plane_mesh::await_until(
+            deadline,
+            self.mark_direct_validation_failure_at(
+                peer,
+                DirectValidationState::ProtocolRejected,
+                validation_revision,
+            ),
         )
         .await;
         Some(breaker_state)

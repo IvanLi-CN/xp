@@ -1,5 +1,5 @@
 use super::*;
-use futures_util::StreamExt;
+use futures_util::{StreamExt, TryStreamExt};
 use http_body_util::BodyExt as _;
 use reqwest::ResponseBuilderExt;
 use std::sync::Arc;
@@ -232,49 +232,8 @@ pub(super) fn attach_mesh_gate(
     let mut extensions = url_extensions;
     extensions.extend(std::mem::take(&mut parts.extensions));
     parts.extensions = extensions;
-    let body = body.into_data_stream();
-    let guarded_body = futures_util::stream::unfold(
-        (body, Some(gate_guard), false),
-        move |(mut body, mut gate_guard, finished)| async move {
-            if finished {
-                drop(gate_guard.take());
-                return None;
-            }
-            if deadline <= Instant::now() {
-                drop(gate_guard.take());
-                return Some((
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "Mesh response body deadline exceeded",
-                    )),
-                    (body, gate_guard, true),
-                ));
-            }
-            match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), body.next())
-                .await
-            {
-                Ok(Some(Ok(item))) => Some((Ok(item), (body, gate_guard, false))),
-                Ok(Some(Err(error))) => {
-                    drop(gate_guard.take());
-                    Some((Err(std::io::Error::other(error)), (body, gate_guard, true)))
-                }
-                Ok(None) => {
-                    drop(gate_guard.take());
-                    None
-                }
-                Err(_) => {
-                    drop(gate_guard.take());
-                    Some((
-                        Err(std::io::Error::new(
-                            std::io::ErrorKind::TimedOut,
-                            "Mesh response body deadline exceeded",
-                        )),
-                        (body, gate_guard, true),
-                    ))
-                }
-            }
-        },
-    );
+    let body = body.into_data_stream().map_err(std::io::Error::other);
+    let guarded_body = crate::mesh_gate_body::guard_stream(body, gate_guard, deadline);
     reqwest::Response::from(axum::http::Response::from_parts(
         parts,
         reqwest::Body::wrap_stream(guarded_body),
@@ -289,6 +248,7 @@ impl MeshAwareHttpClient {
         request: &MeshRequest,
         route: &ReverseRelayRoute,
         epoch: u64,
+        deadline: Instant,
     ) {
         // Every successful reverse response carries the Mesh read guard in its body stream.
         // Do not reacquire the write-preferring lock here: a queued gate transition would
@@ -297,25 +257,29 @@ impl MeshAwareHttpClient {
             return;
         }
         if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .record_reverse_sample(crate::mesh_telemetry::ReverseRelayTelemetrySample {
-                    peer_id: peer.node_id.clone(),
-                    peer_name: peer.node_name.clone(),
-                    rendezvous: route.rendezvous.node_id.clone(),
-                    rendezvous_role: route.role.as_str().to_string(),
-                    primary_rendezvous: route.assignment.primary_node_id.clone(),
-                    standby_rendezvous: route.assignment.standby_node_id.clone(),
-                    generation: route.assignment.generation,
-                    sample: telemetry_sample(
-                        TelemetryPath::Mesh,
-                        true,
-                        started.elapsed(),
-                        true,
-                        request.updates_active_path,
-                        None,
-                    ),
-                })
-                .await;
+            let _ = super::await_until(
+                deadline,
+                telemetry.record_reverse_sample(
+                    crate::mesh_telemetry::ReverseRelayTelemetrySample {
+                        peer_id: peer.node_id.clone(),
+                        peer_name: peer.node_name.clone(),
+                        rendezvous: route.rendezvous.node_id.clone(),
+                        rendezvous_role: route.role.as_str().to_string(),
+                        primary_rendezvous: route.assignment.primary_node_id.clone(),
+                        standby_rendezvous: route.assignment.standby_node_id.clone(),
+                        generation: route.assignment.generation,
+                        sample: telemetry_sample(
+                            TelemetryPath::Mesh,
+                            true,
+                            started.elapsed(),
+                            true,
+                            request.updates_active_path,
+                            None,
+                        ),
+                    },
+                ),
+            )
+            .await;
         }
     }
 
@@ -499,8 +463,15 @@ impl MeshAwareHttpClient {
                 .await
             {
                 Ok(response) => {
-                    self.record_reverse_sample(peer, started, &request, &candidate, mesh_epoch)
-                        .await;
+                    self.record_reverse_sample(
+                        peer,
+                        started,
+                        &request,
+                        &candidate,
+                        mesh_epoch,
+                        started + request.total_budget,
+                    )
+                    .await;
                     return Ok(response);
                 }
                 Err(

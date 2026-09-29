@@ -53,6 +53,15 @@ pub const MESH_BACKOFF: [Duration; 5] = [
 pub const DIRECT_VALIDATION_TTL: Duration = Duration::from_secs(5 * 60);
 const LEGACY_CAPABILITIES_PROBE_PATH: &str = "/api/admin/_internal/capabilities";
 
+pub(super) async fn await_until<T>(
+    deadline: Instant,
+    future: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), future)
+        .await
+        .ok()
+}
+
 #[derive(Debug, Clone)]
 pub struct MeshPeerTarget {
     pub node_id: String,
@@ -473,6 +482,7 @@ impl MeshAwareHttpClient {
         public_fallback_policy: gate::PublicFallbackPolicy,
     ) -> Result<PeerRequestResponse, MeshRequestError> {
         let started = Instant::now();
+        let request_deadline = started + request.total_budget;
         let cluster_mesh_enabled = self.observe_mesh_gate().await;
         #[cfg(test)]
         if let Some((observed, release)) = &self.mesh_observation_pause {
@@ -489,7 +499,8 @@ impl MeshAwareHttpClient {
             && peer.mesh_base_url.is_some()
             && direct_validation == DirectValidationState::ProtocolRejected
         {
-            self.record_terminal_failure(peer).await;
+            self.record_terminal_failure_until(peer, request_deadline)
+                .await;
             return Err(MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
                 dispatched: false,
@@ -504,7 +515,8 @@ impl MeshAwareHttpClient {
         let mut mesh_outcome_timed_out = false;
 
         if matches!(decision, MeshAttemptDecision::Quarantined) {
-            self.record_terminal_failure(peer).await;
+            self.record_terminal_failure_until(peer, request_deadline)
+                .await;
             return Err(MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
                 dispatched: false,
@@ -562,6 +574,10 @@ impl MeshAwareHttpClient {
                     ambiguous,
                     timed_out,
                 } => {
+                    if matches!(decision, MeshAttemptDecision::Probe) {
+                        self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
+                            .await;
+                    }
                     fallback = true;
                     mesh_outcome_ambiguous |= ambiguous;
                     mesh_outcome_timed_out |= timed_out;
@@ -623,8 +639,15 @@ impl MeshAwareHttpClient {
                     .await
                 {
                     Ok(response) => {
-                        self.record_reverse_sample(peer, started, &request, &candidate, mesh_epoch)
-                            .await;
+                        self.record_reverse_sample(
+                            peer,
+                            started,
+                            &request,
+                            &candidate,
+                            mesh_epoch,
+                            request_deadline,
+                        )
+                        .await;
                         return Ok(PeerRequestResponse::Verified(response));
                     }
                     Err(error) => {
@@ -643,7 +666,8 @@ impl MeshAwareHttpClient {
                                     | MeshRequestError::ReverseTimeout
                             )
                         {
-                            self.record_terminal_failure(peer).await;
+                            self.record_terminal_failure_until(peer, request_deadline)
+                                .await;
                             return Err(error);
                         }
                         if matches!(
@@ -665,7 +689,8 @@ impl MeshAwareHttpClient {
                             error,
                             MeshRequestError::Auth(_) | MeshRequestError::Protocol(_)
                         ) {
-                            self.record_terminal_failure(peer).await;
+                            self.record_terminal_failure_until(peer, request_deadline)
+                                .await;
                             return Err(error);
                         }
                         // A gate rejection happens before dispatch and cannot make the outcome
@@ -697,7 +722,8 @@ impl MeshAwareHttpClient {
             allow_public_fallback = !self.observe_mesh_gate().await;
         }
         if !allow_public_fallback {
-            self.record_terminal_failure(peer).await;
+            self.record_terminal_failure_until(peer, request_deadline)
+                .await;
             return Err(if matches!(decision, MeshAttemptDecision::Disabled) {
                 MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
             } else {
@@ -709,7 +735,8 @@ impl MeshAwareHttpClient {
             });
         }
         if !request.allow_ambiguous_fallback && mesh_outcome_ambiguous {
-            self.record_terminal_failure(peer).await;
+            self.record_terminal_failure_until(peer, request_deadline)
+                .await;
             return Err(if mesh_outcome_timed_out {
                 MeshRequestError::TransportTimeout
             } else {
@@ -720,7 +747,8 @@ impl MeshAwareHttpClient {
         let public_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
         let remaining = request.total_budget.saturating_sub(elapsed);
         if remaining.is_zero() {
-            self.record_terminal_failure(peer).await;
+            self.record_terminal_failure_until(peer, request_deadline)
+                .await;
             return Err(if mesh_outcome_timed_out {
                 MeshRequestError::TransportTimeout
             } else {
@@ -732,7 +760,8 @@ impl MeshAwareHttpClient {
             .await
         {
             MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined => {
-                self.record_terminal_failure(peer).await;
+                self.record_terminal_failure_until(peer, request_deadline)
+                    .await;
                 return Err(MeshRequestError::CircuitOpen {
                     path: "Public",
                     dispatched: mesh_outcome_ambiguous,
@@ -775,15 +804,22 @@ impl MeshAwareHttpClient {
                 return Err(error);
             }
             Err(error) => {
-                let public_breaker = self.circuits.record_public_failure(&peer.node_id).await;
+                let public_breaker = await_until(
+                    request_deadline,
+                    self.circuits.record_public_failure(&peer.node_id),
+                )
+                .await
+                .unwrap_or(BreakerState::Open);
                 if let Some(telemetry) = &self.telemetry {
-                    let _ = telemetry
-                        .set_public_breaker(
+                    let _ = await_until(
+                        request_deadline,
+                        telemetry.set_public_breaker(
                             &peer.node_id,
                             public_breaker,
                             Some(format!("Public circuit opened: {error}")),
-                        )
-                        .await;
+                        ),
+                    )
+                    .await;
                 }
                 self.record_public_outcome_for_epoch(
                     peer,
@@ -792,6 +828,7 @@ impl MeshAwareHttpClient {
                     fallback,
                     request.updates_active_path,
                     public_epoch,
+                    request_deadline,
                 )
                 .await;
                 return Err(error);
@@ -803,14 +840,25 @@ impl MeshAwareHttpClient {
                 .headers()
                 .contains_key(internal_auth::INTERNAL_ACK_HEADER)
         {
-            self.circuits.record_public_success(&peer.node_id).await;
+            let _ = await_until(
+                request_deadline,
+                self.circuits.record_public_success(&peer.node_id),
+            )
+            .await;
             return Ok(PeerRequestResponse::PredecessorNotFound);
         }
-        let public_breaker = self.circuits.record_public_success(&peer.node_id).await;
+        let public_breaker = await_until(
+            request_deadline,
+            self.circuits.record_public_success(&peer.node_id),
+        )
+        .await
+        .unwrap_or(BreakerState::Closed);
         if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .set_public_breaker(&peer.node_id, public_breaker, None)
-                .await;
+            let _ = await_until(
+                request_deadline,
+                telemetry.set_public_breaker(&peer.node_id, public_breaker, None),
+            )
+            .await;
         }
         self.record_public_outcome_for_epoch(
             peer,
@@ -819,6 +867,7 @@ impl MeshAwareHttpClient {
             fallback,
             request.updates_active_path,
             public_epoch,
+            request_deadline,
         )
         .await;
         Ok(PeerRequestResponse::Verified(response))

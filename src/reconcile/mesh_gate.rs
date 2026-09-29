@@ -63,6 +63,12 @@ impl ReconcileHandle {
     }
 
     pub(super) async fn set_mesh_enabled_if_current(&self, enabled: bool, generation: u64) {
+        if self.mesh_gate_authoritative.load(Ordering::Acquire)
+            && self.mesh_enabled.load(Ordering::Acquire) == enabled
+            && self.mesh_state_generation.load(Ordering::Acquire) == generation
+        {
+            return;
+        }
         let _gate_lock = self.mesh_gate_lock.write().await;
         if self.mesh_state_generation.load(Ordering::Acquire) == generation {
             self.set_mesh_enabled_locked(enabled);

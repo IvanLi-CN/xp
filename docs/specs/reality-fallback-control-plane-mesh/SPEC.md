@@ -36,8 +36,9 @@
   Mesh 开关开启也不会重新启用 Native Reverse。
 - 已准入的 Mesh 响应必须把读 guard 绑定到完整 response body 生命周期；准入期间的成功遥测
   必须复用该 guard，不得再次获取同一写优先读写锁而阻塞 gate transition。body guard 受调用方
-  绝对 deadline 约束，并在 EOF、body error、取消或 deadline 时释放；guard 释放后的遥测只做
-  原子 epoch/gate 校验，不重新等待该锁。
+  绝对 deadline 约束，并在 EOF、body error、取消或 deadline 时释放；deadline timer 必须独立于
+  下一次 body poll，调用方保留未消费的 response 也不能无限持有 guard。guard 释放后的遥测只做
+  原子 epoch/gate 校验，不重新等待该锁，并在剩余请求预算内完成或取消。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。
@@ -113,6 +114,8 @@
 - Mesh gate admission 消耗同一请求的 Mesh slice；admission deadline 到期表示请求尚未 dispatch，
   只读、Raft 幂等和 durable history 请求仍可用剩余预算走 Public fallback。已签名响应头之后的
   body deadline 属于权威响应的终止，不得改走 Public 或其他路径重试。
+- authoritative gate 的 reconcile 若目标值与当前值及 state generation 均未变化，必须只做原子
+  校验而不排队写 barrier；显式 Mesh 开关切换和首次认证初始化仍必须取得 write barrier。
 - 有效 ack 的任何 HTTP status 都是权威结果，禁止降级。
 - 公网边缘返回无签名 `502`、`503`、`504`、`520`、`522`、`523` 或 `524` 时，
   只读、Raft 幂等和 durable history 请求可在原请求预算内按 `200ms`、`500ms` 退避重试两次；
@@ -233,7 +236,9 @@
   且不排队 gate writer；持有 read guard 且已有 gate transition writer 时，Mesh admission 在请求
   deadline 内取消并保留未 dispatch 分类，Public fallback 使用剩余预算。
 - finite、erroring、dropped 与 stalled signed response body 均覆盖 guard 的完整生命周期：EOF、
-  error、取消和 deadline 必须释放 guard；signed-header body timeout 不得触发 Public fallback。
+  error、取消、未继续 poll 和 deadline 必须释放 guard；signed-header body timeout 不得触发
+  Public fallback。未 dispatch 的 half-open probe 必须释放其占位，限时 telemetry 不得跨过请求
+  deadline 或把旧 epoch 状态写入新 epoch。
 - 50-peer 15 分钟 workload 中 XP peak anonymous PSS 不超过 18,432 KiB，XP total PSS 与
   候选完整栈均不高于各自基线 1,024 KiB，XP CPU-seconds 不高于基线 5%，TLS/TCP 建连至少
   减少 90%。file-backed PSS 仍计入 total PSS；该相对门禁不代表完整托管栈已经满足 64 MiB

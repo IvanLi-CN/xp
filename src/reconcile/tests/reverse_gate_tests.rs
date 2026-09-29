@@ -43,3 +43,28 @@ async fn mesh_gate_only_resets_reverse_readiness_on_enable_transition() {
     reconcile.initialize_mesh_gate(true).await;
     assert!(!reconcile.reverse_gate().load(Ordering::Acquire));
 }
+
+#[tokio::test]
+async fn unchanged_authoritative_reconcile_does_not_queue_gate_writer() {
+    let reconcile = ReconcileHandle::noop();
+    let in_flight_mesh_read = reconcile.mesh_gate_lock().read_owned().await;
+    let reconcile_task = tokio::spawn({
+        let reconcile = reconcile.clone();
+        async move {
+            reconcile.set_mesh_enabled_if_current(true, 0).await;
+        }
+    });
+    tokio::task::yield_now().await;
+
+    let later_reader = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        reconcile.mesh_gate_lock().read_owned(),
+    )
+    .await
+    .expect("unchanged reconcile must not queue a gate writer");
+    drop(later_reader);
+    drop(in_flight_mesh_read);
+    reconcile_task
+        .await
+        .expect("reconcile task should not panic");
+}
