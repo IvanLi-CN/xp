@@ -29,8 +29,8 @@ mod telemetry;
 mod transport;
 pub use circuit::DirectValidationState;
 use circuit::{
-    DirectValidationStore, MeshAttemptDecision, PeerCircuitBreakers, endpoint_fingerprint,
-    mesh_attempt_budget,
+    DirectValidationStore, MeshAttemptDecision, PeerCircuitBreakers, PublicHalfOpenProbeGuard,
+    endpoint_fingerprint, mesh_attempt_budget,
 };
 pub use error::MeshRequestError;
 pub(crate) use request::CapabilityProbeResponse;
@@ -755,10 +755,12 @@ impl MeshAwareHttpClient {
                 MeshRequestError::OutcomeUnknown
             });
         }
-        match self
+        let public_decision = self
             .before_public_request(&peer.node_id, request.route)
-            .await
-        {
+            .await;
+        let mut public_probe_guard =
+            PublicHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, public_decision);
+        match public_decision {
             MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined => {
                 self.record_terminal_failure_until(peer, request_deadline)
                     .await;
@@ -777,6 +779,9 @@ impl MeshAwareHttpClient {
                 self.circuits
                     .release_public_half_open_probe(&peer.node_id)
                     .await;
+                if let Some(guard) = public_probe_guard.as_mut() {
+                    guard.disarm();
+                }
                 return Err(error);
             }
         };
@@ -801,6 +806,9 @@ impl MeshAwareHttpClient {
                 self.circuits
                     .release_public_half_open_probe(&peer.node_id)
                     .await;
+                if let Some(guard) = public_probe_guard.as_mut() {
+                    guard.disarm();
+                }
                 return Err(error);
             }
             Err(error) => {
@@ -808,8 +816,13 @@ impl MeshAwareHttpClient {
                     request_deadline,
                     self.circuits.record_public_failure(&peer.node_id),
                 )
-                .await
-                .unwrap_or(BreakerState::Open);
+                .await;
+                if public_breaker.is_some()
+                    && let Some(guard) = public_probe_guard.as_mut()
+                {
+                    guard.disarm();
+                }
+                let public_breaker = public_breaker.unwrap_or(BreakerState::Open);
                 if let Some(telemetry) = &self.telemetry {
                     let _ = await_until(
                         request_deadline,
@@ -840,19 +853,29 @@ impl MeshAwareHttpClient {
                 .headers()
                 .contains_key(internal_auth::INTERNAL_ACK_HEADER)
         {
-            let _ = await_until(
+            let public_breaker = await_until(
                 request_deadline,
                 self.circuits.record_public_success(&peer.node_id),
             )
             .await;
+            if public_breaker.is_some()
+                && let Some(guard) = public_probe_guard.as_mut()
+            {
+                guard.disarm();
+            }
             return Ok(PeerRequestResponse::PredecessorNotFound);
         }
         let public_breaker = await_until(
             request_deadline,
             self.circuits.record_public_success(&peer.node_id),
         )
-        .await
-        .unwrap_or(BreakerState::Closed);
+        .await;
+        if public_breaker.is_some()
+            && let Some(guard) = public_probe_guard.as_mut()
+        {
+            guard.disarm();
+        }
+        let public_breaker = public_breaker.unwrap_or(BreakerState::Closed);
         if let Some(telemetry) = &self.telemetry {
             let _ = await_until(
                 request_deadline,

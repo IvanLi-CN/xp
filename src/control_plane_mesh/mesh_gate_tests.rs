@@ -867,6 +867,72 @@ async fn invalid_public_target_releases_half_open_probe() {
 }
 
 #[tokio::test]
+async fn cancelled_public_probe_releases_half_open_probe() {
+    let (public_base_url, requests, public_task) =
+        super::peer_target_tests::spawn_stalling_mesh().await;
+    let peer = primary_reverse_target(None, public_base_url);
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    client
+        .circuits()
+        .set_public_probe_ready_for_test(&peer.node_id)
+        .await;
+
+    let request = tokio::spawn({
+        let client = client.clone();
+        let peer = peer.clone();
+        let ca_key_pem = ca.key_pem.clone();
+        let ca_cert_pem = ca.cert_pem.clone();
+        async move {
+            client
+                .send_peer_request(
+                    &peer,
+                    MeshRequest {
+                        method: reqwest::Method::GET,
+                        path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
+                        content_type: None,
+                        body: Vec::new(),
+                        total_budget: Duration::from_secs(5),
+                        allow_ambiguous_fallback: true,
+                        request_id: "cancelled-public-probe".to_owned(),
+                        route: InternalRoute::HealthV2,
+                        cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+                        sender_id: xp_test_fixtures::primary_node_id().to_owned(),
+                        updates_active_path: false,
+                    },
+                    &ca_key_pem,
+                    &ca_cert_pem,
+                )
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while requests.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("public probe should dispatch before cancellation");
+    request.abort();
+    let _ = request.await;
+
+    let decision = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let decision = client.circuits().before_public_attempt(&peer.node_id).await;
+            if decision == MeshAttemptDecision::Probe {
+                break decision;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cancelled public probe must release its half-open slot");
+    assert_eq!(decision, MeshAttemptDecision::Probe);
+    public_task.abort();
+}
+
+#[tokio::test]
 async fn invalid_mesh_target_releases_half_open_probe() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new());
     let peer = primary_reverse_target(

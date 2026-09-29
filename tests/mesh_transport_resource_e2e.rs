@@ -15,7 +15,6 @@ const XP_TOTAL_PSS_LIMIT_KIB: u64 = 32 * 1024;
 const XP_ANON_PSS_LIMIT_KIB: u64 = 18_432;
 const XP_PSS_DELTA_LIMIT_KIB: u64 = 1_024;
 const STACK_PSS_DELTA_LIMIT_KIB: u64 = 1_024;
-const RESOURCE_CPU_PERCENT_ONE_CORE: f64 = 0.5;
 
 fn resource_workload_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -36,18 +35,11 @@ fn workload_duration() -> Duration {
         .unwrap_or(DEFAULT_DURATION)
 }
 
-fn cpu_budget_ticks(duration: Duration) -> u64 {
-    let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }
-        .try_into()
-        .ok()
-        .filter(|value: &u64| *value > 0)
-        .unwrap_or(100);
-    let budget =
-        duration.as_secs_f64() * ticks_per_second as f64 * RESOURCE_CPU_PERCENT_ONE_CORE / 100.0;
-    budget.ceil() as u64
+fn cpu_limit_ticks(baseline: u64) -> u64 {
+    baseline.saturating_mul(105).saturating_add(99) / 100
 }
 
-fn assert_resource_budget(baseline: &ResourceRun, candidate: &ResourceRun, duration: Duration) {
+fn assert_resource_budget(baseline: &ResourceRun, candidate: &ResourceRun) {
     for run in [baseline, candidate] {
         assert!(run.xp_peak_anon_pss_kib <= run.xp_peak_pss_kib);
         assert!(run.xp_peak_file_pss_kib <= run.xp_peak_pss_kib);
@@ -84,16 +76,22 @@ fn assert_resource_budget(baseline: &ResourceRun, candidate: &ResourceRun, durat
         baseline.stack_peak_pss_kib,
         STACK_PSS_DELTA_LIMIT_KIB
     );
-    let cpu_budget = cpu_budget_ticks(duration);
+    let cpu_limit = cpu_limit_ticks(baseline.cpu_ticks);
     assert!(
-        candidate.cpu_ticks <= baseline.cpu_ticks.saturating_add(cpu_budget),
-        "candidate XP CPU {} ticks exceeds baseline {} ticks + {} ticks ({}% of one core)",
+        candidate.cpu_ticks <= cpu_limit,
+        "candidate XP CPU {} ticks exceeds baseline {} ticks + 5% relative limit {} ticks",
         candidate.cpu_ticks,
         baseline.cpu_ticks,
-        cpu_budget,
-        RESOURCE_CPU_PERCENT_ONE_CORE
+        cpu_limit
     );
-    if baseline.tls_accepts > baseline.active_per_peer.len() {
+    let baseline_connection_floor = baseline.active_per_peer.len();
+    assert!(
+        baseline.tls_accepts >= baseline_connection_floor,
+        "baseline TLS accepts {} is below the one-connection-per-peer floor {}",
+        baseline.tls_accepts,
+        baseline_connection_floor
+    );
+    if baseline.tls_accepts > baseline_connection_floor {
         assert!(
             candidate.tls_accepts.saturating_mul(10) <= baseline.tls_accepts,
             "candidate TLS accepts {} did not fall by at least 90% from baseline {}",
@@ -102,10 +100,10 @@ fn assert_resource_budget(baseline: &ResourceRun, candidate: &ResourceRun, durat
         );
     } else {
         assert!(
-            candidate.tls_accepts <= baseline.tls_accepts,
-            "candidate TLS accepts {} exceeded reusable baseline {}",
+            candidate.tls_accepts <= baseline_connection_floor,
+            "candidate TLS accepts {} exceeded the one-connection-per-peer floor {}",
             candidate.tls_accepts,
-            baseline.tls_accepts
+            baseline_connection_floor
         );
     }
     assert_eq!(
@@ -173,7 +171,7 @@ mod budget_tests {
         candidate.cpu_ticks = 90;
         candidate.tls_accepts = 10;
 
-        assert_resource_budget(&baseline, &candidate, Duration::from_secs(60));
+        assert_resource_budget(&baseline, &candidate);
     }
 
     #[test]
@@ -183,7 +181,18 @@ mod budget_tests {
         let mut candidate = run(25_000, XP_ANON_PSS_LIMIT_KIB + 1, 6_567, 50_000);
         candidate.tls_accepts = 10;
 
-        assert_resource_budget(&baseline, &candidate, Duration::from_secs(60));
+        assert_resource_budget(&baseline, &candidate);
+    }
+
+    #[test]
+    #[should_panic(expected = "CPU")]
+    fn resource_budget_rejects_cpu_increase_over_relative_limit() {
+        let baseline = run(25_000, 12_000, 13_000, 50_000);
+        let mut candidate = run(25_000, 12_000, 13_000, 50_000);
+        candidate.cpu_ticks = 106;
+        candidate.tls_accepts = 10;
+
+        assert_resource_budget(&baseline, &candidate);
     }
 }
 
@@ -221,7 +230,7 @@ async fn fifty_peer_mesh_transport_meets_connection_and_resource_budgets() {
 
     println!("mesh_resource_baseline={baseline:?}");
     println!("mesh_resource_candidate={candidate:?}");
-    assert_resource_budget(&baseline, &candidate, duration);
+    assert_resource_budget(&baseline, &candidate);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

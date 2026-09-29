@@ -241,9 +241,10 @@
   Public fallback。未 dispatch 的 half-open probe 必须释放其占位，限时 telemetry 不得跨过请求
   deadline 或把旧 epoch 状态写入新 epoch。
 - 50-peer 15 分钟 workload 中 XP peak anonymous PSS 不超过 18,432 KiB，XP total PSS 与
-  候选完整栈均不高于各自基线 1,024 KiB，XP CPU-seconds 不高于基线 5%，TLS/TCP 建连至少
-  减少 90%。file-backed PSS 仍计入 total PSS；该相对门禁不代表完整托管栈已经满足 64 MiB
-  总预算。
+  候选完整栈均不高于各自基线 1,024 KiB，XP CPU-seconds 不高于基线 5%。当基线的
+  TLS/TCP 建连数高于每个 peer 一条持久连接的 floor 时，候选至少减少 90%；基线已经处于
+  该 floor 时，候选不得超过该 floor。file-backed PSS 仍计入 total PSS；该相对门禁不代表
+  完整托管栈已经满足 64 MiB 总预算。
 - Web 覆盖 healthy、fallback、slow、down、stale、empty、partial 与 50 peers。
 - 后端通过 fmt、clippy 和 test；前端通过 lint、typecheck、Vitest、
   Storybook、Playwright 与 style budget。

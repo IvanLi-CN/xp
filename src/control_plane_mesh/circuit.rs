@@ -163,6 +163,45 @@ pub struct PeerCircuitBreakers {
     pub(crate) reverse_in_flight: reverse::ReverseInFlight,
 }
 
+pub(super) struct PublicHalfOpenProbeGuard {
+    circuits: PeerCircuitBreakers,
+    peer_id: String,
+    armed: bool,
+}
+
+impl PublicHalfOpenProbeGuard {
+    pub(super) fn new(
+        circuits: &PeerCircuitBreakers,
+        peer_id: &str,
+        decision: MeshAttemptDecision,
+    ) -> Option<Self> {
+        matches!(decision, MeshAttemptDecision::Probe).then(|| Self {
+            circuits: circuits.clone(),
+            peer_id: peer_id.to_owned(),
+            armed: true,
+        })
+    }
+
+    pub(super) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PublicHalfOpenProbeGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let circuits = self.circuits.clone();
+        let peer_id = self.peer_id.clone();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                circuits.release_public_half_open_probe(&peer_id).await;
+            });
+        }
+    }
+}
+
 impl PeerCircuitBreakers {
     #[cfg(test)]
     pub(super) async fn before_attempt(&self, peer_id: &str, enabled: bool) -> MeshAttemptDecision {
