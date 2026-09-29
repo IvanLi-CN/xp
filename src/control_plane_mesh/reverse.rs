@@ -219,6 +219,10 @@ pub(super) fn attach_mesh_gate(
     gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
     deadline: Instant,
 ) -> reqwest::Response {
+    if response.content_length() == Some(0) {
+        drop(gate_guard);
+        return response;
+    }
     let response_url = response.url().clone();
     let response: axum::http::Response<reqwest::Body> = response.into();
     let (mut parts, body) = response.into_parts();
