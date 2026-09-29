@@ -1,5 +1,7 @@
 #[path = "mesh_transport_resource_e2e/support.rs"]
 mod mesh_transport_resource_support;
+#[path = "mesh_transport_resource_e2e/warmup.rs"]
+mod mesh_transport_resource_warmup;
 
 use std::{path::PathBuf, sync::OnceLock, time::Duration};
 
