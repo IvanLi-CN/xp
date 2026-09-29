@@ -227,6 +227,7 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        let request_deadline = Instant::now() + request.total_budget;
         let cluster_mesh_enabled = self.observe_mesh_gate().await;
         match path {
             PeerDirectPath::RealityMesh if !cluster_mesh_enabled => {
@@ -239,20 +240,24 @@ impl MeshAwareHttpClient {
             })?,
             PeerDirectPath::ApiBaseUrl => &peer.public_base_url,
         };
-        let mesh_gate_read = self.mesh_read_guard_for_path(path).await?;
-        self.send_peer_direct_request_with_gate(
+        let mesh_gate_read = self
+            .mesh_read_guard_for_path_until(path, request_deadline)
+            .await?;
+        self.send_peer_direct_request_with_gate_until(
             peer,
             path,
             request,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
             mesh_gate_read,
+            request_deadline,
         )
         .await
     }
-    /// Sends over one direct path with a caller-owned Mesh admission guard. The guard may
-    /// span asynchronous target preparation for dedicated probes and is never reacquired.
-    pub(crate) async fn send_peer_direct_request_with_gate(
+    /// Sends over one direct path with a caller-owned Mesh admission guard and deadline. The
+    /// guard may span asynchronous target preparation and is never reacquired.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn send_peer_direct_request_with_gate_until(
         &self,
         peer: &MeshPeerTarget,
         path: PeerDirectPath,
@@ -260,6 +265,7 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
         mesh_gate_read: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+        request_deadline: Instant,
     ) -> Result<reqwest::Response, MeshRequestError> {
         self.send_peer_direct_request_with_options(
             peer,
@@ -269,6 +275,7 @@ impl MeshAwareHttpClient {
             cluster_ca_cert_pem,
             mesh_gate_read,
             false,
+            request_deadline,
         )
         .await
     }
@@ -315,12 +322,13 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
         mesh_gate_read: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
         allow_mesh_when_disabled: bool,
+        request_deadline: Instant,
     ) -> Result<reqwest::Response, MeshRequestError> {
         let mesh_gate_read = if path == PeerDirectPath::RealityMesh && mesh_gate_read.is_none() {
             if allow_mesh_when_disabled {
                 None
             } else {
-                Some(self.mesh_direct_read_guard().await?)
+                Some(self.mesh_direct_read_guard_until(request_deadline).await?)
             }
         } else {
             mesh_gate_read
@@ -348,6 +356,10 @@ impl MeshAwareHttpClient {
             PeerDirectPath::RealityMesh => &self.mesh,
             PeerDirectPath::ApiBaseUrl => &self.public_direct,
         };
+        let remaining = request_deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(MeshRequestError::PreDispatchTimeout);
+        }
         let (response, verified) = retry::signed_send_with_public_gateway_retries(
             client,
             &url,
@@ -355,12 +367,12 @@ impl MeshAwareHttpClient {
             &peer.node_id,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
-            request.total_budget,
+            remaining,
             path == PeerDirectPath::ApiBaseUrl,
         )
         .await?;
         let response = match mesh_gate_read {
-            Some(gate_guard) => reverse::attach_mesh_gate(response, gate_guard),
+            Some(gate_guard) => reverse::attach_mesh_gate(response, gate_guard, request_deadline),
             None => response,
         };
         if path == PeerDirectPath::RealityMesh
@@ -641,6 +653,13 @@ impl MeshAwareHttpClient {
                                 | MeshRequestError::InvalidTarget(_)
                         ) {
                             return Err(error);
+                        }
+                        if matches!(
+                            &error,
+                            MeshRequestError::Reverse(reason)
+                                if reason == reverse::MESH_GATE_ADMISSION_TIMEOUT
+                        ) {
+                            continue;
                         }
                         if matches!(
                             error,

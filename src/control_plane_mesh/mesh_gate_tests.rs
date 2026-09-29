@@ -145,7 +145,7 @@ async fn mesh_gate_transition_waits_for_an_inflight_send_boundary() {
 
     let send = tokio::spawn(async move {
         client
-            .with_mesh_send(0, || async move {
+            .with_mesh_send_until(0, Instant::now() + Duration::from_secs(5), |_| async move {
                 let _ = started_tx.send(());
                 let _ = release_rx.await;
             })
@@ -170,6 +170,243 @@ async fn mesh_gate_transition_waits_for_an_inflight_send_boundary() {
     drop(gate_guard);
     transition.await.expect("transition task should finish");
     assert!(!gate.load(Ordering::Acquire));
+}
+
+#[tokio::test]
+async fn mesh_admission_timeout_keeps_public_fallback_available_behind_a_queued_writer() {
+    let reconcile = ReconcileHandle::noop();
+    let gate = reconcile.mesh_gate();
+    let epoch = reconcile.mesh_gate_epoch();
+    let in_flight_mesh_read = reconcile.mesh_gate_lock().read_owned().await;
+    let transition = tokio::spawn({
+        let reconcile = reconcile.clone();
+        async move { reconcile.initialize_mesh_gate(false).await }
+    });
+    tokio::task::yield_now().await;
+
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let (public_base_url, public_requests, public_task) =
+        super::peer_target_tests::spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
+    let (mesh_base_url, mesh_requests, mesh_task) =
+        super::peer_target_tests::spawn_stalling_mesh().await;
+    let peer = primary_reverse_target(Some(mesh_base_url), public_base_url);
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new())
+            .with_mesh_gate_epoch(gate, epoch)
+            .with_mesh_gate_lock(reconcile.mesh_gate_lock());
+
+    let result = tokio::time::timeout(
+        Duration::from_millis(900),
+        client.send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: true,
+                request_id: "mesh-admission-timeout-public-fallback".to_owned(),
+                route: InternalRoute::HealthV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+                sender_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+                updates_active_path: true,
+            },
+            &ca.key_pem,
+            &ca.cert_pem,
+        ),
+    )
+    .await
+    .expect("Mesh admission must not wait for the queued writer");
+    assert!(
+        result.is_ok(),
+        "Public fallback should receive the request: {result:?}"
+    );
+    assert_eq!(mesh_requests.load(Ordering::SeqCst), 0);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 1);
+
+    drop(in_flight_mesh_read);
+    transition
+        .await
+        .expect("gate transition task should finish");
+    mesh_task.abort();
+    public_task.abort();
+}
+
+#[tokio::test]
+async fn direct_mesh_admission_timeout_preserves_pre_dispatch_classification() {
+    let reconcile = ReconcileHandle::noop();
+    let gate = reconcile.mesh_gate();
+    let epoch = reconcile.mesh_gate_epoch();
+    let in_flight_mesh_read = reconcile.mesh_gate_lock().read_owned().await;
+    let transition = tokio::spawn({
+        let reconcile = reconcile.clone();
+        async move { reconcile.initialize_mesh_gate(false).await }
+    });
+    tokio::task::yield_now().await;
+
+    let client = MeshAwareHttpClient::new(reqwest::Client::new())
+        .with_mesh_gate_epoch(gate, epoch)
+        .with_mesh_gate_lock(reconcile.mesh_gate_lock());
+    let peer = primary_reverse_target(
+        Some("https://peer.example:443".to_owned()),
+        "https://public.example".to_owned(),
+    );
+    let error = client
+        .send_peer_direct_preflight(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_millis(50),
+                allow_ambiguous_fallback: false,
+                request_id: "direct-mesh-admission-timeout".to_owned(),
+                route: InternalRoute::HealthV2,
+                cluster_id: "cluster".to_owned(),
+                sender_id: "sender".to_owned(),
+                updates_active_path: false,
+            },
+            "cluster-ca-key",
+            "cluster-ca-cert",
+        )
+        .await
+        .expect_err("direct admission must fail before dispatch");
+    assert!(matches!(error, MeshRequestError::PreDispatchTimeout));
+
+    drop(in_flight_mesh_read);
+    transition
+        .await
+        .expect("gate transition task should finish");
+}
+
+#[tokio::test]
+async fn mesh_response_body_deadline_releases_gate_guard() {
+    use futures_util::StreamExt;
+
+    let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
+    let gate_guard = gate_lock.clone().read_owned().await;
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(reqwest::StatusCode::OK)
+            .body(reqwest::Body::wrap_stream(futures_util::stream::pending::<
+                Result<bytes::Bytes, std::io::Error>,
+            >()))
+            .expect("synthetic response"),
+    );
+    let response = super::reverse::attach_mesh_gate(
+        response,
+        gate_guard,
+        std::time::Instant::now() + Duration::from_millis(40),
+    );
+    let mut body = response.bytes_stream();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), body.next())
+            .await
+            .expect("body deadline should fire")
+            .expect("deadline should produce one body error")
+            .is_err()
+    );
+    drop(body);
+    tokio::time::timeout(Duration::from_millis(100), gate_lock.write_owned())
+        .await
+        .expect("body deadline must release the gate guard");
+}
+
+#[tokio::test]
+async fn mesh_response_body_guard_is_released_on_eof() {
+    use futures_util::StreamExt;
+
+    let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
+    let gate_guard = gate_lock.clone().read_owned().await;
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(reqwest::StatusCode::OK)
+            .body(reqwest::Body::from("response-body"))
+            .expect("synthetic response"),
+    );
+    let response = super::reverse::attach_mesh_gate(
+        response,
+        gate_guard,
+        Instant::now() + Duration::from_secs(1),
+    );
+    let mut body = response.bytes_stream();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), gate_lock.clone().write_owned())
+            .await
+            .is_err(),
+        "body guard must remain through response data"
+    );
+    assert_eq!(
+        body.next()
+            .await
+            .expect("response data")
+            .expect("response data is valid"),
+        bytes::Bytes::from_static(b"response-body")
+    );
+    assert!(body.next().await.is_none());
+    tokio::time::timeout(Duration::from_millis(100), gate_lock.write_owned())
+        .await
+        .expect("EOF must release the gate guard");
+}
+
+#[tokio::test]
+async fn mesh_response_body_guard_is_released_on_error() {
+    use futures_util::StreamExt;
+
+    let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
+    let gate_guard = gate_lock.clone().read_owned().await;
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(reqwest::StatusCode::OK)
+            .body(reqwest::Body::wrap_stream(futures_util::stream::iter([
+                Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"partial")),
+                Err(std::io::Error::other("synthetic body failure")),
+            ])))
+            .expect("synthetic response"),
+    );
+    let response = super::reverse::attach_mesh_gate(
+        response,
+        gate_guard,
+        Instant::now() + Duration::from_secs(1),
+    );
+    let mut body = response.bytes_stream();
+    assert_eq!(
+        body.next()
+            .await
+            .expect("response data")
+            .expect("first response data is valid"),
+        bytes::Bytes::from_static(b"partial")
+    );
+    assert!(body.next().await.expect("response error").is_err());
+    tokio::time::timeout(Duration::from_millis(100), gate_lock.write_owned())
+        .await
+        .expect("body error must release the gate guard");
+}
+
+#[tokio::test]
+async fn mesh_response_body_guard_is_released_when_response_is_dropped() {
+    let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
+    let gate_guard = gate_lock.clone().read_owned().await;
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(reqwest::StatusCode::OK)
+            .body(reqwest::Body::wrap_stream(futures_util::stream::pending::<
+                Result<bytes::Bytes, std::io::Error>,
+            >()))
+            .expect("synthetic response"),
+    );
+    let response = super::reverse::attach_mesh_gate(
+        response,
+        gate_guard,
+        Instant::now() + Duration::from_secs(1),
+    );
+    drop(response);
+    tokio::time::timeout(Duration::from_millis(100), gate_lock.write_owned())
+        .await
+        .expect("dropping the response must release the gate guard");
 }
 
 #[tokio::test]
@@ -331,7 +568,7 @@ async fn stale_epoch_protocol_failure_does_not_quarantine_current_circuit() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_mesh_gate_epoch(gate, epoch);
     let peer = primary_reverse_target(None, xp_test_fixtures::primary_api_url().to_string());
     let gate_guard = client
-        .mesh_direct_read_guard()
+        .mesh_direct_read_guard_until(Instant::now() + Duration::from_secs(1))
         .await
         .expect("mesh gate is enabled");
     assert!(

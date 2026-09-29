@@ -8,13 +8,10 @@ impl MeshAwareHttpClient {
         reason: String,
         epoch: u64,
     ) {
-        let _gate_lock = self.mesh_gate_lock.read().await;
-        let state = {
-            if !self.mesh_gate_matches(epoch) {
-                return;
-            }
-            self.circuits.record_retryable_failure(&peer.node_id).await
-        };
+        if !self.mesh_gate_matches(epoch) {
+            return;
+        }
+        let state = self.circuits.record_retryable_failure(&peer.node_id).await;
         self.record_sample(
             peer,
             telemetry_sample(
@@ -45,7 +42,6 @@ impl MeshAwareHttpClient {
     }
 
     pub(super) async fn record_mesh_protocol_failure(&self, peer: &MeshPeerTarget, epoch: u64) {
-        let _gate_lock = self.mesh_gate_lock.read().await;
         if !self.mesh_gate_matches(epoch) {
             return;
         }
@@ -90,7 +86,6 @@ impl MeshAwareHttpClient {
         peer: &MeshPeerTarget,
         epoch: u64,
     ) {
-        let _gate_lock = self.mesh_gate_lock.read().await;
         if !self.mesh_gate_matches(epoch) {
             return;
         }
@@ -104,7 +99,6 @@ impl MeshAwareHttpClient {
         epoch: u64,
         fallback: bool,
     ) {
-        let _gate_lock = self.mesh_gate_lock.read().await;
         if self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch {
             return;
         }

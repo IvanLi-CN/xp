@@ -14,7 +14,23 @@ impl ReconcileHandle {
     }
 
     pub async fn mesh_gate_read(&self) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-        let guard = self.mesh_gate_lock.clone().read_owned().await;
+        self.mesh_gate_read_until(std::time::Instant::now() + Duration::from_secs(5))
+            .await
+    }
+
+    pub async fn mesh_gate_read_until(
+        &self,
+        deadline: std::time::Instant,
+    ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+        if !self.mesh_enabled.load(Ordering::Acquire) {
+            return None;
+        }
+        let guard = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(deadline),
+            self.mesh_gate_lock.clone().read_owned(),
+        )
+        .await
+        .ok()?;
         self.mesh_enabled.load(Ordering::Acquire).then_some(guard)
     }
 
@@ -25,6 +41,9 @@ impl ReconcileHandle {
     }
 
     pub async fn initialize_mesh_gate_if_unset(&self, enabled: bool) {
+        if self.mesh_gate_authoritative.load(Ordering::Acquire) {
+            return;
+        }
         let _gate_lock = self.mesh_gate_lock.write().await;
         if !self.mesh_gate_authoritative.load(Ordering::Acquire) {
             self.mesh_gate_authoritative.store(true, Ordering::Release);

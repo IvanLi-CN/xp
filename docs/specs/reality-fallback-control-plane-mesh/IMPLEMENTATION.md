@@ -39,6 +39,11 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   learner cannot reject the replicated command; stale learners must be upgraded or retired first.
   Mesh and Reverse requests share a read-side admission barrier and remain concurrent; gate
   transitions take the exclusive write side and wait for admitted requests to finish.
+  Once the gate is authoritative, ordinary state-machine apply uses an atomic fast path and does
+  not queue the write-preferring barrier; only first authenticated initialization and explicit Mesh
+  switch changes take the write side. Mesh admission and response-body guards use the caller's
+  absolute deadline, and terminal body states release the guard without retrying a signed response
+  through Public.
   Non-bootstrap nodes hold the local gate closed until the first authenticated Raft state or
   snapshot is applied, so a joining node cannot emit Mesh traffic from the default local state.
   Snapshots carry an explicit `mesh_state_applied` payload marker plus snapshot identity fields.
@@ -106,6 +111,9 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   an intentional disconnect.
 - Mesh re-enable preflight is server-bounded to 30 seconds with a bounded serialized direction
   schedule; cancellation and deadline expiry fail closed before any Raft write.
+- Targeted lock-coupling regressions cover authoritative apply progress, queued-writer admission
+  timeout with remaining-budget Public fallback, and EOF/error/drop/deadline response-body guard
+  release. The direct admission path preserves `PreDispatchTimeout` while the gate remains enabled.
 - The 50-peer resource comparison records XP anonymous and total PSS separately. Anonymous PSS has
   an 18 MiB absolute ceiling; XP total PSS and the isolated XP-plus-Xray stack each have a 1 MiB
   regression ceiling against the locked baseline. File-backed executable pages remain included in

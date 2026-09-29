@@ -21,6 +21,7 @@
 - 从唯一 managed-default VLESS-REALITY endpoint 派生 HTTPS Mesh 路径。
 - 先尝试 Mesh；路径不可用时再访问 peer 的公网地址。
 - Mesh 请求在共享读准入边界内并发执行；集群 gate 切换取得独占写屏障，等待已准入请求完成后才改变状态，避免关闭后的新请求越过公网-only 边界。
+- 普通 state-machine apply 在 gate 已具备权威状态后只走原子 fast path；只有首次认证初始化和显式 Mesh 开关切换取得写屏障，不得让每条普通日志排队写锁。
 - 用 internal-auth v2、稳定 request ID 和 durable dedupe 保护内部调用。
 - 提供本地持久遥测、管理 API 与 `/system-status`。
 - Direct Mesh 启用前必须通过 current voter 的全有向 `health-v2` 预检：有合格 managed
@@ -34,7 +35,9 @@
   predecessor 404 兼容；专用 Reverse health/link probe 在当前发布中固定停用，即使集群
   Mesh 开关开启也不会重新启用 Native Reverse。
 - 已准入的 Mesh 响应必须把读 guard 绑定到完整 response body 生命周期；准入期间的成功遥测
-  必须复用该 guard，不得再次获取同一写优先读写锁而阻塞 gate transition。
+  必须复用该 guard，不得再次获取同一写优先读写锁而阻塞 gate transition。body guard 受调用方
+  绝对 deadline 约束，并在 EOF、body error、取消或 deadline 时释放；guard 释放后的遥测只做
+  原子 epoch/gate 校验，不重新等待该锁。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。
@@ -107,6 +110,9 @@
 - half-open 只允许一次探测性 Mesh 请求。
 - auth 或 protocol failure 会释放 half-open 探测槽，但不触发公网降级或改变 breaker 失败计数。
 - Mesh 预算为 `min(5s, max(500ms, total/3))`；公网取得剩余预算。
+- Mesh gate admission 消耗同一请求的 Mesh slice；admission deadline 到期表示请求尚未 dispatch，
+  只读、Raft 幂等和 durable history 请求仍可用剩余预算走 Public fallback。已签名响应头之后的
+  body deadline 属于权威响应的终止，不得改走 Public 或其他路径重试。
 - 有效 ack 的任何 HTTP status 都是权威结果，禁止降级。
 - 公网边缘返回无签名 `502`、`503`、`504`、`520`、`522`、`523` 或 `524` 时，
   只读、Raft 幂等和 durable history 请求可在原请求预算内按 `200ms`、`500ms` 退避重试两次；
@@ -223,6 +229,11 @@
 - 缩短的测试 policy 证明 idle timeout 会丢弃旧连接；H2 不可用只触发 transport fallback，
   invalid ack/auth 仍不得降级。
 - 长驻 SSE、Raft burst、8 MiB snapshot 与普通 fan-out 在同一 H2 connection 上并行。
+- authoritative gate 持有 in-flight read guard 时，普通 state-machine apply 仍推进 `last_applied`，
+  且不排队 gate writer；持有 read guard 且已有 gate transition writer 时，Mesh admission 在请求
+  deadline 内取消并保留未 dispatch 分类，Public fallback 使用剩余预算。
+- finite、erroring、dropped 与 stalled signed response body 均覆盖 guard 的完整生命周期：EOF、
+  error、取消和 deadline 必须释放 guard；signed-header body timeout 不得触发 Public fallback。
 - 50-peer 15 分钟 workload 中 XP peak anonymous PSS 不超过 18,432 KiB，XP total PSS 与
   候选完整栈均不高于各自基线 1,024 KiB，XP CPU-seconds 不高于基线 5%，TLS/TCP 建连至少
   减少 90%。file-backed PSS 仍计入 total PSS；该相对门禁不代表完整托管栈已经满足 64 MiB

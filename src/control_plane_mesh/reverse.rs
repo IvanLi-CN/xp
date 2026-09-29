@@ -7,6 +7,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub(crate) const REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS: usize = 8;
 pub(super) const REVERSE_HEALTH_RESERVED_SLOTS: usize = 1;
+pub(super) const MESH_GATE_ADMISSION_TIMEOUT: &str =
+    "Mesh gate admission timed out before dispatch";
 pub(super) type ReverseInFlight =
     Arc<tokio::sync::Mutex<std::collections::BTreeMap<String, Arc<Semaphore>>>>;
 
@@ -215,6 +217,7 @@ pub(super) fn attach_reverse_slot(
 pub(super) fn attach_mesh_gate(
     response: reqwest::Response,
     gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+    deadline: Instant,
 ) -> reqwest::Response {
     let response_url = response.url().clone();
     let response: axum::http::Response<reqwest::Body> = response.into();
@@ -231,17 +234,43 @@ pub(super) fn attach_mesh_gate(
     parts.extensions = extensions;
     let body = body.into_data_stream();
     let guarded_body = futures_util::stream::unfold(
-        (body, Some(gate_guard)),
-        |(mut body, mut gate_guard)| async move {
-            match body.next().await {
-                Some(Ok(item)) => Some((Ok(item), (body, gate_guard))),
-                Some(Err(error)) => {
+        (body, Some(gate_guard), false),
+        move |(mut body, mut gate_guard, finished)| async move {
+            if finished {
+                drop(gate_guard.take());
+                return None;
+            }
+            if deadline <= Instant::now() {
+                drop(gate_guard.take());
+                return Some((
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "Mesh response body deadline exceeded",
+                    )),
+                    (body, gate_guard, true),
+                ));
+            }
+            match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), body.next())
+                .await
+            {
+                Ok(Some(Ok(item))) => Some((Ok(item), (body, gate_guard, false))),
+                Ok(Some(Err(error))) => {
                     drop(gate_guard.take());
-                    Some((Err(error), (body, gate_guard)))
+                    Some((Err(std::io::Error::other(error)), (body, gate_guard, true)))
                 }
-                None => {
+                Ok(None) => {
                     drop(gate_guard.take());
                     None
+                }
+                Err(_) => {
+                    drop(gate_guard.take());
+                    Some((
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "Mesh response body deadline exceeded",
+                        )),
+                        (body, gate_guard, true),
+                    ))
                 }
             }
         },
@@ -524,7 +553,20 @@ pub(super) async fn send_outer_request(
     ),
     MeshRequestError,
 > {
-    let gate_guard = mesh_gate_lock.clone().read_owned().await;
+    let deadline = Instant::now() + budget;
+    let gate_guard = match tokio::time::timeout_at(
+        tokio::time::Instant::from_std(deadline),
+        mesh_gate_lock.clone().read_owned(),
+    )
+    .await
+    {
+        Ok(guard) => guard,
+        Err(_) => {
+            return Err(MeshRequestError::Reverse(
+                MESH_GATE_ADMISSION_TIMEOUT.to_string(),
+            ));
+        }
+    };
     if !cluster_mesh_enabled.load(Ordering::Acquire) {
         return Err(MeshRequestError::Reverse(
             "cluster Mesh gate is disabled".to_string(),
@@ -544,9 +586,13 @@ pub(super) async fn send_outer_request(
     for (name, value) in &dispatch.headers {
         builder = builder.header(name, value);
     }
-    match tokio::time::timeout(budget, builder.send()).await {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(MeshRequestError::PreDispatchTimeout);
+    }
+    match tokio::time::timeout(remaining, builder.send()).await {
         Ok(Ok(response)) => Ok((
-            attach_mesh_gate(response, gate_guard),
+            attach_mesh_gate(response, gate_guard, deadline),
             dispatch.inner_verified,
             dispatch.outer_verified,
         )),

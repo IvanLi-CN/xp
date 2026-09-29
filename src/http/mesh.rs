@@ -245,10 +245,12 @@ pub(super) async fn admin_internal_reverse_relay(
             "reverse relay generation is awaiting signed health verification",
         ));
     }
-    let _mesh_gate_read =
-        state.reconcile.mesh_gate_read().await.ok_or_else(|| {
-            ApiError::conflict("reverse relay is disabled by the cluster Mesh gate")
-        })?;
+    let relay_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let _mesh_gate_read = state
+        .reconcile
+        .mesh_gate_read_until(relay_deadline)
+        .await
+        .ok_or_else(|| ApiError::conflict("reverse relay is disabled by the cluster Mesh gate"))?;
     let mut inner_headers = HeaderMap::new();
     if !envelope.content_type.is_empty() {
         inner_headers.insert(
@@ -405,6 +407,10 @@ pub(super) async fn admin_internal_reverse_relay(
             .insert_headers(&mut inner_headers)
             .map_err(|_| ApiError::invalid_request("reverse relay proof is invalid"))?;
     }
+    let relay_budget = relay_deadline.saturating_duration_since(std::time::Instant::now());
+    if relay_budget.is_zero() {
+        return Err(ApiError::gateway_timeout("reverse relay deadline exceeded"));
+    }
     let response = state
         .reverse_relay
         .forward(
@@ -418,7 +424,7 @@ pub(super) async fn admin_internal_reverse_relay(
                 .unwrap_or(uri.path()),
             &inner_headers,
             body.to_vec(),
-            Duration::from_secs(5),
+            relay_budget,
         )
         .await
         .map_err(|error| {
@@ -450,7 +456,13 @@ pub(super) async fn admin_internal_reverse_relay(
             .mark_health_verified(&assignment.target_node_id, assignment.generation)
             .await;
     }
-    liveness::build_reverse_relay_response(response, status, &inner_ack, _mesh_gate_read)
+    liveness::build_reverse_relay_response(
+        response,
+        status,
+        &inner_ack,
+        _mesh_gate_read,
+        relay_deadline,
+    )
 }
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]

@@ -81,7 +81,6 @@ impl MeshAwareHttpClient {
         membership_revision: Option<String>,
         epoch: u64,
     ) {
-        let _gate_lock = self.mesh_gate_lock.read().await;
         if !self.mesh_gate_matches(epoch) {
             return;
         }
@@ -111,7 +110,7 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
     ) -> Result<MeshAttemptResult, MeshRequestError> {
         let send_result = self
-            .with_mesh_send(mesh_epoch, || async {
+            .with_mesh_send_until(mesh_epoch, started + budget, |remaining| async move {
                 signed_send(
                     &self.mesh,
                     mesh_url,
@@ -119,7 +118,7 @@ impl MeshAwareHttpClient {
                     &peer.node_id,
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
-                    budget,
+                    remaining,
                 )
                 .await
             })
@@ -195,7 +194,11 @@ impl MeshAwareHttpClient {
                     )
                     .await;
                     return Ok(MeshAttemptResult::Response(PeerRequestResponse::Verified(
-                        reverse::attach_mesh_gate(response, gate_guard),
+                        reverse::attach_mesh_gate(
+                            response,
+                            gate_guard,
+                            started + request.total_budget,
+                        ),
                     )));
                 }
                 if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -444,6 +447,7 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
         allow_mesh_when_disabled: bool,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        let request_deadline = Instant::now() + request.total_budget;
         let (_, validation_revision, _membership_guard) =
             self.direct_validation_snapshot(peer).await;
         let (decision, epoch) = self
@@ -467,6 +471,7 @@ impl MeshAwareHttpClient {
                 cluster_ca_cert_pem,
                 None,
                 allow_mesh_when_disabled,
+                request_deadline,
             )
             .await;
         if matches!(decision, MeshAttemptDecision::Probe) {
@@ -523,50 +528,78 @@ impl MeshAwareHttpClient {
             && self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch
     }
 
-    pub(super) async fn with_mesh_send<T, F, Fut>(
+    pub(super) async fn with_mesh_send_until<T, F, Fut>(
         &self,
         epoch: u64,
+        deadline: Instant,
         send: F,
     ) -> Option<(T, tokio::sync::OwnedRwLockReadGuard<()>)>
     where
-        F: FnOnce() -> Fut,
+        F: FnOnce(Duration) -> Fut,
         Fut: std::future::Future<Output = T>,
     {
         let gate_lock = self.mesh_gate_lock.clone();
-        let gate_guard = gate_lock.read_owned().await;
+        let gate_guard = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(deadline),
+            gate_lock.read_owned(),
+        )
+        .await
+        .ok()?;
         if !self.cluster_mesh_enabled.load(Ordering::Acquire)
             || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
         {
             return None;
         }
-        Some((send().await, gate_guard))
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        Some((send(remaining).await, gate_guard))
     }
 
-    pub(super) async fn mesh_read_guard_for_epoch(
+    pub(super) async fn mesh_read_guard_for_epoch_until(
         &self,
         epoch: u64,
+        deadline: Instant,
     ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-        let guard = self.mesh_gate_lock.clone().read_owned().await;
+        let guard = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(deadline),
+            self.mesh_gate_lock.clone().read_owned(),
+        )
+        .await
+        .ok()?;
         (self.cluster_mesh_enabled.load(Ordering::Acquire)
             && self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch)
             .then_some(guard)
     }
 
-    pub(super) async fn mesh_direct_read_guard(
+    pub(super) async fn mesh_direct_read_guard_until(
         &self,
+        deadline: Instant,
     ) -> Result<tokio::sync::OwnedRwLockReadGuard<()>, MeshRequestError> {
         let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
-        self.mesh_read_guard_for_epoch(epoch).await.ok_or_else(|| {
-            MeshRequestError::InvalidTarget("Mesh is disabled by the cluster gate".into())
-        })
+        if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
+            return Err(MeshRequestError::InvalidTarget(
+                "Mesh is disabled by the cluster gate".into(),
+            ));
+        }
+        let Some(guard) = self.mesh_read_guard_for_epoch_until(epoch, deadline).await else {
+            return Err(if self.cluster_mesh_enabled.load(Ordering::Acquire) {
+                MeshRequestError::PreDispatchTimeout
+            } else {
+                MeshRequestError::InvalidTarget("Mesh is disabled by the cluster gate".into())
+            });
+        };
+        Ok(guard)
     }
 
-    pub(super) async fn mesh_read_guard_for_path(
+    pub(super) async fn mesh_read_guard_for_path_until(
         &self,
         path: PeerDirectPath,
+        deadline: Instant,
     ) -> Result<Option<tokio::sync::OwnedRwLockReadGuard<()>>, MeshRequestError> {
         if path == PeerDirectPath::RealityMesh {
-            self.mesh_direct_read_guard().await.map(Some)
+            self.mesh_direct_read_guard_until(deadline).await.map(Some)
         } else {
             Ok(None)
         }
