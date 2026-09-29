@@ -701,6 +701,7 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
             tokio::task::yield_now().await;
         }
         request_active.store(true, Ordering::Release);
+        tokio::task::yield_now().await;
         let responses = join_all((0..4).map(|_| {
             request
                 .try_clone()
