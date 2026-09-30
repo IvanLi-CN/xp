@@ -91,6 +91,7 @@ pub struct ReconcileHandle {
     mesh_state_generation: Arc<AtomicU64>,
     mesh_gate_authoritative: Arc<AtomicBool>,
     mesh_gate_lock: Arc<RwLock<()>>,
+    mesh_epoch_barrier: Arc<RwLock<()>>,
 }
 impl ReconcileHandle {
     pub fn noop() -> Self {
@@ -108,6 +109,7 @@ impl ReconcileHandle {
             mesh_state_generation: Arc::new(AtomicU64::new(0)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
             mesh_gate_lock: Arc::new(RwLock::new(())),
+            mesh_epoch_barrier: Arc::new(RwLock::new(())),
         }
     }
     #[cfg(test)]
@@ -126,6 +128,7 @@ impl ReconcileHandle {
             mesh_state_generation: Arc::new(AtomicU64::new(0)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
             mesh_gate_lock: Arc::new(RwLock::new(())),
+            mesh_epoch_barrier: Arc::new(RwLock::new(())),
         }
     }
     pub fn request(&self, req: ReconcileRequest) {
@@ -172,7 +175,6 @@ impl ReconcileHandle {
             email: email.into(),
         });
     }
-
     pub fn request_rebuild_inbound(&self, endpoint_id: impl Into<String>) {
         self.request(ReconcileRequest::RebuildInbound {
             endpoint_id: endpoint_id.into(),
@@ -202,11 +204,9 @@ impl<R: RngCore> BackoffState<R> {
             rng,
         }
     }
-
     fn reset(&mut self) {
         self.attempt = 0;
     }
-
     fn next_delay(&mut self) -> Duration {
         let base = base_delay_for_attempt(self.cfg.base, self.cfg.cap, self.attempt);
         self.attempt = self.attempt.saturating_add(1);
@@ -299,6 +299,7 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         mesh_state_generation: Arc::new(AtomicU64::new(0)),
         mesh_gate_authoritative: Arc::new(AtomicBool::new(false)),
         mesh_gate_lock: Arc::new(RwLock::new(())),
+        mesh_epoch_barrier: Arc::new(RwLock::new(())),
     };
     let restart_handle = handle.clone();
 
@@ -658,7 +659,6 @@ async fn reconcile_once_with_runtime(
     if should_force_rebuild_remove_grants {
         forced_rebuild_inbounds.extend(local_endpoint_ids.clone());
     }
-
     let reverse_mesh_enabled = config.reverse_mesh_enabled
         && cluster_mesh_enabled
         && crate::reverse_mesh::NATIVE_REVERSE_ENABLED;

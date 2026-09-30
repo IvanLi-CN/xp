@@ -22,7 +22,7 @@ impl MeshAwareHttpClient {
         )
         .await
         else {
-            self.spawn_retryable_failure_cleanup(&peer.node_id, epoch);
+            self.spawn_retryable_failure_cleanup(peer, epoch, validation_revision);
             drop(gate_guard);
             return;
         };
@@ -56,25 +56,19 @@ impl MeshAwareHttpClient {
         .await;
         self.record_mesh_reason_for_epoch_until(peer, mesh_reason, epoch, deadline)
             .await;
-        if let Some(telemetry) = &self.telemetry {
-            if !self.mesh_gate_matches(epoch) {
-                return;
-            }
-            let message = if state == BreakerState::Open {
-                format!("Mesh breaker opened after retryable transport failure: {reason}")
-            } else {
-                format!("Mesh transport failure: {reason}")
-            };
-            let _ = super::await_until(
-                deadline,
-                telemetry.set_breaker(
-                    &peer.node_id,
-                    state,
-                    (state == BreakerState::Open).then_some(message),
-                ),
-            )
-            .await;
-        }
+        let message = if state == BreakerState::Open {
+            format!("Mesh breaker opened after retryable transport failure: {reason}")
+        } else {
+            format!("Mesh transport failure: {reason}")
+        };
+        self.set_mesh_breaker_for_epoch_until(
+            peer,
+            state,
+            (state == BreakerState::Open).then_some(message),
+            epoch,
+            deadline,
+        )
+        .await;
     }
 
     pub(super) async fn record_mesh_protocol_failure(
@@ -116,7 +110,7 @@ impl MeshAwareHttpClient {
         epoch: u64,
         deadline: Instant,
     ) {
-        if self.mesh_gate_matches(epoch) {
+        if let Some(_epoch_guard) = self.try_mesh_epoch_guard(epoch, true) {
             self.record_mesh_reason_until(peer, reason, deadline).await;
         }
     }
@@ -149,10 +143,6 @@ impl MeshAwareHttpClient {
             )
             .await;
         }
-        if sample.success && sample.path == TelemetryPath::Mesh {
-            self.record_mesh_reason_until(peer, MeshPeerReason::MeshAvailable, deadline)
-                .await;
-        }
     }
 
     pub(super) async fn record_sample_for_epoch_until(
@@ -162,10 +152,14 @@ impl MeshAwareHttpClient {
         epoch: u64,
         deadline: Instant,
     ) {
-        if !self.mesh_gate_matches(epoch) {
+        let Some(_epoch_guard) = self.try_mesh_epoch_guard(epoch, true) else {
             return;
-        }
+        };
         self.record_sample_until(peer, sample, deadline).await;
+        if sample.success && sample.path == TelemetryPath::Mesh {
+            self.record_mesh_reason_until(peer, MeshPeerReason::MeshAvailable, deadline)
+                .await;
+        }
     }
 
     pub(super) async fn record_terminal_failure_for_epoch(
@@ -174,7 +168,7 @@ impl MeshAwareHttpClient {
         epoch: u64,
         deadline: Instant,
     ) {
-        if self.mesh_gate_matches(epoch) {
+        if let Some(_epoch_guard) = self.try_mesh_epoch_guard(epoch, true) {
             self.record_terminal_failure_until(peer, deadline).await;
         }
     }
@@ -187,17 +181,38 @@ impl MeshAwareHttpClient {
         fallback: bool,
         deadline: Instant,
     ) {
-        self.record_sample_for_epoch_until(peer, sample, epoch, deadline)
-            .await;
-        if fallback && peer.mesh_base_url.is_some() {
-            self.record_mesh_reason_for_epoch_until(
-                peer,
-                MeshPeerReason::FallbackActive,
-                epoch,
-                deadline,
-            )
-            .await;
+        let Some(_epoch_guard) = self.try_mesh_epoch_guard(epoch, false) else {
+            return;
+        };
+        self.record_sample_until(peer, sample, deadline).await;
+        if fallback
+            && peer.mesh_base_url.is_some()
+            && self.cluster_mesh_enabled.load(Ordering::Acquire)
+        {
+            self.record_mesh_reason_until(peer, MeshPeerReason::FallbackActive, deadline)
+                .await;
         }
+    }
+
+    pub(super) async fn set_mesh_breaker_for_epoch_until(
+        &self,
+        peer: &MeshPeerTarget,
+        state: BreakerState,
+        event_message: Option<String>,
+        epoch: u64,
+        deadline: Instant,
+    ) {
+        let Some(_epoch_guard) = self.try_mesh_epoch_guard(epoch, true) else {
+            return;
+        };
+        let Some(telemetry) = &self.telemetry else {
+            return;
+        };
+        let _ = super::await_until(
+            deadline,
+            telemetry.set_breaker(&peer.node_id, state, event_message),
+        )
+        .await;
     }
 
     #[allow(clippy::too_many_arguments)]

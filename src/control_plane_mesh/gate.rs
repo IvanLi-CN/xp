@@ -291,6 +291,11 @@ impl MeshAwareHttpClient {
         self
     }
 
+    pub fn with_mesh_epoch_barrier(mut self, barrier: Arc<tokio::sync::RwLock<()>>) -> Self {
+        self.mesh_epoch_barrier = barrier;
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn record_mesh_success_state(
         &self,
@@ -333,13 +338,8 @@ impl MeshAwareHttpClient {
         if !self.mesh_gate_matches(epoch) {
             return;
         }
-        if let Some(telemetry) = &self.telemetry {
-            let _ = crate::control_plane_mesh::await_until(
-                deadline,
-                telemetry.set_breaker(&peer.node_id, breaker_state, None),
-            )
+        self.set_mesh_breaker_for_epoch_until(peer, breaker_state, None, epoch, deadline)
             .await;
-        }
         self.record_sample_for_epoch_until(
             peer,
             telemetry_sample(
@@ -386,17 +386,14 @@ impl MeshAwareHttpClient {
         drop(gate_guard);
         self.record_mesh_protocol_failure(peer, epoch, deadline)
             .await;
-        if let Some(telemetry) = &self.telemetry {
-            let _ = crate::control_plane_mesh::await_until(
-                deadline,
-                telemetry.set_breaker(
-                    &peer.node_id,
-                    breaker_state,
-                    Some("Direct protocol rejection isolated the path".to_string()),
-                ),
-            )
-            .await;
-        }
+        self.set_mesh_breaker_for_epoch_until(
+            peer,
+            breaker_state,
+            Some("Direct protocol rejection isolated the path".to_string()),
+            epoch,
+            deadline,
+        )
+        .await;
         self.record_terminal_failure_for_epoch(peer, epoch, deadline)
             .await;
         error
@@ -443,10 +440,9 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let _gate_guard = client.mesh_gate_lock.clone().read_owned().await;
-                if !client.mesh_gate_matches(epoch) {
+                let Some(_epoch_guard) = client.try_mesh_epoch_guard(epoch, true) else {
                     return;
-                }
+                };
                 client.circuits.record_protocol_failure(&peer.node_id).await;
                 client
                     .mark_direct_validation_failure_at(
@@ -459,15 +455,30 @@ impl MeshAwareHttpClient {
         }
     }
 
-    pub(super) fn spawn_retryable_failure_cleanup(&self, peer_id: &str, epoch: u64) {
+    pub(super) fn spawn_retryable_failure_cleanup(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+    ) {
         let client = self.clone();
-        let peer_id = peer_id.to_owned();
+        let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                if !client.mesh_gate_matches(epoch) {
+                let Some(_epoch_guard) = client.try_mesh_epoch_guard(epoch, true) else {
                     return;
-                }
-                client.circuits.record_retryable_failure(&peer_id).await;
+                };
+                client
+                    .circuits
+                    .record_retryable_failure(&peer.node_id)
+                    .await;
+                client
+                    .mark_direct_validation_failure_at(
+                        &peer,
+                        DirectValidationState::TransportFailed,
+                        validation_revision,
+                    )
+                    .await;
             });
         }
     }
@@ -616,6 +627,25 @@ impl MeshAwareHttpClient {
     pub(super) fn mesh_gate_matches(&self, epoch: u64) -> bool {
         self.cluster_mesh_enabled.load(Ordering::Acquire)
             && self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch
+    }
+
+    pub(super) fn try_mesh_epoch_guard(
+        &self,
+        epoch: u64,
+        require_enabled: bool,
+    ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+        if (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
+            || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
+        {
+            return None;
+        }
+        let guard = self.mesh_epoch_barrier.clone().try_read_owned().ok()?;
+        if (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
+            || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
+        {
+            return None;
+        }
+        Some(guard)
     }
 
     pub(super) async fn with_mesh_send_until<T, F, Fut>(
@@ -804,6 +834,92 @@ mod tests {
         })
         .await
         .expect("expired Mesh failure should converge in the background");
+    }
+
+    #[tokio::test]
+    async fn expired_mesh_failure_cleanup_skips_after_epoch_barrier_changes() {
+        let client =
+            MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
+        let peer = MeshPeerTarget {
+            node_id: "peer".to_owned(),
+            node_name: "peer".to_owned(),
+            mesh_base_url: Some("https://mesh.example".to_owned()),
+            endpoint_transport: Some("xhttp_reality_fallback"),
+            endpoint_fingerprint: Some("fingerprint".to_owned()),
+            mesh_reason: MeshPeerReason::MeshAvailable,
+            public_base_url: "https://public.example".to_owned(),
+        };
+        client.mark_direct_validation_success_at(&peer, None).await;
+        let peers_lock = client.circuits.peers.lock().await;
+        let barrier_writer = client.mesh_epoch_barrier.clone().write_owned().await;
+        let gate_guard = client.mesh_gate_lock.clone().read_owned().await;
+        client
+            .record_mesh_transport_failure(
+                &peer,
+                MeshPeerReason::TransportTimeout,
+                "synthetic timeout".to_owned(),
+                0,
+                gate_guard,
+                None,
+                Instant::now(),
+            )
+            .await;
+        client.cluster_mesh_epoch.store(1, Ordering::Release);
+        tokio::task::yield_now().await;
+        drop(barrier_writer);
+        drop(peers_lock);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            client.direct_validation_state_for(&peer).await,
+            DirectValidationState::Verified
+        );
+        assert_eq!(
+            client.circuits.state(&peer.node_id, true).await,
+            BreakerState::Closed
+        );
+    }
+
+    #[tokio::test]
+    async fn public_telemetry_records_when_mesh_is_disabled() {
+        let temp = tempfile::tempdir().expect("telemetry directory");
+        let telemetry = MeshTelemetryHandle::load(temp.path()).expect("telemetry");
+        let client = MeshAwareHttpClient::new(reqwest::Client::new())
+            .with_mesh_observability(telemetry.clone());
+        client.cluster_mesh_enabled.store(false, Ordering::Release);
+        let peer = MeshPeerTarget {
+            node_id: "peer".to_owned(),
+            node_name: "peer".to_owned(),
+            mesh_base_url: Some("https://mesh.example".to_owned()),
+            endpoint_transport: Some("xhttp_reality_fallback"),
+            endpoint_fingerprint: Some("fingerprint".to_owned()),
+            mesh_reason: MeshPeerReason::MeshAvailable,
+            public_base_url: "https://public.example".to_owned(),
+        };
+        client
+            .record_public_outcome_for_epoch(
+                &peer,
+                Instant::now(),
+                true,
+                false,
+                true,
+                0,
+                Instant::now() + Duration::from_secs(1),
+            )
+            .await;
+        let snapshot = telemetry.snapshot().await;
+        let peer = snapshot
+            .peers
+            .iter()
+            .find(|peer| peer.peer_id == "peer")
+            .expect("disabled Mesh must still record the Public peer");
+        assert_eq!(peer.last_path, Some(TelemetryPath::Public));
+        assert_eq!(
+            peer.buckets
+                .back()
+                .expect("telemetry bucket")
+                .public_success,
+            1
+        );
     }
 
     #[tokio::test]

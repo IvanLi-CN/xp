@@ -13,6 +13,10 @@ impl ReconcileHandle {
         self.mesh_gate_lock.clone()
     }
 
+    pub fn mesh_epoch_barrier(&self) -> Arc<RwLock<()>> {
+        self.mesh_epoch_barrier.clone()
+    }
+
     pub async fn mesh_gate_read(&self) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
         self.mesh_gate_read_until(std::time::Instant::now() + Duration::from_secs(5))
             .await
@@ -37,7 +41,7 @@ impl ReconcileHandle {
     pub async fn initialize_mesh_gate(&self, enabled: bool) {
         let _gate_lock = self.mesh_gate_lock.write().await;
         self.mesh_gate_authoritative.store(true, Ordering::Release);
-        self.set_mesh_enabled_locked(enabled);
+        self.set_mesh_enabled_locked(enabled).await;
     }
 
     pub async fn initialize_mesh_gate_if_unset(&self, enabled: bool) {
@@ -47,12 +51,13 @@ impl ReconcileHandle {
         let _gate_lock = self.mesh_gate_lock.write().await;
         if !self.mesh_gate_authoritative.load(Ordering::Acquire) {
             self.mesh_gate_authoritative.store(true, Ordering::Release);
-            self.set_mesh_enabled_locked(enabled);
+            self.set_mesh_enabled_locked(enabled).await;
         }
     }
 
     pub async fn hold_mesh_gate_until_raft_state(&self) {
         let _gate_lock = self.mesh_gate_lock.write().await;
+        let _epoch_barrier = self.mesh_epoch_barrier.write().await;
         self.mesh_gate_authoritative.store(false, Ordering::Release);
         self.mesh_enabled.store(false, Ordering::Release);
         self.refresh_reverse_gate();
@@ -70,11 +75,12 @@ impl ReconcileHandle {
         }
         let _gate_lock = self.mesh_gate_lock.write().await;
         if self.mesh_state_generation.load(Ordering::Acquire) == generation {
-            self.set_mesh_enabled_locked(enabled);
+            self.set_mesh_enabled_locked(enabled).await;
         }
     }
 
-    fn set_mesh_enabled_locked(&self, enabled: bool) {
+    async fn set_mesh_enabled_locked(&self, enabled: bool) {
+        let _epoch_barrier = self.mesh_epoch_barrier.write().await;
         if !self.mesh_gate_authoritative.load(Ordering::Acquire) {
             self.mesh_enabled.store(false, Ordering::Release);
             self.refresh_reverse_gate();

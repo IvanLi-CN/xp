@@ -973,7 +973,8 @@ pub fn build_router_with_mesh_telemetry(
 ) -> Router {
     let mesh_client = mesh_client
         .with_mesh_gate_epoch(reconcile.mesh_gate(), reconcile.mesh_gate_epoch())
-        .with_mesh_gate_lock(reconcile.mesh_gate_lock());
+        .with_mesh_gate_lock(reconcile.mesh_gate_lock())
+        .with_mesh_epoch_barrier(reconcile.mesh_epoch_barrier());
     let cluster_id = cluster.cluster_id.clone();
     let internal_idempotency = InternalIdempotencyLedger::load(&config.data_dir)
         .expect("load local internal idempotency ledger");
