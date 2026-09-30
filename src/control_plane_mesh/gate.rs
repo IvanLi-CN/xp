@@ -134,7 +134,6 @@ impl MeshAwareHttpClient {
                 if let Some(acknowledgement) =
                     response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
                 {
-                    let mesh_body_guard_held = response.content_length() != Some(0);
                     let ack = match acknowledgement.to_str() {
                         Ok(ack) => ack,
                         Err(_) => {
@@ -194,7 +193,6 @@ impl MeshAwareHttpClient {
                             mesh_epoch,
                             breaker_state,
                             request_deadline,
-                            mesh_body_guard_held,
                         )
                         .await;
                     }
@@ -203,7 +201,6 @@ impl MeshAwareHttpClient {
                     )));
                 }
                 if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
-                    let mesh_body_guard_held = response.content_length() != Some(0);
                     let breaker_state = self
                         .record_mesh_success_state(
                             peer,
@@ -224,7 +221,6 @@ impl MeshAwareHttpClient {
                             mesh_epoch,
                             breaker_state,
                             request_deadline,
-                            mesh_body_guard_held,
                         )
                         .await;
                     }
@@ -333,13 +329,7 @@ impl MeshAwareHttpClient {
         epoch: u64,
         breaker_state: BreakerState,
         deadline: Instant,
-        mesh_body_guard_held: bool,
     ) {
-        let _epoch_guard = if mesh_body_guard_held {
-            None
-        } else {
-            self.mesh_epoch_read_guard_until(epoch, deadline).await
-        };
         if !self.mesh_gate_matches(epoch) {
             return;
         }
@@ -350,7 +340,7 @@ impl MeshAwareHttpClient {
             )
             .await;
         }
-        self.record_sample_until(
+        self.record_sample_for_epoch_until(
             peer,
             telemetry_sample(
                 TelemetryPath::Mesh,
@@ -360,6 +350,7 @@ impl MeshAwareHttpClient {
                 request.updates_active_path,
                 Some(transport),
             ),
+            epoch,
             deadline,
         )
         .await;
@@ -464,6 +455,19 @@ impl MeshAwareHttpClient {
                         validation_revision,
                     )
                     .await;
+            });
+        }
+    }
+
+    pub(super) fn spawn_retryable_failure_cleanup(&self, peer_id: &str, epoch: u64) {
+        let client = self.clone();
+        let peer_id = peer_id.to_owned();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                if !client.mesh_gate_matches(epoch) {
+                    return;
+                }
+                client.circuits.record_retryable_failure(&peer_id).await;
             });
         }
     }
@@ -659,20 +663,6 @@ impl MeshAwareHttpClient {
             .then_some(guard)
     }
 
-    pub(super) async fn mesh_epoch_read_guard_until(
-        &self,
-        epoch: u64,
-        deadline: Instant,
-    ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-        let guard = tokio::time::timeout_at(
-            tokio::time::Instant::from_std(deadline),
-            self.mesh_gate_lock.clone().read_owned(),
-        )
-        .await
-        .ok()?;
-        (self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch).then_some(guard)
-    }
-
     pub(super) async fn mesh_direct_read_guard_until(
         &self,
         deadline: Instant,
@@ -716,6 +706,7 @@ impl MeshAwareHttpClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn protocol_failure_cleanup_converges_after_request_deadline() {
@@ -730,7 +721,25 @@ mod tests {
             mesh_reason: MeshPeerReason::MissingEndpoint,
             public_base_url: "https://public.example".to_owned(),
         };
-        client.spawn_protocol_failure_cleanup(&peer, 0, None);
+        let gate_guard = client.mesh_gate_lock.clone().read_owned().await;
+        let response = reqwest::Response::from(
+            axum::http::Response::builder()
+                .status(reqwest::StatusCode::BAD_REQUEST)
+                .body(reqwest::Body::from(Vec::<u8>::new()))
+                .expect("synthetic response"),
+        );
+        let error = client
+            .reject_mesh_response(
+                &peer,
+                0,
+                response,
+                gate_guard,
+                None,
+                MeshRequestError::Protocol("synthetic rejection".to_owned()),
+                Instant::now(),
+            )
+            .await;
+        assert!(matches!(error, MeshRequestError::Protocol(_)));
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
                 if client.direct_validation_state_for(&peer).await
@@ -750,6 +759,114 @@ mod tests {
                 .await,
             MeshAttemptDecision::Quarantined
         );
+    }
+
+    #[tokio::test]
+    async fn expired_mesh_failure_schedules_breaker_cleanup() {
+        let client = MeshAwareHttpClient::new(reqwest::Client::new());
+        let peer = MeshPeerTarget {
+            node_id: "peer".to_owned(),
+            node_name: "peer".to_owned(),
+            mesh_base_url: None,
+            endpoint_transport: None,
+            endpoint_fingerprint: None,
+            mesh_reason: MeshPeerReason::MissingEndpoint,
+            public_base_url: "https://public.example".to_owned(),
+        };
+        let circuits = client.circuits();
+        let peers_lock = circuits.peers.lock().await;
+        let gate_guard = client.mesh_gate_lock.clone().read_owned().await;
+        client
+            .record_mesh_transport_failure(
+                &peer,
+                MeshPeerReason::TransportTimeout,
+                "synthetic timeout".to_owned(),
+                0,
+                gate_guard,
+                None,
+                Instant::now(),
+            )
+            .await;
+        drop(peers_lock);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if circuits
+                    .peers
+                    .lock()
+                    .await
+                    .get("peer")
+                    .is_some_and(|circuit| circuit.failures == 1)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("expired Mesh failure should converge in the background");
+    }
+
+    #[tokio::test]
+    async fn mesh_success_telemetry_does_not_requeue_gate_reader() {
+        let temp = tempfile::tempdir().expect("telemetry directory");
+        let telemetry = MeshTelemetryHandle::load(temp.path()).expect("telemetry");
+        let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
+        let client = MeshAwareHttpClient::new(reqwest::Client::new())
+            .with_mesh_observability(telemetry)
+            .with_mesh_gate_lock(gate_lock.clone());
+        let peer = MeshPeerTarget {
+            node_id: "peer".to_owned(),
+            node_name: "peer".to_owned(),
+            mesh_base_url: Some("https://mesh.example".to_owned()),
+            endpoint_transport: Some("xhttp_reality_fallback"),
+            endpoint_fingerprint: Some("fingerprint".to_owned()),
+            mesh_reason: MeshPeerReason::MeshAvailable,
+            public_base_url: "https://public.example".to_owned(),
+        };
+        let request = MeshRequest {
+            method: reqwest::Method::GET,
+            path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
+            content_type: None,
+            body: Vec::new(),
+            total_budget: Duration::from_secs(1),
+            allow_ambiguous_fallback: false,
+            request_id: "telemetry-reader-regression".to_owned(),
+            route: InternalRoute::HealthV2,
+            cluster_id: "cluster".to_owned(),
+            sender_id: "sender".to_owned(),
+            updates_active_path: false,
+        };
+        let in_flight = gate_lock.clone().read_owned().await;
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let writer_lock = gate_lock.clone();
+        let writer = tokio::spawn(async move {
+            let _ = started_tx.send(());
+            let _guard = writer_lock.write_owned().await;
+            let _ = release_rx.await;
+        });
+        started_rx.await.expect("writer should start");
+        tokio::task::yield_now().await;
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            client.record_mesh_success_telemetry(
+                &peer,
+                Instant::now(),
+                &request,
+                MeshTransportObservation {
+                    protocol: MeshTransportProtocol::H2,
+                    fingerprint: None,
+                },
+                0,
+                BreakerState::Closed,
+                Instant::now() + Duration::from_secs(1),
+            ),
+        )
+        .await
+        .expect("telemetry must not wait for the queued gate writer");
+        drop(in_flight);
+        let _ = release_tx.send(());
+        writer.await.expect("writer should finish");
     }
 }
 
