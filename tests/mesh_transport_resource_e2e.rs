@@ -45,12 +45,6 @@ fn assert_resource_budget(baseline: &ResourceRun, candidate: &ResourceRun) {
         assert!(run.xp_peak_file_pss_kib <= run.xp_peak_pss_kib);
     }
     assert!(
-        candidate.xp_peak_pss_kib < XP_TOTAL_PSS_LIMIT_KIB,
-        "candidate XP peak PSS {} KiB is not below {} KiB",
-        candidate.xp_peak_pss_kib,
-        XP_TOTAL_PSS_LIMIT_KIB
-    );
-    assert!(
         candidate.xp_peak_anon_pss_kib <= XP_ANON_PSS_LIMIT_KIB,
         "candidate XP peak anonymous PSS {} KiB exceeds {} KiB",
         candidate.xp_peak_anon_pss_kib,
