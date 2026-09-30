@@ -8,23 +8,33 @@ impl MeshAwareHttpClient {
         peer: &MeshPeerTarget,
         epoch: u64,
         validation_revision: Option<String>,
+        operation_id: u64,
     ) {
         let client = self.clone();
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let Some(_epoch_guard) = client.mesh_epoch_guard_after_deadline(epoch, true).await
-                else {
+                let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                if !client.mesh_gate_matches(epoch) {
                     return;
-                };
-                client.circuits.record_protocol_failure(&peer.node_id).await;
-                client
-                    .mark_direct_validation_failure_at(
+                }
+                let _ = crate::control_plane_mesh::await_until(
+                    deadline,
+                    client
+                        .circuits
+                        .record_protocol_failure_at(&peer.node_id, operation_id),
+                )
+                .await;
+                let _ = crate::control_plane_mesh::await_until(
+                    deadline,
+                    client.mark_direct_validation_failure_with_operation(
                         &peer,
                         DirectValidationState::ProtocolRejected,
                         validation_revision,
-                    )
-                    .await;
+                        operation_id,
+                    ),
+                )
+                .await;
             });
         }
     }
@@ -34,26 +44,33 @@ impl MeshAwareHttpClient {
         peer: &MeshPeerTarget,
         epoch: u64,
         validation_revision: Option<String>,
+        operation_id: u64,
     ) {
         let client = self.clone();
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let Some(_epoch_guard) = client.mesh_epoch_guard_after_deadline(epoch, true).await
-                else {
+                let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                if !client.mesh_gate_matches(epoch) {
                     return;
-                };
-                client
-                    .circuits
-                    .record_retryable_failure(&peer.node_id)
-                    .await;
-                client
-                    .mark_direct_validation_failure_at(
+                }
+                let _ = crate::control_plane_mesh::await_until(
+                    deadline,
+                    client
+                        .circuits
+                        .record_retryable_failure_at(&peer.node_id, operation_id),
+                )
+                .await;
+                let _ = crate::control_plane_mesh::await_until(
+                    deadline,
+                    client.mark_direct_validation_failure_with_operation(
                         &peer,
                         DirectValidationState::TransportFailed,
                         validation_revision,
-                    )
-                    .await;
+                        operation_id,
+                    ),
+                )
+                .await;
             });
         }
     }
@@ -64,18 +81,61 @@ impl MeshAwareHttpClient {
         epoch: u64,
         state: DirectValidationState,
         validation_revision: Option<String>,
+        operation_id: u64,
     ) {
         let client = self.clone();
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let Some(_epoch_guard) = client.mesh_epoch_guard_after_deadline(epoch, true).await
-                else {
+                let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                if !client.mesh_gate_matches(epoch) {
                     return;
-                };
-                client
-                    .mark_direct_validation_failure_at(&peer, state, validation_revision)
-                    .await;
+                }
+                let _ = crate::control_plane_mesh::await_until(
+                    deadline,
+                    client.mark_direct_validation_failure_with_operation(
+                        &peer,
+                        state,
+                        validation_revision,
+                        operation_id,
+                    ),
+                )
+                .await;
+            });
+        }
+    }
+
+    pub(super) fn spawn_validation_success_cleanup(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+    ) {
+        let client = self.clone();
+        let peer = peer.clone();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                if !client.mesh_gate_matches(epoch) {
+                    return;
+                }
+                let _ = crate::control_plane_mesh::await_until(
+                    deadline,
+                    client
+                        .circuits
+                        .record_success_at(&peer.node_id, operation_id),
+                )
+                .await;
+                let _ = crate::control_plane_mesh::await_until(
+                    deadline,
+                    client.mark_direct_validation_success_with_operation(
+                        &peer,
+                        validation_revision,
+                        operation_id,
+                    ),
+                )
+                .await;
             });
         }
     }
@@ -92,29 +152,5 @@ impl MeshAwareHttpClient {
                 .before_public_attempt_with_probe(peer_id, route == InternalRoute::HealthV2),
         )
         .await
-    }
-
-    async fn mesh_epoch_guard_after_deadline(
-        &self,
-        epoch: u64,
-        require_enabled: bool,
-    ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-        if (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
-            || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
-        {
-            return None;
-        }
-        let guard = tokio::time::timeout(
-            POST_DEADLINE_CLEANUP_WAIT,
-            self.mesh_epoch_barrier.clone().read_owned(),
-        )
-        .await
-        .ok()?;
-        if (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
-            || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
-        {
-            return None;
-        }
-        Some(guard)
     }
 }

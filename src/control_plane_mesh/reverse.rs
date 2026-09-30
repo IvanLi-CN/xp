@@ -152,12 +152,16 @@ pub(super) struct LocalReverseRelay {
 }
 
 impl PeerCircuitBreakers {
-    pub(super) async fn try_reverse_slot(
+    pub(super) async fn try_reverse_slot_until(
         &self,
         rendezvous_node_id: &str,
         class: ReverseRequestClass,
+        deadline: Instant,
     ) -> Result<OwnedSemaphorePermit, MeshRequestError> {
-        let mut limits = self.reverse_in_flight.lock().await;
+        let mut limits =
+            crate::control_plane_mesh::await_until(deadline, self.reverse_in_flight.lock())
+                .await
+                .ok_or(MeshRequestError::PreDispatchTimeout)?;
         let semaphore = limits
             .entry(rendezvous_node_id.to_owned())
             .or_insert_with(|| Arc::new(Semaphore::new(REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS)))
@@ -174,6 +178,20 @@ impl PeerCircuitBreakers {
                 "reverse relay concurrency limit reached for rendezvous {rendezvous_node_id}"
             ))
         })
+    }
+
+    #[cfg(test)]
+    pub(super) async fn try_reverse_slot(
+        &self,
+        rendezvous_node_id: &str,
+        class: ReverseRequestClass,
+    ) -> Result<OwnedSemaphorePermit, MeshRequestError> {
+        self.try_reverse_slot_until(
+            rendezvous_node_id,
+            class,
+            Instant::now() + Duration::from_secs(60),
+        )
+        .await
     }
 }
 
@@ -327,21 +345,22 @@ impl MeshAwareHttpClient {
                 "reverse health probe must be a bodyless GET".to_string(),
             ));
         }
-        let route = self
-            .reverse_routes
-            .read()
-            .await
-            .get(&peer.node_id)
-            .cloned()
-            .ok_or_else(|| {
-                MeshRequestError::Reverse("no reverse assignment is available".into())
-            })?;
         let started = Instant::now();
+        let request_deadline = started + request.total_budget;
+        let route = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(request_deadline),
+            self.reverse_routes.read(),
+        )
+        .await
+        .map_err(|_| MeshRequestError::PreDispatchTimeout)?
+        .get(&peer.node_id)
+        .cloned()
+        .ok_or_else(|| MeshRequestError::Reverse("no reverse assignment is available".into()))?;
         let mut first_error = None;
         for candidate in route.candidates() {
-            let budget = route_budget(request.total_budget)
-                .min(request.total_budget.saturating_sub(started.elapsed()));
-            if budget.is_zero() {
+            let route_deadline =
+                (started + route_budget(request.total_budget)).min(request_deadline);
+            if route_deadline <= Instant::now() {
                 first_error.get_or_insert(MeshRequestError::OutcomeUnknown);
                 break;
             }
@@ -352,7 +371,7 @@ impl MeshAwareHttpClient {
                     &request,
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
-                    budget,
+                    route_deadline,
                     ReverseRequestClass::Health,
                 )
                 .await
@@ -404,7 +423,7 @@ impl MeshAwareHttpClient {
             &request,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
-            route_budget(request.total_budget),
+            Instant::now() + route_budget(request.total_budget),
             ReverseRequestClass::Health,
         )
         .await
@@ -436,21 +455,22 @@ impl MeshAwareHttpClient {
                 "recursive reverse relay is not allowed".to_string(),
             ));
         }
-        let route = self
-            .reverse_routes
-            .read()
-            .await
-            .get(&peer.node_id)
-            .cloned()
-            .ok_or_else(|| {
-                MeshRequestError::Reverse("no reverse assignment is available".into())
-            })?;
         let started = Instant::now();
+        let request_deadline = started + request.total_budget;
+        let route = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(request_deadline),
+            self.reverse_routes.read(),
+        )
+        .await
+        .map_err(|_| MeshRequestError::PreDispatchTimeout)?
+        .get(&peer.node_id)
+        .cloned()
+        .ok_or_else(|| MeshRequestError::Reverse("no reverse assignment is available".into()))?;
         let mut last_error = None;
         for candidate in route.candidates() {
-            let budget = route_budget(request.total_budget)
-                .min(request.total_budget.saturating_sub(started.elapsed()));
-            if budget.is_zero() {
+            let route_deadline =
+                (started + route_budget(request.total_budget)).min(request_deadline);
+            if route_deadline <= Instant::now() {
                 break;
             }
             let mesh_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
@@ -461,7 +481,7 @@ impl MeshAwareHttpClient {
                     &request,
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
-                    budget,
+                    route_deadline,
                     ReverseRequestClass::Control,
                 )
                 .await
@@ -516,7 +536,7 @@ pub(super) async fn send_outer_request(
     cluster_ca_key_pem: &str,
     cluster_ca_cert_pem: &str,
     url: &str,
-    budget: Duration,
+    deadline: Instant,
     allow_ambiguous_fallback: bool,
     cluster_mesh_enabled: &Arc<AtomicBool>,
     mesh_gate_lock: &Arc<tokio::sync::RwLock<()>>,
@@ -528,7 +548,6 @@ pub(super) async fn send_outer_request(
     ),
     MeshRequestError,
 > {
-    let deadline = Instant::now() + budget;
     let gate_guard = match tokio::time::timeout_at(
         tokio::time::Instant::from_std(deadline),
         mesh_gate_lock.clone().read_owned(),
@@ -571,7 +590,10 @@ pub(super) async fn send_outer_request(
             dispatch.inner_verified,
             dispatch.outer_verified,
         )),
-        Ok(Err(error)) => Err(public_transport_error(error, allow_ambiguous_fallback)),
+        Ok(Err(error)) => Err(retry::public_transport_error(
+            error,
+            allow_ambiguous_fallback,
+        )),
         Err(_) => Err(MeshRequestError::OutcomeUnknown),
     }
 }

@@ -20,66 +20,26 @@ pub(super) enum MeshAttemptResult {
     Response(PeerRequestResponse),
 }
 
+pub(super) fn mesh_transport_observation(response: &reqwest::Response) -> MeshTransportObservation {
+    let protocol = if response.version() == reqwest::Version::HTTP_2 {
+        MeshTransportProtocol::H2
+    } else {
+        MeshTransportProtocol::Other
+    };
+    let fingerprint = response
+        .extensions()
+        .get::<hyper_util::client::legacy::connect::HttpInfo>()
+        .map(|info| MeshConnectionFingerprint {
+            local_addr: info.local_addr(),
+            remote_addr: info.remote_addr(),
+        });
+    MeshTransportObservation {
+        protocol,
+        fingerprint,
+    }
+}
+
 impl MeshAwareHttpClient {
-    pub(crate) async fn direct_validation_snapshot(
-        &self,
-        peer: &MeshPeerTarget,
-    ) -> (
-        DirectValidationState,
-        Option<String>,
-        tokio::sync::OwnedRwLockReadGuard<Option<String>>,
-    ) {
-        let membership_guard = self.direct_validation.membership_revision_guard().await;
-        let membership_revision = membership_guard.clone();
-        let state = self
-            .direct_validation
-            .state_at(
-                peer,
-                self.enforce_direct_validation,
-                membership_revision.as_deref(),
-            )
-            .await;
-        (state, membership_revision, membership_guard)
-    }
-
-    pub async fn direct_validation_state_for(
-        &self,
-        peer: &MeshPeerTarget,
-    ) -> DirectValidationState {
-        self.direct_validation_snapshot(peer).await.0
-    }
-
-    pub async fn mark_direct_validation_success_at(
-        &self,
-        peer: &MeshPeerTarget,
-        membership_revision: Option<String>,
-    ) {
-        self.direct_validation
-            .record_at(
-                peer,
-                DirectValidationState::Verified,
-                membership_revision.as_deref(),
-            )
-            .await;
-    }
-
-    pub async fn mark_direct_validation_failure_at(
-        &self,
-        peer: &MeshPeerTarget,
-        state: DirectValidationState,
-        membership_revision: Option<String>,
-    ) {
-        self.direct_validation
-            .record_at(peer, state, membership_revision.as_deref())
-            .await;
-    }
-
-    pub async fn set_membership_revision(&self, revision: Option<String>) {
-        self.direct_validation
-            .set_membership_revision(revision)
-            .await;
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn attempt_mesh_request(
         &self,
@@ -308,19 +268,29 @@ impl MeshAwareHttpClient {
         if !self.mesh_gate_matches(epoch) {
             return None;
         }
+        let operation_id = self.circuits.next_operation();
         let breaker_state = crate::control_plane_mesh::await_until(
             deadline,
-            self.circuits.record_success(&peer.node_id),
+            self.circuits.record_success_at(&peer.node_id, operation_id),
         )
-        .await?;
+        .await
+        .flatten()?;
         if !self.mesh_gate_matches(epoch) {
             return None;
         }
-        let _ = crate::control_plane_mesh::await_until(
+        let cleanup_revision = validation_revision.clone();
+        let validation_recorded = crate::control_plane_mesh::await_until(
             deadline,
-            self.mark_direct_validation_success_at(peer, validation_revision),
+            self.mark_direct_validation_success_with_operation(
+                peer,
+                validation_revision,
+                operation_id,
+            ),
         )
         .await;
+        if validation_recorded.is_none() {
+            self.spawn_validation_success_cleanup(peer, epoch, cleanup_revision, operation_id);
+        }
         Some(breaker_state)
     }
 
@@ -368,7 +338,6 @@ impl MeshAwareHttpClient {
         deadline: Instant,
     ) -> MeshRequestError {
         drop(response);
-        let cleanup_revision = validation_revision.clone();
         let Some(breaker_state) = self
             .record_protocol_failure_for_epoch(
                 peer,
@@ -379,7 +348,6 @@ impl MeshAwareHttpClient {
             )
             .await
         else {
-            self.spawn_protocol_failure_cleanup(peer, epoch, cleanup_revision);
             drop(gate_guard);
             return error;
         };
@@ -410,31 +378,44 @@ impl MeshAwareHttpClient {
         if !self.mesh_gate_matches(epoch) {
             return None;
         }
-        let breaker_state = crate::control_plane_mesh::await_until(
+        let operation_id = self.circuits.next_operation();
+        let Some(breaker_state) = crate::control_plane_mesh::await_until(
             deadline,
-            self.circuits.record_protocol_failure(&peer.node_id),
+            self.circuits
+                .record_protocol_failure_at(&peer.node_id, operation_id),
         )
-        .await?;
+        .await
+        .flatten() else {
+            self.spawn_protocol_failure_cleanup(
+                peer,
+                epoch,
+                validation_revision.clone(),
+                operation_id,
+            );
+            return None;
+        };
         if !self.mesh_gate_matches(epoch) {
             return None;
         }
         let cleanup_revision = validation_revision.clone();
         let recorded = crate::control_plane_mesh::await_until(
             deadline,
-            self.mark_direct_validation_failure_at(
+            self.mark_direct_validation_failure_with_operation(
                 peer,
                 DirectValidationState::ProtocolRejected,
                 validation_revision,
+                operation_id,
             ),
         )
         .await
-        .is_some();
+            == Some(true);
         if !recorded {
             self.spawn_validation_failure_cleanup(
                 peer,
                 epoch,
                 DirectValidationState::ProtocolRejected,
                 cleanup_revision,
+                operation_id,
             );
         }
         Some(breaker_state)
@@ -443,132 +424,6 @@ impl MeshAwareHttpClient {
     pub fn with_mesh_gate_lock(mut self, lock: Arc<tokio::sync::RwLock<()>>) -> Self {
         self.mesh_gate_lock = lock;
         self
-    }
-
-    pub(super) async fn observe_mesh_gate(&self) -> bool {
-        let mut reset_guard = self.mesh_epoch_reset_lock.lock().await;
-        let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
-        let previous = *reset_guard;
-        let enabled = self.cluster_mesh_enabled.load(Ordering::Acquire);
-        if epoch != previous {
-            self.circuits.clear_half_open_probes().await;
-            *reset_guard = epoch;
-        }
-        enabled
-    }
-
-    pub(super) async fn before_mesh_attempt(
-        &self,
-        peer_id: &str,
-        enabled: bool,
-        health_probe: bool,
-    ) -> (MeshAttemptDecision, u64) {
-        let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
-        let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
-        let decision = self
-            .circuits
-            .before_attempt_with_probe_at_epoch(peer_id, enabled, health_probe, Some(epoch))
-            .await;
-        (decision, epoch)
-    }
-
-    pub(super) async fn before_mesh_request(
-        &self,
-        peer_id: &str,
-        enabled: bool,
-        route: InternalRoute,
-    ) -> (MeshAttemptDecision, u64) {
-        self.before_mesh_attempt(peer_id, enabled, route == InternalRoute::HealthV2)
-            .await
-    }
-
-    pub(super) async fn send_peer_direct_preflight_with_admission(
-        &self,
-        peer: &MeshPeerTarget,
-        request: MeshRequest,
-        cluster_ca_key_pem: &str,
-        cluster_ca_cert_pem: &str,
-        allow_mesh_when_disabled: bool,
-    ) -> Result<reqwest::Response, MeshRequestError> {
-        let request_deadline = Instant::now() + request.total_budget;
-        let (_, validation_revision, _membership_guard) =
-            self.direct_validation_snapshot(peer).await;
-        let (decision, epoch) = self
-            .before_mesh_request(&peer.node_id, true, InternalRoute::HealthV2)
-            .await;
-        let mut mesh_probe_guard =
-            MeshHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, decision, epoch);
-        if matches!(
-            decision,
-            MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined
-        ) {
-            return Err(MeshRequestError::CircuitOpen {
-                path: "Direct Mesh",
-                dispatched: false,
-            });
-        }
-        let result = self
-            .send_peer_direct_request_with_options(
-                peer,
-                PeerDirectPath::RealityMesh,
-                request,
-                cluster_ca_key_pem,
-                cluster_ca_cert_pem,
-                None,
-                allow_mesh_when_disabled,
-                request_deadline,
-            )
-            .await;
-        if matches!(decision, MeshAttemptDecision::Probe) {
-            self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
-                .await;
-            if let Some(guard) = mesh_probe_guard.as_mut() {
-                guard.disarm();
-            }
-        }
-        if !self.mesh_epoch_is_current(epoch).await {
-            return result;
-        }
-        if let Err(error) = &result {
-            let validation_state = match error {
-                MeshRequestError::PreDispatchAuth(_)
-                | MeshRequestError::PreDispatchTimeout
-                | MeshRequestError::InvalidTarget(_)
-                | MeshRequestError::CircuitOpen { .. } => {
-                    return result;
-                }
-                MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => {
-                    DirectValidationState::ProtocolRejected
-                }
-                _ => DirectValidationState::TransportFailed,
-            };
-            match validation_state {
-                DirectValidationState::ProtocolRejected => {
-                    self.circuits.record_protocol_failure(&peer.node_id).await;
-                }
-                DirectValidationState::TransportFailed => {
-                    self.circuits.record_retryable_failure(&peer.node_id).await;
-                }
-                _ => unreachable!("preflight failure state is classified above"),
-            }
-            self.mark_direct_validation_failure_at(peer, validation_state, validation_revision)
-                .await;
-        } else {
-            self.circuits.record_success(&peer.node_id).await;
-            self.mark_direct_validation_success_at(peer, validation_revision)
-                .await;
-        }
-        result
-    }
-
-    pub(super) async fn mesh_attempt_is_current(&self, epoch: u64) -> bool {
-        let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
-        self.mesh_gate_matches(epoch)
-    }
-
-    pub(super) async fn mesh_epoch_is_current(&self, epoch: u64) -> bool {
-        let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
-        self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch
     }
 
     pub(super) fn mesh_gate_matches(&self, epoch: u64) -> bool {
@@ -623,60 +478,15 @@ impl MeshAwareHttpClient {
         }
         Some((send(remaining).await, gate_guard))
     }
+}
 
-    pub(super) async fn mesh_read_guard_for_epoch_until(
-        &self,
-        epoch: u64,
-        deadline: Instant,
-    ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-        let guard = tokio::time::timeout_at(
-            tokio::time::Instant::from_std(deadline),
-            self.mesh_gate_lock.clone().read_owned(),
-        )
-        .await
-        .ok()?;
-        (self.cluster_mesh_enabled.load(Ordering::Acquire)
-            && self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch)
-            .then_some(guard)
-    }
-
-    pub(super) async fn mesh_direct_read_guard_until(
-        &self,
-        deadline: Instant,
-    ) -> Result<tokio::sync::OwnedRwLockReadGuard<()>, MeshRequestError> {
-        let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
-        if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
-            return Err(MeshRequestError::InvalidTarget(
-                "Mesh is disabled by the cluster gate".into(),
-            ));
+impl PeerCircuitBreakers {
+    pub(super) async fn clear_half_open_probes(&self) {
+        let mut peers = self.peers.lock().await;
+        for circuit in peers.values_mut() {
+            circuit.half_open_in_flight = false;
+            circuit.half_open_epoch = None;
         }
-        let Some(guard) = self.mesh_read_guard_for_epoch_until(epoch, deadline).await else {
-            return Err(if self.cluster_mesh_enabled.load(Ordering::Acquire) {
-                MeshRequestError::PreDispatchTimeout
-            } else {
-                MeshRequestError::InvalidTarget("Mesh is disabled by the cluster gate".into())
-            });
-        };
-        Ok(guard)
-    }
-
-    pub(super) async fn mesh_read_guard_for_path_until(
-        &self,
-        path: PeerDirectPath,
-        deadline: Instant,
-    ) -> Result<Option<tokio::sync::OwnedRwLockReadGuard<()>>, MeshRequestError> {
-        if path == PeerDirectPath::RealityMesh {
-            self.mesh_direct_read_guard_until(deadline).await.map(Some)
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub(super) async fn release_half_open_probe_for_epoch(&self, peer_id: &str, epoch: u64) {
-        let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
-        self.circuits
-            .release_half_open_probe_for_epoch(peer_id, epoch)
-            .await;
     }
 }
 
@@ -930,15 +740,5 @@ mod tests {
         drop(in_flight);
         let _ = release_tx.send(());
         writer.await.expect("writer should finish");
-    }
-}
-
-impl PeerCircuitBreakers {
-    async fn clear_half_open_probes(&self) {
-        let mut peers = self.peers.lock().await;
-        for circuit in peers.values_mut() {
-            circuit.half_open_in_flight = false;
-            circuit.half_open_epoch = None;
-        }
     }
 }

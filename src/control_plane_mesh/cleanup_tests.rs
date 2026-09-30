@@ -14,7 +14,7 @@ impl MeshAwareHttpClient {
 }
 
 #[tokio::test]
-async fn protocol_failure_cleanup_waits_through_same_epoch_barrier_write() {
+async fn protocol_failure_cleanup_does_not_hold_epoch_barrier() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
     let peer = MeshPeerTarget {
         node_id: "peer".to_owned(),
@@ -26,12 +26,17 @@ async fn protocol_failure_cleanup_waits_through_same_epoch_barrier_write() {
         public_base_url: "https://public.example".to_owned(),
     };
     let barrier_writer = client.mesh_epoch_barrier.clone().write_owned().await;
-    client.spawn_protocol_failure_cleanup(&peer, 0, None);
-    tokio::time::sleep(Duration::from_millis(10)).await;
-    assert_eq!(
-        client.circuits().state("peer", true).await,
-        BreakerState::Closed
-    );
+    client.spawn_protocol_failure_cleanup(&peer, 0, None, client.circuits.next_operation());
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if client.circuits().state("peer", true).await == BreakerState::Open {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cleanup should not wait for the epoch barrier");
     drop(barrier_writer);
 
     tokio::time::timeout(Duration::from_secs(1), async {
@@ -48,7 +53,42 @@ async fn protocol_failure_cleanup_waits_through_same_epoch_barrier_write() {
         }
     })
     .await
-    .expect("cleanup should wait for a same-epoch barrier write");
+    .expect("cleanup should quarantine the peer");
+}
+
+#[tokio::test]
+async fn stale_failure_cleanup_cannot_overwrite_newer_success() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
+    let peer = MeshPeerTarget {
+        node_id: "peer".to_owned(),
+        node_name: "peer".to_owned(),
+        mesh_base_url: Some("https://mesh.example".to_owned()),
+        endpoint_transport: Some("vision_tcp"),
+        endpoint_fingerprint: Some("fingerprint".to_owned()),
+        mesh_reason: MeshPeerReason::MeshAvailable,
+        public_base_url: "https://public.example".to_owned(),
+    };
+    let stale_operation = client.circuits.next_operation();
+    let current_operation = client.circuits.next_operation();
+    client
+        .circuits
+        .record_success_at(&peer.node_id, current_operation)
+        .await;
+    client
+        .mark_direct_validation_success_with_operation(&peer, None, current_operation)
+        .await;
+
+    client.spawn_protocol_failure_cleanup(&peer, 0, None, stale_operation);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    assert_eq!(
+        client.circuits().state("peer", true).await,
+        BreakerState::Closed
+    );
+    assert_eq!(
+        client.direct_validation_state_for(&peer).await,
+        DirectValidationState::Verified
+    );
 }
 
 #[tokio::test]

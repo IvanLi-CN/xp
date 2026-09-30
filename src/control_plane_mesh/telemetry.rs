@@ -16,13 +16,22 @@ impl MeshAwareHttpClient {
             drop(gate_guard);
             return;
         }
-        let Some(state) = super::await_until(
+        let operation_id = self.circuits.next_operation();
+        let breaker_result = super::await_until(
             deadline,
-            self.circuits.record_retryable_failure(&peer.node_id),
+            self.circuits
+                .record_retryable_failure_at(&peer.node_id, operation_id),
         )
-        .await
-        else {
-            self.spawn_retryable_failure_cleanup(peer, epoch, validation_revision);
+        .await;
+        let Some(state) = breaker_result.flatten() else {
+            if breaker_result.is_none() {
+                self.spawn_retryable_failure_cleanup(
+                    peer,
+                    epoch,
+                    validation_revision,
+                    operation_id,
+                );
+            }
             drop(gate_guard);
             return;
         };
@@ -33,20 +42,22 @@ impl MeshAwareHttpClient {
         let cleanup_revision = validation_revision.clone();
         let recorded = super::await_until(
             deadline,
-            self.mark_direct_validation_failure_at(
+            self.mark_direct_validation_failure_with_operation(
                 peer,
                 DirectValidationState::TransportFailed,
                 validation_revision,
+                operation_id,
             ),
         )
         .await
-        .is_some();
+            == Some(true);
         if !recorded {
             self.spawn_validation_failure_cleanup(
                 peer,
                 epoch,
                 DirectValidationState::TransportFailed,
                 cleanup_revision,
+                operation_id,
             );
         }
         drop(gate_guard);
