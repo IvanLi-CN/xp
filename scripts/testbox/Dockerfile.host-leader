@@ -2,5 +2,8 @@ ARG XP_TEST_IMAGE=xp-fresh-join-candidate
 FROM ${XP_TEST_IMAGE}
 
 COPY scripts/testbox/artifacts/xp /usr/local/bin/xp
+COPY scripts/testbox/artifacts/xp-ops /usr/local/bin/xp-ops
 
-RUN chmod 0755 /usr/local/bin/xp
+RUN chmod 0755 /usr/local/bin/xp /usr/local/bin/xp-ops
+
+ENTRYPOINT ["/usr/local/bin/xp-ops", "container", "run"]
