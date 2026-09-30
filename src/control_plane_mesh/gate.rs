@@ -418,7 +418,8 @@ impl MeshAwareHttpClient {
         if !self.mesh_gate_matches(epoch) {
             return None;
         }
-        let _ = crate::control_plane_mesh::await_until(
+        let cleanup_revision = validation_revision.clone();
+        let recorded = crate::control_plane_mesh::await_until(
             deadline,
             self.mark_direct_validation_failure_at(
                 peer,
@@ -426,61 +427,17 @@ impl MeshAwareHttpClient {
                 validation_revision,
             ),
         )
-        .await;
+        .await
+        .is_some();
+        if !recorded {
+            self.spawn_validation_failure_cleanup(
+                peer,
+                epoch,
+                DirectValidationState::ProtocolRejected,
+                cleanup_revision,
+            );
+        }
         Some(breaker_state)
-    }
-
-    pub(super) fn spawn_protocol_failure_cleanup(
-        &self,
-        peer: &MeshPeerTarget,
-        epoch: u64,
-        validation_revision: Option<String>,
-    ) {
-        let client = self.clone();
-        let peer = peer.clone();
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                let Some(_epoch_guard) = client.try_mesh_epoch_guard(epoch, true) else {
-                    return;
-                };
-                client.circuits.record_protocol_failure(&peer.node_id).await;
-                client
-                    .mark_direct_validation_failure_at(
-                        &peer,
-                        DirectValidationState::ProtocolRejected,
-                        validation_revision,
-                    )
-                    .await;
-            });
-        }
-    }
-
-    pub(super) fn spawn_retryable_failure_cleanup(
-        &self,
-        peer: &MeshPeerTarget,
-        epoch: u64,
-        validation_revision: Option<String>,
-    ) {
-        let client = self.clone();
-        let peer = peer.clone();
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                let Some(_epoch_guard) = client.try_mesh_epoch_guard(epoch, true) else {
-                    return;
-                };
-                client
-                    .circuits
-                    .record_retryable_failure(&peer.node_id)
-                    .await;
-                client
-                    .mark_direct_validation_failure_at(
-                        &peer,
-                        DirectValidationState::TransportFailed,
-                        validation_revision,
-                    )
-                    .await;
-            });
-        }
     }
 
     pub fn with_mesh_gate_lock(mut self, lock: Arc<tokio::sync::RwLock<()>>) -> Self {
@@ -522,16 +479,6 @@ impl MeshAwareHttpClient {
         route: InternalRoute,
     ) -> (MeshAttemptDecision, u64) {
         self.before_mesh_attempt(peer_id, enabled, route == InternalRoute::HealthV2)
-            .await
-    }
-
-    pub(super) async fn before_public_request(
-        &self,
-        peer_id: &str,
-        route: InternalRoute,
-    ) -> MeshAttemptDecision {
-        self.circuits
-            .before_public_attempt_with_probe(peer_id, route == InternalRoute::HealthV2)
             .await
     }
 

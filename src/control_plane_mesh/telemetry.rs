@@ -30,7 +30,8 @@ impl MeshAwareHttpClient {
             drop(gate_guard);
             return;
         }
-        let _ = super::await_until(
+        let cleanup_revision = validation_revision.clone();
+        let recorded = super::await_until(
             deadline,
             self.mark_direct_validation_failure_at(
                 peer,
@@ -38,7 +39,16 @@ impl MeshAwareHttpClient {
                 validation_revision,
             ),
         )
-        .await;
+        .await
+        .is_some();
+        if !recorded {
+            self.spawn_validation_failure_cleanup(
+                peer,
+                epoch,
+                DirectValidationState::TransportFailed,
+                cleanup_revision,
+            );
+        }
         drop(gate_guard);
         self.record_sample_for_epoch_until(
             peer,

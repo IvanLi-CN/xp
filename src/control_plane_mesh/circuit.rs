@@ -41,7 +41,7 @@ pub enum DirectValidationState {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct DirectValidationRecord {
+pub(crate) struct DirectValidationRecord {
     pub(super) fingerprint: String,
     pub(super) state: DirectValidationState,
     pub(super) verified_at: Option<Instant>,
@@ -143,6 +143,13 @@ impl DirectValidationStore {
         let membership_revision = self.membership_revision().await;
         self.record_at(peer, state, membership_revision.as_deref())
             .await;
+    }
+
+    #[cfg(test)]
+    pub(super) async fn hold_records_for_test(
+        &self,
+    ) -> tokio::sync::OwnedMutexGuard<BTreeMap<String, DirectValidationRecord>> {
+        self.records.clone().lock_owned().await
     }
 }
 
@@ -354,6 +361,13 @@ impl PeerCircuitBreakers {
         let mut peers = self.public_peers.lock().await;
         let circuit = peers.entry(peer_id.to_owned()).or_default();
         circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+    }
+
+    #[cfg(test)]
+    pub(super) async fn hold_public_peers_for_test(
+        &self,
+    ) -> tokio::sync::OwnedMutexGuard<BTreeMap<String, PeerCircuit>> {
+        self.public_peers.clone().lock_owned().await
     }
 
     pub(super) async fn before_public_attempt_with_probe(

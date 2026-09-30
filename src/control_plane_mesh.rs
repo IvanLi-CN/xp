@@ -20,6 +20,7 @@ use crate::{
 };
 
 mod circuit;
+mod cleanup;
 mod error;
 mod gate;
 mod request;
@@ -756,21 +757,15 @@ impl MeshAwareHttpClient {
                 MeshRequestError::OutcomeUnknown
             });
         }
-        let elapsed = started.elapsed();
         let public_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
-        let remaining = request.total_budget.saturating_sub(elapsed);
-        if remaining.is_zero() {
+        let Some(public_decision) = self
+            .before_public_request_until(&peer.node_id, request.route, request_deadline)
+            .await
+        else {
             self.record_terminal_failure_until(peer, request_deadline)
                 .await;
-            return Err(if mesh_outcome_timed_out {
-                MeshRequestError::TransportTimeout
-            } else {
-                MeshRequestError::OutcomeUnknown
-            });
-        }
-        let public_decision = self
-            .before_public_request(&peer.node_id, request.route)
-            .await;
+            return Err(MeshRequestError::PreDispatchTimeout);
+        };
         let mut public_probe_guard =
             PublicHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, public_decision);
         match public_decision {
@@ -805,7 +800,7 @@ impl MeshAwareHttpClient {
                 &peer.node_id,
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
-                remaining,
+                request_deadline.saturating_duration_since(Instant::now()),
                 allow_unsigned_not_found,
             )
             .await
@@ -1176,6 +1171,8 @@ fn direct_mesh_is_eligible(
         && validation == DirectValidationState::Verified
 }
 
+#[cfg(test)]
+mod cleanup_tests;
 #[cfg(test)]
 mod mesh_fallback_tests;
 #[cfg(test)]
