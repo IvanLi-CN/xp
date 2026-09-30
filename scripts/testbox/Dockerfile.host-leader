@@ -7,3 +7,6 @@ COPY scripts/testbox/artifacts/xp-ops /usr/local/bin/xp-ops
 RUN chmod 0755 /usr/local/bin/xp /usr/local/bin/xp-ops
 
 ENTRYPOINT ["/usr/local/bin/xp-ops", "container", "run"]
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=6 \
+  CMD curl -fsS http://127.0.0.1:62416/api/health >/dev/null || exit 1
