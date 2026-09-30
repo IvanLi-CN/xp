@@ -42,7 +42,8 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   Once the gate is authoritative, ordinary state-machine apply uses an atomic fast path and does
   not queue the write-preferring barrier; only first authenticated initialization and explicit Mesh
   switch changes take the write side. Reconcile also skips the write side when the authoritative
-  value and state generation are unchanged. Mesh admission and response-body guards use the caller's
+  value is already unchanged, regardless of an unrelated state-generation advance. Mesh admission
+  and response-body guards use the caller's
   absolute deadline; an independent body timer releases an unconsumed response guard, and terminal
   body states release it without retrying a signed response through Public. Breaker/validation state
   updates stay under the bounded admission guard, while persistence telemetry is deadline-aware
@@ -114,11 +115,12 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   an intentional disconnect.
 - Mesh re-enable preflight is server-bounded to 30 seconds with a bounded serialized direction
   schedule; cancellation and deadline expiry fail closed before any Raft write.
-- Targeted lock-coupling regressions cover authoritative apply progress, unchanged reconcile without
-  a queued writer, queued-writer admission timeout with remaining-budget Public fallback and
-  half-open release, plus EOF/error/drop/unpolled/deadline response-body guard release. The direct
-  admission path preserves `PreDispatchTimeout` while the gate remains enabled; bounded state and
-  telemetry updates retain epoch classification.
+- Targeted lock-coupling regressions cover authoritative apply progress while a Mesh read guard is
+  held, unchanged reconcile without a queued writer after a generation advance, queued-writer
+  admission timeout with remaining-budget Public fallback and half-open release, protocol rejection
+  cleanup after the request deadline, and EOF/error/drop/unpolled/deadline response-body guard
+  release. The direct admission path preserves `PreDispatchTimeout` while the gate remains enabled;
+  bounded state and telemetry updates retain epoch classification.
 - The 50-peer resource comparison records XP anonymous and total PSS separately. Anonymous PSS has
   an 18 MiB absolute ceiling; XP total PSS and the isolated XP-plus-Xray stack each have a 1 MiB
   regression ceiling against the locked baseline. File-backed executable pages remain included in
@@ -129,16 +131,16 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
 - The current locked 15-minute comparison completed on candidate
-  `ad485653b2ab8e1db3b8e2dc680a0a94e45abf58` in testbox run
-  `20260930_063234_ad485653b2ab_b012b686`. Candidate XP total PSS was 32,660 KiB versus
-  34,024 KiB for the baseline; anonymous PSS was 16,112 KiB versus 17,388 KiB, stack PSS was
-  53,506 KiB versus 60,111 KiB, and CPU ticks were 176 versus 221. All 50 peers reached the
+  `bdf84f066757517ca51a1c9a6db077001daae0a5` in testbox run
+  `20260930_100241_bdf84f066757_20cbb054`. Candidate XP total PSS was 34,118 KiB versus
+  34,067 KiB for the baseline; anonymous PSS was 16,668 KiB versus 17,028 KiB, stack PSS was
+  57,793 KiB versus 64,069 KiB, and CPU ticks were 221 versus 228. All 50 peers reached the
   candidate smoke and formal workload with one active H2 connection each, 50 TLS accepts, and zero
-  non-H2 requests. The repository summary peak was 29,001 KiB and the source journal peak was
-  28,256 KiB; source-journal CPU p95 was 1%, additional read bytes were 0, and the journal
-  remained in `journal_capacity_guard` at 19,971 pending segments. Candidate, baseline, and
-  resource-test builds completed in 428, 456, and 440 seconds respectively. The exact archive
-  hashes and manifest are recorded in `./evidence/mesh-resource-ad485653.md`.
+  non-H2 requests. The repository summary peak was 29,365 KiB and the source journal peak was
+  29,237 KiB; source-journal CPU p95 was 0%, additional read bytes were 0, max RSS delta was
+  8,192 bytes, and the journal remained in `journal_capacity_guard` at 19,971 pending segments.
+  Candidate, baseline, and resource-test builds completed in 2, 0, and 1 seconds respectively.
+  The exact archive hashes and manifest are recorded in `./evidence/mesh-resource-bdf84f06.md`.
 - Rustls 0.23 uses the ring provider for both the server and Mesh client. Keeping one provider
   removes the unused AWS-LC implementation from the release binary while preserving TLS 1.2/1.3
   and P-256 support. ACME still carries its older HTTP/DNS dependency stack; replacing that stack is
