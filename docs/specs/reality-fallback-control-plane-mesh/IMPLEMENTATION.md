@@ -131,16 +131,17 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
 - The current locked 15-minute comparison completed on candidate
-  `bdf84f066757517ca51a1c9a6db077001daae0a5` in testbox run
-  `20260930_100241_bdf84f066757_20cbb054`. Candidate XP total PSS was 34,118 KiB versus
-  34,067 KiB for the baseline; anonymous PSS was 16,668 KiB versus 17,028 KiB, stack PSS was
-  57,793 KiB versus 64,069 KiB, and CPU ticks were 221 versus 228. All 50 peers reached the
+  `8e435a900f93da8a2f30ed15fd38437337aafec1` in testbox run
+  `20260930_141513_8e435a900f93_8b284427`. Candidate XP total PSS was 33,112 KiB versus
+  33,789 KiB for the baseline; anonymous PSS was 17,060 KiB versus 16,888 KiB, stack PSS was
+  43,028 KiB versus 43,681 KiB, and CPU ticks were 207 versus 202. All 50 peers reached the
   candidate smoke and formal workload with one active H2 connection each, 50 TLS accepts, and zero
-  non-H2 requests. The repository summary peak was 29,365 KiB and the source journal peak was
-  29,237 KiB; source-journal CPU p95 was 0%, additional read bytes were 0, max RSS delta was
-  8,192 bytes, and the journal remained in `journal_capacity_guard` at 19,971 pending segments.
-  Candidate, baseline, and resource-test builds completed in 2, 0, and 1 seconds respectively.
-  The exact archive hashes and manifest are recorded in `./evidence/mesh-resource-bdf84f06.md`.
+  non-H2 requests. The repository summary peak was 27,900 KiB and the source journal peak was
+  27,426 KiB; source-journal CPU p95 was 1%, additional read bytes were 0, max RSS delta was
+  65,536 bytes, and the journal remained in `journal_capacity_guard` at 19,971 pending segments.
+  Candidate, baseline, and resource-test builds completed in 401, 462, and 399 seconds
+  respectively. The exact archive hashes and manifest are recorded in
+  `./evidence/mesh-resource-8e435a90.md`.
 - Rustls 0.23 uses the ring provider for both the server and Mesh client. Keeping one provider
   removes the unused AWS-LC implementation from the release binary while preserving TLS 1.2/1.3
   and P-256 support. ACME still carries its older HTTP/DNS dependency stack; replacing that stack is
