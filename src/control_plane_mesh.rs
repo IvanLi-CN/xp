@@ -510,7 +510,7 @@ impl MeshAwareHttpClient {
         let (decision, mesh_epoch) = self
             .before_mesh_request(&peer.node_id, mesh_enabled, request.route)
             .await;
-        let _mesh_probe_guard =
+        let mut mesh_probe_guard =
             MeshHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, decision, mesh_epoch);
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
         let mut mesh_outcome_ambiguous = false;
@@ -533,6 +533,9 @@ impl MeshAwareHttpClient {
             if matches!(decision, MeshAttemptDecision::Probe) {
                 self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
                     .await;
+                if let Some(guard) = mesh_probe_guard.as_mut() {
+                    guard.disarm();
+                }
             }
             fallback = true;
         }
@@ -551,6 +554,9 @@ impl MeshAwareHttpClient {
                     if matches!(decision, MeshAttemptDecision::Probe) {
                         self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
                             .await;
+                        if let Some(guard) = mesh_probe_guard.as_mut() {
+                            guard.disarm();
+                        }
                     }
                     return Err(error);
                 }
@@ -579,6 +585,9 @@ impl MeshAwareHttpClient {
                     if matches!(decision, MeshAttemptDecision::Probe) {
                         self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
                             .await;
+                        if let Some(guard) = mesh_probe_guard.as_mut() {
+                            guard.disarm();
+                        }
                     }
                     fallback = true;
                     mesh_outcome_ambiguous |= ambiguous;
@@ -821,7 +830,8 @@ impl MeshAwareHttpClient {
                 .await;
                 if public_breaker.is_none() {
                     self.circuits.spawn_public_failure_cleanup(&peer.node_id);
-                } else if let Some(guard) = public_probe_guard.as_mut() {
+                }
+                if let Some(guard) = public_probe_guard.as_mut() {
                     guard.disarm();
                 }
                 let public_breaker = public_breaker.unwrap_or(BreakerState::Open);

@@ -48,6 +48,7 @@ async fn mesh_gate_only_resets_reverse_readiness_on_enable_transition() {
 async fn unchanged_authoritative_reconcile_does_not_queue_gate_writer() {
     let reconcile = ReconcileHandle::noop();
     let in_flight_mesh_read = reconcile.mesh_gate_lock().read_owned().await;
+    reconcile.note_mesh_state_applied();
     let reconcile_task = tokio::spawn({
         let reconcile = reconcile.clone();
         async move {

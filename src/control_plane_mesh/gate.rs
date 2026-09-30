@@ -134,6 +134,7 @@ impl MeshAwareHttpClient {
                 if let Some(acknowledgement) =
                     response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
                 {
+                    let mesh_body_guard_held = response.content_length() != Some(0);
                     let ack = match acknowledgement.to_str() {
                         Ok(ack) => ack,
                         Err(_) => {
@@ -193,6 +194,7 @@ impl MeshAwareHttpClient {
                             mesh_epoch,
                             breaker_state,
                             request_deadline,
+                            mesh_body_guard_held,
                         )
                         .await;
                     }
@@ -201,6 +203,7 @@ impl MeshAwareHttpClient {
                     )));
                 }
                 if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
+                    let mesh_body_guard_held = response.content_length() != Some(0);
                     let breaker_state = self
                         .record_mesh_success_state(
                             peer,
@@ -221,6 +224,7 @@ impl MeshAwareHttpClient {
                             mesh_epoch,
                             breaker_state,
                             request_deadline,
+                            mesh_body_guard_held,
                         )
                         .await;
                     }
@@ -244,8 +248,6 @@ impl MeshAwareHttpClient {
             }
             Some((Err(SignedSendError::PreDispatch(error)), gate_guard)) => {
                 drop(gate_guard);
-                self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
-                    .await;
                 Err(error)
             }
             Some((Err(SignedSendError::Transport(error)), gate_guard)) => {
@@ -331,7 +333,13 @@ impl MeshAwareHttpClient {
         epoch: u64,
         breaker_state: BreakerState,
         deadline: Instant,
+        mesh_body_guard_held: bool,
     ) {
+        let _epoch_guard = if mesh_body_guard_held {
+            None
+        } else {
+            self.mesh_epoch_read_guard_until(epoch, deadline).await
+        };
         if !self.mesh_gate_matches(epoch) {
             return;
         }
@@ -369,8 +377,7 @@ impl MeshAwareHttpClient {
         deadline: Instant,
     ) -> MeshRequestError {
         drop(response);
-        self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
-            .await;
+        let cleanup_revision = validation_revision.clone();
         let Some(breaker_state) = self
             .record_protocol_failure_for_epoch(
                 peer,
@@ -381,6 +388,7 @@ impl MeshAwareHttpClient {
             )
             .await
         else {
+            self.spawn_protocol_failure_cleanup(peer, epoch, cleanup_revision);
             drop(gate_guard);
             return error;
         };
@@ -432,6 +440,32 @@ impl MeshAwareHttpClient {
         )
         .await;
         Some(breaker_state)
+    }
+
+    pub(super) fn spawn_protocol_failure_cleanup(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+    ) {
+        let client = self.clone();
+        let peer = peer.clone();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let _gate_guard = client.mesh_gate_lock.clone().read_owned().await;
+                if !client.mesh_gate_matches(epoch) {
+                    return;
+                }
+                client.circuits.record_protocol_failure(&peer.node_id).await;
+                client
+                    .mark_direct_validation_failure_at(
+                        &peer,
+                        DirectValidationState::ProtocolRejected,
+                        validation_revision,
+                    )
+                    .await;
+            });
+        }
     }
 
     pub fn with_mesh_gate_lock(mut self, lock: Arc<tokio::sync::RwLock<()>>) -> Self {
@@ -500,7 +534,7 @@ impl MeshAwareHttpClient {
         let (decision, epoch) = self
             .before_mesh_request(&peer.node_id, true, InternalRoute::HealthV2)
             .await;
-        let _mesh_probe_guard =
+        let mut mesh_probe_guard =
             MeshHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, decision, epoch);
         if matches!(
             decision,
@@ -526,6 +560,9 @@ impl MeshAwareHttpClient {
         if matches!(decision, MeshAttemptDecision::Probe) {
             self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
                 .await;
+            if let Some(guard) = mesh_probe_guard.as_mut() {
+                guard.disarm();
+            }
         }
         if !self.mesh_epoch_is_current(epoch).await {
             return result;
@@ -622,6 +659,20 @@ impl MeshAwareHttpClient {
             .then_some(guard)
     }
 
+    pub(super) async fn mesh_epoch_read_guard_until(
+        &self,
+        epoch: u64,
+        deadline: Instant,
+    ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+        let guard = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(deadline),
+            self.mesh_gate_lock.clone().read_owned(),
+        )
+        .await
+        .ok()?;
+        (self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch).then_some(guard)
+    }
+
     pub(super) async fn mesh_direct_read_guard_until(
         &self,
         deadline: Instant,
@@ -659,6 +710,46 @@ impl MeshAwareHttpClient {
         self.circuits
             .release_half_open_probe_for_epoch(peer_id, epoch)
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn protocol_failure_cleanup_converges_after_request_deadline() {
+        let client =
+            MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
+        let peer = MeshPeerTarget {
+            node_id: "peer".to_owned(),
+            node_name: "peer".to_owned(),
+            mesh_base_url: None,
+            endpoint_transport: None,
+            endpoint_fingerprint: None,
+            mesh_reason: MeshPeerReason::MissingEndpoint,
+            public_base_url: "https://public.example".to_owned(),
+        };
+        client.spawn_protocol_failure_cleanup(&peer, 0, None);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if client.direct_validation_state_for(&peer).await
+                    == DirectValidationState::ProtocolRejected
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("protocol rejection cleanup should converge after the request deadline");
+        assert_eq!(
+            client
+                .circuits()
+                .before_attempt_with_probe("peer", true, false)
+                .await,
+            MeshAttemptDecision::Quarantined
+        );
     }
 }
 

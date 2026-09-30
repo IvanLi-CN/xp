@@ -162,9 +162,12 @@ impl MeshAwareHttpClient {
         fallback: bool,
         deadline: Instant,
     ) {
-        if self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch {
+        if self.telemetry.is_none() {
             return;
         }
+        let Some(_epoch_guard) = self.mesh_epoch_read_guard_until(epoch, deadline).await else {
+            return;
+        };
         self.record_sample_until(peer, sample, deadline).await;
         if self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch
             && fallback

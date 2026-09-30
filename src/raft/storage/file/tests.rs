@@ -135,8 +135,9 @@ async fn authoritative_normal_apply_does_not_queue_mesh_gate_writer() {
         .unwrap();
     let gate_lock = reconcile.mesh_gate_lock();
     let in_flight_mesh_read = gate_lock.clone().read_owned().await;
+    let state_machine_inner = state_machine.inner.clone();
 
-    let apply = tokio::spawn(async move {
+    let mut apply = tokio::spawn(async move {
         state_machine
             .apply(vec![build_entry(
                 DesiredStateCommand::SetReverseMeshEpoch { epoch: 1 },
@@ -146,6 +147,21 @@ async fn authoritative_normal_apply_does_not_queue_mesh_gate_writer() {
     });
     tokio::task::yield_now().await;
 
+    tokio::time::timeout(std::time::Duration::from_millis(100), &mut apply)
+        .await
+        .expect("state-machine apply must finish while a Mesh read guard is held")
+        .expect("state-machine task should not panic")
+        .expect("state-machine apply should succeed");
+    assert_eq!(
+        state_machine_inner
+            .lock()
+            .await
+            .last_applied
+            .expect("apply should advance last_applied")
+            .index,
+        1
+    );
+
     let later_reader = tokio::time::timeout(
         std::time::Duration::from_millis(100),
         gate_lock.clone().read_owned(),
@@ -154,12 +170,6 @@ async fn authoritative_normal_apply_does_not_queue_mesh_gate_writer() {
     .expect("ordinary apply must not queue a gate writer");
     drop(later_reader);
     drop(in_flight_mesh_read);
-
-    tokio::time::timeout(std::time::Duration::from_secs(1), apply)
-        .await
-        .expect("state-machine apply should finish")
-        .expect("state-machine task should not panic")
-        .expect("state-machine apply should succeed");
 }
 
 #[tokio::test]

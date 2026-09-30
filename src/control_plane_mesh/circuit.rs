@@ -169,12 +169,11 @@ pub(super) struct PublicHalfOpenProbeGuard {
     armed: bool,
 }
 
-const CIRCUIT_CLEANUP_BUDGET: Duration = Duration::from_millis(100);
-
 pub(super) struct MeshHalfOpenProbeGuard {
     circuits: PeerCircuitBreakers,
     peer_id: String,
     epoch: u64,
+    armed: bool,
 }
 
 impl MeshHalfOpenProbeGuard {
@@ -188,22 +187,28 @@ impl MeshHalfOpenProbeGuard {
             circuits: circuits.clone(),
             peer_id: peer_id.to_owned(),
             epoch,
+            armed: true,
         })
+    }
+
+    pub(super) fn disarm(&mut self) {
+        self.armed = false;
     }
 }
 
 impl Drop for MeshHalfOpenProbeGuard {
     fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
         let circuits = self.circuits.clone();
         let peer_id = self.peer_id.clone();
         let epoch = self.epoch;
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let _ = tokio::time::timeout(
-                    CIRCUIT_CLEANUP_BUDGET,
-                    circuits.release_half_open_probe_for_epoch(&peer_id, epoch),
-                )
-                .await;
+                circuits
+                    .release_half_open_probe_for_epoch(&peer_id, epoch)
+                    .await;
             });
         }
     }
@@ -236,11 +241,7 @@ impl Drop for PublicHalfOpenProbeGuard {
         let peer_id = self.peer_id.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let _ = tokio::time::timeout(
-                    CIRCUIT_CLEANUP_BUDGET,
-                    circuits.release_public_half_open_probe(&peer_id),
-                )
-                .await;
+                circuits.release_public_half_open_probe(&peer_id).await;
             });
         }
     }
@@ -404,11 +405,7 @@ impl PeerCircuitBreakers {
         let peer_id = peer_id.to_owned();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let _ = tokio::time::timeout(
-                    CIRCUIT_CLEANUP_BUDGET,
-                    circuits.record_public_failure(&peer_id),
-                )
-                .await;
+                circuits.record_public_failure(&peer_id).await;
             });
         }
     }
@@ -593,5 +590,34 @@ mod tests {
         })
         .await
         .expect("dropped Mesh probe guard should release its half-open slot");
+    }
+
+    #[tokio::test]
+    async fn disarmed_mesh_probe_guard_cannot_release_a_new_probe() {
+        let circuits = PeerCircuitBreakers::default();
+        {
+            let mut peers = circuits.peers.lock().await;
+            let circuit = peers.entry("peer".to_owned()).or_default();
+            circuit.failures = MESH_FAILURES_BEFORE_OPEN;
+            circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+        }
+        let decision = circuits
+            .before_attempt_with_probe_at_epoch("peer", true, true, Some(7))
+            .await;
+        let mut old_guard = MeshHalfOpenProbeGuard::new(&circuits, "peer", decision, 7)
+            .expect("first health request should own the probe slot");
+        circuits.release_half_open_probe_for_epoch("peer", 7).await;
+        old_guard.disarm();
+
+        let next_decision = circuits
+            .before_attempt_with_probe_at_epoch("peer", true, true, Some(7))
+            .await;
+        assert_eq!(next_decision, MeshAttemptDecision::Probe);
+        let _next_guard = MeshHalfOpenProbeGuard::new(&circuits, "peer", next_decision, 7);
+        drop(old_guard);
+        assert_eq!(
+            circuits.before_attempt("peer", true).await,
+            MeshAttemptDecision::SkipOpen
+        );
     }
 }
