@@ -131,18 +131,19 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
 - The current locked 15-minute comparison completed on candidate
-  `59fa7d6fa65381d3bf34d074d562f4eaad8831c2` in testbox run
-  `20260930_172342_59fa7d6fa653_ebde60ba`. Candidate XP total PSS was 32,887 KiB versus
-  33,859 KiB for the baseline; anonymous PSS was 16,112 KiB versus 17,544 KiB, stack PSS was
-  47,947 KiB versus 62,158 KiB, and CPU ticks were 189 versus 196. All 50 peers reached the
+  `d0d88f242c1ec85c2d41bd6d1a010a40e1055266` in testbox run
+  `20260930_193626_d0d88f242c1e_af73dce8`. Candidate XP total PSS was 32,235 KiB versus
+  31,408 KiB for the baseline; anonymous PSS was 17,932 KiB versus 17,224 KiB, stack PSS was
+  40,811 KiB versus 59,229 KiB, and CPU ticks were 189 versus 213. All 50 peers reached the
   candidate smoke and formal workload with one active H2 connection each, 50 TLS accepts, and zero
-  non-H2 requests. The repository summary peak was 28,486 KiB and the source journal peak was
-  28,647 KiB; source-journal CPU p95 was 1%, additional read bytes were 0, max RSS delta was
-  118,784 bytes, and the journal remained in `journal_capacity_guard` at 19,971 pending segments.
-  The targeted lock-coupling regressions ran as 72 Mesh tests, and the full Rust suite reported
-  1,519 library tests, 7 main tests, and all non-ignored integration tests passed. The exact
-  archive hashes, pinned baseline command, and manifest are recorded in
-  `./evidence/mesh-resource-59fa7d6f.md`.
+  non-H2 requests. The repository summary peak was 27,336 KiB and the source journal peak was
+  27,059 KiB; source-journal CPU p95 was 1%, additional read bytes were 0, max RSS delta was
+  8,192 bytes, and the journal remained in `journal_capacity_guard` at 19,971 pending segments.
+  The targeted lock-coupling regressions ran as 76 Mesh tests plus 7 H2 transport tests, and the
+  full Rust suite reported 1,524 library tests, 7 main tests, and all non-ignored integration tests
+  passed. The exact archive hashes, pinned baseline command, and manifest are recorded in
+  `./evidence/mesh-resource-d0d88f24.md`; local command results are recorded in
+  `./evidence/local-checks-d0d88f24.md`.
 - Rustls 0.23 uses the ring provider for both the server and Mesh client. Keeping one provider
   removes the unused AWS-LC implementation from the release binary while preserving TLS 1.2/1.3
   and P-256 support. ACME still carries its older HTTP/DNS dependency stack; replacing that stack is
