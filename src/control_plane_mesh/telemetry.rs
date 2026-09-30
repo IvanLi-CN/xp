@@ -136,6 +136,25 @@ impl MeshAwareHttpClient {
         }
     }
 
+    async fn record_sample_until(
+        &self,
+        peer: &MeshPeerTarget,
+        sample: MeshTelemetrySample,
+        deadline: Instant,
+    ) {
+        if let Some(telemetry) = &self.telemetry {
+            let _ = super::await_until(
+                deadline,
+                telemetry.record_sample(&peer.node_id, &peer.node_name, sample),
+            )
+            .await;
+        }
+        if sample.success && sample.path == TelemetryPath::Mesh {
+            self.record_mesh_reason_until(peer, MeshPeerReason::MeshAvailable, deadline)
+                .await;
+        }
+    }
+
     pub(super) async fn record_sample_for_epoch_until(
         &self,
         peer: &MeshPeerTarget,
@@ -146,22 +165,7 @@ impl MeshAwareHttpClient {
         if !self.mesh_gate_matches(epoch) {
             return;
         }
-        if let Some(telemetry) = &self.telemetry {
-            let _ = super::await_until(
-                deadline,
-                telemetry.record_sample(&peer.node_id, &peer.node_name, sample),
-            )
-            .await;
-        }
-        if sample.success && sample.path == TelemetryPath::Mesh {
-            self.record_mesh_reason_for_epoch_until(
-                peer,
-                MeshPeerReason::MeshAvailable,
-                epoch,
-                deadline,
-            )
-            .await;
-        }
+        self.record_sample_until(peer, sample, deadline).await;
     }
 
     pub(super) async fn record_terminal_failure_for_epoch(
@@ -183,9 +187,6 @@ impl MeshAwareHttpClient {
         fallback: bool,
         deadline: Instant,
     ) {
-        if !self.mesh_gate_matches(epoch) {
-            return;
-        }
         self.record_sample_for_epoch_until(peer, sample, epoch, deadline)
             .await;
         if fallback && peer.mesh_base_url.is_some() {
