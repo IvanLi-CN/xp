@@ -129,16 +129,16 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
 - The current locked 15-minute comparison completed on candidate
-  `94a8a05f7ef46791bb4c8e57b394a80a3bcf17c1` in testbox run
-  `20260929_142242_94a8a05f7ef4_835d4f37`. Candidate XP total PSS was 32,456 KiB versus
-  33,407 KiB for the baseline; anonymous PSS was 16,724 KiB versus 17,228 KiB, stack PSS was
-  42,188 KiB versus 43,139 KiB, and CPU ticks were 183 versus 172. All 50 peers reached the
+  `819899fa4cefdca3d35a1ae480572bc77a4d1a3b` in testbox run
+  `20260930_050825_819899fa4cef_cd955c61`. Candidate XP total PSS was 33,949 KiB versus
+  34,683 KiB for the baseline; anonymous PSS was 16,548 KiB versus 16,872 KiB, stack PSS was
+  63,469 KiB versus 64,203 KiB, and CPU ticks were 176 versus 178. All 50 peers reached the
   candidate smoke and formal workload with one active H2 connection each, 50 TLS accepts, and zero
-  non-H2 requests. The repository summary peak was 29,509 KiB and the source journal peak was
-  29,112 KiB; source-journal CPU p95 was 1%, additional read bytes were 0, and the journal
+  non-H2 requests. The repository summary peak was 28,905 KiB and the source journal peak was
+  28,313 KiB; source-journal CPU p95 was 0%, additional read bytes were 0, and the journal
   remained in `journal_capacity_guard` at 19,971 pending segments. Candidate, baseline, and
-  resource-test builds completed in 381, 382, and 384 seconds respectively. The exact archive
-  hashes and manifest are recorded in `./evidence/mesh-resource-94a8a05f.md`.
+  resource-test builds completed in 1, 1, and 0 seconds respectively. The exact archive hashes
+  and manifest are recorded in `./evidence/mesh-resource-819899fa.md`.
 - Rustls 0.23 uses the ring provider for both the server and Mesh client. Keeping one provider
   removes the unused AWS-LC implementation from the release binary while preserving TLS 1.2/1.3
   and P-256 support. ACME still carries its older HTTP/DNS dependency stack; replacing that stack is

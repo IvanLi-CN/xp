@@ -29,8 +29,8 @@ mod telemetry;
 mod transport;
 pub use circuit::DirectValidationState;
 use circuit::{
-    DirectValidationStore, MeshAttemptDecision, PeerCircuitBreakers, PublicHalfOpenProbeGuard,
-    endpoint_fingerprint, mesh_attempt_budget,
+    DirectValidationStore, MeshAttemptDecision, MeshHalfOpenProbeGuard, PeerCircuitBreakers,
+    PublicHalfOpenProbeGuard, endpoint_fingerprint, mesh_attempt_budget,
 };
 pub use error::MeshRequestError;
 pub(crate) use request::CapabilityProbeResponse;
@@ -510,6 +510,8 @@ impl MeshAwareHttpClient {
         let (decision, mesh_epoch) = self
             .before_mesh_request(&peer.node_id, mesh_enabled, request.route)
             .await;
+        let _mesh_probe_guard =
+            MeshHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, decision, mesh_epoch);
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
         let mut mesh_outcome_ambiguous = false;
         let mut mesh_outcome_timed_out = false;
@@ -817,9 +819,9 @@ impl MeshAwareHttpClient {
                     self.circuits.record_public_failure(&peer.node_id),
                 )
                 .await;
-                if public_breaker.is_some()
-                    && let Some(guard) = public_probe_guard.as_mut()
-                {
+                if public_breaker.is_none() {
+                    self.circuits.spawn_public_failure_cleanup(&peer.node_id);
+                } else if let Some(guard) = public_probe_guard.as_mut() {
                     guard.disarm();
                 }
                 let public_breaker = public_breaker.unwrap_or(BreakerState::Open);

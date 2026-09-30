@@ -169,6 +169,46 @@ pub(super) struct PublicHalfOpenProbeGuard {
     armed: bool,
 }
 
+const CIRCUIT_CLEANUP_BUDGET: Duration = Duration::from_millis(100);
+
+pub(super) struct MeshHalfOpenProbeGuard {
+    circuits: PeerCircuitBreakers,
+    peer_id: String,
+    epoch: u64,
+}
+
+impl MeshHalfOpenProbeGuard {
+    pub(super) fn new(
+        circuits: &PeerCircuitBreakers,
+        peer_id: &str,
+        decision: MeshAttemptDecision,
+        epoch: u64,
+    ) -> Option<Self> {
+        matches!(decision, MeshAttemptDecision::Probe).then(|| Self {
+            circuits: circuits.clone(),
+            peer_id: peer_id.to_owned(),
+            epoch,
+        })
+    }
+}
+
+impl Drop for MeshHalfOpenProbeGuard {
+    fn drop(&mut self) {
+        let circuits = self.circuits.clone();
+        let peer_id = self.peer_id.clone();
+        let epoch = self.epoch;
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let _ = tokio::time::timeout(
+                    CIRCUIT_CLEANUP_BUDGET,
+                    circuits.release_half_open_probe_for_epoch(&peer_id, epoch),
+                )
+                .await;
+            });
+        }
+    }
+}
+
 impl PublicHalfOpenProbeGuard {
     pub(super) fn new(
         circuits: &PeerCircuitBreakers,
@@ -196,7 +236,11 @@ impl Drop for PublicHalfOpenProbeGuard {
         let peer_id = self.peer_id.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                circuits.release_public_half_open_probe(&peer_id).await;
+                let _ = tokio::time::timeout(
+                    CIRCUIT_CLEANUP_BUDGET,
+                    circuits.release_public_half_open_probe(&peer_id),
+                )
+                .await;
             });
         }
     }
@@ -208,11 +252,23 @@ impl PeerCircuitBreakers {
         self.before_attempt_with_probe(peer_id, enabled, true).await
     }
 
+    #[cfg(test)]
     pub(super) async fn before_attempt_with_probe(
         &self,
         peer_id: &str,
         enabled: bool,
         probe_allowed: bool,
+    ) -> MeshAttemptDecision {
+        self.before_attempt_with_probe_at_epoch(peer_id, enabled, probe_allowed, None)
+            .await
+    }
+
+    pub(super) async fn before_attempt_with_probe_at_epoch(
+        &self,
+        peer_id: &str,
+        enabled: bool,
+        probe_allowed: bool,
+        epoch: Option<u64>,
     ) -> MeshAttemptDecision {
         if !enabled {
             return MeshAttemptDecision::Disabled;
@@ -230,6 +286,7 @@ impl PeerCircuitBreakers {
             Some(_) if !probe_allowed => MeshAttemptDecision::SkipOpen,
             Some(_) => {
                 circuit.half_open_in_flight = true;
+                circuit.half_open_epoch = epoch;
                 MeshAttemptDecision::Probe
             }
         }
@@ -245,15 +302,6 @@ impl PeerCircuitBreakers {
         circuit.half_open_epoch = None;
         circuit.quarantined = false;
         BreakerState::Closed
-    }
-
-    pub(super) async fn mark_half_open_probe_epoch(&self, peer_id: &str, epoch: u64) {
-        let mut peers = self.peers.lock().await;
-        if let Some(circuit) = peers.get_mut(peer_id)
-            && circuit.half_open_in_flight
-        {
-            circuit.half_open_epoch = Some(epoch);
-        }
     }
 
     pub(super) async fn release_half_open_probe_for_epoch(&self, peer_id: &str, epoch: u64) {
@@ -349,6 +397,20 @@ impl PeerCircuitBreakers {
         circuit.half_open_in_flight = false;
         circuit.half_open_epoch = None;
         BreakerState::Open
+    }
+
+    pub(super) fn spawn_public_failure_cleanup(&self, peer_id: &str) {
+        let circuits = self.clone();
+        let peer_id = peer_id.to_owned();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let _ = tokio::time::timeout(
+                    CIRCUIT_CLEANUP_BUDGET,
+                    circuits.record_public_failure(&peer_id),
+                )
+                .await;
+            });
+        }
     }
 
     pub async fn public_state(&self, peer_id: &str) -> BreakerState {
@@ -485,5 +547,51 @@ mod tests {
             Some("vision_tcp"),
         );
         assert_ne!(first, second);
+    }
+
+    #[tokio::test]
+    async fn public_failure_cleanup_converges_after_request_deadline() {
+        let circuits = PeerCircuitBreakers::default();
+        let public_peers = circuits.public_peers.lock().await;
+        circuits.spawn_public_failure_cleanup("peer");
+        drop(public_peers);
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if circuits.public_state("peer").await == BreakerState::Open {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("bounded public failure cleanup should record the breaker state");
+    }
+
+    #[tokio::test]
+    async fn mesh_probe_guard_releases_slot_on_drop() {
+        let circuits = PeerCircuitBreakers::default();
+        {
+            let mut peers = circuits.peers.lock().await;
+            let circuit = peers.entry("peer".to_owned()).or_default();
+            circuit.failures = MESH_FAILURES_BEFORE_OPEN;
+            circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+        }
+        let decision = circuits
+            .before_attempt_with_probe_at_epoch("peer", true, true, Some(7))
+            .await;
+        assert_eq!(decision, MeshAttemptDecision::Probe);
+        drop(MeshHalfOpenProbeGuard::new(&circuits, "peer", decision, 7));
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if circuits.before_attempt("peer", true).await == MeshAttemptDecision::Probe {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("dropped Mesh probe guard should release its half-open slot");
     }
 }

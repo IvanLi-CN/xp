@@ -461,13 +461,8 @@ impl MeshAwareHttpClient {
         let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
         let decision = self
             .circuits
-            .before_attempt_with_probe(peer_id, enabled, health_probe)
+            .before_attempt_with_probe_at_epoch(peer_id, enabled, health_probe, Some(epoch))
             .await;
-        if matches!(decision, MeshAttemptDecision::Probe) {
-            self.circuits
-                .mark_half_open_probe_epoch(peer_id, epoch)
-                .await;
-        }
         (decision, epoch)
     }
 
@@ -505,6 +500,8 @@ impl MeshAwareHttpClient {
         let (decision, epoch) = self
             .before_mesh_request(&peer.node_id, true, InternalRoute::HealthV2)
             .await;
+        let _mesh_probe_guard =
+            MeshHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, decision, epoch);
         if matches!(
             decision,
             MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined
