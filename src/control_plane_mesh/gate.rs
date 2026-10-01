@@ -144,16 +144,15 @@ impl MeshAwareHttpClient {
                         response,
                         gate_guard,
                         request_deadline,
-                        breaker_state.map(|breaker_state| {
-                            self.mesh_success_telemetry_callback(
-                                peer,
-                                started,
-                                request,
-                                transport,
-                                breaker_state,
-                                request_deadline,
-                            )
-                        }),
+                        Some(self.mesh_success_telemetry_callback(
+                            peer,
+                            started,
+                            request,
+                            transport,
+                            mesh_epoch,
+                            breaker_state,
+                            request_deadline,
+                        )),
                     );
                     return Ok(MeshAttemptResult::Response(PeerRequestResponse::Verified(
                         response,
@@ -168,16 +167,15 @@ impl MeshAwareHttpClient {
                     );
                     drop(response);
                     drop(gate_guard);
-                    if let Some(breaker_state) = breaker_state {
-                        self.mesh_success_telemetry_callback(
-                            peer,
-                            started,
-                            request,
-                            transport,
-                            breaker_state,
-                            request_deadline,
-                        )();
-                    }
+                    self.mesh_success_telemetry_callback(
+                        peer,
+                        started,
+                        request,
+                        transport,
+                        mesh_epoch,
+                        breaker_state,
+                        request_deadline,
+                    )(crate::mesh_gate_body::BodyFinish::Complete);
                     return Ok(MeshAttemptResult::Response(
                         PeerRequestResponse::PredecessorNotFound,
                     ));
@@ -291,13 +289,17 @@ impl MeshAwareHttpClient {
         started: Instant,
         request: &MeshRequest,
         transport: MeshTransportObservation,
-        breaker_state: BreakerState,
+        epoch: u64,
+        breaker_state: Option<BreakerState>,
         deadline: Instant,
-    ) -> Box<dyn FnOnce() + Send + 'static> {
+    ) -> Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static> {
         let client = self.clone();
         let peer = peer.clone();
         let updates_active_path = request.updates_active_path;
-        Box::new(move || {
+        Box::new(move |outcome| {
+            if outcome != crate::mesh_gate_body::BodyFinish::Complete {
+                return;
+            }
             tokio::spawn(async move {
                 client
                     .record_mesh_success_telemetry(
@@ -305,6 +307,7 @@ impl MeshAwareHttpClient {
                         started,
                         updates_active_path,
                         transport,
+                        epoch,
                         breaker_state,
                         deadline,
                     )
@@ -320,20 +323,26 @@ impl MeshAwareHttpClient {
         started: Instant,
         updates_active_path: bool,
         transport: MeshTransportObservation,
-        breaker_state: BreakerState,
+        epoch: u64,
+        breaker_state: Option<BreakerState>,
         deadline: Instant,
     ) {
         let Some(telemetry) = &self.telemetry else {
             return;
         };
+        let Some(_epoch_guard) = self.mesh_epoch_guard_until(epoch, deadline, true).await else {
+            return;
+        };
+        if let Some(breaker_state) = breaker_state {
+            let _ = super::await_until(
+                deadline,
+                telemetry.set_breaker_deferred(&peer.node_id, breaker_state, None),
+            )
+            .await;
+        }
         let _ = super::await_until(
             deadline,
-            telemetry.set_breaker(&peer.node_id, breaker_state, None),
-        )
-        .await;
-        let _ = super::await_until(
-            deadline,
-            telemetry.record_sample(
+            telemetry.record_sample_deferred(
                 &peer.node_id,
                 &peer.node_name,
                 telemetry_sample(
@@ -783,7 +792,8 @@ mod tests {
                     protocol: MeshTransportProtocol::H2,
                     fingerprint: None,
                 },
-                BreakerState::Closed,
+                0,
+                Some(BreakerState::Closed),
                 Instant::now() + Duration::from_millis(10),
             ),
         )
@@ -846,7 +856,8 @@ mod tests {
                     protocol: MeshTransportProtocol::H2,
                     fingerprint: None,
                 },
-                BreakerState::Closed,
+                0,
+                Some(BreakerState::Closed),
                 Instant::now() + Duration::from_secs(1),
             )),
         );
@@ -873,5 +884,80 @@ mod tests {
         })
         .await
         .expect("body finish must schedule success telemetry");
+    }
+
+    #[tokio::test]
+    async fn mesh_finish_callback_reports_body_error_without_success() {
+        use futures_util::StreamExt;
+
+        let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
+        let (outcome_tx, outcome_rx) = oneshot::channel();
+        let response = reqwest::Response::from(
+            axum::http::Response::builder()
+                .status(reqwest::StatusCode::OK)
+                .body(reqwest::Body::wrap_stream(futures_util::stream::iter([
+                    Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"partial")),
+                    Err(std::io::Error::other("synthetic body failure")),
+                ])))
+                .expect("synthetic response"),
+        );
+        let response = super::reverse::attach_mesh_gate_with_finish(
+            response,
+            gate_lock.read_owned().await,
+            Instant::now() + Duration::from_secs(1),
+            Some(Box::new(move |outcome| {
+                let _ = outcome_tx.send(outcome);
+            })),
+        );
+        let mut body = response.bytes_stream();
+        assert!(body.next().await.expect("response data").is_ok());
+        assert!(body.next().await.expect("response error").is_err());
+        assert_eq!(
+            outcome_rx.await.expect("body finish outcome"),
+            crate::mesh_gate_body::BodyFinish::Error
+        );
+    }
+
+    #[tokio::test]
+    async fn mesh_success_telemetry_skips_after_epoch_changes() {
+        let temp = tempfile::tempdir().expect("telemetry directory");
+        let telemetry = MeshTelemetryHandle::load(temp.path()).expect("telemetry");
+        let client = MeshAwareHttpClient::new(reqwest::Client::new())
+            .with_mesh_observability(telemetry.clone());
+        let peer = MeshPeerTarget {
+            node_id: "peer".to_owned(),
+            node_name: "peer".to_owned(),
+            mesh_base_url: Some("https://mesh.example".to_owned()),
+            endpoint_transport: Some("xhttp_reality_fallback"),
+            endpoint_fingerprint: Some("fingerprint".to_owned()),
+            mesh_reason: MeshPeerReason::MeshAvailable,
+            public_base_url: "https://public.example".to_owned(),
+        };
+        let barrier_writer = client.mesh_epoch_barrier.clone().write_owned().await;
+        let task = tokio::spawn({
+            let client = client.clone();
+            let peer = peer.clone();
+            async move {
+                client
+                    .record_mesh_success_telemetry(
+                        &peer,
+                        Instant::now(),
+                        false,
+                        MeshTransportObservation {
+                            protocol: MeshTransportProtocol::H2,
+                            fingerprint: None,
+                        },
+                        0,
+                        Some(BreakerState::Closed),
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .await;
+            }
+        });
+        tokio::task::yield_now().await;
+        client.cluster_mesh_epoch.store(1, Ordering::Release);
+        drop(barrier_writer);
+        task.await.expect("telemetry task should finish");
+        assert!(telemetry.snapshot().await.peers.is_empty());
     }
 }

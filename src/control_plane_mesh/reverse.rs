@@ -244,12 +244,12 @@ pub(super) fn attach_mesh_gate_with_finish(
     response: reqwest::Response,
     gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
     deadline: Instant,
-    on_finish: Option<Box<dyn FnOnce() + Send + 'static>>,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
 ) -> reqwest::Response {
     if response.content_length() == Some(0) {
         drop(gate_guard);
         if let Some(on_finish) = on_finish {
-            on_finish();
+            on_finish(crate::mesh_gate_body::BodyFinish::Complete);
         }
         return response;
     }

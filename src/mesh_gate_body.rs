@@ -14,12 +14,20 @@ use tokio::{
 type BodyStream = futures_util::stream::BoxStream<'static, Result<Bytes, io::Error>>;
 type GateGuard = OwnedRwLockReadGuard<()>;
 
-type FinishCallback = Box<dyn FnOnce() + Send + 'static>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BodyFinish {
+    Complete,
+    Error,
+    Cancelled,
+    Deadline,
+}
+
+type FinishCallback = Box<dyn FnOnce(BodyFinish) + Send + 'static>;
 
 struct GuardCell(Mutex<(Option<GateGuard>, Option<FinishCallback>)>);
 
 impl GuardCell {
-    fn finish(&self) {
+    fn finish(&self, outcome: BodyFinish) {
         let Some((guard, callback)) = self
             .0
             .lock()
@@ -31,7 +39,7 @@ impl GuardCell {
         let had_guard = guard.is_some();
         drop(guard);
         if had_guard && let Some(callback) = callback {
-            callback();
+            callback(outcome);
         }
     }
 }
@@ -45,18 +53,20 @@ struct GuardedBodyState {
 }
 
 impl GuardedBodyState {
-    fn finish(&mut self) {
+    fn finish(&mut self, outcome: BodyFinish) {
         self.finished = true;
         if let Some(cancel_timer) = self.cancel_timer.take() {
             let _ = cancel_timer.send(());
         }
-        self.guard.finish();
+        self.guard.finish(outcome);
     }
 }
 
 impl Drop for GuardedBodyState {
     fn drop(&mut self) {
-        self.finish();
+        if !self.finished {
+            self.finish(BodyFinish::Cancelled);
+        }
     }
 }
 
@@ -80,7 +90,7 @@ pub(crate) fn guard_stream_with_finish(
     tokio::spawn(async move {
         tokio::select! {
             _ = time::sleep_until(time::Instant::from_std(deadline)) => {
-                timer_guard.finish();
+                timer_guard.finish(BodyFinish::Deadline);
             }
             _ = timer_cancelled => {}
         }
@@ -98,7 +108,7 @@ pub(crate) fn guard_stream_with_finish(
             return None;
         }
         if state.deadline <= Instant::now() {
-            state.finish();
+            state.finish(BodyFinish::Deadline);
             return Some((
                 Err(io::Error::new(
                     io::ErrorKind::TimedOut,
@@ -110,15 +120,15 @@ pub(crate) fn guard_stream_with_finish(
         match time::timeout_at(time::Instant::from_std(state.deadline), state.body.next()).await {
             Ok(Some(Ok(item))) => Some((Ok(item), state)),
             Ok(Some(Err(error))) => {
-                state.finish();
+                state.finish(BodyFinish::Error);
                 Some((Err(error), state))
             }
             Ok(None) => {
-                state.finish();
+                state.finish(BodyFinish::Complete);
                 None
             }
             Err(_) => {
-                state.finish();
+                state.finish(BodyFinish::Deadline);
                 Some((
                     Err(io::Error::new(
                         io::ErrorKind::TimedOut,
