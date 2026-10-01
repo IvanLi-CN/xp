@@ -310,7 +310,23 @@ async fn mesh_requests_reuse_one_tls_connection_for_sequential_and_parallel_load
     }
 
     assert_eq!(server.accepts.load(Ordering::SeqCst), 1);
-    let peer = telemetry.snapshot().await.peers.remove(0);
+    let peer = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let peer = telemetry
+                .snapshot()
+                .await
+                .peers
+                .into_iter()
+                .next()
+                .expect("Mesh telemetry peer");
+            if peer.current_connection_requests == 48 {
+                break peer;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("Mesh telemetry should converge after response bodies are released");
     assert_eq!(peer.connection_generation, 1);
     assert_eq!(peer.current_connection_requests, 48);
     assert_eq!(
