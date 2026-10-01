@@ -72,7 +72,7 @@ pub(super) async fn clear_node_history(
         peer,
         reqwest::Method::DELETE,
         format!("/api/admin/_internal/nodes/{node_id}/history"),
-        true,
+        false,
     )
     .await?;
     if !response.status().is_success() {
@@ -93,7 +93,7 @@ pub(super) async fn clear_user_traffic(
         peer,
         reqwest::Method::DELETE,
         format!("/api/admin/_internal/users/{user_id}/traffic/local"),
-        true,
+        false,
     )
     .await?;
     if !response.status().is_success() {

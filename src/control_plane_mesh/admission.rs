@@ -269,7 +269,7 @@ impl MeshAwareHttpClient {
                 request_deadline,
             )
             .await;
-        if matches!(decision, MeshAttemptDecision::Probe) {
+        if result.is_err() && matches!(decision, MeshAttemptDecision::Probe) {
             self.release_mesh_probe_guard_until(
                 &mut mesh_probe_guard,
                 &peer.node_id,
@@ -384,29 +384,92 @@ impl MeshAwareHttpClient {
                 );
             }
         } else {
-            let cleanup_revision = validation_revision.clone();
-            let breaker_recorded = crate::control_plane_mesh::await_until(
+            let response = result.expect("successful direct preflight response");
+            let callback = self.direct_preflight_success_callback(
+                peer,
+                epoch,
+                validation_revision,
+                operation_id,
+                mesh_probe_guard.take(),
                 request_deadline,
-                self.circuits.record_success_at(&peer.node_id, operation_id),
-            )
-            .await
-            .flatten()
-            .is_some();
-            let validation_recorded = crate::control_plane_mesh::await_until(
+            );
+            return Ok(super::reverse::attach_response_with_finish(
+                response,
                 request_deadline,
-                self.mark_direct_validation_success_with_operation(
-                    peer,
-                    validation_revision,
-                    operation_id,
-                ),
-            )
-            .await
-            .is_some_and(|recorded| recorded);
-            if !breaker_recorded || !validation_recorded {
-                self.spawn_validation_success_cleanup(peer, epoch, cleanup_revision, operation_id);
-            }
+                Some(callback),
+            ));
         }
         result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn direct_preflight_success_callback(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
+        deadline: Instant,
+    ) -> crate::mesh_gate_body::FinishCallback {
+        let client = self.clone();
+        let peer = peer.clone();
+        Box::new(move |outcome| {
+            if outcome != crate::mesh_gate_body::BodyFinish::Complete {
+                return;
+            }
+            tokio::spawn(async move {
+                client
+                    .record_direct_preflight_success_after_body(
+                        &peer,
+                        epoch,
+                        validation_revision,
+                        operation_id,
+                        mesh_probe_guard,
+                        deadline,
+                    )
+                    .await;
+            });
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn record_direct_preflight_success_after_body(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        mut mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
+        deadline: Instant,
+    ) {
+        let Some(_epoch_guard) = self.mesh_epoch_guard_until(epoch, deadline, true).await else {
+            return;
+        };
+        let breaker_recorded = crate::control_plane_mesh::await_until(
+            deadline,
+            self.circuits.record_success_at(&peer.node_id, operation_id),
+        )
+        .await
+        .flatten()
+        .is_some();
+        let cleanup_revision = validation_revision.clone();
+        let validation_recorded = crate::control_plane_mesh::await_until(
+            deadline,
+            self.mark_direct_validation_success_with_operation(
+                peer,
+                validation_revision,
+                operation_id,
+            ),
+        )
+        .await
+        .is_some_and(|recorded| recorded);
+        if !breaker_recorded || !validation_recorded {
+            self.spawn_validation_success_cleanup(peer, epoch, cleanup_revision, operation_id);
+        }
+        if breaker_recorded && let Some(guard) = mesh_probe_guard.as_mut() {
+            guard.disarm();
+        }
     }
 
     #[cfg(test)]

@@ -246,6 +246,23 @@ pub(super) fn attach_mesh_gate_with_finish(
     deadline: Instant,
     on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
 ) -> reqwest::Response {
+    attach_response_body_with_finish(response, Some(gate_guard), deadline, on_finish)
+}
+
+pub(super) fn attach_response_with_finish(
+    response: reqwest::Response,
+    deadline: Instant,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
+) -> reqwest::Response {
+    attach_response_body_with_finish(response, None, deadline, on_finish)
+}
+
+fn attach_response_body_with_finish(
+    response: reqwest::Response,
+    gate_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+    deadline: Instant,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
+) -> reqwest::Response {
     if response.content_length() == Some(0) {
         drop(gate_guard);
         if let Some(on_finish) = on_finish {
@@ -267,8 +284,13 @@ pub(super) fn attach_mesh_gate_with_finish(
     extensions.extend(std::mem::take(&mut parts.extensions));
     parts.extensions = extensions;
     let body = body.into_data_stream().map_err(std::io::Error::other);
-    let guarded_body =
-        crate::mesh_gate_body::guard_stream_with_finish(body, gate_guard, deadline, on_finish);
+    let guarded_body = match gate_guard {
+        Some(gate_guard) => {
+            crate::mesh_gate_body::guard_stream_with_finish(body, gate_guard, deadline, on_finish)
+                .boxed()
+        }
+        None => crate::mesh_gate_body::stream_with_finish(body, deadline, on_finish).boxed(),
+    };
     reqwest::Response::from(axum::http::Response::from_parts(
         parts,
         reqwest::Body::wrap_stream(guarded_body),

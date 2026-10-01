@@ -963,40 +963,20 @@ impl MeshAwareHttpClient {
             return Ok(PeerRequestResponse::PredecessorNotFound);
         }
         let operation_id = self.circuits.next_operation();
-        let public_breaker_result = await_until(
+        let response = reverse::attach_response_with_finish(
+            response,
             request_deadline,
-            self.circuits
-                .record_public_success_at(&peer.node_id, operation_id),
-        )
-        .await;
-        if public_breaker_result.is_some()
-            && let Some(guard) = public_probe_guard.as_mut()
-        {
-            guard.disarm();
-        }
-        if public_breaker_result.is_none() {
-            self.circuits
-                .spawn_public_success_cleanup(&peer.node_id, operation_id);
-        }
-        if let Some(public_breaker) = public_breaker_result.flatten()
-            && let Some(telemetry) = &self.telemetry
-        {
-            let _ = await_until(
+            Some(self.public_success_telemetry_callback(
+                peer,
+                started,
+                fallback,
+                request.updates_active_path,
+                public_epoch,
+                operation_id,
+                public_probe_guard.take(),
                 request_deadline,
-                telemetry.set_public_breaker(&peer.node_id, public_breaker, None),
-            )
-            .await;
-        }
-        self.record_public_outcome_for_epoch(
-            peer,
-            started,
-            true,
-            fallback,
-            request.updates_active_path,
-            public_epoch,
-            request_deadline,
-        )
-        .await;
+            )),
+        );
         Ok(PeerRequestResponse::Verified(response))
     }
 
@@ -1187,5 +1167,7 @@ mod mesh_gate_tests;
 mod peer_target_edge_tests;
 #[cfg(test)]
 mod peer_target_tests;
+#[cfg(test)]
+mod public_body_tests;
 #[cfg(test)]
 mod retry_tests;

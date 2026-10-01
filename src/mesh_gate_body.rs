@@ -22,7 +22,7 @@ pub(crate) enum BodyFinish {
     Deadline,
 }
 
-type FinishCallback = Box<dyn FnOnce(BodyFinish) + Send + 'static>;
+pub(crate) type FinishCallback = Box<dyn FnOnce(BodyFinish) + Send + 'static>;
 
 struct GuardCell(Mutex<(Option<GateGuard>, Option<FinishCallback>)>);
 
@@ -36,9 +36,8 @@ impl GuardCell {
         else {
             return;
         };
-        let had_guard = guard.is_some();
         drop(guard);
-        if had_guard && let Some(callback) = callback {
+        if let Some(callback) = callback {
             callback(outcome);
         }
     }
@@ -84,7 +83,24 @@ pub(crate) fn guard_stream_with_finish(
     deadline: Instant,
     on_finish: Option<FinishCallback>,
 ) -> impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static {
-    let guard = Arc::new(GuardCell(Mutex::new((Some(gate_guard), on_finish))));
+    stream_with_finish_inner(body, Some(gate_guard), deadline, on_finish)
+}
+
+pub(crate) fn stream_with_finish(
+    body: impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static,
+    deadline: Instant,
+    on_finish: Option<FinishCallback>,
+) -> impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static {
+    stream_with_finish_inner(body, None, deadline, on_finish)
+}
+
+fn stream_with_finish_inner(
+    body: impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static,
+    gate_guard: Option<GateGuard>,
+    deadline: Instant,
+    on_finish: Option<FinishCallback>,
+) -> impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static {
+    let guard = Arc::new(GuardCell(Mutex::new((gate_guard, on_finish))));
     let (cancel_timer, timer_cancelled) = oneshot::channel();
     let timer_guard = Arc::clone(&guard);
     tokio::spawn(async move {

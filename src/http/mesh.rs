@@ -1595,8 +1595,12 @@ async fn run_mesh_health_probe(
     };
     if public_only {
         peer.mesh_base_url = None;
-        client
+        let response = client
             .send_peer_request(&peer, request, ca_key_pem, &state.cluster_ca_pem)
+            .await
+            .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+        response
+            .bytes()
             .await
             .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
     } else {
@@ -1604,7 +1608,10 @@ async fn run_mesh_health_probe(
             .send_peer_direct_preflight(&peer, request, ca_key_pem, &state.cluster_ca_pem)
             .await;
         let response = result.map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
-        drop(response);
+        response
+            .bytes()
+            .await
+            .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
     }
     Ok(())
 }

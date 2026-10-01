@@ -465,6 +465,31 @@ async fn h2_transport_failure_uses_the_compatible_public_client() {
         .await
         .expect("public fallback response");
     assert_eq!(response.version(), Version::HTTP_11);
+    response
+        .bytes()
+        .await
+        .expect("public fallback response body");
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let snapshot = telemetry.snapshot().await;
+            let ready = snapshot
+                .peers
+                .first()
+                .and_then(|peer| peer.buckets.back())
+                .is_some_and(|bucket| {
+                    bucket.mesh_failure == 1
+                        && bucket.public_success == 1
+                        && bucket.fallback_success == 1
+                });
+            if ready {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("public fallback telemetry");
 
     let peer = telemetry.snapshot().await.peers.remove(0);
     let bucket = peer.buckets.back().expect("telemetry bucket");

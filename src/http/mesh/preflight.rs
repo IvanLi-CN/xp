@@ -341,7 +341,10 @@ async fn run_peer_health_preflight(
         }
     };
     let response = result?;
-    drop(response);
+    response
+        .bytes()
+        .await
+        .map_err(|_| MeshRequestError::TransportTimeout)?;
     Ok(())
 }
 

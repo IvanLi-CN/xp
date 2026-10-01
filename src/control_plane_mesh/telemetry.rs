@@ -264,6 +264,95 @@ impl MeshAwareHttpClient {
         .await;
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn public_success_telemetry_callback(
+        &self,
+        peer: &MeshPeerTarget,
+        started: Instant,
+        fallback: bool,
+        updates_active_path: bool,
+        public_epoch: u64,
+        operation_id: u64,
+        public_probe_guard: Option<PublicHalfOpenProbeGuard>,
+        deadline: Instant,
+    ) -> crate::mesh_gate_body::FinishCallback {
+        let client = self.clone();
+        let peer = peer.clone();
+        Box::new(move |outcome| {
+            if outcome != crate::mesh_gate_body::BodyFinish::Complete {
+                return;
+            }
+            tokio::spawn(async move {
+                client
+                    .record_public_success_after_body(
+                        &peer,
+                        started,
+                        fallback,
+                        updates_active_path,
+                        public_epoch,
+                        operation_id,
+                        public_probe_guard,
+                        deadline,
+                    )
+                    .await;
+            });
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn record_public_success_after_body(
+        &self,
+        peer: &MeshPeerTarget,
+        started: Instant,
+        fallback: bool,
+        updates_active_path: bool,
+        public_epoch: u64,
+        operation_id: u64,
+        mut public_probe_guard: Option<PublicHalfOpenProbeGuard>,
+        deadline: Instant,
+    ) {
+        let Some(_epoch_guard) = self
+            .mesh_epoch_guard_until(public_epoch, deadline, false)
+            .await
+        else {
+            return;
+        };
+        let public_breaker_result = super::await_until(
+            deadline,
+            self.circuits
+                .record_public_success_at(&peer.node_id, operation_id),
+        )
+        .await;
+        if public_breaker_result.is_none() {
+            self.circuits
+                .spawn_public_success_cleanup(&peer.node_id, operation_id);
+        }
+        if public_breaker_result.is_some()
+            && let Some(guard) = public_probe_guard.as_mut()
+        {
+            guard.disarm();
+        }
+        if let Some(public_breaker) = public_breaker_result.flatten()
+            && let Some(telemetry) = &self.telemetry
+        {
+            let _ = super::await_until(
+                deadline,
+                telemetry.set_public_breaker(&peer.node_id, public_breaker, None),
+            )
+            .await;
+        }
+        self.record_public_outcome_for_epoch(
+            peer,
+            started,
+            true,
+            fallback,
+            updates_active_path,
+            public_epoch,
+            deadline,
+        )
+        .await;
+    }
+
     pub(super) async fn record_terminal_failure_until(
         &self,
         peer: &MeshPeerTarget,
