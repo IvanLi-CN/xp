@@ -130,14 +130,16 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   copies the resolved executables into the disposable run before measurement, so build scripts and
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
-- The current locked runtime candidate is `96050406e978c3b713d66efb573a7059127c8782`. Local
-  command results, including `81` Mesh tests, the full Rust suite, and Web checks, are recorded
-  in `./evidence/local-checks-96050406.md`. This candidate also retries protocol, retryable,
-  validation, and health-preflight cleanup after a bounded epoch-barrier wait, so the prior
-  same-SHA resource comparisons remain historical evidence only. A fresh testbox attempt is
-  currently blocked before the runner starts because SSH to `codex-testbox` (`192.168.31.15`)
-  times out during banner exchange; the attempt and exact runner command are recorded in
-  `./evidence/mesh-resource-96050406.md`.
+- The current locked runtime candidate is `c3c6642e` (full source SHA is recorded in
+  `./evidence/local-checks-c3c6642e.md`). Local command results, including `82` Mesh tests and
+  the full Rust suite, are recorded there; the follow-up test-only commit `5bf4ab38` makes the
+  existing connection-reuse assertion await the now-background telemetry convergence. Success
+  telemetry is scheduled only after the response body guard releases, so a slow persistence
+  `sync_all()` cannot delay a signed response or gate admission. The previous `96050406` runner
+  reached all workloads but exceeded the total-PSS relative ceiling by `197 KiB`; it remains a
+  failed historical attempt. A fresh testbox run for this runtime candidate is required before
+  A4 can pass, with the exact command and result recorded in
+  `./evidence/mesh-resource-c3c6642e.md`.
 - Host-managed fresh-join and service-recovery evidence passed on the immediately preceding
   runtime candidate. The current repair changes circuit admission and Mesh success telemetry,
   not deployment, membership, persistence, or service activation code; the scope and non-same-SHA
