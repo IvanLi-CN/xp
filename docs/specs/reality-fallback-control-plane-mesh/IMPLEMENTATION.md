@@ -130,16 +130,15 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   copies the resolved executables into the disposable run before measurement, so build scripts and
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
-- The current locked runtime candidate is `c3c6642e` (full source SHA is recorded in
-  `./evidence/local-checks-c3c6642e.md`). Local command results, including `82` Mesh tests and
-  the full Rust suite, are recorded there; the follow-up test-only commit `5bf4ab38` makes the
-  existing connection-reuse assertion await the now-background telemetry convergence. Success
-  telemetry is scheduled only after the response body guard releases, so a slow persistence
-  `sync_all()` cannot delay a signed response or gate admission. The previous `96050406` runner
-  reached all workloads but exceeded the total-PSS relative ceiling by `197 KiB`; it remains a
-  failed historical attempt. A fresh testbox run for this runtime candidate is required before
-  A4 can pass, with the exact command and result recorded in
-  `./evidence/mesh-resource-c3c6642e.md`.
+- The current locked runtime candidate is `78d6dfe0` (full source SHA is recorded in
+  `./evidence/local-checks-78d6dfe0.md`). Local command results, including `84` Mesh tests and
+  `1532` library tests, are recorded there. Success telemetry is scheduled only after a
+  response body completes; error, cancellation, and deadline outcomes release the gate without
+  recording a false success, while the captured Mesh epoch prevents an old response from
+  updating a newer gate generation. The previous `96050406` runner reached all workloads but
+  exceeded the total-PSS relative ceiling by `197 KiB`; it remains a failed historical attempt.
+  A fresh testbox run for this runtime candidate is required before A4 can pass, with the exact
+  command and result recorded in `./evidence/mesh-resource-78d6dfe0.md`.
 - Host-managed fresh-join and service-recovery evidence passed on the immediately preceding
   runtime candidate. The current repair changes circuit admission and Mesh success telemetry,
   not deployment, membership, persistence, or service activation code; the scope and non-same-SHA
