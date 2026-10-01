@@ -1,6 +1,7 @@
-# Mesh Resource Evidence
+# Historical Mesh Resource Evidence
 
 - Runtime candidate commit: `78d6dfe09ff6c0cb16374560c39c4594de931a59`
+- Status: superseded by `c86c7ef0`; retained as a pending record for the preceding step.
 - Baseline commit: `ed109323`
 - Required runner:
   `XP_RUN_MESH_RESOURCE=1 XP_E2E_ONLY_MESH_RESOURCE=1`
