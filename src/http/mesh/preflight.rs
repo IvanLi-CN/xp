@@ -10,6 +10,12 @@ enum MeshPreflightRoute {
     RegisteredApi,
 }
 
+#[derive(Debug)]
+pub(super) enum MeshPreflightBodyError {
+    Transport(String),
+    Oversized,
+}
+
 fn mesh_preflight_route(target: &MeshPeerTarget) -> MeshPreflightRoute {
     if target.mesh_base_url.is_some() {
         MeshPreflightRoute::Direct
@@ -340,7 +346,12 @@ async fn run_peer_health_preflight(
     };
     consume_bounded_preflight_body(response)
         .await
-        .map_err(|_| MeshRequestError::TransportTimeout)?;
+        .map_err(|error| match error {
+            MeshPreflightBodyError::Transport(_) => MeshRequestError::TransportTimeout,
+            MeshPreflightBodyError::Oversized => {
+                MeshRequestError::Protocol("mesh preflight response body is oversized".into())
+            }
+        })?;
     if let Some(completion) = completion
         && !completion.await.unwrap_or(false)
     {
@@ -351,22 +362,22 @@ async fn run_peer_health_preflight(
 
 pub(super) async fn consume_bounded_preflight_body(
     mut response: reqwest::Response,
-) -> Result<(), String> {
+) -> Result<(), MeshPreflightBodyError> {
     if response
         .content_length()
         .is_some_and(|length| length > MAX_MESH_PREFLIGHT_RESPONSE_BYTES as u64)
     {
-        return Err(format!(
-            "mesh preflight response exceeds {MAX_MESH_PREFLIGHT_RESPONSE_BYTES} bytes"
-        ));
+        return Err(MeshPreflightBodyError::Oversized);
     }
     let mut bytes = 0usize;
-    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| MeshPreflightBodyError::Transport(error.to_string()))?
+    {
         bytes = bytes.saturating_add(chunk.len());
         if bytes > MAX_MESH_PREFLIGHT_RESPONSE_BYTES {
-            return Err(format!(
-                "mesh preflight response exceeds {MAX_MESH_PREFLIGHT_RESPONSE_BYTES} bytes"
-            ));
+            return Err(MeshPreflightBodyError::Oversized);
         }
     }
     Ok(())
@@ -527,7 +538,7 @@ mod tests {
         let error = consume_bounded_preflight_body(response)
             .await
             .expect_err("oversized health body must fail closed");
-        assert!(error.contains("exceeds"));
+        assert!(matches!(error, MeshPreflightBodyError::Oversized));
     }
 
     #[tokio::test]

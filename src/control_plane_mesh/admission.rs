@@ -318,7 +318,13 @@ impl MeshAwareHttpClient {
                     }
                 }
             }
-            return result.map(|response| (response, None));
+            return match result {
+                Ok(response) => {
+                    drop(response);
+                    Err(MeshRequestError::PreDispatchTimeout)
+                }
+                Err(error) => Err(error),
+            };
         }
         let operation_id = self.circuits.next_operation();
         let (completion_sender, completion_receiver) = if allow_mesh_when_disabled {

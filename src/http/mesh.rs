@@ -1601,7 +1601,14 @@ async fn run_mesh_health_probe(
             .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
         preflight::consume_bounded_preflight_body(response)
             .await
-            .map_err(ApiError::gateway_timeout)?;
+            .map_err(|error| match error {
+                preflight::MeshPreflightBodyError::Transport(message) => {
+                    ApiError::gateway_timeout(message)
+                }
+                preflight::MeshPreflightBodyError::Oversized => {
+                    ApiError::gateway_timeout("mesh preflight response body is oversized")
+                }
+            })?;
     } else {
         let result = client
             .send_peer_direct_preflight(&peer, request, ca_key_pem, &state.cluster_ca_pem)
@@ -1609,7 +1616,14 @@ async fn run_mesh_health_probe(
         let response = result.map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
         preflight::consume_bounded_preflight_body(response)
             .await
-            .map_err(ApiError::gateway_timeout)?;
+            .map_err(|error| match error {
+                preflight::MeshPreflightBodyError::Transport(message) => {
+                    ApiError::gateway_timeout(message)
+                }
+                preflight::MeshPreflightBodyError::Oversized => {
+                    ApiError::gateway_timeout("mesh preflight response body is oversized")
+                }
+            })?;
     }
     Ok(())
 }

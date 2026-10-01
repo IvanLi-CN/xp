@@ -432,27 +432,6 @@ async fn mesh_response_body_guard_is_released_on_eof() {
 }
 
 #[tokio::test]
-async fn zero_length_mesh_response_releases_gate_guard_immediately() {
-    let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
-    let gate_guard = gate_lock.clone().read_owned().await;
-    let response = reqwest::Response::from(
-        axum::http::Response::builder()
-            .status(reqwest::StatusCode::OK)
-            .body(reqwest::Body::from(Vec::<u8>::new()))
-            .expect("synthetic response"),
-    );
-    let response = super::reverse::attach_mesh_gate(
-        response,
-        gate_guard,
-        Instant::now() + Duration::from_secs(1),
-    );
-    tokio::time::timeout(Duration::from_millis(100), gate_lock.write_owned())
-        .await
-        .expect("zero-length response must release the gate guard");
-    drop(response);
-}
-
-#[tokio::test]
 async fn mesh_response_body_guard_is_released_on_error() {
     use futures_util::StreamExt;
 

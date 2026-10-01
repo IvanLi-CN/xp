@@ -263,13 +263,6 @@ fn attach_response_body_with_finish(
     deadline: Instant,
     on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
 ) -> reqwest::Response {
-    if response.content_length() == Some(0) {
-        drop(gate_guard);
-        if let Some(on_finish) = on_finish {
-            on_finish(crate::mesh_gate_body::BodyFinish::Complete);
-        }
-        return response;
-    }
     let response_url = response.url().clone();
     let response: axum::http::Response<reqwest::Body> = response.into();
     let (mut parts, body) = response.into_parts();

@@ -24,6 +24,8 @@ mod circuit;
 mod cleanup;
 mod error;
 mod gate;
+#[cfg(test)]
+mod mesh_body_lifecycle_tests;
 mod request;
 mod request_flow;
 mod retry;
