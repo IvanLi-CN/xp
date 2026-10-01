@@ -79,6 +79,38 @@ async fn delayed_mesh_success_cannot_overwrite_newer_protocol_rejection() {
 }
 
 #[tokio::test]
+async fn reenable_preflight_success_commits_while_mesh_gate_is_disabled() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    let peer = peer();
+    client.cluster_mesh_enabled.store(false, Ordering::Release);
+    client.circuits.record_protocol_failure(&peer.node_id).await;
+    client
+        .mark_direct_validation_failure_at(&peer, DirectValidationState::ProtocolRejected, None)
+        .await;
+
+    client
+        .record_direct_preflight_success_after_body(
+            &peer,
+            0,
+            None,
+            client.circuits.next_operation(),
+            None,
+            true,
+            Instant::now() + Duration::from_secs(1),
+        )
+        .await;
+
+    assert_eq!(
+        client.circuits.state(&peer.node_id, true).await,
+        BreakerState::Closed
+    );
+    assert_eq!(
+        client.direct_validation_state_for(&peer).await,
+        DirectValidationState::Verified
+    );
+}
+
+#[tokio::test]
 async fn mesh_probe_remains_held_until_response_body_finishes() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new());
     let peer = peer();

@@ -391,6 +391,7 @@ impl MeshAwareHttpClient {
                 validation_revision,
                 operation_id,
                 mesh_probe_guard.take(),
+                allow_mesh_when_disabled,
                 request_deadline,
             );
             return Ok(super::reverse::attach_response_with_finish(
@@ -410,6 +411,7 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         operation_id: u64,
         mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
+        allow_mesh_when_disabled: bool,
         deadline: Instant,
     ) -> crate::mesh_gate_body::FinishCallback {
         let client = self.clone();
@@ -426,6 +428,7 @@ impl MeshAwareHttpClient {
                         validation_revision,
                         operation_id,
                         mesh_probe_guard,
+                        allow_mesh_when_disabled,
                         deadline,
                     )
                     .await;
@@ -434,16 +437,20 @@ impl MeshAwareHttpClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn record_direct_preflight_success_after_body(
+    pub(super) async fn record_direct_preflight_success_after_body(
         &self,
         peer: &MeshPeerTarget,
         epoch: u64,
         validation_revision: Option<String>,
         operation_id: u64,
         mut mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
+        allow_mesh_when_disabled: bool,
         deadline: Instant,
     ) {
-        let Some(_epoch_guard) = self.mesh_epoch_guard_until(epoch, deadline, true).await else {
+        let Some(_epoch_guard) = self
+            .mesh_epoch_guard_until(epoch, deadline, !allow_mesh_when_disabled)
+            .await
+        else {
             return;
         };
         let breaker_recorded = crate::control_plane_mesh::await_until(
