@@ -1,5 +1,74 @@
 use super::*;
+use futures_util::StreamExt;
 use tokio::sync::oneshot;
+
+#[tokio::test]
+async fn mesh_body_success_callbacks_share_one_completion_worker() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    let peer = MeshPeerTarget {
+        node_id: "peer".to_owned(),
+        node_name: "peer".to_owned(),
+        mesh_base_url: Some("https://mesh.example".to_owned()),
+        endpoint_transport: Some("xhttp_reality_fallback"),
+        endpoint_fingerprint: Some("fingerprint".to_owned()),
+        mesh_reason: MeshPeerReason::MeshAvailable,
+        public_base_url: "https://public.example".to_owned(),
+    };
+    let request = MeshRequest {
+        method: reqwest::Method::GET,
+        path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
+        content_type: None,
+        body: Vec::new(),
+        total_budget: Duration::from_secs(1),
+        allow_ambiguous_fallback: false,
+        request_id: "mesh-completion-dispatcher-regression".to_owned(),
+        route: InternalRoute::HealthV2,
+        cluster_id: "cluster".to_owned(),
+        sender_id: "sender".to_owned(),
+        updates_active_path: false,
+    };
+    let transport = MeshTransportObservation {
+        protocol: MeshTransportProtocol::H2,
+        fingerprint: None,
+    };
+
+    for _ in 0..8 {
+        let response = reqwest::Response::from(
+            axum::http::Response::builder()
+                .status(reqwest::StatusCode::OK)
+                .body(reqwest::Body::from(Vec::<u8>::new()))
+                .expect("synthetic response"),
+        );
+        let response = super::reverse::attach_response_with_finish(
+            response,
+            Instant::now() + Duration::from_secs(1),
+            Some(client.mesh_success_telemetry_callback(
+                &peer,
+                Instant::now(),
+                &request,
+                transport,
+                0,
+                None,
+                client.circuits.next_operation(),
+                None,
+                Instant::now() + Duration::from_secs(1),
+            )),
+        );
+        let mut body = response.bytes_stream();
+        assert!(body.next().await.is_none());
+    }
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if client.completion_worker_starts_for_test() == Some(1) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("Mesh body completions should share one worker");
+}
 
 #[tokio::test]
 async fn mesh_success_telemetry_does_not_requeue_gate_reader() {

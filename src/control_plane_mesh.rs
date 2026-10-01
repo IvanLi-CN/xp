@@ -22,6 +22,7 @@ use crate::{
 mod admission;
 mod circuit;
 mod cleanup;
+mod completion;
 mod error;
 mod gate;
 #[cfg(test)]
@@ -148,6 +149,7 @@ pub struct MeshAwareHttpClient {
     mesh_epoch_barrier: Arc<tokio::sync::RwLock<()>>,
     mesh_epoch_reset_lock: Arc<Mutex<u64>>,
     mesh_gate_lock: Arc<tokio::sync::RwLock<()>>,
+    completion_dispatcher: Arc<std::sync::OnceLock<completion::CompletionDispatcher>>,
     telemetry: Option<MeshTelemetryHandle>,
     reverse_routes: Arc<RwLock<BTreeMap<String, ReverseRelayRoute>>>,
     reverse_enabled: Arc<AtomicBool>,
@@ -171,6 +173,7 @@ impl MeshAwareHttpClient {
             mesh_epoch_barrier: Arc::new(tokio::sync::RwLock::new(())),
             mesh_epoch_reset_lock: Arc::new(Mutex::new(0)),
             mesh_gate_lock: Arc::new(tokio::sync::RwLock::new(())),
+            completion_dispatcher: Arc::new(std::sync::OnceLock::new()),
             telemetry: None,
             reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
             reverse_enabled: Arc::new(AtomicBool::new(cfg!(test))),
@@ -186,6 +189,7 @@ impl MeshAwareHttpClient {
         self.telemetry = Some(telemetry);
         self
     }
+
     pub fn with_circuits(mut self, circuits: PeerCircuitBreakers) -> Self {
         self.circuits = circuits;
         self

@@ -282,8 +282,9 @@ impl MeshAwareHttpClient {
             if outcome != crate::mesh_gate_body::BodyFinish::Complete {
                 return;
             }
-            tokio::spawn(async move {
-                client
+            let completion_client = client.clone();
+            client.dispatch_completion(async move {
+                completion_client
                     .record_public_success_after_body(
                         &peer,
                         started,

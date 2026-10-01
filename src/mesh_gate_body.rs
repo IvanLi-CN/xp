@@ -1,15 +1,13 @@
 use std::{
     io,
+    sync::atomic::{AtomicBool, Ordering},
     sync::{Arc, Mutex},
     time::Instant,
 };
 
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt, stream};
-use tokio::{
-    sync::{OwnedRwLockReadGuard, oneshot},
-    time,
-};
+use tokio::{sync::OwnedRwLockReadGuard, time};
 
 type BodyStream = futures_util::stream::BoxStream<'static, Result<Bytes, io::Error>>;
 type GateGuard = OwnedRwLockReadGuard<()>;
@@ -46,7 +44,7 @@ impl GuardCell {
 struct GuardedBodyState {
     body: BodyStream,
     guard: Arc<GuardCell>,
-    cancel_timer: Option<oneshot::Sender<()>>,
+    cancel_timer: Option<Arc<AtomicBool>>,
     deadline: Instant,
     finished: bool,
 }
@@ -55,7 +53,7 @@ impl GuardedBodyState {
     fn finish(&mut self, outcome: BodyFinish) {
         self.finished = true;
         if let Some(cancel_timer) = self.cancel_timer.take() {
-            let _ = cancel_timer.send(());
+            cancel_timer.store(true, Ordering::Release);
         }
         self.guard.finish(outcome);
     }
@@ -101,14 +99,13 @@ fn stream_with_finish_inner(
     on_finish: Option<FinishCallback>,
 ) -> impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static {
     let guard = Arc::new(GuardCell(Mutex::new((gate_guard, on_finish))));
-    let (cancel_timer, timer_cancelled) = oneshot::channel();
+    let cancel_timer = Arc::new(AtomicBool::new(false));
     let timer_guard = Arc::clone(&guard);
+    let timer_cancelled = Arc::clone(&cancel_timer);
     tokio::spawn(async move {
-        tokio::select! {
-            _ = time::sleep_until(time::Instant::from_std(deadline)) => {
-                timer_guard.finish(BodyFinish::Deadline);
-            }
-            _ = timer_cancelled => {}
+        time::sleep_until(time::Instant::from_std(deadline)).await;
+        if !timer_cancelled.load(Ordering::Acquire) {
+            timer_guard.finish(BodyFinish::Deadline);
         }
     });
 
