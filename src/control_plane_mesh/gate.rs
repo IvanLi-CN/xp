@@ -134,14 +134,12 @@ impl MeshAwareHttpClient {
                             )
                             .await);
                     }
-                    let breaker_state = self
-                        .record_mesh_success_state(
-                            peer,
-                            mesh_epoch,
-                            validation_revision.clone(),
-                            &gate_guard,
-                        )
-                        .await;
+                    let breaker_state = self.record_mesh_success_state(
+                        peer,
+                        mesh_epoch,
+                        validation_revision.clone(),
+                        &gate_guard,
+                    );
                     let response =
                         reverse::attach_mesh_gate(response, gate_guard, request_deadline);
                     if let Some(breaker_state) = breaker_state {
@@ -160,14 +158,12 @@ impl MeshAwareHttpClient {
                     )));
                 }
                 if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
-                    let breaker_state = self
-                        .record_mesh_success_state(
-                            peer,
-                            mesh_epoch,
-                            validation_revision.clone(),
-                            &gate_guard,
-                        )
-                        .await;
+                    let breaker_state = self.record_mesh_success_state(
+                        peer,
+                        mesh_epoch,
+                        validation_revision.clone(),
+                        &gate_guard,
+                    );
                     drop(response);
                     drop(gate_guard);
                     if let Some(breaker_state) = breaker_state {
@@ -254,7 +250,7 @@ impl MeshAwareHttpClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn record_mesh_success_state(
+    fn record_mesh_success_state(
         &self,
         peer: &MeshPeerTarget,
         epoch: u64,
@@ -265,17 +261,22 @@ impl MeshAwareHttpClient {
             return None;
         }
         let operation_id = self.circuits.next_operation();
-        let breaker_state = self
+        let Some(breaker_state) = self
             .circuits
-            .record_success_at(&peer.node_id, operation_id)
-            .await?;
+            .try_record_success_at(&peer.node_id, operation_id)
+        else {
+            self.spawn_validation_success_cleanup(peer, epoch, validation_revision, operation_id);
+            return None;
+        };
         if !self.mesh_gate_matches(epoch) {
             return None;
         }
         let cleanup_revision = validation_revision.clone();
-        if !self
-            .mark_direct_validation_success_with_operation(peer, validation_revision, operation_id)
-            .await
+        if self.try_mark_direct_validation_success_with_operation(
+            peer,
+            validation_revision,
+            operation_id,
+        ) != Some(true)
         {
             self.spawn_validation_success_cleanup(peer, epoch, cleanup_revision, operation_id);
         }
@@ -496,6 +497,7 @@ impl PeerCircuitBreakers {
         for circuit in peers.values_mut() {
             circuit.half_open_in_flight = false;
             circuit.half_open_epoch = None;
+            circuit.half_open_probe_id = None;
         }
     }
 }

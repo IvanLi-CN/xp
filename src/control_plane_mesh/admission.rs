@@ -90,6 +90,20 @@ impl MeshAwareHttpClient {
             .await
     }
 
+    pub(super) fn try_mark_direct_validation_success_with_operation(
+        &self,
+        peer: &MeshPeerTarget,
+        membership_revision: Option<String>,
+        operation_id: u64,
+    ) -> Option<bool> {
+        self.direct_validation.try_record_at_if_newer(
+            peer,
+            DirectValidationState::Verified,
+            membership_revision.as_deref(),
+            operation_id,
+        )
+    }
+
     pub(super) async fn mark_direct_validation_failure_with_operation(
         &self,
         peer: &MeshPeerTarget,
@@ -133,20 +147,20 @@ impl MeshAwareHttpClient {
         Some(enabled)
     }
 
-    pub(super) async fn before_mesh_attempt_until(
+    async fn before_mesh_attempt_until_with_token(
         &self,
         peer_id: &str,
         enabled: bool,
         health_probe: bool,
         deadline: Instant,
-    ) -> Option<(MeshAttemptDecision, u64)> {
+    ) -> Option<(MeshAttemptDecision, u64, Option<u64>)> {
         let _reset_guard =
             crate::control_plane_mesh::await_until(deadline, self.mesh_epoch_reset_lock.lock())
                 .await?;
         let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
         let decision = self
             .circuits
-            .before_attempt_with_probe_at_epoch_until(
+            .before_attempt_with_probe_at_epoch_until_with_token(
                 peer_id,
                 enabled,
                 health_probe,
@@ -154,7 +168,7 @@ impl MeshAwareHttpClient {
                 deadline,
             )
             .await?;
-        Some((decision, epoch))
+        Some((decision.0, epoch, decision.1))
     }
 
     #[cfg(test)]
@@ -164,25 +178,50 @@ impl MeshAwareHttpClient {
         enabled: bool,
         route: InternalRoute,
     ) -> (MeshAttemptDecision, u64) {
-        self.before_mesh_request_until(
+        self.before_mesh_request_until_with_token(
             peer_id,
             enabled,
             route,
             Instant::now() + Duration::from_secs(60),
         )
         .await
+        .map(|(decision, epoch, _)| (decision, epoch))
         .expect("test Mesh admission should complete")
     }
 
-    pub(super) async fn before_mesh_request_until(
+    pub(super) async fn before_mesh_request_until_with_token(
         &self,
         peer_id: &str,
         enabled: bool,
         route: InternalRoute,
         deadline: Instant,
-    ) -> Option<(MeshAttemptDecision, u64)> {
-        self.before_mesh_attempt_until(peer_id, enabled, route == InternalRoute::HealthV2, deadline)
-            .await
+    ) -> Option<(MeshAttemptDecision, u64, Option<u64>)> {
+        self.before_mesh_attempt_until_with_token(
+            peer_id,
+            enabled,
+            route == InternalRoute::HealthV2,
+            deadline,
+        )
+        .await
+    }
+
+    pub(super) fn mesh_probe_guard(
+        &self,
+        peer_id: &str,
+        decision: MeshAttemptDecision,
+        epoch: u64,
+        probe_id: Option<u64>,
+    ) -> Option<MeshHalfOpenProbeGuard> {
+        MeshHalfOpenProbeGuard::new(&self.circuits, peer_id, decision, epoch, probe_id)
+    }
+
+    pub(super) fn public_probe_guard(
+        &self,
+        peer_id: &str,
+        decision: MeshAttemptDecision,
+        probe_id: Option<u64>,
+    ) -> Option<PublicHalfOpenProbeGuard> {
+        PublicHalfOpenProbeGuard::new(&self.circuits, peer_id, decision, probe_id)
     }
 
     pub(super) async fn send_peer_direct_preflight_with_admission(
@@ -198,8 +237,8 @@ impl MeshAwareHttpClient {
             .direct_validation_snapshot_until(peer, request_deadline)
             .await
             .ok_or(MeshRequestError::PreDispatchTimeout)?;
-        let (decision, epoch) = self
-            .before_mesh_request_until(
+        let (decision, epoch, probe_id) = self
+            .before_mesh_request_until_with_token(
                 &peer.node_id,
                 true,
                 InternalRoute::HealthV2,
@@ -208,7 +247,7 @@ impl MeshAwareHttpClient {
             .await
             .ok_or(MeshRequestError::PreDispatchTimeout)?;
         let mut mesh_probe_guard =
-            MeshHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, decision, epoch);
+            MeshHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, decision, epoch, probe_id);
         if matches!(
             decision,
             MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined
@@ -374,8 +413,12 @@ impl MeshAwareHttpClient {
         &self,
         peer_id: &str,
         epoch: u64,
+        probe_id: Option<u64>,
         deadline: Instant,
     ) -> bool {
+        let Some(probe_id) = probe_id else {
+            return false;
+        };
         let Some(_reset_guard) =
             crate::control_plane_mesh::await_until(deadline, self.mesh_epoch_reset_lock.lock())
                 .await
@@ -385,7 +428,7 @@ impl MeshAwareHttpClient {
         crate::control_plane_mesh::await_until(
             deadline,
             self.circuits
-                .release_half_open_probe_for_epoch(peer_id, epoch),
+                .release_half_open_probe_for_epoch(peer_id, epoch, probe_id),
         )
         .await
         .unwrap_or(false)
@@ -398,8 +441,9 @@ impl MeshAwareHttpClient {
         epoch: u64,
         deadline: Instant,
     ) {
+        let probe_id = guard.as_ref().map(MeshHalfOpenProbeGuard::probe_id);
         if self
-            .release_half_open_probe_for_epoch_until(peer_id, epoch, deadline)
+            .release_half_open_probe_for_epoch_until(peer_id, epoch, probe_id, deadline)
             .await
             && let Some(guard) = guard.as_mut()
         {
@@ -413,9 +457,14 @@ impl MeshAwareHttpClient {
         peer_id: &str,
         deadline: Instant,
     ) {
+        let probe_id = guard.as_ref().map(PublicHalfOpenProbeGuard::probe_id);
+        let Some(probe_id) = probe_id else {
+            return;
+        };
         if crate::control_plane_mesh::await_until(
             deadline,
-            self.circuits.release_public_half_open_probe(peer_id),
+            self.circuits
+                .release_public_half_open_probe(peer_id, probe_id),
         )
         .await
         .unwrap_or(false)
@@ -427,9 +476,17 @@ impl MeshAwareHttpClient {
 
     #[cfg(test)]
     pub(super) async fn release_half_open_probe_for_epoch(&self, peer_id: &str, epoch: u64) {
+        let probe_id = self
+            .circuits
+            .peers
+            .lock()
+            .await
+            .get(peer_id)
+            .and_then(|circuit| circuit.half_open_probe_id);
         self.release_half_open_probe_for_epoch_until(
             peer_id,
             epoch,
+            probe_id,
             Instant::now() + Duration::from_secs(60),
         )
         .await;

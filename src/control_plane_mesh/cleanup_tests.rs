@@ -269,3 +269,51 @@ async fn mesh_admission_timeout_does_not_public_dispatch_an_ordinary_mutation() 
     mesh_task.abort();
     public_task.abort();
 }
+
+#[tokio::test]
+async fn dispatched_mesh_timeout_is_not_reported_as_pre_dispatch_timeout() {
+    let (mesh_base_url, mesh_requests, mesh_task) =
+        super::peer_target_tests::spawn_stalling_mesh().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let (public_base_url, public_requests, public_task) =
+        super::peer_target_tests::spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
+    let peer =
+        super::peer_target_tests::primary_reverse_target(Some(mesh_base_url), public_base_url);
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new());
+
+    let result = client
+        .send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::POST,
+                path_and_query: "/api/admin/_internal/raft/client-write".to_owned(),
+                content_type: Some("application/json".to_owned()),
+                body: br#"{"op":"set"}"#.to_vec(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: false,
+                request_id: "dispatched-mesh-timeout-classification".to_owned(),
+                route: InternalRoute::MeshV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+                sender_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+                updates_active_path: true,
+            },
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await
+        .expect_err("a dispatched mutation timeout must fail closed");
+
+    assert!(
+        matches!(
+            result,
+            MeshRequestError::TransportTimeout | MeshRequestError::OutcomeUnknown
+        ),
+        "dispatched Mesh timeout must retain an ambiguous outcome: {result:?}"
+    );
+    assert_eq!(mesh_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 0);
+    mesh_task.abort();
+    public_task.abort();
+}

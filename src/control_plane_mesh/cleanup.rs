@@ -149,11 +149,13 @@ impl MeshAwareHttpClient {
         peer_id: &str,
         route: InternalRoute,
         deadline: Instant,
-    ) -> Option<MeshAttemptDecision> {
+    ) -> Option<(MeshAttemptDecision, Option<u64>)> {
         crate::control_plane_mesh::await_until(
             deadline,
-            self.circuits
-                .before_public_attempt_with_probe(peer_id, route == InternalRoute::HealthV2),
+            self.circuits.before_public_attempt_with_probe_with_token(
+                peer_id,
+                route == InternalRoute::HealthV2,
+            ),
         )
         .await
     }

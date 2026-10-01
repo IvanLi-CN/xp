@@ -1,3 +1,4 @@
+use super::circuit::MeshAttemptDecision;
 use super::internal_auth;
 
 #[derive(Debug)]
@@ -16,6 +17,36 @@ pub enum MeshRequestError {
         path: &'static str,
         dispatched: bool,
     },
+}
+
+pub(super) fn classify_mesh_failure(
+    admission_timed_out: bool,
+    mesh_outcome_ambiguous: bool,
+    mesh_outcome_timed_out: bool,
+    decision: MeshAttemptDecision,
+) -> MeshRequestError {
+    if admission_timed_out && !mesh_outcome_ambiguous {
+        MeshRequestError::PreDispatchTimeout
+    } else if matches!(decision, MeshAttemptDecision::Disabled) {
+        MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
+    } else if mesh_outcome_timed_out {
+        MeshRequestError::TransportTimeout
+    } else {
+        MeshRequestError::OutcomeUnknown
+    }
+}
+
+pub(super) fn public_timeout(
+    mesh_outcome_ambiguous: bool,
+    mesh_outcome_timed_out: bool,
+    decision: MeshAttemptDecision,
+) -> MeshRequestError {
+    classify_mesh_failure(
+        !mesh_outcome_ambiguous,
+        mesh_outcome_ambiguous,
+        mesh_outcome_timed_out,
+        decision,
+    )
 }
 
 impl From<internal_auth::AuthError> for MeshRequestError {

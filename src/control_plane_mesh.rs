@@ -36,6 +36,7 @@ use circuit::{
     PublicHalfOpenProbeGuard, endpoint_fingerprint, mesh_attempt_budget,
 };
 pub use error::MeshRequestError;
+use error::{classify_mesh_failure, public_timeout};
 pub(crate) use request::CapabilityProbeResponse;
 use request::PeerRequestResponse;
 pub use request::{MeshRequest, PeerDirectPath};
@@ -534,8 +535,8 @@ impl MeshAwareHttpClient {
             });
         }
         let mesh_enabled = direct_mesh_is_eligible(peer, cluster_mesh_enabled, direct_validation);
-        let (decision, mesh_epoch) = match self
-            .before_mesh_request_until(
+        let (decision, mesh_epoch, mesh_probe_id) = match self
+            .before_mesh_request_until_with_token(
                 &peer.node_id,
                 mesh_enabled,
                 request.route,
@@ -549,6 +550,7 @@ impl MeshAwareHttpClient {
                 (
                     MeshAttemptDecision::Disabled,
                     self.cluster_mesh_epoch.load(Ordering::Acquire),
+                    None,
                 )
             }
         };
@@ -556,7 +558,7 @@ impl MeshAwareHttpClient {
             allow_public_fallback = false;
         }
         let mut mesh_probe_guard =
-            MeshHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, decision, mesh_epoch);
+            self.mesh_probe_guard(&peer.node_id, decision, mesh_epoch, mesh_probe_id);
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
         let mut mesh_outcome_ambiguous = false;
         let mut mesh_outcome_timed_out = false;
@@ -645,11 +647,9 @@ impl MeshAwareHttpClient {
                     fallback = true;
                     mesh_outcome_ambiguous |= ambiguous;
                     mesh_outcome_timed_out |= timed_out;
-                    if timed_out {
-                        admission_timed_out = true;
-                        if !admission_fallback_allowed {
-                            allow_public_fallback = false;
-                        }
+                    admission_timed_out |= timed_out && !ambiguous;
+                    if timed_out && !admission_fallback_allowed {
+                        allow_public_fallback = false;
                     }
                 }
                 gate::MeshAttemptResult::Response(response) => return Ok(response),
@@ -815,17 +815,12 @@ impl MeshAwareHttpClient {
         if !allow_public_fallback {
             self.record_terminal_failure_until(peer, request_deadline)
                 .await;
-            return Err(if admission_timed_out {
-                MeshRequestError::PreDispatchTimeout
-            } else if matches!(decision, MeshAttemptDecision::Disabled) {
-                MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
-            } else {
-                if mesh_outcome_timed_out {
-                    MeshRequestError::TransportTimeout
-                } else {
-                    MeshRequestError::OutcomeUnknown
-                }
-            });
+            return Err(classify_mesh_failure(
+                admission_timed_out,
+                mesh_outcome_ambiguous,
+                mesh_outcome_timed_out,
+                decision,
+            ));
         }
         if !request.allow_ambiguous_fallback && mesh_outcome_ambiguous {
             self.record_terminal_failure_until(peer, request_deadline)
@@ -837,16 +832,20 @@ impl MeshAwareHttpClient {
             });
         }
         let public_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
-        let Some(public_decision) = self
+        let Some((public_decision, public_probe_id)) = self
             .before_public_request_until(&peer.node_id, request.route, request_deadline)
             .await
         else {
             self.record_terminal_failure_until(peer, request_deadline)
                 .await;
-            return Err(MeshRequestError::PreDispatchTimeout);
+            return Err(public_timeout(
+                mesh_outcome_ambiguous,
+                mesh_outcome_timed_out,
+                decision,
+            ));
         };
         let mut public_probe_guard =
-            PublicHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, public_decision);
+            self.public_probe_guard(&peer.node_id, public_decision, public_probe_id);
         match public_decision {
             MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined => {
                 self.record_terminal_failure_until(peer, request_deadline)
