@@ -130,21 +130,19 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   copies the resolved executables into the disposable run before measurement, so build scripts and
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
-- The current locked candidate is `d0fe824625d5e58fca8455b26d5d3032bf9a45fb`. Local command
-  results, including `78` Mesh tests and the full Rust suite, are recorded in
-  `./evidence/local-checks-d0fe8246.md`. The same-SHA 15-minute candidate-versus-baseline
-  resource comparison passed on `codex-testbox` with the locked baseline `ed109323`: candidate
-  total PSS was `32955 KiB` versus `32898 KiB`, anonymous PSS was `16524` versus `16948 KiB`,
-  stack PSS was `43063` versus `42957 KiB`, and CPU ticks were `190` versus `197`. All 50 peers
-  reached the formal workload with one active H2 connection each, 50 TLS accepts, and zero
-  non-H2 requests. Repository summary peak PSS was `29100 KiB`; source journal peak PSS was
-  `28368 KiB`, CPU p95 was `1%`, additional read bytes were `0`, and max RSS delta was
-  `126976 bytes`. The exact archive hashes, manifest, and A1-A5 mapping are recorded in
-  `./evidence/mesh-resource-d0fe8246.md`.
+- The current locked candidate is `d14da9899cd8b215e632d555db078c6f9a33340a`. Local command
+  results, including `81` Mesh tests and the full Rust suite, are recorded in
+  `./evidence/local-checks-d14da989.md`. The previous same-SHA resource comparison for
+  `d0fe8246` remains historical evidence only: this candidate changes the half-open probe
+  admission and success-telemetry wait paths, so it cannot be reused for A4. A fresh testbox
+  attempt is currently blocked before the runner starts because SSH to `codex-testbox`
+  (`192.168.31.15`) times out during banner exchange; the attempt and exact runner command are
+  recorded in `./evidence/mesh-resource-d14da989.md`.
 - Host-managed fresh-join and service-recovery evidence passed on the immediately preceding
-  runtime candidate; the current two-file success-telemetry optimization does not touch that
-  deployment or membership surface. The scope and non-same-SHA status are recorded in
-  `./evidence/host-managed-fresh-join-d0fe8246.md`.
+  runtime candidate. The current repair changes circuit admission and Mesh success telemetry,
+  not deployment, membership, persistence, or service activation code; the scope and non-same-SHA
+  status remain recorded in `./evidence/host-managed-fresh-join-d0fe8246.md`. This supplementary
+  evidence does not replace the required same-SHA shared-testbox gate.
 - Rustls 0.23 uses the ring provider for both the server and Mesh client. Keeping one provider
   removes the unused AWS-LC implementation from the release binary while preserving TLS 1.2/1.3
   and P-256 support. ACME still carries its older HTTP/DNS dependency stack; replacing that stack is
