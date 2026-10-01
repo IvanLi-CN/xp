@@ -140,7 +140,6 @@ impl MeshAwareHttpClient {
                             mesh_epoch,
                             validation_revision.clone(),
                             &gate_guard,
-                            request_deadline,
                         )
                         .await;
                     let response =
@@ -153,7 +152,6 @@ impl MeshAwareHttpClient {
                             transport,
                             mesh_epoch,
                             breaker_state,
-                            request_deadline,
                         )
                         .await;
                     }
@@ -168,7 +166,6 @@ impl MeshAwareHttpClient {
                             mesh_epoch,
                             validation_revision.clone(),
                             &gate_guard,
-                            request_deadline,
                         )
                         .await;
                     drop(response);
@@ -181,7 +178,6 @@ impl MeshAwareHttpClient {
                             transport,
                             mesh_epoch,
                             breaker_state,
-                            request_deadline,
                         )
                         .await;
                     }
@@ -264,32 +260,23 @@ impl MeshAwareHttpClient {
         epoch: u64,
         validation_revision: Option<String>,
         _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
-        deadline: Instant,
     ) -> Option<BreakerState> {
         if !self.mesh_gate_matches(epoch) {
             return None;
         }
         let operation_id = self.circuits.next_operation();
-        let breaker_state = crate::control_plane_mesh::await_until(
-            deadline,
-            self.circuits.record_success_at(&peer.node_id, operation_id),
-        )
-        .await
-        .flatten()?;
+        let breaker_state = self
+            .circuits
+            .record_success_at(&peer.node_id, operation_id)
+            .await?;
         if !self.mesh_gate_matches(epoch) {
             return None;
         }
         let cleanup_revision = validation_revision.clone();
-        let validation_recorded = crate::control_plane_mesh::await_until(
-            deadline,
-            self.mark_direct_validation_success_with_operation(
-                peer,
-                validation_revision,
-                operation_id,
-            ),
-        )
-        .await;
-        if validation_recorded.is_none() {
+        if !self
+            .mark_direct_validation_success_with_operation(peer, validation_revision, operation_id)
+            .await
+        {
             self.spawn_validation_success_cleanup(peer, epoch, cleanup_revision, operation_id);
         }
         Some(breaker_state)
@@ -304,14 +291,13 @@ impl MeshAwareHttpClient {
         transport: MeshTransportObservation,
         epoch: u64,
         breaker_state: BreakerState,
-        deadline: Instant,
     ) {
         if !self.mesh_gate_matches(epoch) {
             return;
         }
-        self.set_mesh_breaker_for_epoch_until(peer, breaker_state, None, epoch, deadline)
+        self.set_mesh_breaker_for_epoch(peer, breaker_state, None, epoch)
             .await;
-        self.record_sample_for_epoch_until(
+        self.record_sample_for_epoch(
             peer,
             telemetry_sample(
                 TelemetryPath::Mesh,
@@ -322,7 +308,6 @@ impl MeshAwareHttpClient {
                 Some(transport),
             ),
             epoch,
-            deadline,
         )
         .await;
     }
@@ -757,7 +742,6 @@ mod tests {
                 },
                 0,
                 BreakerState::Closed,
-                Instant::now() + Duration::from_secs(1),
             ),
         )
         .await
