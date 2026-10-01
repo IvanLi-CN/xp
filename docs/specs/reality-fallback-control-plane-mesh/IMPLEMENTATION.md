@@ -135,19 +135,19 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   copies the resolved executables into the disposable run before measurement, so build scripts and
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
-- The current locked runtime candidate is `40cb7962` (full source SHA is recorded in
-  `./evidence/local-checks-40cb7962.md`). Local command results, including `89` Mesh tests and
-  `1536` library tests, are recorded there. Signed response headers only authenticate the
-  response; Mesh, Direct health preflight, and Public signed success commit after the body
-  completes. Error, cancellation, and deadline outcomes release the relevant gate or probe
-  without recording success, while the captured Mesh epoch prevents an old response from
+- The current locked runtime candidate is `7712c651` (full source SHA is recorded in
+  `./evidence/local-checks-7712c651.md`). Local command results, including `88` Mesh tests,
+  `6` preflight tests, and `1539` library tests, are recorded there. Signed response headers only
+  authenticate the response; Mesh, Direct health preflight, and Public signed success commit
+  after the body completes. Error, cancellation, and deadline outcomes release the relevant gate
+  or probe without recording success, while the captured Mesh epoch prevents an old response from
   updating a newer gate generation; the captured circuit operation id also prevents an old body
   from reopening a newer protocol-isolated peer. Non-idempotent history cleanup keeps fail-closed
   `outcome_unknown` handling after an ambiguous response. The previous `96050406` runner
   exceeded the total-PSS relative ceiling by `197 KiB`; the later `f933bd92` runner passed the
   isolated workload but is not the current SHA. A fresh testbox run for this runtime candidate
   is required before A4 can pass, with the exact command and result recorded in
-  `./evidence/mesh-resource-40cb7962.md`.
+  `./evidence/mesh-resource-7712c651.md`.
 - Host-managed fresh-join and service-recovery evidence passed on the immediately preceding
   runtime candidate. The current repair changes circuit admission and Mesh success telemetry,
   not deployment, membership, persistence, or service activation code; the scope and non-same-SHA

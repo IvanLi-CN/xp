@@ -1,13 +1,13 @@
 # Mesh Resource Evidence
 
-- Runtime candidate commit: `40cb79620bafbfe4f568b17b08e4cc78f2d5ba08`
+- Runtime candidate commit: `7712c651ccd6e4253f137438d4d9cc648dcc2805`
 - Baseline commit: `ed109323`
 - Required runner:
   `XP_RUN_MESH_RESOURCE=1 XP_E2E_ONLY_MESH_RESOURCE=1`
   `XP_MESH_RESOURCE_BASELINE_SHA=ed109323`
   `scripts/testbox/run-shared-mesh-resource-e2e.sh`
-- Status: pending final-candidate run after the shared testbox restart and the operation-ordering
-  and half-open body-lifecycle fixes.
+- Status: pending final-candidate run after the shared testbox restart and the preflight completion,
+  cleanup, bounded-body, and EOF lifecycle fixes.
 - Testbox: `codex-testbox` / `192.168.31.15`
 - The prior non-current `f933bd92` run passed the isolated workload: baseline XP total/anon PSS
   `32752/17868 KiB`, candidate `32506/16488 KiB`, stack peaks `42688/42442 KiB`, 50 TLS accepts,
