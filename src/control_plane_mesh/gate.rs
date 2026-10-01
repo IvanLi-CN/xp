@@ -134,12 +134,6 @@ impl MeshAwareHttpClient {
                             )
                             .await);
                     }
-                    let breaker_state = self.record_mesh_success_state(
-                        peer,
-                        mesh_epoch,
-                        validation_revision.clone(),
-                        &gate_guard,
-                    );
                     let response = reverse::attach_mesh_gate_with_finish(
                         response,
                         gate_guard,
@@ -150,7 +144,7 @@ impl MeshAwareHttpClient {
                             request,
                             transport,
                             mesh_epoch,
-                            breaker_state,
+                            validation_revision,
                             request_deadline,
                         )),
                     );
@@ -159,12 +153,6 @@ impl MeshAwareHttpClient {
                     )));
                 }
                 if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
-                    let breaker_state = self.record_mesh_success_state(
-                        peer,
-                        mesh_epoch,
-                        validation_revision.clone(),
-                        &gate_guard,
-                    );
                     drop(response);
                     drop(gate_guard);
                     self.mesh_success_telemetry_callback(
@@ -173,7 +161,7 @@ impl MeshAwareHttpClient {
                         request,
                         transport,
                         mesh_epoch,
-                        breaker_state,
+                        validation_revision,
                         request_deadline,
                     )(crate::mesh_gate_body::BodyFinish::Complete);
                     return Ok(MeshAttemptResult::Response(
@@ -254,7 +242,7 @@ impl MeshAwareHttpClient {
         peer: &MeshPeerTarget,
         epoch: u64,
         validation_revision: Option<String>,
-        _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
+        _epoch_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
     ) -> Option<BreakerState> {
         if !self.mesh_gate_matches(epoch) {
             return None;
@@ -290,7 +278,7 @@ impl MeshAwareHttpClient {
         request: &MeshRequest,
         transport: MeshTransportObservation,
         epoch: u64,
-        breaker_state: Option<BreakerState>,
+        validation_revision: Option<String>,
         deadline: Instant,
     ) -> Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static> {
         let client = self.clone();
@@ -302,13 +290,13 @@ impl MeshAwareHttpClient {
             }
             tokio::spawn(async move {
                 client
-                    .record_mesh_success_telemetry(
+                    .record_mesh_success_after_body(
                         &peer,
                         started,
                         updates_active_path,
                         transport,
                         epoch,
-                        breaker_state,
+                        validation_revision,
                         deadline,
                     )
                     .await;
@@ -317,20 +305,22 @@ impl MeshAwareHttpClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn record_mesh_success_telemetry(
+    async fn record_mesh_success_after_body(
         &self,
         peer: &MeshPeerTarget,
         started: Instant,
         updates_active_path: bool,
         transport: MeshTransportObservation,
         epoch: u64,
-        breaker_state: Option<BreakerState>,
+        validation_revision: Option<String>,
         deadline: Instant,
     ) {
-        let Some(telemetry) = &self.telemetry else {
+        let Some(epoch_guard) = self.mesh_epoch_guard_until(epoch, deadline, true).await else {
             return;
         };
-        let Some(_epoch_guard) = self.mesh_epoch_guard_until(epoch, deadline, true).await else {
+        let breaker_state =
+            self.record_mesh_success_state(peer, epoch, validation_revision, &epoch_guard);
+        let Some(telemetry) = &self.telemetry else {
             return;
         };
         if let Some(breaker_state) = breaker_state {
@@ -608,7 +598,6 @@ mod tests {
             MeshAttemptDecision::Quarantined
         );
     }
-
     #[tokio::test]
     async fn expired_mesh_failure_schedules_breaker_cleanup() {
         let client = MeshAwareHttpClient::new(reqwest::Client::new());
@@ -653,7 +642,6 @@ mod tests {
         .await
         .expect("expired Mesh failure should converge in the background");
     }
-
     #[tokio::test]
     async fn expired_mesh_failure_cleanup_skips_after_epoch_barrier_changes() {
         let client =
@@ -696,7 +684,6 @@ mod tests {
             BreakerState::Closed
         );
     }
-
     #[tokio::test]
     async fn public_telemetry_records_when_mesh_is_disabled() {
         let temp = tempfile::tempdir().expect("telemetry directory");
@@ -739,7 +726,6 @@ mod tests {
             1
         );
     }
-
     #[tokio::test]
     async fn mesh_success_telemetry_does_not_requeue_gate_reader() {
         let temp = tempfile::tempdir().expect("telemetry directory");
@@ -784,7 +770,7 @@ mod tests {
         tokio::task::yield_now().await;
         tokio::time::timeout(
             Duration::from_millis(100),
-            client.record_mesh_success_telemetry(
+            client.record_mesh_success_after_body(
                 &peer,
                 Instant::now(),
                 request.updates_active_path,
@@ -793,7 +779,7 @@ mod tests {
                     fingerprint: None,
                 },
                 0,
-                Some(BreakerState::Closed),
+                None,
                 Instant::now() + Duration::from_millis(10),
             ),
         )
@@ -804,7 +790,6 @@ mod tests {
         let _ = release_tx.send(());
         writer.await.expect("writer should finish");
     }
-
     #[tokio::test]
     async fn mesh_success_telemetry_runs_after_body_releases_gate() {
         use futures_util::StreamExt;
@@ -857,7 +842,7 @@ mod tests {
                     fingerprint: None,
                 },
                 0,
-                Some(BreakerState::Closed),
+                None,
                 Instant::now() + Duration::from_secs(1),
             )),
         );
@@ -885,39 +870,91 @@ mod tests {
         .await
         .expect("body finish must schedule success telemetry");
     }
-
     #[tokio::test]
-    async fn mesh_finish_callback_reports_body_error_without_success() {
-        use futures_util::StreamExt;
-
-        let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
-        let (outcome_tx, outcome_rx) = oneshot::channel();
-        let response = reqwest::Response::from(
-            axum::http::Response::builder()
-                .status(reqwest::StatusCode::OK)
-                .body(reqwest::Body::wrap_stream(futures_util::stream::iter([
-                    Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"partial")),
-                    Err(std::io::Error::other("synthetic body failure")),
-                ])))
-                .expect("synthetic response"),
-        );
-        let response = super::reverse::attach_mesh_gate_with_finish(
-            response,
-            gate_lock.read_owned().await,
-            Instant::now() + Duration::from_secs(1),
-            Some(Box::new(move |outcome| {
-                let _ = outcome_tx.send(outcome);
-            })),
-        );
-        let mut body = response.bytes_stream();
-        assert!(body.next().await.expect("response data").is_ok());
-        assert!(body.next().await.expect("response error").is_err());
+    async fn mesh_body_error_does_not_commit_success_state() {
+        let client =
+            MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
+        let peer = MeshPeerTarget {
+            node_id: "peer".to_owned(),
+            node_name: "peer".to_owned(),
+            mesh_base_url: Some("https://mesh.example".to_owned()),
+            endpoint_transport: Some("xhttp_reality_fallback"),
+            endpoint_fingerprint: Some("fingerprint".to_owned()),
+            mesh_reason: MeshPeerReason::MeshAvailable,
+            public_base_url: "https://public.example".to_owned(),
+        };
+        client
+            .circuits
+            .record_retryable_failure_at("peer", client.circuits.next_operation())
+            .await;
+        client
+            .mark_direct_validation_failure_at(&peer, DirectValidationState::TransportFailed, None)
+            .await;
+        let request = MeshRequest {
+            method: reqwest::Method::GET,
+            path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
+            content_type: None,
+            body: Vec::new(),
+            total_budget: Duration::from_secs(1),
+            allow_ambiguous_fallback: false,
+            request_id: "body-error-state-regression".to_owned(),
+            route: InternalRoute::HealthV2,
+            cluster_id: "cluster".to_owned(),
+            sender_id: "sender".to_owned(),
+            updates_active_path: false,
+        };
+        let callback = || {
+            client.mesh_success_telemetry_callback(
+                &peer,
+                Instant::now(),
+                &request,
+                MeshTransportObservation {
+                    protocol: MeshTransportProtocol::H2,
+                    fingerprint: None,
+                },
+                0,
+                None,
+                Instant::now() + Duration::from_secs(1),
+            )
+        };
+        callback()(crate::mesh_gate_body::BodyFinish::Error);
+        tokio::task::yield_now().await;
         assert_eq!(
-            outcome_rx.await.expect("body finish outcome"),
-            crate::mesh_gate_body::BodyFinish::Error
+            client.direct_validation_state_for(&peer).await,
+            DirectValidationState::TransportFailed
         );
+        assert_eq!(
+            client
+                .circuits
+                .peers
+                .lock()
+                .await
+                .get("peer")
+                .expect("failed peer circuit")
+                .failures,
+            1
+        );
+        callback()(crate::mesh_gate_body::BodyFinish::Complete);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if client.direct_validation_state_for(&peer).await
+                    == DirectValidationState::Verified
+                    && client
+                        .circuits
+                        .peers
+                        .lock()
+                        .await
+                        .get("peer")
+                        .is_some_and(|circuit| circuit.failures == 0)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("complete body must commit success state without telemetry");
     }
-
     #[tokio::test]
     async fn mesh_success_telemetry_skips_after_epoch_changes() {
         let temp = tempfile::tempdir().expect("telemetry directory");
@@ -939,7 +976,7 @@ mod tests {
             let peer = peer.clone();
             async move {
                 client
-                    .record_mesh_success_telemetry(
+                    .record_mesh_success_after_body(
                         &peer,
                         Instant::now(),
                         false,
@@ -948,7 +985,7 @@ mod tests {
                             fingerprint: None,
                         },
                         0,
-                        Some(BreakerState::Closed),
+                        None,
                         Instant::now() + Duration::from_secs(1),
                     )
                     .await;
