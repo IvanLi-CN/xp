@@ -252,6 +252,11 @@ impl MeshTelemetryHandle {
         self.operator_probe_gate.clone().try_acquire_owned().ok()
     }
 
+    #[cfg(test)]
+    pub(crate) async fn hold_state_for_test(&self) -> impl Send {
+        self.state.clone().lock_owned().await
+    }
+
     pub async fn snapshot(&self) -> MeshTelemetrySnapshot {
         let state = self.state.lock().await;
         MeshTelemetrySnapshot {

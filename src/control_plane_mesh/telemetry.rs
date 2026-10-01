@@ -183,31 +183,6 @@ impl MeshAwareHttpClient {
         }
     }
 
-    pub(super) async fn record_sample_for_epoch(
-        &self,
-        peer: &MeshPeerTarget,
-        sample: MeshTelemetrySample,
-        epoch: u64,
-    ) {
-        let Some(_epoch_guard) = self.try_mesh_epoch_guard(epoch, true) else {
-            return;
-        };
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .record_sample(&peer.node_id, &peer.node_name, sample)
-                .await;
-            if sample.success && sample.path == TelemetryPath::Mesh {
-                let _ = telemetry
-                    .set_mesh_reason(
-                        &peer.node_id,
-                        peer.mesh_base_url.as_deref(),
-                        MeshPeerReason::MeshAvailable,
-                    )
-                    .await;
-            }
-        }
-    }
-
     pub(super) async fn record_terminal_failure_for_epoch(
         &self,
         peer: &MeshPeerTarget,
@@ -259,23 +234,6 @@ impl MeshAwareHttpClient {
             telemetry.set_breaker(&peer.node_id, state, event_message),
         )
         .await;
-    }
-
-    pub(super) async fn set_mesh_breaker_for_epoch(
-        &self,
-        peer: &MeshPeerTarget,
-        state: BreakerState,
-        event_message: Option<String>,
-        epoch: u64,
-    ) {
-        let Some(_epoch_guard) = self.try_mesh_epoch_guard(epoch, true) else {
-            return;
-        };
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .set_breaker(&peer.node_id, state, event_message)
-                .await;
-        }
     }
 
     #[allow(clippy::too_many_arguments)]

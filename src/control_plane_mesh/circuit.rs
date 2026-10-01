@@ -361,6 +361,7 @@ impl PeerCircuitBreakers {
             .await
     }
 
+    #[cfg(test)]
     pub(super) async fn before_attempt_with_probe_at_epoch(
         &self,
         peer_id: &str,
@@ -368,27 +369,9 @@ impl PeerCircuitBreakers {
         probe_allowed: bool,
         epoch: Option<u64>,
     ) -> MeshAttemptDecision {
-        if !enabled {
-            return MeshAttemptDecision::Disabled;
-        }
-        let now = Instant::now();
-        let mut peers = self.peers.lock().await;
-        let circuit = peers.entry(peer_id.to_string()).or_default();
-        if circuit.quarantined && !probe_allowed {
-            return MeshAttemptDecision::Quarantined;
-        }
-        match circuit.retry_at {
-            None => MeshAttemptDecision::Attempt,
-            Some(retry_at) if now < retry_at => MeshAttemptDecision::SkipOpen,
-            Some(_) if circuit.half_open_in_flight => MeshAttemptDecision::SkipOpen,
-            Some(_) if !probe_allowed => MeshAttemptDecision::SkipOpen,
-            Some(_) => {
-                circuit.half_open_in_flight = true;
-                circuit.half_open_epoch = epoch;
-                circuit.half_open_probe_id = Some(self.next_probe_id());
-                MeshAttemptDecision::Probe
-            }
-        }
+        self.before_attempt_with_probe_at_epoch_with_token(peer_id, enabled, probe_allowed, epoch)
+            .await
+            .0
     }
 
     pub(super) async fn before_attempt_with_probe_at_epoch_until_with_token(
@@ -421,19 +404,25 @@ impl PeerCircuitBreakers {
         if !enabled {
             return (MeshAttemptDecision::Disabled, None);
         }
-        let decision = self
-            .before_attempt_with_probe_at_epoch(peer_id, enabled, probe_allowed, epoch)
-            .await;
-        let probe_id = if matches!(decision, MeshAttemptDecision::Probe) {
-            self.peers
-                .lock()
-                .await
-                .get(peer_id)
-                .and_then(|circuit| circuit.half_open_probe_id)
-        } else {
-            None
-        };
-        (decision, probe_id)
+        let now = Instant::now();
+        let mut peers = self.peers.lock().await;
+        let circuit = peers.entry(peer_id.to_string()).or_default();
+        if circuit.quarantined && !probe_allowed {
+            return (MeshAttemptDecision::Quarantined, None);
+        }
+        match circuit.retry_at {
+            None => (MeshAttemptDecision::Attempt, None),
+            Some(retry_at) if now < retry_at => (MeshAttemptDecision::SkipOpen, None),
+            Some(_) if circuit.half_open_in_flight => (MeshAttemptDecision::SkipOpen, None),
+            Some(_) if !probe_allowed => (MeshAttemptDecision::SkipOpen, None),
+            Some(_) => {
+                circuit.half_open_in_flight = true;
+                circuit.half_open_epoch = epoch;
+                let probe_id = self.next_probe_id();
+                circuit.half_open_probe_id = Some(probe_id);
+                (MeshAttemptDecision::Probe, Some(probe_id))
+            }
+        }
     }
 
     pub async fn record_success(&self, peer_id: &str) -> BreakerState {
@@ -924,6 +913,41 @@ mod tests {
         })
         .await
         .expect("dropped Mesh probe guard should release its half-open slot");
+    }
+
+    #[tokio::test]
+    async fn mesh_probe_admission_timeout_does_not_strand_half_open_slot() {
+        let circuits = PeerCircuitBreakers::default();
+        {
+            let mut peers = circuits.peers.lock().await;
+            let circuit = peers.entry("peer".to_owned()).or_default();
+            circuit.failures = MESH_FAILURES_BEFORE_OPEN;
+            circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+        }
+
+        let peers_lock = circuits.peers.clone().lock_owned().await;
+        assert!(
+            circuits
+                .before_attempt_with_probe_at_epoch_until_with_token(
+                    "peer",
+                    true,
+                    true,
+                    Some(7),
+                    Instant::now() + Duration::from_millis(10),
+                )
+                .await
+                .is_none(),
+            "a cancelled lock wait must not report a probe without its ownership token"
+        );
+        drop(peers_lock);
+
+        assert_eq!(
+            circuits
+                .before_attempt_with_probe_at_epoch("peer", true, true, Some(7))
+                .await,
+            MeshAttemptDecision::Probe,
+            "a timed-out admission must leave the half-open slot available"
+        );
     }
 
     #[tokio::test]

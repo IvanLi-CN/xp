@@ -150,6 +150,7 @@ impl MeshAwareHttpClient {
                             transport,
                             mesh_epoch,
                             breaker_state,
+                            request_deadline,
                         )
                         .await;
                     }
@@ -174,6 +175,7 @@ impl MeshAwareHttpClient {
                             transport,
                             mesh_epoch,
                             breaker_state,
+                            request_deadline,
                         )
                         .await;
                     }
@@ -292,13 +294,14 @@ impl MeshAwareHttpClient {
         transport: MeshTransportObservation,
         epoch: u64,
         breaker_state: BreakerState,
+        deadline: Instant,
     ) {
         if !self.mesh_gate_matches(epoch) {
             return;
         }
-        self.set_mesh_breaker_for_epoch(peer, breaker_state, None, epoch)
+        self.set_mesh_breaker_for_epoch_until(peer, breaker_state, None, epoch, deadline)
             .await;
-        self.record_sample_for_epoch(
+        self.record_sample_for_epoch_until(
             peer,
             telemetry_sample(
                 TelemetryPath::Mesh,
@@ -309,6 +312,7 @@ impl MeshAwareHttpClient {
                 Some(transport),
             ),
             epoch,
+            deadline,
         )
         .await;
     }
@@ -695,9 +699,10 @@ mod tests {
     async fn mesh_success_telemetry_does_not_requeue_gate_reader() {
         let temp = tempfile::tempdir().expect("telemetry directory");
         let telemetry = MeshTelemetryHandle::load(temp.path()).expect("telemetry");
+        let telemetry_state = telemetry.hold_state_for_test().await;
         let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
         let client = MeshAwareHttpClient::new(reqwest::Client::new())
-            .with_mesh_observability(telemetry)
+            .with_mesh_observability(telemetry.clone())
             .with_mesh_gate_lock(gate_lock.clone());
         let peer = MeshPeerTarget {
             node_id: "peer".to_owned(),
@@ -744,10 +749,12 @@ mod tests {
                 },
                 0,
                 BreakerState::Closed,
+                Instant::now() + Duration::from_millis(10),
             ),
         )
         .await
-        .expect("telemetry must not wait for the queued gate writer");
+        .expect("telemetry must not wait for the held telemetry or gate locks");
+        drop(telemetry_state);
         drop(in_flight);
         let _ = release_tx.send(());
         writer.await.expect("writer should finish");
