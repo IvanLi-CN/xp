@@ -237,8 +237,20 @@ pub(super) fn attach_mesh_gate(
     gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
     deadline: Instant,
 ) -> reqwest::Response {
+    attach_mesh_gate_with_finish(response, gate_guard, deadline, None)
+}
+
+pub(super) fn attach_mesh_gate_with_finish(
+    response: reqwest::Response,
+    gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+    deadline: Instant,
+    on_finish: Option<Box<dyn FnOnce() + Send + 'static>>,
+) -> reqwest::Response {
     if response.content_length() == Some(0) {
         drop(gate_guard);
+        if let Some(on_finish) = on_finish {
+            on_finish();
+        }
         return response;
     }
     let response_url = response.url().clone();
@@ -255,7 +267,8 @@ pub(super) fn attach_mesh_gate(
     extensions.extend(std::mem::take(&mut parts.extensions));
     parts.extensions = extensions;
     let body = body.into_data_stream().map_err(std::io::Error::other);
-    let guarded_body = crate::mesh_gate_body::guard_stream(body, gate_guard, deadline);
+    let guarded_body =
+        crate::mesh_gate_body::guard_stream_with_finish(body, gate_guard, deadline, on_finish);
     reqwest::Response::from(axum::http::Response::from_parts(
         parts,
         reqwest::Body::wrap_stream(guarded_body),

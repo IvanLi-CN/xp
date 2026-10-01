@@ -14,11 +14,25 @@ use tokio::{
 type BodyStream = futures_util::stream::BoxStream<'static, Result<Bytes, io::Error>>;
 type GateGuard = OwnedRwLockReadGuard<()>;
 
-struct GuardCell(Mutex<Option<GateGuard>>);
+type FinishCallback = Box<dyn FnOnce() + Send + 'static>;
+
+struct GuardCell(Mutex<(Option<GateGuard>, Option<FinishCallback>)>);
 
 impl GuardCell {
-    fn take(&self) -> Option<GateGuard> {
-        self.0.lock().ok().and_then(|mut guard| guard.take())
+    fn finish(&self) {
+        let Some((guard, callback)) = self
+            .0
+            .lock()
+            .ok()
+            .map(|mut state| (state.0.take(), state.1.take()))
+        else {
+            return;
+        };
+        let had_guard = guard.is_some();
+        drop(guard);
+        if had_guard && let Some(callback) = callback {
+            callback();
+        }
     }
 }
 
@@ -36,7 +50,7 @@ impl GuardedBodyState {
         if let Some(cancel_timer) = self.cancel_timer.take() {
             let _ = cancel_timer.send(());
         }
-        drop(self.guard.take());
+        self.guard.finish();
     }
 }
 
@@ -51,13 +65,22 @@ pub(crate) fn guard_stream(
     gate_guard: GateGuard,
     deadline: Instant,
 ) -> impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static {
-    let guard = Arc::new(GuardCell(Mutex::new(Some(gate_guard))));
+    guard_stream_with_finish(body, gate_guard, deadline, None)
+}
+
+pub(crate) fn guard_stream_with_finish(
+    body: impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static,
+    gate_guard: GateGuard,
+    deadline: Instant,
+    on_finish: Option<FinishCallback>,
+) -> impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static {
+    let guard = Arc::new(GuardCell(Mutex::new((Some(gate_guard), on_finish))));
     let (cancel_timer, timer_cancelled) = oneshot::channel();
     let timer_guard = Arc::clone(&guard);
     tokio::spawn(async move {
         tokio::select! {
             _ = time::sleep_until(time::Instant::from_std(deadline)) => {
-                drop(timer_guard.take());
+                timer_guard.finish();
             }
             _ = timer_cancelled => {}
         }

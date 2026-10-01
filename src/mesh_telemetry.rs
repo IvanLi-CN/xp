@@ -253,7 +253,7 @@ impl MeshTelemetryHandle {
     }
 
     #[cfg(test)]
-    pub(crate) async fn hold_state_for_test(&self) -> impl Send {
+    pub(crate) async fn hold_state_for_test(&self) -> impl Send + use<> {
         self.state.clone().lock_owned().await
     }
 
