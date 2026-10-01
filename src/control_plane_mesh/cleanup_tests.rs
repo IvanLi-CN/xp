@@ -1,4 +1,6 @@
+use super::peer_target_tests::primary_reverse_target;
 use super::*;
+use crate::reconcile::ReconcileHandle;
 use std::sync::atomic::Ordering;
 
 impl MeshAwareHttpClient {
@@ -14,7 +16,7 @@ impl MeshAwareHttpClient {
 }
 
 #[tokio::test]
-async fn protocol_failure_cleanup_does_not_hold_epoch_barrier() {
+async fn protocol_failure_cleanup_waits_for_epoch_barrier_before_state_update() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
     let peer = MeshPeerTarget {
         node_id: "peer".to_owned(),
@@ -27,16 +29,11 @@ async fn protocol_failure_cleanup_does_not_hold_epoch_barrier() {
     };
     let barrier_writer = client.mesh_epoch_barrier.clone().write_owned().await;
     client.spawn_protocol_failure_cleanup(&peer, 0, None, client.circuits.next_operation());
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if client.circuits().state("peer", true).await == BreakerState::Open {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("cleanup should not wait for the epoch barrier");
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    assert_eq!(
+        client.circuits().state("peer", true).await,
+        BreakerState::Closed
+    );
     drop(barrier_writer);
 
     tokio::time::timeout(Duration::from_secs(1), async {
@@ -211,5 +208,64 @@ async fn public_admission_timeout_does_not_dispatch_after_circuit_lock_wait() {
     assert!(matches!(result, MeshRequestError::PreDispatchTimeout));
     assert_eq!(public_requests.load(Ordering::SeqCst), 0);
     drop(public_lock);
+    public_task.abort();
+}
+
+#[tokio::test]
+async fn mesh_admission_timeout_does_not_public_dispatch_an_ordinary_mutation() {
+    let reconcile = ReconcileHandle::noop();
+    let gate = reconcile.mesh_gate();
+    let epoch = reconcile.mesh_gate_epoch();
+    let in_flight_mesh_read = reconcile.mesh_gate_lock().read_owned().await;
+    let transition = tokio::spawn({
+        let reconcile = reconcile.clone();
+        async move { reconcile.initialize_mesh_gate(false).await }
+    });
+    tokio::task::yield_now().await;
+
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let (public_base_url, public_requests, public_task) =
+        super::peer_target_tests::spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
+    let (mesh_base_url, mesh_requests, mesh_task) =
+        super::peer_target_tests::spawn_stalling_mesh().await;
+    let peer = primary_reverse_target(Some(mesh_base_url), public_base_url);
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new())
+            .with_mesh_gate_epoch(gate, epoch)
+            .with_mesh_gate_lock(reconcile.mesh_gate_lock());
+
+    let result = tokio::time::timeout(
+        Duration::from_millis(900),
+        client.send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::POST,
+                path_and_query: "/api/admin/_internal/raft/client-write".to_owned(),
+                content_type: Some("application/json".to_owned()),
+                body: br#"{\"op\":\"set\"}"#.to_vec(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: false,
+                request_id: "mesh-admission-timeout-no-mutation-fallback".to_owned(),
+                route: InternalRoute::MeshV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+                sender_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+                updates_active_path: true,
+            },
+            &ca.key_pem,
+            &ca.cert_pem,
+        ),
+    )
+    .await
+    .expect("ordinary mutation admission must remain bounded");
+    assert!(matches!(result, Err(MeshRequestError::PreDispatchTimeout)));
+    assert_eq!(mesh_requests.load(Ordering::SeqCst), 0);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 0);
+
+    drop(in_flight_mesh_read);
+    transition
+        .await
+        .expect("gate transition task should finish");
+    mesh_task.abort();
     public_task.abort();
 }

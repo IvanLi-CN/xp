@@ -15,9 +15,10 @@ impl MeshAwareHttpClient {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
-                if !client.mesh_gate_matches(epoch) {
+                let Some(_epoch_guard) = client.mesh_epoch_guard_until(epoch, deadline, true).await
+                else {
                     return;
-                }
+                };
                 let _ = crate::control_plane_mesh::await_until(
                     deadline,
                     client
@@ -51,9 +52,10 @@ impl MeshAwareHttpClient {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
-                if !client.mesh_gate_matches(epoch) {
+                let Some(_epoch_guard) = client.mesh_epoch_guard_until(epoch, deadline, true).await
+                else {
                     return;
-                }
+                };
                 let _ = crate::control_plane_mesh::await_until(
                     deadline,
                     client
@@ -88,9 +90,10 @@ impl MeshAwareHttpClient {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
-                if !client.mesh_gate_matches(epoch) {
+                let Some(_epoch_guard) = client.mesh_epoch_guard_until(epoch, deadline, true).await
+                else {
                     return;
-                }
+                };
                 let _ = crate::control_plane_mesh::await_until(
                     deadline,
                     client.mark_direct_validation_failure_with_operation(
@@ -117,9 +120,10 @@ impl MeshAwareHttpClient {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
-                if !client.mesh_gate_matches(epoch) {
+                let Some(_epoch_guard) = client.mesh_epoch_guard_until(epoch, deadline, true).await
+                else {
                     return;
-                }
+                };
                 let _ = crate::control_plane_mesh::await_until(
                     deadline,
                     client

@@ -231,11 +231,13 @@ impl MeshAwareHttpClient {
             )
             .await;
         if matches!(decision, MeshAttemptDecision::Probe) {
-            self.release_half_open_probe_for_epoch_until(&peer.node_id, epoch, request_deadline)
-                .await;
-            if let Some(guard) = mesh_probe_guard.as_mut() {
-                guard.disarm();
-            }
+            self.release_mesh_probe_guard_until(
+                &mut mesh_probe_guard,
+                &peer.node_id,
+                epoch,
+                request_deadline,
+            )
+            .await;
         }
         if !self
             .mesh_epoch_is_current_until(epoch, request_deadline)
@@ -373,19 +375,54 @@ impl MeshAwareHttpClient {
         peer_id: &str,
         epoch: u64,
         deadline: Instant,
-    ) {
+    ) -> bool {
         let Some(_reset_guard) =
             crate::control_plane_mesh::await_until(deadline, self.mesh_epoch_reset_lock.lock())
                 .await
         else {
-            return;
+            return false;
         };
-        let _ = crate::control_plane_mesh::await_until(
+        crate::control_plane_mesh::await_until(
             deadline,
             self.circuits
                 .release_half_open_probe_for_epoch(peer_id, epoch),
         )
-        .await;
+        .await
+        .unwrap_or(false)
+    }
+
+    pub(super) async fn release_mesh_probe_guard_until(
+        &self,
+        guard: &mut Option<MeshHalfOpenProbeGuard>,
+        peer_id: &str,
+        epoch: u64,
+        deadline: Instant,
+    ) {
+        if self
+            .release_half_open_probe_for_epoch_until(peer_id, epoch, deadline)
+            .await
+            && let Some(guard) = guard.as_mut()
+        {
+            guard.disarm();
+        }
+    }
+
+    pub(super) async fn release_public_probe_guard_until(
+        &self,
+        guard: &mut Option<PublicHalfOpenProbeGuard>,
+        peer_id: &str,
+        deadline: Instant,
+    ) {
+        if crate::control_plane_mesh::await_until(
+            deadline,
+            self.circuits.release_public_half_open_probe(peer_id),
+        )
+        .await
+        .unwrap_or(false)
+            && let Some(guard) = guard.as_mut()
+        {
+            guard.disarm();
+        }
     }
 
     #[cfg(test)]

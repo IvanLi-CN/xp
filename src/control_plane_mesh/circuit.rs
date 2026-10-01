@@ -245,11 +245,9 @@ impl Drop for MeshHalfOpenProbeGuard {
         let epoch = self.epoch;
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let _ = tokio::time::timeout(
-                    Duration::from_millis(100),
-                    circuits.release_half_open_probe_for_epoch(&peer_id, epoch),
-                )
-                .await;
+                circuits
+                    .release_half_open_probe_for_epoch(&peer_id, epoch)
+                    .await;
             });
         }
     }
@@ -282,11 +280,7 @@ impl Drop for PublicHalfOpenProbeGuard {
         let peer_id = self.peer_id.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let _ = tokio::time::timeout(
-                    Duration::from_millis(100),
-                    circuits.release_public_half_open_probe(&peer_id),
-                )
-                .await;
+                circuits.release_public_half_open_probe(&peer_id).await;
             });
         }
     }
@@ -384,13 +378,20 @@ impl PeerCircuitBreakers {
         Some(BreakerState::Closed)
     }
 
-    pub(super) async fn release_half_open_probe_for_epoch(&self, peer_id: &str, epoch: u64) {
+    pub(super) async fn release_half_open_probe_for_epoch(
+        &self,
+        peer_id: &str,
+        epoch: u64,
+    ) -> bool {
         let mut peers = self.peers.lock().await;
         if let Some(circuit) = peers.get_mut(peer_id)
             && circuit.half_open_epoch == Some(epoch)
         {
             circuit.half_open_in_flight = false;
             circuit.half_open_epoch = None;
+            true
+        } else {
+            false
         }
     }
 
@@ -555,12 +556,9 @@ impl PeerCircuitBreakers {
         let peer_id = peer_id.to_owned();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let deadline = Instant::now() + Duration::from_millis(100);
-                let _ = crate::control_plane_mesh::await_until(
-                    deadline,
-                    circuits.record_public_failure_at(&peer_id, operation_id),
-                )
-                .await;
+                circuits
+                    .record_public_failure_at(&peer_id, operation_id)
+                    .await;
             });
         }
     }
@@ -606,11 +604,14 @@ impl PeerCircuitBreakers {
         let remaining = circuit.retry_at?.saturating_duration_since(Instant::now());
         (!remaining.is_zero()).then(|| remaining.as_secs().saturating_add(1).clamp(1, 300))
     }
-    pub async fn release_public_half_open_probe(&self, peer_id: &str) {
+    pub async fn release_public_half_open_probe(&self, peer_id: &str) -> bool {
         let mut peers = self.public_peers.lock().await;
         if let Some(circuit) = peers.get_mut(peer_id) {
             circuit.half_open_in_flight = false;
             circuit.half_open_epoch = None;
+            true
+        } else {
+            false
         }
     }
 
@@ -721,6 +722,13 @@ mod tests {
         let circuits = PeerCircuitBreakers::default();
         let public_peers = circuits.public_peers.lock().await;
         circuits.spawn_public_failure_cleanup("peer", circuits.next_operation());
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), circuits.public_state("peer"))
+                .await
+                .is_err(),
+            "public cleanup should remain pending while its state lock is held"
+        );
         drop(public_peers);
 
         tokio::time::timeout(Duration::from_secs(1), async {
@@ -748,7 +756,10 @@ mod tests {
             .before_attempt_with_probe_at_epoch("peer", true, true, Some(7))
             .await;
         assert_eq!(decision, MeshAttemptDecision::Probe);
+        let peers_lock = circuits.peers.clone().lock_owned().await;
         drop(MeshHalfOpenProbeGuard::new(&circuits, "peer", decision, 7));
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        drop(peers_lock);
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {

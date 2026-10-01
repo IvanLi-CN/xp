@@ -56,8 +56,9 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
     ) -> Result<MeshAttemptResult, MeshRequestError> {
         let request_deadline = started + request.total_budget;
+        let mesh_send_deadline = started + budget;
         let send_result = self
-            .with_mesh_send_until(mesh_epoch, started + budget, |remaining| async move {
+            .with_mesh_send_until(mesh_epoch, mesh_send_deadline, |remaining| async move {
                 signed_send(
                     &self.mesh,
                     mesh_url,
@@ -74,7 +75,7 @@ impl MeshAwareHttpClient {
             // The gate rejected admission before dispatch, so the request outcome is known.
             None => Ok(MeshAttemptResult::Fallback {
                 ambiguous: false,
-                timed_out: false,
+                timed_out: Instant::now() >= mesh_send_deadline,
             }),
             Some((Ok((response, verified)), gate_guard)) => {
                 let transport = mesh_transport_observation(&response);
@@ -442,6 +443,30 @@ impl MeshAwareHttpClient {
             return None;
         }
         let guard = self.mesh_epoch_barrier.clone().try_read_owned().ok()?;
+        if (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
+            || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
+        {
+            return None;
+        }
+        Some(guard)
+    }
+
+    pub(super) async fn mesh_epoch_guard_until(
+        &self,
+        epoch: u64,
+        deadline: Instant,
+        require_enabled: bool,
+    ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+        if (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
+            || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
+        {
+            return None;
+        }
+        let guard = crate::control_plane_mesh::await_until(
+            deadline,
+            self.mesh_epoch_barrier.clone().read_owned(),
+        )
+        .await?;
         if (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
             || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
         {

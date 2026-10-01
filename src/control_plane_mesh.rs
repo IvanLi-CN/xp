@@ -491,7 +491,9 @@ impl MeshAwareHttpClient {
     ) -> Result<PeerRequestResponse, MeshRequestError> {
         let started = Instant::now();
         let request_deadline = started + request.total_budget;
-        let observed_mesh_gate = self.observe_mesh_gate_until(request_deadline).await;
+        let mesh_admission_deadline =
+            started + mesh_attempt_budget(request.total_budget).min(request.total_budget);
+        let observed_mesh_gate = self.observe_mesh_gate_until(mesh_admission_deadline).await;
         let admission_timed_out = observed_mesh_gate.is_none();
         let cluster_mesh_enabled = observed_mesh_gate.unwrap_or(true);
         #[cfg(test)]
@@ -505,7 +507,7 @@ impl MeshAwareHttpClient {
         let validation_snapshot = if admission_timed_out {
             None
         } else {
-            self.direct_validation_snapshot_until(peer, request_deadline)
+            self.direct_validation_snapshot_until(peer, mesh_admission_deadline)
                 .await
         };
         let validation_snapshot_timed_out = validation_snapshot.is_none();
@@ -515,6 +517,11 @@ impl MeshAwareHttpClient {
                 None => (DirectValidationState::ConfiguredUnverified, None, None),
             };
         let mut admission_timed_out = admission_timed_out || validation_snapshot_timed_out;
+        let admission_fallback_allowed = request.allow_ambiguous_fallback
+            || matches!(request.method, reqwest::Method::GET | reqwest::Method::HEAD);
+        if admission_timed_out && !admission_fallback_allowed {
+            allow_public_fallback = false;
+        }
         if cluster_mesh_enabled
             && peer.mesh_base_url.is_some()
             && direct_validation == DirectValidationState::ProtocolRejected
@@ -528,7 +535,12 @@ impl MeshAwareHttpClient {
         }
         let mesh_enabled = direct_mesh_is_eligible(peer, cluster_mesh_enabled, direct_validation);
         let (decision, mesh_epoch) = match self
-            .before_mesh_request_until(&peer.node_id, mesh_enabled, request.route, request_deadline)
+            .before_mesh_request_until(
+                &peer.node_id,
+                mesh_enabled,
+                request.route,
+                mesh_admission_deadline,
+            )
             .await
         {
             Some(decision) => decision,
@@ -540,6 +552,9 @@ impl MeshAwareHttpClient {
                 )
             }
         };
+        if admission_timed_out && !admission_fallback_allowed {
+            allow_public_fallback = false;
+        }
         let mut mesh_probe_guard =
             MeshHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, decision, mesh_epoch);
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
@@ -559,19 +574,17 @@ impl MeshAwareHttpClient {
             decision,
             MeshAttemptDecision::Attempt | MeshAttemptDecision::Probe
         ) && !self
-            .mesh_attempt_is_current_until(mesh_epoch, request_deadline)
+            .mesh_attempt_is_current_until(mesh_epoch, mesh_admission_deadline)
             .await
         {
             if matches!(decision, MeshAttemptDecision::Probe) {
-                self.release_half_open_probe_for_epoch_until(
+                self.release_mesh_probe_guard_until(
+                    &mut mesh_probe_guard,
                     &peer.node_id,
                     mesh_epoch,
                     request_deadline,
                 )
                 .await;
-                if let Some(guard) = mesh_probe_guard.as_mut() {
-                    guard.disarm();
-                }
             }
             fallback = true;
         }
@@ -588,15 +601,13 @@ impl MeshAwareHttpClient {
                 Ok(url) => url,
                 Err(error) => {
                     if matches!(decision, MeshAttemptDecision::Probe) {
-                        self.release_half_open_probe_for_epoch_until(
+                        self.release_mesh_probe_guard_until(
+                            &mut mesh_probe_guard,
                             &peer.node_id,
                             mesh_epoch,
                             request_deadline,
                         )
                         .await;
-                        if let Some(guard) = mesh_probe_guard.as_mut() {
-                            guard.disarm();
-                        }
                     }
                     return Err(error);
                 }
@@ -623,19 +634,23 @@ impl MeshAwareHttpClient {
                     timed_out,
                 } => {
                     if matches!(decision, MeshAttemptDecision::Probe) {
-                        self.release_half_open_probe_for_epoch_until(
+                        self.release_mesh_probe_guard_until(
+                            &mut mesh_probe_guard,
                             &peer.node_id,
                             mesh_epoch,
                             request_deadline,
                         )
                         .await;
-                        if let Some(guard) = mesh_probe_guard.as_mut() {
-                            guard.disarm();
-                        }
                     }
                     fallback = true;
                     mesh_outcome_ambiguous |= ambiguous;
                     mesh_outcome_timed_out |= timed_out;
+                    if timed_out {
+                        admission_timed_out = true;
+                        if !admission_fallback_allowed {
+                            allow_public_fallback = false;
+                        }
+                    }
                 }
                 gate::MeshAttemptResult::Response(response) => return Ok(response),
             }
@@ -848,14 +863,12 @@ impl MeshAwareHttpClient {
         let public_url = match join_url(&peer.public_base_url, &request.path_and_query, false) {
             Ok(url) => url,
             Err(error) => {
-                let _ = await_until(
+                self.release_public_probe_guard_until(
+                    &mut public_probe_guard,
+                    &peer.node_id,
                     request_deadline,
-                    self.circuits.release_public_half_open_probe(&peer.node_id),
                 )
                 .await;
-                if let Some(guard) = public_probe_guard.as_mut() {
-                    guard.disarm();
-                }
                 return Err(error);
             }
         };
@@ -877,14 +890,12 @@ impl MeshAwareHttpClient {
                 | MeshRequestError::PreDispatchTimeout
                 | MeshRequestError::InvalidTarget(_)),
             ) => {
-                let _ = await_until(
+                self.release_public_probe_guard_until(
+                    &mut public_probe_guard,
+                    &peer.node_id,
                     request_deadline,
-                    self.circuits.release_public_half_open_probe(&peer.node_id),
                 )
                 .await;
-                if let Some(guard) = public_probe_guard.as_mut() {
-                    guard.disarm();
-                }
                 return Err(error);
             }
             Err(error) => {
@@ -1149,7 +1160,6 @@ impl MeshAwareHttpClient {
         Ok(reverse::attach_reverse_slot(response, reverse_slot))
     }
 }
-
 fn telemetry_sample(
     path: TelemetryPath,
     success: bool,
