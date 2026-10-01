@@ -45,9 +45,12 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   value is already unchanged, regardless of an unrelated state-generation advance. Mesh admission
   and response-body guards use the caller's
   absolute deadline; an independent body timer releases an unconsumed response guard, and terminal
-  body states release it without retrying a signed response through Public. Breaker/validation state
-  updates stay under the bounded admission guard, while persistence telemetry is deadline-aware
-  after the guard is released.
+  body states release it without retrying a signed response through Public. Signed Mesh success
+  reserves its circuit operation id at header verification and carries the half-open probe guard
+  through body completion, so a late body cannot overwrite a newer protocol rejection and a second
+  half-open probe cannot start while the first body is active. Breaker/validation state updates stay
+  under the bounded admission guard, while persistence telemetry is deadline-aware after the guard
+  is released.
   Non-bootstrap nodes hold the local gate closed until the first authenticated Raft state or
   snapshot is applied, so a joining node cannot emit Mesh traffic from the default local state.
   Snapshots carry an explicit `mesh_state_applied` payload marker plus snapshot identity fields.
@@ -119,8 +122,10 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   held, unchanged reconcile without a queued writer after a generation advance, queued-writer
   admission timeout with remaining-budget Public fallback and half-open release, protocol rejection
   cleanup after the request deadline, and EOF/error/drop/unpolled/deadline response-body guard
-  release. The direct admission path preserves `PreDispatchTimeout` while the gate remains enabled;
-  bounded state and telemetry updates retain epoch classification.
+  release. They also cover delayed Mesh success versus newer protocol rejection and retain the
+  half-open probe slot until a successful response body finishes. The direct admission path
+  preserves `PreDispatchTimeout` while the gate remains enabled; bounded state and telemetry
+  updates retain epoch classification.
 - The 50-peer resource comparison records XP anonymous and total PSS separately. Anonymous PSS has
   an 18 MiB absolute ceiling; XP total PSS and the isolated XP-plus-Xray stack each have a 1 MiB
   regression ceiling against the locked baseline. File-backed executable pages remain included in
@@ -130,18 +135,19 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   copies the resolved executables into the disposable run before measurement, so build scripts and
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
-- The current locked runtime candidate is `e14677d5` (full source SHA is recorded in
-  `./evidence/local-checks-e14677d5.md`). Local command results, including `85` Mesh tests and
-  `1533` library tests, are recorded there. Signed response headers only authenticate the
+- The current locked runtime candidate is `40cb7962` (full source SHA is recorded in
+  `./evidence/local-checks-40cb7962.md`). Local command results, including `89` Mesh tests and
+  `1536` library tests, are recorded there. Signed response headers only authenticate the
   response; Mesh, Direct health preflight, and Public signed success commit after the body
   completes. Error, cancellation, and deadline outcomes release the relevant gate or probe
   without recording success, while the captured Mesh epoch prevents an old response from
-  updating a newer gate generation. Non-idempotent history cleanup keeps fail-closed
+  updating a newer gate generation; the captured circuit operation id also prevents an old body
+  from reopening a newer protocol-isolated peer. Non-idempotent history cleanup keeps fail-closed
   `outcome_unknown` handling after an ambiguous response. The previous `96050406` runner
   exceeded the total-PSS relative ceiling by `197 KiB`; the later `f933bd92` runner passed the
   isolated workload but is not the current SHA. A fresh testbox run for this runtime candidate
   is required before A4 can pass, with the exact command and result recorded in
-  `./evidence/mesh-resource-e14677d5.md`.
+  `./evidence/mesh-resource-40cb7962.md`.
 - Host-managed fresh-join and service-recovery evidence passed on the immediately preceding
   runtime candidate. The current repair changes circuit admission and Mesh success telemetry,
   not deployment, membership, persistence, or service activation code; the scope and non-same-SHA
