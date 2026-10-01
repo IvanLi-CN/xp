@@ -231,7 +231,13 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
         allow_mesh_when_disabled: bool,
-    ) -> Result<reqwest::Response, MeshRequestError> {
+    ) -> Result<
+        (
+            reqwest::Response,
+            Option<tokio::sync::oneshot::Receiver<bool>>,
+        ),
+        MeshRequestError,
+    > {
         let request_deadline = Instant::now() + request.total_budget;
         let (_, validation_revision, _membership_guard) = self
             .direct_validation_snapshot_until(peer, request_deadline)
@@ -312,15 +318,23 @@ impl MeshAwareHttpClient {
                     }
                 }
             }
-            return result;
+            return result.map(|response| (response, None));
         }
         let operation_id = self.circuits.next_operation();
+        let (completion_sender, completion_receiver) = if allow_mesh_when_disabled {
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            (Some(sender), Some(receiver))
+        } else {
+            (None, None)
+        };
         if let Err(error) = &result {
             let validation_state = match error {
                 MeshRequestError::PreDispatchAuth(_)
                 | MeshRequestError::PreDispatchTimeout
                 | MeshRequestError::InvalidTarget(_)
-                | MeshRequestError::CircuitOpen { .. } => return result,
+                | MeshRequestError::CircuitOpen { .. } => {
+                    return result.map(|response| (response, None));
+                }
                 MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => {
                     DirectValidationState::ProtocolRejected
                 }
@@ -347,18 +361,22 @@ impl MeshAwareHttpClient {
             };
             if !recorded {
                 match validation_state {
-                    DirectValidationState::ProtocolRejected => self.spawn_protocol_failure_cleanup(
-                        peer,
-                        epoch,
-                        validation_revision.clone(),
-                        operation_id,
-                    ),
-                    DirectValidationState::TransportFailed => self.spawn_retryable_failure_cleanup(
-                        peer,
-                        epoch,
-                        validation_revision.clone(),
-                        operation_id,
-                    ),
+                    DirectValidationState::ProtocolRejected => self
+                        .spawn_protocol_failure_cleanup_for_preflight(
+                            peer,
+                            epoch,
+                            validation_revision.clone(),
+                            operation_id,
+                            allow_mesh_when_disabled,
+                        ),
+                    DirectValidationState::TransportFailed => self
+                        .spawn_retryable_failure_cleanup_for_preflight(
+                            peer,
+                            epoch,
+                            validation_revision.clone(),
+                            operation_id,
+                            allow_mesh_when_disabled,
+                        ),
                     _ => unreachable!("preflight failure state is classified above"),
                 }
             }
@@ -375,12 +393,13 @@ impl MeshAwareHttpClient {
             .await
             .is_some_and(|recorded| recorded);
             if !validation_recorded {
-                self.spawn_validation_failure_cleanup(
+                self.spawn_validation_failure_cleanup_for_preflight(
                     peer,
                     epoch,
                     validation_state,
                     cleanup_revision,
                     operation_id,
+                    allow_mesh_when_disabled,
                 );
             }
         } else {
@@ -393,14 +412,18 @@ impl MeshAwareHttpClient {
                 mesh_probe_guard.take(),
                 allow_mesh_when_disabled,
                 request_deadline,
+                completion_sender,
             );
-            return Ok(super::reverse::attach_response_with_finish(
-                response,
-                request_deadline,
-                Some(callback),
+            return Ok((
+                super::reverse::attach_response_with_finish(
+                    response,
+                    request_deadline,
+                    Some(callback),
+                ),
+                completion_receiver,
             ));
         }
-        result
+        result.map(|response| (response, None))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -413,15 +436,19 @@ impl MeshAwareHttpClient {
         mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
         allow_mesh_when_disabled: bool,
         deadline: Instant,
+        completion_sender: Option<tokio::sync::oneshot::Sender<bool>>,
     ) -> crate::mesh_gate_body::FinishCallback {
         let client = self.clone();
         let peer = peer.clone();
         Box::new(move |outcome| {
             if outcome != crate::mesh_gate_body::BodyFinish::Complete {
+                if let Some(sender) = completion_sender {
+                    let _ = sender.send(false);
+                }
                 return;
             }
             tokio::spawn(async move {
-                client
+                let committed = client
                     .record_direct_preflight_success_after_body(
                         &peer,
                         epoch,
@@ -432,6 +459,9 @@ impl MeshAwareHttpClient {
                         deadline,
                     )
                     .await;
+                if let Some(sender) = completion_sender {
+                    let _ = sender.send(committed);
+                }
             });
         })
     }
@@ -446,12 +476,12 @@ impl MeshAwareHttpClient {
         mut mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
         allow_mesh_when_disabled: bool,
         deadline: Instant,
-    ) {
+    ) -> bool {
         let Some(_epoch_guard) = self
             .mesh_epoch_guard_until(epoch, deadline, !allow_mesh_when_disabled)
             .await
         else {
-            return;
+            return false;
         };
         let breaker_recorded = crate::control_plane_mesh::await_until(
             deadline,
@@ -472,11 +502,22 @@ impl MeshAwareHttpClient {
         .await
         .is_some_and(|recorded| recorded);
         if !breaker_recorded || !validation_recorded {
-            self.spawn_validation_success_cleanup(peer, epoch, cleanup_revision, operation_id);
+            if allow_mesh_when_disabled {
+                self.spawn_validation_success_cleanup_for_preflight(
+                    peer,
+                    epoch,
+                    cleanup_revision,
+                    operation_id,
+                    true,
+                );
+            } else {
+                self.spawn_validation_success_cleanup(peer, epoch, cleanup_revision, operation_id);
+            }
         }
         if breaker_recorded && let Some(guard) = mesh_probe_guard.as_mut() {
             guard.disarm();
         }
+        breaker_recorded && validation_recorded
     }
 
     #[cfg(test)]

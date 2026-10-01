@@ -228,17 +228,58 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         operation_id: u64,
     ) {
+        self.spawn_validation_failure_cleanup_with_requirement(
+            peer,
+            epoch,
+            state,
+            validation_revision,
+            operation_id,
+            true,
+        );
+    }
+
+    pub(super) fn spawn_validation_failure_cleanup_for_preflight(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        state: DirectValidationState,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        allow_mesh_when_disabled: bool,
+    ) {
+        self.spawn_validation_failure_cleanup_with_requirement(
+            peer,
+            epoch,
+            state,
+            validation_revision,
+            operation_id,
+            !allow_mesh_when_disabled,
+        );
+    }
+
+    fn spawn_validation_failure_cleanup_with_requirement(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        state: DirectValidationState,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        require_enabled: bool,
+    ) {
         let client = self.clone();
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 loop {
-                    if !client.mesh_gate_matches(epoch) {
+                    if (require_enabled && !client.mesh_gate_matches(epoch))
+                        || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                    {
                         return;
                     }
                     let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
-                    let Some(epoch_guard) =
-                        client.mesh_epoch_guard_until(epoch, deadline, true).await
+                    let Some(epoch_guard) = client
+                        .mesh_epoch_guard_until(epoch, deadline, require_enabled)
+                        .await
                     else {
                         tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
                         continue;
@@ -270,17 +311,54 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         operation_id: u64,
     ) {
+        self.spawn_validation_success_cleanup_with_requirement(
+            peer,
+            epoch,
+            validation_revision,
+            operation_id,
+            true,
+        );
+    }
+
+    pub(super) fn spawn_validation_success_cleanup_for_preflight(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        allow_mesh_when_disabled: bool,
+    ) {
+        self.spawn_validation_success_cleanup_with_requirement(
+            peer,
+            epoch,
+            validation_revision,
+            operation_id,
+            !allow_mesh_when_disabled,
+        );
+    }
+
+    fn spawn_validation_success_cleanup_with_requirement(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        require_enabled: bool,
+    ) {
         let client = self.clone();
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 loop {
-                    if !client.mesh_gate_matches(epoch) {
+                    if (require_enabled && !client.mesh_gate_matches(epoch))
+                        || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                    {
                         return;
                     }
                     let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
-                    let Some(epoch_guard) =
-                        client.mesh_epoch_guard_until(epoch, deadline, true).await
+                    let Some(epoch_guard) = client
+                        .mesh_epoch_guard_until(epoch, deadline, require_enabled)
+                        .await
                     else {
                         tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
                         continue;
@@ -301,12 +379,15 @@ impl MeshAwareHttpClient {
                 }
 
                 loop {
-                    if !client.mesh_gate_matches(epoch) {
+                    if (require_enabled && !client.mesh_gate_matches(epoch))
+                        || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                    {
                         return;
                     }
                     let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
-                    let Some(epoch_guard) =
-                        client.mesh_epoch_guard_until(epoch, deadline, true).await
+                    let Some(epoch_guard) = client
+                        .mesh_epoch_guard_until(epoch, deadline, require_enabled)
+                        .await
                     else {
                         tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
                         continue;

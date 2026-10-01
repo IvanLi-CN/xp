@@ -313,6 +313,7 @@ impl MeshAwareHttpClient {
             false,
         )
         .await
+        .map(|(response, _)| response)
     }
 
     pub(crate) async fn send_peer_direct_preflight_for_reenable(
@@ -321,7 +322,7 @@ impl MeshAwareHttpClient {
         request: MeshRequest,
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
-    ) -> Result<reqwest::Response, MeshRequestError> {
+    ) -> Result<(reqwest::Response, tokio::sync::oneshot::Receiver<bool>), MeshRequestError> {
         self.send_peer_direct_preflight_with_admission(
             peer,
             request,
@@ -330,6 +331,12 @@ impl MeshAwareHttpClient {
             true,
         )
         .await
+        .map(|(response, completion)| {
+            (
+                response,
+                completion.expect("reenable preflight must expose completion"),
+            )
+        })
     }
     #[allow(clippy::too_many_arguments)]
     async fn send_peer_direct_request_with_options(
