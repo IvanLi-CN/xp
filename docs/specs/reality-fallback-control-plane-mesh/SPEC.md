@@ -245,6 +245,11 @@
   TLS/TCP 建连数高于每个 peer 一条持久连接的 floor 时，候选至少减少 90%；基线已经处于
   该 floor 时，候选不得超过该 floor。file-backed PSS 仍计入 total PSS；该相对门禁不代表
   完整托管栈已经满足 64 MiB 总预算。
+- 隔离 shared-testbox 的 host-managed fresh-join workload 必须验证官方 `xp-ops` deploy、
+  systemd/OpenRC follower 加入、服务重启后的身份保持、OpenRC XP 强杀恢复和三节点成员列表。
+  该 workload 若未暴露 committed、`last_applied` 或选举超时计数，不得把这些未测量指标写成
+  运行证据；它们由 state-machine、admission 和 response-body 的确定性回归覆盖，直到有专门
+  的多节点指标采集器为止。
 - Web 覆盖 healthy、fallback、slow、down、stale、empty、partial 与 50 peers。
 - 后端通过 fmt、clippy 和 test；前端通过 lint、typecheck、Vitest、
   Storybook、Playwright 与 style budget。

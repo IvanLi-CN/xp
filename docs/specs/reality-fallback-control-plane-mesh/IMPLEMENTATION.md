@@ -130,20 +130,22 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   copies the resolved executables into the disposable run before measurement, so build scripts and
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
-- The current locked 15-minute comparison completed on candidate
-  `d0d88f242c1ec85c2d41bd6d1a010a40e1055266` in testbox run
-  `20260930_193626_d0d88f242c1e_af73dce8`. Candidate XP total PSS was 32,235 KiB versus
-  31,408 KiB for the baseline; anonymous PSS was 17,932 KiB versus 17,224 KiB, stack PSS was
-  40,811 KiB versus 59,229 KiB, and CPU ticks were 189 versus 213. All 50 peers reached the
-  candidate smoke and formal workload with one active H2 connection each, 50 TLS accepts, and zero
-  non-H2 requests. The repository summary peak was 27,336 KiB and the source journal peak was
-  27,059 KiB; source-journal CPU p95 was 1%, additional read bytes were 0, max RSS delta was
-  8,192 bytes, and the journal remained in `journal_capacity_guard` at 19,971 pending segments.
-  The targeted lock-coupling regressions ran as 76 Mesh tests plus 7 H2 transport tests, and the
-  full Rust suite reported 1,524 library tests, 7 main tests, and all non-ignored integration tests
-  passed. The exact archive hashes, pinned baseline command, and manifest are recorded in
-  `./evidence/mesh-resource-d0d88f24.md`; local command results are recorded in
-  `./evidence/local-checks-d0d88f24.md`.
+- The current locked candidate is `1e54d319f92d0d6f3db90d27fa0be52cb04f5d67`. Local command
+  results, including `77` Mesh tests, `7` transport reuse tests, and the full Rust suite, are
+  recorded in `./evidence/local-checks-1e54d319.md`. The host-managed fresh-join runner also
+  passed for this SHA; its exact receipt and scope are recorded in
+  `./evidence/host-managed-fresh-join-1e54d319.md`.
+- The current same-SHA 15-minute candidate-versus-baseline resource comparison passed on
+  `codex-testbox` with the locked baseline `ed109323`. Candidate XP total PSS was `33824 KiB`
+  versus `33454 KiB` for the baseline; anonymous PSS was `16592` versus `16904 KiB`, stack PSS was
+  `48596` versus `64638 KiB`, and CPU ticks were `169` versus `172`. All 50 peers reached the
+  formal workload with one active H2 connection each, 50 TLS accepts, and zero non-H2 requests.
+  Repository summary peak PSS was `29283 KiB`; source journal peak PSS was `29087 KiB`, CPU p95
+  was `1%`, additional read bytes were `0`, and max RSS delta was `16384 bytes`. The exact
+  archive hashes, manifest, and complete A1-A5 mapping are recorded in
+  `./evidence/mesh-resource-1e54d319.md`. The resource workload proves bounded H2/50-peer and
+  memory behavior; it does not by itself measure committed versus `last_applied` convergence or
+  election-timeout counters.
 - Rustls 0.23 uses the ring provider for both the server and Mesh client. Keeping one provider
   removes the unused AWS-LC implementation from the release binary while preserving TLS 1.2/1.3
   and P-256 support. ACME still carries its older HTTP/DNS dependency stack; replacing that stack is
