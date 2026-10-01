@@ -50,6 +50,7 @@ impl MeshAwareHttpClient {
         mesh_epoch: u64,
         validation_revision: Option<String>,
         _membership_guard: Option<tokio::sync::OwnedRwLockReadGuard<Option<String>>>,
+        mesh_probe_guard: &mut Option<MeshHalfOpenProbeGuard>,
         started: Instant,
         allow_unsigned_not_found: bool,
         cluster_ca_key_pem: &str,
@@ -134,6 +135,7 @@ impl MeshAwareHttpClient {
                             )
                             .await);
                     }
+                    let operation_id = self.circuits.next_operation();
                     let response = reverse::attach_mesh_gate_with_finish(
                         response,
                         gate_guard,
@@ -145,6 +147,8 @@ impl MeshAwareHttpClient {
                             transport,
                             mesh_epoch,
                             validation_revision,
+                            operation_id,
+                            mesh_probe_guard.take(),
                             request_deadline,
                         )),
                     );
@@ -155,6 +159,7 @@ impl MeshAwareHttpClient {
                 if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
                     drop(response);
                     drop(gate_guard);
+                    let operation_id = self.circuits.next_operation();
                     self.mesh_success_telemetry_callback(
                         peer,
                         started,
@@ -162,6 +167,8 @@ impl MeshAwareHttpClient {
                         transport,
                         mesh_epoch,
                         validation_revision,
+                        operation_id,
+                        mesh_probe_guard.take(),
                         request_deadline,
                     )(crate::mesh_gate_body::BodyFinish::Complete);
                     return Ok(MeshAttemptResult::Response(
@@ -242,12 +249,12 @@ impl MeshAwareHttpClient {
         peer: &MeshPeerTarget,
         epoch: u64,
         validation_revision: Option<String>,
+        operation_id: u64,
         _epoch_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
     ) -> Option<BreakerState> {
         if !self.mesh_gate_matches(epoch) {
             return None;
         }
-        let operation_id = self.circuits.next_operation();
         let Some(breaker_state) = self
             .circuits
             .try_record_success_at(&peer.node_id, operation_id)
@@ -271,7 +278,7 @@ impl MeshAwareHttpClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn mesh_success_telemetry_callback(
+    pub(super) fn mesh_success_telemetry_callback(
         &self,
         peer: &MeshPeerTarget,
         started: Instant,
@@ -279,6 +286,8 @@ impl MeshAwareHttpClient {
         transport: MeshTransportObservation,
         epoch: u64,
         validation_revision: Option<String>,
+        operation_id: u64,
+        mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
         deadline: Instant,
     ) -> Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static> {
         let client = self.clone();
@@ -297,6 +306,8 @@ impl MeshAwareHttpClient {
                         transport,
                         epoch,
                         validation_revision,
+                        operation_id,
+                        mesh_probe_guard,
                         deadline,
                     )
                     .await;
@@ -305,7 +316,7 @@ impl MeshAwareHttpClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn record_mesh_success_after_body(
+    pub(super) async fn record_mesh_success_after_body(
         &self,
         peer: &MeshPeerTarget,
         started: Instant,
@@ -313,13 +324,25 @@ impl MeshAwareHttpClient {
         transport: MeshTransportObservation,
         epoch: u64,
         validation_revision: Option<String>,
+        operation_id: u64,
+        mut mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
         deadline: Instant,
     ) {
         let Some(epoch_guard) = self.mesh_epoch_guard_until(epoch, deadline, true).await else {
             return;
         };
-        let breaker_state =
-            self.record_mesh_success_state(peer, epoch, validation_revision, &epoch_guard);
+        let breaker_state = self.record_mesh_success_state(
+            peer,
+            epoch,
+            validation_revision,
+            operation_id,
+            &epoch_guard,
+        );
+        if breaker_state.is_some()
+            && let Some(mesh_probe_guard) = mesh_probe_guard.as_mut()
+        {
+            mesh_probe_guard.disarm();
+        }
         let Some(telemetry) = &self.telemetry else {
             return;
         };
@@ -544,7 +567,6 @@ impl PeerCircuitBreakers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn protocol_failure_cleanup_converges_after_request_deadline() {
@@ -727,70 +749,6 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn mesh_success_telemetry_does_not_requeue_gate_reader() {
-        let temp = tempfile::tempdir().expect("telemetry directory");
-        let telemetry = MeshTelemetryHandle::load(temp.path()).expect("telemetry");
-        let telemetry_state = telemetry.clone().hold_state_for_test().await;
-        let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
-        let client = MeshAwareHttpClient::new(reqwest::Client::new())
-            .with_mesh_observability(telemetry.clone())
-            .with_mesh_gate_lock(gate_lock.clone());
-        let peer = MeshPeerTarget {
-            node_id: "peer".to_owned(),
-            node_name: "peer".to_owned(),
-            mesh_base_url: Some("https://mesh.example".to_owned()),
-            endpoint_transport: Some("xhttp_reality_fallback"),
-            endpoint_fingerprint: Some("fingerprint".to_owned()),
-            mesh_reason: MeshPeerReason::MeshAvailable,
-            public_base_url: "https://public.example".to_owned(),
-        };
-        let request = MeshRequest {
-            method: reqwest::Method::GET,
-            path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
-            content_type: None,
-            body: Vec::new(),
-            total_budget: Duration::from_secs(1),
-            allow_ambiguous_fallback: false,
-            request_id: "telemetry-reader-regression".to_owned(),
-            route: InternalRoute::HealthV2,
-            cluster_id: "cluster".to_owned(),
-            sender_id: "sender".to_owned(),
-            updates_active_path: false,
-        };
-        let in_flight = gate_lock.clone().read_owned().await;
-        let (started_tx, started_rx) = oneshot::channel();
-        let (release_tx, release_rx) = oneshot::channel();
-        let writer_lock = gate_lock.clone();
-        let writer = tokio::spawn(async move {
-            let _ = started_tx.send(());
-            let _guard = writer_lock.write_owned().await;
-            let _ = release_rx.await;
-        });
-        started_rx.await.expect("writer should start");
-        tokio::task::yield_now().await;
-        tokio::time::timeout(
-            Duration::from_millis(100),
-            client.record_mesh_success_after_body(
-                &peer,
-                Instant::now(),
-                request.updates_active_path,
-                MeshTransportObservation {
-                    protocol: MeshTransportProtocol::H2,
-                    fingerprint: None,
-                },
-                0,
-                None,
-                Instant::now() + Duration::from_millis(10),
-            ),
-        )
-        .await
-        .expect("telemetry must not wait for the held telemetry or gate locks");
-        drop(telemetry_state);
-        drop(in_flight);
-        let _ = release_tx.send(());
-        writer.await.expect("writer should finish");
-    }
-    #[tokio::test]
     async fn mesh_success_telemetry_runs_after_body_releases_gate() {
         use futures_util::StreamExt;
 
@@ -842,6 +800,8 @@ mod tests {
                     fingerprint: None,
                 },
                 0,
+                None,
+                client.circuits.next_operation(),
                 None,
                 Instant::now() + Duration::from_secs(1),
             )),
@@ -914,6 +874,8 @@ mod tests {
                 },
                 0,
                 None,
+                client.circuits.next_operation(),
+                None,
                 Instant::now() + Duration::from_secs(1),
             )
         };
@@ -985,6 +947,8 @@ mod tests {
                             fingerprint: None,
                         },
                         0,
+                        None,
+                        client.circuits.next_operation(),
                         None,
                         Instant::now() + Duration::from_secs(1),
                     )

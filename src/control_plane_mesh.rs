@@ -624,6 +624,7 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                     validation_revision.clone(),
                     membership_read_guard.take(),
+                    &mut mesh_probe_guard,
                     started,
                     allow_unsigned_not_found,
                     cluster_ca_key_pem,
@@ -1163,6 +1164,10 @@ mod cleanup_tests;
 mod mesh_fallback_tests;
 #[cfg(test)]
 mod mesh_gate_tests;
+#[cfg(test)]
+mod mesh_success_body_tests;
+#[cfg(test)]
+mod mesh_success_race_tests;
 #[cfg(test)]
 mod peer_target_edge_tests;
 #[cfg(test)]
