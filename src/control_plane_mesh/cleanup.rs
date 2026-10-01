@@ -1,6 +1,7 @@
 use super::*;
 
 const POST_DEADLINE_CLEANUP_WAIT: Duration = Duration::from_millis(100);
+const CLEANUP_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 impl MeshAwareHttpClient {
     pub(super) fn spawn_protocol_failure_cleanup(
@@ -10,32 +11,103 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         operation_id: u64,
     ) {
+        self.spawn_protocol_failure_cleanup_with_requirement(
+            peer,
+            epoch,
+            validation_revision,
+            operation_id,
+            true,
+        );
+    }
+
+    pub(super) fn spawn_protocol_failure_cleanup_for_preflight(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        allow_mesh_when_disabled: bool,
+    ) {
+        self.spawn_protocol_failure_cleanup_with_requirement(
+            peer,
+            epoch,
+            validation_revision,
+            operation_id,
+            !allow_mesh_when_disabled,
+        );
+    }
+
+    fn spawn_protocol_failure_cleanup_with_requirement(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        require_enabled: bool,
+    ) {
         let client = self.clone();
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
-                let Some(_epoch_guard) = client.mesh_epoch_guard_until(epoch, deadline, true).await
-                else {
-                    return;
-                };
-                let _ = crate::control_plane_mesh::await_until(
-                    deadline,
-                    client
-                        .circuits
-                        .record_protocol_failure_at(&peer.node_id, operation_id),
-                )
-                .await;
-                let _ = crate::control_plane_mesh::await_until(
-                    deadline,
-                    client.mark_direct_validation_failure_with_operation(
-                        &peer,
-                        DirectValidationState::ProtocolRejected,
-                        validation_revision,
-                        operation_id,
-                    ),
-                )
-                .await;
+                loop {
+                    if (require_enabled && !client.mesh_gate_matches(epoch))
+                        || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                    {
+                        return;
+                    }
+                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let Some(epoch_guard) = client
+                        .mesh_epoch_guard_until(epoch, deadline, require_enabled)
+                        .await
+                    else {
+                        tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
+                        continue;
+                    };
+                    let breaker_result = crate::control_plane_mesh::await_until(
+                        deadline,
+                        client
+                            .circuits
+                            .record_protocol_failure_at(&peer.node_id, operation_id),
+                    )
+                    .await;
+                    drop(epoch_guard);
+                    match breaker_result {
+                        Some(Some(_)) => break,
+                        Some(None) => return,
+                        None => tokio::time::sleep(CLEANUP_RETRY_DELAY).await,
+                    }
+                }
+
+                loop {
+                    if (require_enabled && !client.mesh_gate_matches(epoch))
+                        || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                    {
+                        return;
+                    }
+                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let Some(epoch_guard) = client
+                        .mesh_epoch_guard_until(epoch, deadline, require_enabled)
+                        .await
+                    else {
+                        tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
+                        continue;
+                    };
+                    let validation_result = crate::control_plane_mesh::await_until(
+                        deadline,
+                        client.mark_direct_validation_failure_with_operation(
+                            &peer,
+                            DirectValidationState::ProtocolRejected,
+                            validation_revision.clone(),
+                            operation_id,
+                        ),
+                    )
+                    .await;
+                    drop(epoch_guard);
+                    match validation_result {
+                        Some(_) => return,
+                        None => tokio::time::sleep(CLEANUP_RETRY_DELAY).await,
+                    }
+                }
             });
         }
     }
@@ -47,32 +119,103 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         operation_id: u64,
     ) {
+        self.spawn_retryable_failure_cleanup_with_requirement(
+            peer,
+            epoch,
+            validation_revision,
+            operation_id,
+            true,
+        );
+    }
+
+    pub(super) fn spawn_retryable_failure_cleanup_for_preflight(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        allow_mesh_when_disabled: bool,
+    ) {
+        self.spawn_retryable_failure_cleanup_with_requirement(
+            peer,
+            epoch,
+            validation_revision,
+            operation_id,
+            !allow_mesh_when_disabled,
+        );
+    }
+
+    fn spawn_retryable_failure_cleanup_with_requirement(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        require_enabled: bool,
+    ) {
         let client = self.clone();
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
-                let Some(_epoch_guard) = client.mesh_epoch_guard_until(epoch, deadline, true).await
-                else {
-                    return;
-                };
-                let _ = crate::control_plane_mesh::await_until(
-                    deadline,
-                    client
-                        .circuits
-                        .record_retryable_failure_at(&peer.node_id, operation_id),
-                )
-                .await;
-                let _ = crate::control_plane_mesh::await_until(
-                    deadline,
-                    client.mark_direct_validation_failure_with_operation(
-                        &peer,
-                        DirectValidationState::TransportFailed,
-                        validation_revision,
-                        operation_id,
-                    ),
-                )
-                .await;
+                loop {
+                    if (require_enabled && !client.mesh_gate_matches(epoch))
+                        || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                    {
+                        return;
+                    }
+                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let Some(epoch_guard) = client
+                        .mesh_epoch_guard_until(epoch, deadline, require_enabled)
+                        .await
+                    else {
+                        tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
+                        continue;
+                    };
+                    let breaker_result = crate::control_plane_mesh::await_until(
+                        deadline,
+                        client
+                            .circuits
+                            .record_retryable_failure_at(&peer.node_id, operation_id),
+                    )
+                    .await;
+                    drop(epoch_guard);
+                    match breaker_result {
+                        Some(Some(_)) => break,
+                        Some(None) => return,
+                        None => tokio::time::sleep(CLEANUP_RETRY_DELAY).await,
+                    }
+                }
+
+                loop {
+                    if (require_enabled && !client.mesh_gate_matches(epoch))
+                        || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                    {
+                        return;
+                    }
+                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let Some(epoch_guard) = client
+                        .mesh_epoch_guard_until(epoch, deadline, require_enabled)
+                        .await
+                    else {
+                        tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
+                        continue;
+                    };
+                    let validation_result = crate::control_plane_mesh::await_until(
+                        deadline,
+                        client.mark_direct_validation_failure_with_operation(
+                            &peer,
+                            DirectValidationState::TransportFailed,
+                            validation_revision.clone(),
+                            operation_id,
+                        ),
+                    )
+                    .await;
+                    drop(epoch_guard);
+                    match validation_result {
+                        Some(_) => return,
+                        None => tokio::time::sleep(CLEANUP_RETRY_DELAY).await,
+                    }
+                }
             });
         }
     }
@@ -89,21 +232,33 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
-                let Some(_epoch_guard) = client.mesh_epoch_guard_until(epoch, deadline, true).await
-                else {
-                    return;
-                };
-                let _ = crate::control_plane_mesh::await_until(
-                    deadline,
-                    client.mark_direct_validation_failure_with_operation(
-                        &peer,
-                        state,
-                        validation_revision,
-                        operation_id,
-                    ),
-                )
-                .await;
+                loop {
+                    if !client.mesh_gate_matches(epoch) {
+                        return;
+                    }
+                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let Some(epoch_guard) =
+                        client.mesh_epoch_guard_until(epoch, deadline, true).await
+                    else {
+                        tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
+                        continue;
+                    };
+                    let validation_result = crate::control_plane_mesh::await_until(
+                        deadline,
+                        client.mark_direct_validation_failure_with_operation(
+                            &peer,
+                            state,
+                            validation_revision.clone(),
+                            operation_id,
+                        ),
+                    )
+                    .await;
+                    drop(epoch_guard);
+                    match validation_result {
+                        Some(_) => return,
+                        None => tokio::time::sleep(CLEANUP_RETRY_DELAY).await,
+                    }
+                }
             });
         }
     }
@@ -119,27 +274,58 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
-                let Some(_epoch_guard) = client.mesh_epoch_guard_until(epoch, deadline, true).await
-                else {
-                    return;
-                };
-                let _ = crate::control_plane_mesh::await_until(
-                    deadline,
-                    client
-                        .circuits
-                        .record_success_at(&peer.node_id, operation_id),
-                )
-                .await;
-                let _ = crate::control_plane_mesh::await_until(
-                    deadline,
-                    client.mark_direct_validation_success_with_operation(
-                        &peer,
-                        validation_revision,
-                        operation_id,
-                    ),
-                )
-                .await;
+                loop {
+                    if !client.mesh_gate_matches(epoch) {
+                        return;
+                    }
+                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let Some(epoch_guard) =
+                        client.mesh_epoch_guard_until(epoch, deadline, true).await
+                    else {
+                        tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
+                        continue;
+                    };
+                    let breaker_result = crate::control_plane_mesh::await_until(
+                        deadline,
+                        client
+                            .circuits
+                            .record_success_at(&peer.node_id, operation_id),
+                    )
+                    .await;
+                    drop(epoch_guard);
+                    match breaker_result {
+                        Some(Some(_)) => break,
+                        Some(None) => return,
+                        None => tokio::time::sleep(CLEANUP_RETRY_DELAY).await,
+                    }
+                }
+
+                loop {
+                    if !client.mesh_gate_matches(epoch) {
+                        return;
+                    }
+                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let Some(epoch_guard) =
+                        client.mesh_epoch_guard_until(epoch, deadline, true).await
+                    else {
+                        tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
+                        continue;
+                    };
+                    let validation_result = crate::control_plane_mesh::await_until(
+                        deadline,
+                        client.mark_direct_validation_success_with_operation(
+                            &peer,
+                            validation_revision.clone(),
+                            operation_id,
+                        ),
+                    )
+                    .await;
+                    drop(epoch_guard);
+                    match validation_result {
+                        Some(_) => return,
+                        None => tokio::time::sleep(CLEANUP_RETRY_DELAY).await,
+                    }
+                }
             });
         }
     }

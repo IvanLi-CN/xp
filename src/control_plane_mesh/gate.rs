@@ -422,6 +422,10 @@ impl MeshAwareHttpClient {
             && self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch
     }
 
+    pub(super) fn mesh_epoch_matches(&self, epoch: u64) -> bool {
+        self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch
+    }
+
     pub(super) fn try_mesh_epoch_guard(
         &self,
         epoch: u64,

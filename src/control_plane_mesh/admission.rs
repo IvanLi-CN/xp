@@ -282,6 +282,36 @@ impl MeshAwareHttpClient {
             .mesh_epoch_is_current_until(epoch, request_deadline)
             .await
         {
+            if self.mesh_epoch_matches(epoch)
+                && let Err(error) = &result
+            {
+                let cleanup_revision = validation_revision.clone();
+                let operation_id = self.circuits.next_operation();
+                match error {
+                    MeshRequestError::Auth(_) | MeshRequestError::Protocol(_) => {
+                        self.spawn_protocol_failure_cleanup_for_preflight(
+                            peer,
+                            epoch,
+                            cleanup_revision,
+                            operation_id,
+                            allow_mesh_when_disabled,
+                        );
+                    }
+                    MeshRequestError::PreDispatchAuth(_)
+                    | MeshRequestError::PreDispatchTimeout
+                    | MeshRequestError::InvalidTarget(_)
+                    | MeshRequestError::CircuitOpen { .. } => {}
+                    _ => {
+                        self.spawn_retryable_failure_cleanup_for_preflight(
+                            peer,
+                            epoch,
+                            cleanup_revision,
+                            operation_id,
+                            allow_mesh_when_disabled,
+                        );
+                    }
+                }
+            }
             return result;
         }
         let operation_id = self.circuits.next_operation();

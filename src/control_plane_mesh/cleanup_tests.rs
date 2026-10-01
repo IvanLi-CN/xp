@@ -29,7 +29,7 @@ async fn protocol_failure_cleanup_waits_for_epoch_barrier_before_state_update() 
     };
     let barrier_writer = client.mesh_epoch_barrier.clone().write_owned().await;
     client.spawn_protocol_failure_cleanup(&peer, 0, None, client.circuits.next_operation());
-    tokio::time::sleep(Duration::from_millis(25)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(
         client.circuits().state("peer", true).await,
         BreakerState::Closed
