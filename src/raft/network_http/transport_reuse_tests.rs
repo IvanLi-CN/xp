@@ -288,6 +288,10 @@ async fn mesh_requests_reuse_one_tls_connection_for_sequential_and_parallel_load
             .await
             .expect("sequential Mesh request");
         assert_eq!(response.version(), Version::HTTP_2);
+        response
+            .bytes()
+            .await
+            .expect("sequential Mesh response body");
     }
 
     let responses = join_all((32..48).map(|index| {
@@ -303,10 +307,9 @@ async fn mesh_requests_reuse_one_tls_connection_for_sequential_and_parallel_load
     }))
     .await;
     for response in responses {
-        assert_eq!(
-            response.expect("parallel Mesh request").version(),
-            Version::HTTP_2
-        );
+        let response = response.expect("parallel Mesh request");
+        assert_eq!(response.version(), Version::HTTP_2);
+        response.bytes().await.expect("parallel Mesh response body");
     }
 
     assert_eq!(server.accepts.load(Ordering::SeqCst), 1);

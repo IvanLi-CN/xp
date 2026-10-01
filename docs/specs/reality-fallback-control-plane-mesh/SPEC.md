@@ -38,8 +38,9 @@
   必须复用该 guard，不得再次获取同一写优先读写锁而阻塞 gate transition。body guard 受调用方
   绝对 deadline 约束，并在 EOF、body error、取消或 deadline 时释放；deadline timer 必须独立于
   下一次 body poll，调用方保留未消费的 response 也不能无限持有 guard。guard 释放后的遥测只做
-  原子 epoch/gate 校验，不重新等待该锁，并在剩余请求预算内完成或取消。已知 zero-length body
-  在 response headers 完成时即可释放 guard；未知长度和非空 body 仍覆盖完整 body 生命周期。
+  原子 epoch/gate 校验，不重新等待该锁，并在剩余请求预算内完成或取消。zero-length body
+  也必须等待实际 EOF；仅有 response headers 不足以释放 guard，未知长度和非空 body 同样覆盖
+  完整 body 生命周期。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。
