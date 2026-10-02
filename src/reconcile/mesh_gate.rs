@@ -126,11 +126,37 @@ impl ReconcileHandle {
     }
 
     pub async fn hold_mesh_gate_until_raft_state(&self) {
-        let _gate_lock = self.mesh_gate_lock.write().await;
-        let _epoch_barrier = self.mesh_epoch_barrier.write().await;
+        let _ = self
+            .hold_mesh_gate_until_raft_state_until(
+                std::time::Instant::now() + Duration::from_secs(60),
+            )
+            .await;
+    }
+
+    pub async fn hold_mesh_gate_until_raft_state_until(
+        &self,
+        deadline: std::time::Instant,
+    ) -> bool {
+        let Some(_gate_lock) = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(deadline),
+            self.mesh_gate_lock.clone().write_owned(),
+        )
+        .await
+        .ok() else {
+            return false;
+        };
+        let Some(_epoch_barrier) = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(deadline),
+            self.mesh_epoch_barrier.clone().write_owned(),
+        )
+        .await
+        .ok() else {
+            return false;
+        };
         self.mesh_gate_authoritative.store(false, Ordering::Release);
         self.mesh_enabled.store(false, Ordering::Release);
         self.refresh_reverse_gate();
+        true
     }
 
     pub(crate) fn note_mesh_state_applied(&self) {

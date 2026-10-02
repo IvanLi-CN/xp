@@ -41,9 +41,24 @@ impl CompletionDispatcher {
             #[cfg(test)]
             let _worker_starts = worker_starts_for_task;
             let mut in_flight: FuturesUnordered<Completion> = FuturesUnordered::new();
+            let mut prefer_pending = false;
             loop {
                 while in_flight.len() < COMPLETION_ACTIVE_CAPACITY {
                     let mut received = false;
+                    if prefer_pending {
+                        if let Some(completion) =
+                            critical_pending_for_task
+                                .lock()
+                                .ok()
+                                .and_then(|mut pending| {
+                                    pending.pop_first().map(|(_, completion)| completion)
+                                })
+                        {
+                            in_flight.push(completion);
+                            received = true;
+                        }
+                        prefer_pending = false;
+                    }
                     match critical_receiver.try_recv() {
                         Ok(completion) => {
                             in_flight.push(completion.completion);
@@ -82,10 +97,13 @@ impl CompletionDispatcher {
                 }
                 if in_flight.len() >= COMPLETION_ACTIVE_CAPACITY {
                     let _ = in_flight.next().await;
+                    prefer_pending = true;
                     continue;
                 }
                 tokio::select! {
-                    _ = in_flight.next() => {}
+                    _ = in_flight.next() => {
+                        prefer_pending = true;
+                    }
                     completion = critical_receiver.recv() => match completion {
                         Some(completion) => in_flight.push(completion.completion),
                         None => return,
@@ -223,5 +241,68 @@ mod tests {
         })
         .await
         .expect("the latest critical completion must not be dropped");
+    }
+
+    #[tokio::test]
+    async fn pending_completion_is_serviced_while_the_channel_stays_replenished() {
+        let dispatcher = CompletionDispatcher::new();
+        let release = std::sync::Arc::new(AtomicBool::new(false));
+        let active = std::sync::Arc::new(AtomicUsize::new(0));
+
+        for index in 0..COMPLETION_ACTIVE_CAPACITY {
+            let release = release.clone();
+            let active = active.clone();
+            dispatcher.dispatch_critical(format!("active-{index}"), async move {
+                active.fetch_add(1, Ordering::AcqRel);
+                while !release.load(Ordering::Acquire) {
+                    tokio::task::yield_now().await;
+                }
+                active.fetch_sub(1, Ordering::AcqRel);
+            });
+        }
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while active.load(Ordering::Acquire) != COMPLETION_ACTIVE_CAPACITY {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the dispatcher should fill its active window");
+
+        let pending_completed = std::sync::Arc::new(AtomicBool::new(false));
+        let pending_completed_for_task = pending_completed.clone();
+        dispatcher
+            .critical_pending
+            .lock()
+            .expect("pending completion lock")
+            .insert(
+                "pending-key".to_string(),
+                Box::pin(async move {
+                    pending_completed_for_task.store(true, Ordering::Release);
+                }),
+            );
+        dispatcher.critical_notify.notify_one();
+
+        let producer_dispatcher = dispatcher.clone();
+        let pending_completed_for_producer = pending_completed.clone();
+        let producer = tokio::spawn(async move {
+            let mut index = 0usize;
+            while !pending_completed_for_producer.load(Ordering::Acquire) {
+                producer_dispatcher.dispatch_critical(format!("replenished-{index}"), async {
+                    tokio::task::yield_now().await
+                });
+                index = index.wrapping_add(1);
+                tokio::task::yield_now().await;
+            }
+        });
+        release.store(true, Ordering::Release);
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !pending_completed.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("a continuously replenished channel must not starve pending state");
+        producer.abort();
     }
 }

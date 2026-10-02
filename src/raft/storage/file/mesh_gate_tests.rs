@@ -73,6 +73,25 @@ async fn explicit_mesh_switch_apply_is_bounded_by_mesh_body_guard() {
 }
 
 #[tokio::test]
+async fn snapshot_mesh_gate_hold_is_bounded_by_its_deadline() {
+    let reconcile = ReconcileHandle::noop();
+    let in_flight_mesh_read = reconcile.mesh_gate_lock().read_owned().await;
+
+    let started = std::time::Instant::now();
+    assert!(
+        !reconcile
+            .hold_mesh_gate_until_raft_state_until(started + Duration::from_millis(50))
+            .await
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "snapshot gate admission must not wait behind an in-flight body forever"
+    );
+
+    drop(in_flight_mesh_read);
+}
+
+#[tokio::test]
 async fn initial_mesh_gate_apply_is_bounded_by_mesh_body_guard() {
     let tmp = tempfile::tempdir().unwrap();
     let reconcile = ReconcileHandle::noop();

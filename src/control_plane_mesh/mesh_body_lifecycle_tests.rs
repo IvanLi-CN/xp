@@ -1,6 +1,27 @@
 use super::*;
 use tokio::sync::oneshot;
 
+struct DropNotifies(Option<oneshot::Sender<()>>);
+
+impl futures_util::Stream for DropNotifies {
+    type Item = Result<bytes::Bytes, std::io::Error>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::task::Poll::Pending
+    }
+}
+
+impl Drop for DropNotifies {
+    fn drop(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
+    }
+}
+
 #[tokio::test]
 async fn zero_length_mesh_response_releases_gate_guard_after_eof() {
     use futures_util::StreamExt;
@@ -135,6 +156,7 @@ async fn mesh_response_body_stream_lease_outlives_admission_slice() {
     let mut body = response.bytes_stream();
     assert!(body.next().await.expect("first body chunk").is_ok());
 
+    tokio::task::yield_now().await;
     tokio::time::advance(Duration::from_secs(15 * 60)).await;
     tokio::task::yield_now().await;
     assert!(
@@ -149,4 +171,46 @@ async fn mesh_response_body_stream_lease_outlives_admission_slice() {
         gate_lock.clone().try_write_owned().is_ok(),
         "stream lease expiry must release the gate guard"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn mesh_response_body_lease_drops_unpolled_upstream_on_expiry() {
+    use futures_util::StreamExt;
+
+    let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
+    let gate_guard = gate_lock.clone().read_owned().await;
+    let (dropped_tx, mut dropped_rx) = oneshot::channel();
+    let body = futures_util::stream::once(async {
+        Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"first"))
+    })
+    .chain(DropNotifies(Some(dropped_tx)));
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(reqwest::StatusCode::OK)
+            .body(reqwest::Body::wrap_stream(body))
+            .expect("synthetic response"),
+    );
+    let response = super::reverse::attach_mesh_gate_with_body_lease(
+        response,
+        gate_guard,
+        Instant::now() + Duration::from_secs(3),
+        Duration::from_secs(15 * 60),
+        None,
+    );
+    let mut body = response.bytes_stream();
+    assert!(body.next().await.expect("first body chunk").is_ok());
+
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(15 * 60)).await;
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+        if dropped_rx.try_recv().is_ok() {
+            assert!(
+                gate_lock.clone().try_write_owned().is_ok(),
+                "lease expiry must release the gate without another body poll"
+            );
+            return;
+        }
+    }
+    panic!("lease expiry must cancel and drop an upstream body that is no longer polled");
 }

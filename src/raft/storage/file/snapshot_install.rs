@@ -62,10 +62,22 @@ pub(super) async fn install(
     // Close Mesh and persist an in-progress marker before replacing the state. If the process
     // dies while either snapshot file or the state store is being replaced, restart remains
     // fail-closed until a later authenticated state apply completes.
-    state_machine
+    if !state_machine
         .reconcile
-        .hold_mesh_gate_until_raft_state()
-        .await;
+        .hold_mesh_gate_until_raft_state_until(
+            std::time::Instant::now() + std::time::Duration::from_secs(3),
+        )
+        .await
+    {
+        return Err(io_err(
+            ErrorSubject::StateMachine,
+            ErrorVerb::Write,
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Mesh gate transition timed out before snapshot installation",
+            ),
+        ));
+    }
     {
         let mut inner = state_machine.inner.lock().await;
         inner.mesh_state_applied = false;

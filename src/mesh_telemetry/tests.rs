@@ -330,6 +330,51 @@ async fn deferred_flush_persists_the_latest_sample_without_another_request() {
     assert!(!telemetry.state.lock().await.dirty);
 }
 
+#[tokio::test(start_paused = true)]
+async fn deferred_mesh_reason_flushes_without_synchronous_persistence() {
+    let temp = tempfile::tempdir().unwrap();
+    let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+
+    telemetry
+        .record_sample_deferred(
+            "peer-a",
+            "alpha",
+            MeshTelemetrySample {
+                path: TelemetryPath::Mesh,
+                success: true,
+                latency_ms: Some(xp_test_fixtures::number_value42()),
+                fallback: false,
+                updates_active_path: true,
+                transport: None,
+            },
+            Some((
+                Some("https://peer-a.example.test:443".to_string()),
+                MeshPeerReason::MeshAvailable,
+            )),
+        )
+        .await
+        .unwrap();
+    assert!(telemetry.state.lock().await.flush_scheduled);
+    assert_eq!(
+        telemetry.persist_count(),
+        0,
+        "deferred reason must not flush synchronously"
+    );
+
+    tokio::task::yield_now().await;
+    tokio::time::advance(SAMPLE_PERSIST_INTERVAL).await;
+    tokio::task::yield_now().await;
+    assert_eq!(
+        MeshTelemetryHandle::load(temp.path())
+            .unwrap()
+            .snapshot()
+            .await
+            .peers[0]
+            .last_mesh_reason,
+        Some(MeshPeerReason::MeshAvailable)
+    );
+}
+
 #[tokio::test]
 async fn retries_a_dirty_sample_after_a_persistence_failure() {
     let temp = tempfile::tempdir().unwrap();

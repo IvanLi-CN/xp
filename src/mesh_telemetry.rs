@@ -240,12 +240,10 @@ impl MeshTelemetryHandle {
             persist_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })
     }
-
     /// Limits all scheduled and operator-triggered peer probes on this node together.
     pub fn probe_gate(&self) -> Arc<Semaphore> {
         self.probe_gate.clone()
     }
-
     pub fn try_acquire_operator_probe_batch(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
         self.operator_probe_gate.clone().try_acquire_owned().ok()
     }
@@ -302,14 +300,13 @@ impl MeshTelemetryHandle {
         }
         snapshot
     }
-
     pub async fn record_sample(
         &self,
         peer_id: impl Into<String>,
         peer_name: impl Into<String>,
         sample: MeshTelemetrySample,
     ) -> anyhow::Result<()> {
-        self.record_sample_with_active_route(peer_id, peer_name, sample, None, false)
+        self.record_sample_with_active_route(peer_id, peer_name, sample, None, None, false)
             .await
     }
     pub(crate) async fn record_sample_deferred(
@@ -317,8 +314,9 @@ impl MeshTelemetryHandle {
         peer_id: impl Into<String>,
         peer_name: impl Into<String>,
         sample: MeshTelemetrySample,
+        mesh_reason: Option<(Option<String>, MeshPeerReason)>,
     ) -> anyhow::Result<()> {
-        self.record_sample_with_active_route(peer_id, peer_name, sample, None, true)
+        self.record_sample_with_active_route(peer_id, peer_name, sample, None, mesh_reason, true)
             .await
     }
     async fn record_sample_with_active_route(
@@ -327,6 +325,7 @@ impl MeshTelemetryHandle {
         peer_name: impl Into<String>,
         sample: MeshTelemetrySample,
         active_route: Option<MeshActiveRoute>,
+        mesh_reason: Option<(Option<String>, MeshPeerReason)>,
         defer_persist: bool,
     ) -> anyhow::Result<()> {
         let now = Utc::now();
@@ -374,6 +373,9 @@ impl MeshTelemetryHandle {
                 peer.current_connection_requests = requests;
             }
         }
+        if let Some((mesh_target, reason)) = mesh_reason {
+            (peer.last_mesh_reason, peer.last_mesh_target) = (Some(reason), mesh_target);
+        }
         let bucket = ensure_bucket(peer, now);
         match (sample.path, sample.success) {
             (TelemetryPath::Mesh, true) => {
@@ -401,11 +403,10 @@ impl MeshTelemetryHandle {
                 bucket.mesh_connection_starts = bucket.mesh_connection_starts.saturating_add(1);
             }
         }
-        if let Some(latency_ms) = sample.latency_ms {
-            // Cap per-minute quantiles at 64 values to stay stable under probe bursts.
-            if bucket.latency_samples_ms.len() < 64 {
-                bucket.latency_samples_ms.push(latency_ms);
-            }
+        if let Some(latency_ms) = sample.latency_ms
+            && bucket.latency_samples_ms.len() < 64
+        {
+            bucket.latency_samples_ms.push(latency_ms);
         }
         state.persisted.revision += 1;
         let deferred_flush = if defer_persist {

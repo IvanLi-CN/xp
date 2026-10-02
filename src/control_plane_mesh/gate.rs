@@ -312,6 +312,7 @@ impl MeshAwareHttpClient {
             let key = format!("mesh:{}", peer.node_id);
             match outcome {
                 crate::mesh_gate_body::BodyFinish::Complete => {
+                    let completion_deadline = super::body_completion_deadline(deadline);
                     client.dispatch_critical_completion(key, async move {
                         completion_client
                             .record_mesh_success_after_body(
@@ -323,7 +324,7 @@ impl MeshAwareHttpClient {
                                 validation_revision,
                                 operation_id,
                                 mesh_probe_guard,
-                                deadline,
+                                completion_deadline,
                             )
                             .await;
                     });
@@ -335,9 +336,7 @@ impl MeshAwareHttpClient {
                     } else {
                         MeshPeerReason::TransportError
                     };
-                    let failure_deadline = (outcome == crate::mesh_gate_body::BodyFinish::Deadline)
-                        .then(Instant::now)
-                        .unwrap_or(deadline);
+                    let failure_deadline = super::body_completion_deadline(deadline);
                     client.dispatch_critical_completion(key, async move {
                         completion_client
                             .record_mesh_body_failure_after_body(
@@ -374,7 +373,9 @@ impl MeshAwareHttpClient {
         mut mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
         deadline: Instant,
     ) {
+        let cleanup_revision = validation_revision.clone();
         let Some(epoch_guard) = self.mesh_epoch_guard_until(epoch, deadline, true).await else {
+            self.spawn_validation_success_cleanup(peer, epoch, cleanup_revision, operation_id);
             return;
         };
         let breaker_state = self.record_mesh_success_state(
@@ -423,7 +424,9 @@ impl MeshAwareHttpClient {
         reason: MeshPeerReason,
         deadline: Instant,
     ) {
+        let cleanup_revision = validation_revision.clone();
         let Some(epoch_guard) = self.mesh_epoch_guard_until(epoch, deadline, true).await else {
+            self.spawn_retryable_failure_cleanup(peer, epoch, cleanup_revision, operation_id);
             return;
         };
         if !self.mesh_gate_matches(epoch) {

@@ -170,12 +170,18 @@ impl MeshAwareHttpClient {
         &self,
         peer: &MeshPeerTarget,
         sample: MeshTelemetrySample,
+        mesh_reason: Option<MeshPeerReason>,
         deadline: Instant,
     ) {
         if let Some(telemetry) = &self.telemetry {
             let _ = super::await_until(
                 deadline,
-                telemetry.record_sample_deferred(&peer.node_id, &peer.node_name, sample),
+                telemetry.record_sample_deferred(
+                    &peer.node_id,
+                    &peer.node_name,
+                    sample,
+                    mesh_reason.map(|reason| (peer.mesh_base_url.clone(), reason)),
+                ),
             )
             .await;
         }
@@ -188,15 +194,18 @@ impl MeshAwareHttpClient {
         epoch: u64,
         deadline: Instant,
     ) {
-        let Some(_epoch_guard) = self.try_mesh_epoch_guard(epoch, true) else {
+        let Some(epoch_guard) = self.try_mesh_epoch_guard(epoch, true) else {
             return;
         };
-        self.record_sample_deferred_until(peer, sample, deadline)
-            .await;
-        if sample.success && sample.path == TelemetryPath::Mesh {
-            self.record_mesh_reason_until(peer, MeshPeerReason::MeshAvailable, deadline)
-                .await;
-        }
+        self.record_sample_deferred_until(
+            peer,
+            sample,
+            (sample.success && sample.path == TelemetryPath::Mesh)
+                .then_some(MeshPeerReason::MeshAvailable),
+            deadline,
+        )
+        .await;
+        drop(epoch_guard);
     }
 
     pub(super) async fn record_sample_for_epoch_until(
@@ -337,6 +346,7 @@ impl MeshAwareHttpClient {
             let key = format!("public:{}", peer.node_id);
             match outcome {
                 crate::mesh_gate_body::BodyFinish::Complete => {
+                    let completion_deadline = super::body_completion_deadline(deadline);
                     client.dispatch_critical_completion(key, async move {
                         completion_client
                             .record_public_success_after_body(
@@ -347,16 +357,14 @@ impl MeshAwareHttpClient {
                                 public_epoch,
                                 operation_id,
                                 public_probe_guard,
-                                deadline,
+                                completion_deadline,
                             )
                             .await;
                     });
                 }
                 crate::mesh_gate_body::BodyFinish::Error
                 | crate::mesh_gate_body::BodyFinish::Deadline => {
-                    let failure_deadline = (outcome == crate::mesh_gate_body::BodyFinish::Deadline)
-                        .then(Instant::now)
-                        .unwrap_or(deadline);
+                    let failure_deadline = super::body_completion_deadline(deadline);
                     client.dispatch_critical_completion(key, async move {
                         completion_client
                             .record_public_body_failure_after_body(

@@ -70,6 +70,11 @@ pub(super) async fn await_until<T>(
         .ok()
 }
 
+pub(super) fn body_completion_deadline(deadline: Instant) -> Instant {
+    let grace_deadline = Instant::now() + Duration::from_millis(100);
+    deadline.max(grace_deadline)
+}
+
 #[derive(Debug, Clone)]
 pub struct MeshPeerTarget {
     pub node_id: String,
