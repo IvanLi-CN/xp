@@ -45,21 +45,28 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   value is already unchanged, regardless of an unrelated state-generation advance. Mesh admission
   and response-body guards use the caller's absolute deadline; runtime-events SSE keeps the
   three-second admission/first-byte budget but uses a fixed internal fifteen-minute body lease.
-  An independent body timer releases an unconsumed response guard, and terminal body states
+  An independent body timer releases an unconsumed response guard; lease expiry actively cancels
+  the upstream stream even if its consumer stops polling. Ordinary bounded bodies retain their
+  deadline timer without the streaming cancellation driver. Terminal body states
   release it without retrying a signed response through Public. Signed Mesh success
   reserves its circuit operation id at header verification and carries the half-open probe guard
   through body completion, so a late body cannot overwrite a newer protocol rejection and a second
   half-open probe cannot start while the first body is active. Breaker/validation state updates stay
   under the bounded admission guard, while persistence telemetry is deadline-aware after the guard
   is released. Critical completion state is coalesced per peer behind a bounded queue and
-  active-worker window; overflow preserves the latest critical state, while successful body
+  active-worker window; overflow preserves the latest critical state and is serviced fairly
+  alongside queued work without exceeding the 32-active bound. Empty overflow state is checked
+  without taking the pending-map lock. Body completion has bounded cleanup grace when its request
+  deadline has expired, while successful body
   telemetry uses bounded deferred persistence after its RAII probe guard is released. Failure,
   cancellation, and deadline telemetry remains immediate and bounded.
   Non-bootstrap nodes hold the local gate closed until the first authenticated Raft state or
   snapshot is applied, so a joining node cannot emit Mesh traffic from the default local state.
   Snapshots carry an explicit `mesh_state_applied` payload marker plus snapshot identity fields.
-  Snapshot installation persists a fail-closed pending marker before replacing state, writes data
-  before metadata, and clears the pending marker only after both files are durable. Readers reject
+  Snapshot installation rejects a gate barrier that cannot be acquired within three seconds
+  before replacing state. It persists a fail-closed pending marker before replacing state,
+  writes data before metadata, and clears the pending marker only after both files are durable.
+  Readers reject
   mismatched identity pairs and authenticated markers without identity evidence.
   Legacy startup migration only reopens the gate when that marker is true and its snapshot metadata
   exactly matches the persisted applied log; WAL-only, metadata-only, missing, malformed, or legacy
@@ -127,7 +134,10 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   admission timeout with remaining-budget Public fallback and half-open release, protocol rejection
   cleanup after the request deadline, and EOF/error/drop/unpolled/deadline response-body guard
   release. They also cover delayed Mesh success versus newer protocol rejection and retain the
-  half-open probe slot until a successful response body finishes. The direct admission path
+  half-open probe slot until a successful response body finishes. They also verify lease expiry
+  drops an unpolled upstream body, snapshot gate acquisition is bounded, and queued plus overflow
+  completions share the active capacity while the queue remains continuously replenished.
+  The direct admission path
   preserves `PreDispatchTimeout` while the gate remains enabled; bounded state and telemetry
   updates retain epoch classification.
 - The 50-peer resource comparison records XP anonymous and total PSS separately. Anonymous PSS has
@@ -139,21 +149,24 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   copies the resolved executables into the disposable run before measurement, so build scripts and
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
-- The current locked runtime candidate is `392f4b2a` (full source SHA is recorded in
-  `./evidence/local-checks-392f4b2a.md`). Local command results for the final head are recorded
-  there. Signed response headers only
+- Candidate validation is bound to exact source commits, source and generated Web archive
+  digests, and inspectable runner manifests in the delivery evidence. Historical local results
+  for `392f4b2a` are recorded in `./evidence/local-checks-392f4b2a.md`; they do not validate later
+  runtime changes. Signed response headers only
   authenticate the response; Mesh, Direct health preflight, and Public signed success commit
   after the body completes. Error, cancellation, and deadline outcomes release the relevant gate
   or probe without recording success, while the captured Mesh epoch prevents an old response from
   updating a newer gate generation; the captured circuit operation id also prevents an old body
   from reopening a newer protocol-isolated peer. Non-idempotent history cleanup keeps fail-closed
-  `outcome_unknown` handling after an ambiguous response. The same-SHA formal isolated workload
+  `outcome_unknown` handling after an ambiguous response. The `392f4b2a` formal isolated workload
   passed after two diagnostic runs hit different shared-testbox peak boundaries; the exact
   successful run and both bounded failures are recorded in
-  `./evidence/mesh-resource-392f4b2a.md`.
+  `./evidence/mesh-resource-392f4b2a.md`. The later `5607923d` CPU gate failure is preserved in
+  `./evidence/mesh-resource-5607923d.md`. Current acceptance requires the full formal runner and
+  full Rust checks on the exact committed delivery candidate; historical passes and short smoke
+  runs cannot replace that evidence.
 - Host-managed fresh-join and service-recovery evidence passed on the immediately preceding
-  runtime candidate. The current repair changes circuit admission and Mesh success telemetry,
-  not deployment, membership, persistence, or service activation code; the scope and non-same-SHA
+  runtime candidate. The scope and non-same-SHA
   status remain recorded in `./evidence/host-managed-fresh-join-d0fe8246.md`. This supplementary
   evidence does not replace the required same-SHA shared-testbox gate.
 - Rustls 0.23 uses the ring provider for both the server and Mesh client. Keeping one provider

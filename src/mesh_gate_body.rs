@@ -27,15 +27,20 @@ pub(crate) type FinishCallback = Box<dyn FnOnce(BodyFinish) + Send + 'static>;
 
 struct GuardCell {
     state: Mutex<(Option<GateGuard>, Option<FinishCallback>)>,
-    cancellation: watch::Sender<Option<BodyFinish>>,
+    cancellation: Option<watch::Sender<Option<BodyFinish>>>,
 }
 
 impl GuardCell {
     fn new(
         gate_guard: Option<GateGuard>,
         on_finish: Option<FinishCallback>,
-    ) -> (Arc<Self>, watch::Receiver<Option<BodyFinish>>) {
-        let (cancellation, cancellation_rx) = watch::channel(None);
+        cancellation_enabled: bool,
+    ) -> (Arc<Self>, Option<watch::Receiver<Option<BodyFinish>>>) {
+        let (cancellation, cancellation_rx) = cancellation_enabled
+            .then(|| watch::channel(None))
+            .map_or((None, None), |(sender, receiver)| {
+                (Some(sender), Some(receiver))
+            });
         (
             Arc::new(Self {
                 state: Mutex::new((gate_guard, on_finish)),
@@ -54,7 +59,9 @@ impl GuardCell {
         else {
             return;
         };
-        let _ = self.cancellation.send(Some(outcome));
+        if let Some(cancellation) = &self.cancellation {
+            let _ = cancellation.send(Some(outcome));
+        }
         drop(guard);
         if let Some(callback) = callback {
             callback(outcome);
@@ -66,7 +73,7 @@ struct GuardedBodyState {
     body: BodyStream,
     guard: Arc<GuardCell>,
     timer: Option<tokio::task::JoinHandle<()>>,
-    cancellation_rx: watch::Receiver<Option<BodyFinish>>,
+    cancellation_rx: Option<watch::Receiver<Option<BodyFinish>>>,
     deadline: Instant,
     first_byte_tx: Option<oneshot::Sender<()>>,
     lease_expiry_is_eof: bool,
@@ -149,11 +156,14 @@ fn stream_with_finish_inner(
     on_finish: Option<FinishCallback>,
     lease: Option<std::time::Duration>,
 ) -> impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static {
-    let (guard, cancellation_rx) = GuardCell::new(gate_guard, on_finish);
+    let (guard, cancellation_rx) = GuardCell::new(gate_guard, on_finish, lease.is_some());
     let body = match lease {
         Some(_) => {
             let (body_tx, body_rx) = mpsc::channel(1);
-            let mut body_cancellation_rx = cancellation_rx.clone();
+            let mut body_cancellation_rx = cancellation_rx
+                .as_ref()
+                .expect("lease bodies must have cancellation")
+                .clone();
             tokio::spawn(async move {
                 let mut body = body.boxed();
                 while let Some(item) = tokio::select! {
@@ -223,7 +233,10 @@ fn stream_with_finish_inner(
         if state.finished {
             return None;
         }
-        let cancellation = state.cancellation_rx.borrow().as_ref().copied();
+        let cancellation = state
+            .cancellation_rx
+            .as_ref()
+            .and_then(|rx| rx.borrow().as_ref().copied());
         if let Some(outcome) = cancellation {
             return finish_after_cancellation(state, outcome);
         }
@@ -245,17 +258,21 @@ fn stream_with_finish_inner(
             Cancellation(BodyFinish),
             Body(Result<Option<Result<Bytes, io::Error>>, time::error::Elapsed>),
         }
-        let polled = {
+        let polled = if let Some(cancellation_rx) = state.cancellation_rx.as_mut() {
             let next = state.body.next();
             tokio::pin!(next);
             tokio::select! {
-                outcome = wait_for_cancellation(&mut state.cancellation_rx) => {
+                outcome = wait_for_cancellation(cancellation_rx) => {
                     PollOutcome::Cancellation(outcome)
                 }
                 result = time::timeout_at(time::Instant::from_std(state.deadline), &mut next) => {
                     PollOutcome::Body(result)
                 }
             }
+        } else {
+            PollOutcome::Body(
+                time::timeout_at(time::Instant::from_std(state.deadline), state.body.next()).await,
+            )
         };
         match polled {
             PollOutcome::Cancellation(outcome) => finish_after_cancellation(state, outcome),

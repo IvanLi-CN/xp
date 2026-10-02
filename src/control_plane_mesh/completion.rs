@@ -1,4 +1,12 @@
-use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    future::Future,
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use futures_util::{StreamExt, stream::FuturesUnordered};
 use tokio::sync::{Notify, mpsc};
@@ -19,6 +27,7 @@ pub(super) struct CompletionDispatcher {
     critical_sender: mpsc::Sender<CriticalCompletion>,
     // Saturation keeps the latest critical state per peer instead of dropping it.
     critical_pending: Arc<std::sync::Mutex<BTreeMap<String, Completion>>>,
+    critical_pending_ready: Arc<AtomicBool>,
     critical_notify: Arc<Notify>,
     #[cfg(test)]
     worker_starts: std::sync::Arc<std::sync::atomic::AtomicUsize>,
@@ -30,6 +39,8 @@ impl CompletionDispatcher {
             mpsc::channel::<CriticalCompletion>(COMPLETION_QUEUE_CAPACITY);
         let critical_pending = Arc::new(std::sync::Mutex::new(BTreeMap::new()));
         let critical_pending_for_task = critical_pending.clone();
+        let critical_pending_ready = Arc::new(AtomicBool::new(false));
+        let critical_pending_ready_for_task = critical_pending_ready.clone();
         let critical_notify = Arc::new(Notify::new());
         let critical_notify_for_task = critical_notify.clone();
         #[cfg(test)]
@@ -45,19 +56,18 @@ impl CompletionDispatcher {
             loop {
                 while in_flight.len() < COMPLETION_ACTIVE_CAPACITY {
                     let mut received = false;
-                    if prefer_pending {
-                        if let Some(completion) =
-                            critical_pending_for_task
-                                .lock()
-                                .ok()
-                                .and_then(|mut pending| {
-                                    pending.pop_first().map(|(_, completion)| completion)
-                                })
-                        {
+                    if prefer_pending && critical_pending_ready_for_task.load(Ordering::Acquire) {
+                        if let Some(completion) = pop_pending(
+                            &critical_pending_for_task,
+                            &critical_pending_ready_for_task,
+                        ) {
                             in_flight.push(completion);
                             received = true;
                         }
                         prefer_pending = false;
+                    }
+                    if in_flight.len() >= COMPLETION_ACTIVE_CAPACITY {
+                        continue;
                     }
                     match critical_receiver.try_recv() {
                         Ok(completion) => {
@@ -70,13 +80,11 @@ impl CompletionDispatcher {
                     if in_flight.len() >= COMPLETION_ACTIVE_CAPACITY {
                         continue;
                     }
-                    if let Some(completion) =
-                        critical_pending_for_task
-                            .lock()
-                            .ok()
-                            .and_then(|mut pending| {
-                                pending.pop_first().map(|(_, completion)| completion)
-                            })
+                    if critical_pending_ready_for_task.load(Ordering::Acquire)
+                        && let Some(completion) = pop_pending(
+                            &critical_pending_for_task,
+                            &critical_pending_ready_for_task,
+                        )
                     {
                         in_flight.push(completion);
                         received = true;
@@ -116,6 +124,7 @@ impl CompletionDispatcher {
         Self {
             critical_sender,
             critical_pending,
+            critical_pending_ready,
             critical_notify,
             #[cfg(test)]
             worker_starts,
@@ -137,6 +146,7 @@ impl CompletionDispatcher {
             | Err(mpsc::error::TrySendError::Closed(completion)) => {
                 if let Ok(mut pending) = self.critical_pending.lock() {
                     pending.insert(completion.key, completion.completion);
+                    self.critical_pending_ready.store(true, Ordering::Release);
                 }
                 self.critical_notify.notify_one();
             }
@@ -148,6 +158,20 @@ impl CompletionDispatcher {
         self.worker_starts
             .load(std::sync::atomic::Ordering::Acquire)
     }
+}
+
+fn pop_pending(
+    pending: &std::sync::Mutex<BTreeMap<String, Completion>>,
+    pending_ready: &AtomicBool,
+) -> Option<Completion> {
+    let Ok(mut pending) = pending.lock() else {
+        return None;
+    };
+    let completion = pending.pop_first().map(|(_, completion)| completion);
+    if pending.is_empty() {
+        pending_ready.store(false, Ordering::Release);
+    }
+    completion
 }
 
 impl MeshAwareHttpClient {
@@ -244,6 +268,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pending_and_queued_completions_share_the_active_bound() {
+        let dispatcher = CompletionDispatcher::new();
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let (started_tx, mut started_rx) = mpsc::unbounded_channel();
+
+        for index in 0..(COMPLETION_ACTIVE_CAPACITY + COMPLETION_QUEUE_CAPACITY + 2) {
+            let release = release.clone();
+            let active = active.clone();
+            let max_active = max_active.clone();
+            let started_tx = started_tx.clone();
+            dispatcher.dispatch_critical(format!("mesh:peer-{index}"), async move {
+                let count = active.fetch_add(1, Ordering::AcqRel) + 1;
+                max_active.fetch_max(count, Ordering::AcqRel);
+                let _ = started_tx.send(());
+                release
+                    .acquire()
+                    .await
+                    .expect("test release semaphore")
+                    .forget();
+                active.fetch_sub(1, Ordering::AcqRel);
+            });
+        }
+        for _ in 0..COMPLETION_ACTIVE_CAPACITY {
+            tokio::time::timeout(Duration::from_secs(1), started_rx.recv())
+                .await
+                .expect("the active window should start")
+                .expect("completion start signal");
+        }
+        release.add_permits(1);
+        tokio::time::timeout(Duration::from_secs(1), started_rx.recv())
+            .await
+            .expect("one free slot should admit one completion")
+            .expect("completion start signal");
+        let _ = tokio::time::timeout(Duration::from_millis(50), started_rx.recv()).await;
+        let maximum = max_active.load(Ordering::Acquire);
+        release.add_permits(COMPLETION_ACTIVE_CAPACITY + COMPLETION_QUEUE_CAPACITY + 2);
+        assert_eq!(maximum, COMPLETION_ACTIVE_CAPACITY);
+    }
+
+    #[tokio::test]
     async fn pending_completion_is_serviced_while_the_channel_stays_replenished() {
         let dispatcher = CompletionDispatcher::new();
         let release = std::sync::Arc::new(AtomicBool::new(false));
@@ -280,6 +346,9 @@ mod tests {
                     pending_completed_for_task.store(true, Ordering::Release);
                 }),
             );
+        dispatcher
+            .critical_pending_ready
+            .store(true, Ordering::Release);
         dispatcher.critical_notify.notify_one();
 
         let producer_dispatcher = dispatcher.clone();

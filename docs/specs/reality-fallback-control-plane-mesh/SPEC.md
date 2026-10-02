@@ -8,7 +8,7 @@
 - [0014-xhttp-endpoint-direct-mesh](../../adr/0014-xhttp-endpoint-direct-mesh.md)
 - [ADR 0015](../../adr/0015-directed-mesh-admission-and-peer-isolation.md)
 
-## 背景
+## Context and Scope
 
 - 控制面此前只访问 peer 的公网 `api_base_url`。
 - 内部 HMAC 没有覆盖 body、时间或身份。
@@ -74,7 +74,18 @@
 - UI 强制选路、重置 breaker 或主动修复。
 - 混合 auth v1/v2 的零停机滚动升级。
 
-## 必须满足
+## Requirements
+
+- **REQ-AUTH**: Mesh 必须验证签名与完整请求身份，保留 request ID 幂等合同；认证或协议错误
+  不得触发跨路径重试。详细约束见本节与传输和幂等规则。
+- **REQ-GATE**: authoritative gate 下普通 Raft apply 必须保持可推进；首次认证与显式开关
+  切换保留 write barrier，准入与状态初始化必须受内部 deadline 约束。
+- **REQ-BODY**: response guard 必须覆盖实际 body 生命周期；普通 body 使用调用方 deadline，
+  runtime-events SSE 使用三秒 admission/首字节及独立十五分钟 lease，终态必须释放 guard。
+- **REQ-RESOURCE**: 共享传输、遥测与完成处理必须遵守本文既定的连接、内存和 CPU 上限。
+- **REQ-OPS**: host-managed 与容器的升级必须遵守既有 auth epoch 维护与回滚合同。
+
+### 必须满足
 
 - Mesh URL 只能由唯一 managed-default VLESS/Reality endpoint 与有效 `access_host` 推导；
   Vision/TCP 标记为 `vision_tcp`，XHTTP 标记为 `xhttp_reality_fallback`。XHTTP Direct Mesh
@@ -228,7 +239,17 @@
 - [internal-auth v2](./contracts/internal-auth-v2.md)
 - [Mesh status API](./contracts/mesh-status-api.md)
 
-## 验收
+## Verification
+
+- **VER-AUTH** covers: REQ-AUTH. 签名拒绝、幂等、fallback 分类和协议隔离回归验证安全边界。
+- **VER-GATE** covers: REQ-GATE. state-machine、snapshot 和排队 writer 准入回归验证推进与超时。
+- **VER-BODY** covers: REQ-BODY. EOF/error/drop/unpolled/deadline/lease 回归验证 guard 生命周期。
+- **VER-RESOURCE** covers: REQ-RESOURCE. 真实 TLS 连接复用、完成处理容量与正式 50-peer 资源
+  workload 验证既定门限。
+- **VER-OPS** covers: REQ-OPS. auth epoch 升级回归与隔离 host-managed fresh-join workload
+  验证维护边界和服务身份保持。
+
+### 验收
 
 - body、method、URI、member、target、时间窗、v1 与未认证 Raft 均被拒绝。
 - 已执行但响应丢失的 mutation 复用 request ID，只返回第一次结果。
