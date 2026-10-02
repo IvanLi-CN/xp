@@ -137,17 +137,18 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   copies the resolved executables into the disposable run before measurement, so build scripts and
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
-- The current locked runtime candidate is `9e1cebfc` (full source SHA is recorded in
-  `./evidence/local-checks-9e1cebfc.md`). Local command results, including `90` Mesh tests
-  and `1540` library tests, are recorded there. Signed response headers only
+- The current locked runtime candidate is `5a9855f6` (full source SHA is recorded in
+  `./evidence/local-checks-5a9855f6.md`). Local command results for the final head are recorded
+  there. Signed response headers only
   authenticate the response; Mesh, Direct health preflight, and Public signed success commit
   after the body completes. Error, cancellation, and deadline outcomes release the relevant gate
   or probe without recording success, while the captured Mesh epoch prevents an old response from
   updating a newer gate generation; the captured circuit operation id also prevents an old body
   from reopening a newer protocol-isolated peer. Non-idempotent history cleanup keeps fail-closed
-  `outcome_unknown` handling after an ambiguous response. The preceding `7712c651` runner
-  exceeded its CPU relative ceiling; the repaired candidate passed the formal isolated workload,
-  with the exact command and result recorded in `./evidence/mesh-resource-9e1cebfc.md`.
+  `outcome_unknown` handling after an ambiguous response. The preceding `dc7713ad` runner
+  exceeded its CPU relative ceiling; the completion-dispatch optimization passed the formal
+  isolated workload, with the exact command and result recorded in
+  `./evidence/mesh-resource-5a9855f6.md`.
 - Host-managed fresh-join and service-recovery evidence passed on the immediately preceding
   runtime candidate. The current repair changes circuit admission and Mesh success telemetry,
   not deployment, membership, persistence, or service activation code; the scope and non-same-SHA
