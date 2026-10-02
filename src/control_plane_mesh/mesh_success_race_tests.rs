@@ -3,13 +3,13 @@ use futures_util::StreamExt;
 
 fn peer() -> MeshPeerTarget {
     MeshPeerTarget {
-        node_id: "peer".to_owned(),
-        node_name: "peer".to_owned(),
-        mesh_base_url: Some("https://mesh.example".to_owned()),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
         endpoint_transport: Some("xhttp_reality_fallback"),
         endpoint_fingerprint: Some("fingerprint".to_owned()),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "https://public.example".to_owned(),
+        public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
     }
 }
 
@@ -23,7 +23,7 @@ fn request() -> MeshRequest {
         allow_ambiguous_fallback: false,
         request_id: "mesh-success-race-regression".to_owned(),
         route: InternalRoute::HealthV2,
-        cluster_id: "cluster".to_owned(),
+        cluster_id: xp_test_fixtures::primary_cluster_id().to_owned(),
         sender_id: "sender".to_owned(),
         updates_active_path: false,
     }

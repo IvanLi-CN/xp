@@ -6,22 +6,26 @@ async fn public_signed_body_commits_success_only_after_completion() {
 
     let client = MeshAwareHttpClient::new(reqwest::Client::new());
     let peer = MeshPeerTarget {
-        node_id: "peer".to_owned(),
-        node_name: "peer".to_owned(),
-        mesh_base_url: Some("https://mesh.example".to_owned()),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
         endpoint_transport: Some("xhttp_reality_fallback"),
         endpoint_fingerprint: Some("fingerprint".to_owned()),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "https://public.example".to_owned(),
+        public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
     };
     let circuits = client.circuits();
-    circuits.record_public_failure("peer").await;
-    circuits.set_public_probe_ready_for_test("peer").await;
+    circuits
+        .record_public_failure(xp_test_fixtures::primary_node_id())
+        .await;
+    circuits
+        .set_public_probe_ready_for_test(xp_test_fixtures::primary_node_id())
+        .await;
     let (decision, probe_id) = circuits
-        .before_public_attempt_with_probe_with_token("peer", true)
+        .before_public_attempt_with_probe_with_token(xp_test_fixtures::primary_node_id(), true)
         .await;
     let probe_guard = client
-        .public_probe_guard("peer", decision, probe_id)
+        .public_probe_guard(xp_test_fixtures::primary_node_id(), decision, probe_id)
         .expect("public probe guard");
     let response = reqwest::Response::from(
         axum::http::Response::builder()
@@ -47,7 +51,11 @@ async fn public_signed_body_commits_success_only_after_completion() {
     assert_eq!(body.as_ref(), b"response-body");
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            if circuits.public_state("peer").await == BreakerState::Closed {
+            if circuits
+                .public_state(xp_test_fixtures::primary_node_id())
+                .await
+                == BreakerState::Closed
+            {
                 break;
             }
             tokio::task::yield_now().await;
@@ -58,13 +66,17 @@ async fn public_signed_body_commits_success_only_after_completion() {
 
     let error_client = MeshAwareHttpClient::new(reqwest::Client::new());
     let error_circuits = error_client.circuits();
-    error_circuits.record_public_failure("peer").await;
-    error_circuits.set_public_probe_ready_for_test("peer").await;
+    error_circuits
+        .record_public_failure(xp_test_fixtures::primary_node_id())
+        .await;
+    error_circuits
+        .set_public_probe_ready_for_test(xp_test_fixtures::primary_node_id())
+        .await;
     let (decision, probe_id) = error_circuits
-        .before_public_attempt_with_probe_with_token("peer", true)
+        .before_public_attempt_with_probe_with_token(xp_test_fixtures::primary_node_id(), true)
         .await;
     let probe_guard = error_client
-        .public_probe_guard("peer", decision, probe_id)
+        .public_probe_guard(xp_test_fixtures::primary_node_id(), decision, probe_id)
         .expect("public error probe guard");
     let response = reqwest::Response::from(
         axum::http::Response::builder()
@@ -92,7 +104,11 @@ async fn public_signed_body_commits_success_only_after_completion() {
     assert!(body.next().await.expect("body error item").is_err());
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            if error_circuits.public_state("peer").await == BreakerState::Open {
+            if error_circuits
+                .public_state(xp_test_fixtures::primary_node_id())
+                .await
+                == BreakerState::Open
+            {
                 break;
             }
             tokio::task::yield_now().await;

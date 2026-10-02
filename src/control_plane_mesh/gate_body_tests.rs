@@ -4,17 +4,20 @@ use super::*;
 async fn mesh_body_error_does_not_commit_success_state() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
     let peer = MeshPeerTarget {
-        node_id: "peer".to_owned(),
-        node_name: "peer".to_owned(),
-        mesh_base_url: Some("https://mesh.example".to_owned()),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
         endpoint_transport: Some("xhttp_reality_fallback"),
         endpoint_fingerprint: Some("fingerprint".to_owned()),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "https://public.example".to_owned(),
+        public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
     };
     client
         .circuits
-        .record_retryable_failure_at("peer", client.circuits.next_operation())
+        .record_retryable_failure_at(
+            xp_test_fixtures::primary_node_id(),
+            client.circuits.next_operation(),
+        )
         .await;
     client
         .mark_direct_validation_failure_at(&peer, DirectValidationState::TransportFailed, None)
@@ -28,7 +31,7 @@ async fn mesh_body_error_does_not_commit_success_state() {
         allow_ambiguous_fallback: false,
         request_id: "body-error-state-regression".to_owned(),
         route: InternalRoute::HealthV2,
-        cluster_id: "cluster".to_owned(),
+        cluster_id: xp_test_fixtures::primary_cluster_id().to_owned(),
         sender_id: "sender".to_owned(),
         updates_active_path: false,
     };
@@ -60,7 +63,7 @@ async fn mesh_body_error_does_not_commit_success_state() {
             .peers
             .lock()
             .await
-            .get("peer")
+            .get(xp_test_fixtures::primary_node_id())
             .expect("failed peer circuit")
             .failures,
         2
@@ -74,7 +77,7 @@ async fn mesh_body_error_does_not_commit_success_state() {
                     .peers
                     .lock()
                     .await
-                    .get("peer")
+                    .get(xp_test_fixtures::primary_node_id())
                     .is_some_and(|circuit| circuit.failures == 0)
             {
                 break;
@@ -93,13 +96,13 @@ async fn mesh_success_telemetry_skips_after_epoch_changes() {
     let client =
         MeshAwareHttpClient::new(reqwest::Client::new()).with_mesh_observability(telemetry.clone());
     let peer = MeshPeerTarget {
-        node_id: "peer".to_owned(),
-        node_name: "peer".to_owned(),
-        mesh_base_url: Some("https://mesh.example".to_owned()),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
         endpoint_transport: Some("xhttp_reality_fallback"),
         endpoint_fingerprint: Some("fingerprint".to_owned()),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "https://public.example".to_owned(),
+        public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
     };
     let barrier_writer = client.mesh_epoch_barrier.clone().write_owned().await;
     let task = tokio::spawn({

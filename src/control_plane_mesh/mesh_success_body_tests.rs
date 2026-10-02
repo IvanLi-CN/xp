@@ -6,13 +6,13 @@ use tokio::sync::oneshot;
 async fn mesh_body_success_callbacks_share_one_completion_worker() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new());
     let peer = MeshPeerTarget {
-        node_id: "peer".to_owned(),
-        node_name: "peer".to_owned(),
-        mesh_base_url: Some("https://mesh.example".to_owned()),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
         endpoint_transport: Some("xhttp_reality_fallback"),
         endpoint_fingerprint: Some("fingerprint".to_owned()),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "https://public.example".to_owned(),
+        public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
     };
     let request = MeshRequest {
         method: reqwest::Method::GET,
@@ -23,7 +23,7 @@ async fn mesh_body_success_callbacks_share_one_completion_worker() {
         allow_ambiguous_fallback: false,
         request_id: "mesh-completion-dispatcher-regression".to_owned(),
         route: InternalRoute::HealthV2,
-        cluster_id: "cluster".to_owned(),
+        cluster_id: xp_test_fixtures::primary_cluster_id().to_owned(),
         sender_id: "sender".to_owned(),
         updates_active_path: false,
     };
@@ -80,13 +80,13 @@ async fn mesh_success_telemetry_does_not_requeue_gate_reader() {
         .with_mesh_observability(telemetry.clone())
         .with_mesh_gate_lock(gate_lock.clone());
     let peer = MeshPeerTarget {
-        node_id: "peer".to_owned(),
-        node_name: "peer".to_owned(),
-        mesh_base_url: Some("https://mesh.example".to_owned()),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
         endpoint_transport: Some("xhttp_reality_fallback"),
         endpoint_fingerprint: Some("fingerprint".to_owned()),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "https://public.example".to_owned(),
+        public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
     };
     let request = MeshRequest {
         method: reqwest::Method::GET,
@@ -97,7 +97,7 @@ async fn mesh_success_telemetry_does_not_requeue_gate_reader() {
         allow_ambiguous_fallback: false,
         request_id: "telemetry-reader-regression".to_owned(),
         route: InternalRoute::HealthV2,
-        cluster_id: "cluster".to_owned(),
+        cluster_id: xp_test_fixtures::primary_cluster_id().to_owned(),
         sender_id: "sender".to_owned(),
         updates_active_path: false,
     };

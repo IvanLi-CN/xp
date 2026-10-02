@@ -657,12 +657,12 @@ async fn signed_mesh_body_holds_gate_until_deadline_without_public_retry() {
     )
     .expect("node certificate");
     let mesh_server = spawn_counting_tls_server(&ca.key_pem, &ca.cert_pem).await;
-    let public_server = spawn_http1_server(&ca.key_pem, &ca.cert_pem).await;
+    let server = spawn_http1_server(&ca.key_pem, &ca.cert_pem).await;
     let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem)
         .expect("network factory")
         .mesh_client();
     let target = MeshPeerTarget {
-        public_base_url: format!("http://{}", public_server.addr),
+        public_base_url: format!("http://{}", server.addr),
         ..mesh_target(mesh_server.addr)
     };
     let mut request = mesh_request(0);
@@ -688,6 +688,6 @@ async fn signed_mesh_body_holds_gate_until_deadline_without_public_retry() {
         .await
         .expect("body deadline should release Mesh admission")
         .expect("transition task should finish");
-    assert_eq!(public_server.requests.load(Ordering::SeqCst), 0);
+    assert_eq!(server.requests.load(Ordering::SeqCst), 0);
     drop(response);
 }

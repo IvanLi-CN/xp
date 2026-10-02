@@ -344,7 +344,7 @@ async fn direct_mesh_admission_timeout_preserves_pre_dispatch_classification() {
                 allow_ambiguous_fallback: false,
                 request_id: "direct-mesh-admission-timeout".to_owned(),
                 route: InternalRoute::HealthV2,
-                cluster_id: "cluster".to_owned(),
+                cluster_id: xp_test_fixtures::primary_cluster_id().to_owned(),
                 sender_id: "sender".to_owned(),
                 updates_active_path: false,
             },

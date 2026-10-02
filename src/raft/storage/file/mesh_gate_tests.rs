@@ -14,7 +14,7 @@ fn test_store_init(tmp_dir: &Path) -> StoreInit {
         data_dir: tmp_dir.to_path_buf(),
         bootstrap_node_id: None,
         bootstrap_node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
-        bootstrap_access_host: "".to_owned(),
+        bootstrap_access_host: xp_test_fixtures::label_empty().to_owned(),
         bootstrap_api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
     }
 }

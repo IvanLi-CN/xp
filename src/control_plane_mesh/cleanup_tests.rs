@@ -19,19 +19,22 @@ impl MeshAwareHttpClient {
 async fn protocol_failure_cleanup_waits_for_epoch_barrier_before_state_update() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
     let peer = MeshPeerTarget {
-        node_id: "peer".to_owned(),
-        node_name: "peer".to_owned(),
-        mesh_base_url: Some("https://mesh.example".to_owned()),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
         endpoint_transport: Some("vision_tcp"),
         endpoint_fingerprint: Some("fingerprint".to_owned()),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "https://public.example".to_owned(),
+        public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
     };
     let barrier_writer = client.mesh_epoch_barrier.clone().write_owned().await;
     client.spawn_protocol_failure_cleanup(&peer, 0, None, client.circuits.next_operation());
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(
-        client.circuits().state("peer", true).await,
+        client
+            .circuits()
+            .state(xp_test_fixtures::primary_node_id(), true)
+            .await,
         BreakerState::Closed
     );
     drop(barrier_writer);
@@ -40,7 +43,7 @@ async fn protocol_failure_cleanup_waits_for_epoch_barrier_before_state_update() 
         loop {
             if client
                 .circuits()
-                .before_attempt_with_probe("peer", true, false)
+                .before_attempt_with_probe(xp_test_fixtures::primary_node_id(), true, false)
                 .await
                 == MeshAttemptDecision::Quarantined
             {
@@ -57,13 +60,13 @@ async fn protocol_failure_cleanup_waits_for_epoch_barrier_before_state_update() 
 async fn stale_failure_cleanup_cannot_overwrite_newer_success() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
     let peer = MeshPeerTarget {
-        node_id: "peer".to_owned(),
-        node_name: "peer".to_owned(),
-        mesh_base_url: Some("https://mesh.example".to_owned()),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
         endpoint_transport: Some("vision_tcp"),
         endpoint_fingerprint: Some("fingerprint".to_owned()),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "https://public.example".to_owned(),
+        public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
     };
     let stale_operation = client.circuits.next_operation();
     let current_operation = client.circuits.next_operation();
@@ -79,7 +82,10 @@ async fn stale_failure_cleanup_cannot_overwrite_newer_success() {
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     assert_eq!(
-        client.circuits().state("peer", true).await,
+        client
+            .circuits()
+            .state(xp_test_fixtures::primary_node_id(), true)
+            .await,
         BreakerState::Closed
     );
     assert_eq!(
@@ -92,13 +98,13 @@ async fn stale_failure_cleanup_cannot_overwrite_newer_success() {
 async fn protocol_validation_timeout_converges_in_background() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
     let peer = MeshPeerTarget {
-        node_id: "peer".to_owned(),
-        node_name: "peer".to_owned(),
-        mesh_base_url: Some("https://mesh.example".to_owned()),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
         endpoint_transport: Some("vision_tcp"),
         endpoint_fingerprint: Some("fingerprint".to_owned()),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "https://public.example".to_owned(),
+        public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
     };
     let records_lock = client.hold_direct_validation_records_for_test().await;
     let gate_guard = client.mesh_gate_lock.clone().read_owned().await;
@@ -135,13 +141,13 @@ async fn protocol_validation_timeout_converges_in_background() {
 async fn transport_validation_timeout_converges_in_background() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
     let peer = MeshPeerTarget {
-        node_id: "peer".to_owned(),
-        node_name: "peer".to_owned(),
-        mesh_base_url: Some("https://mesh.example".to_owned()),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
         endpoint_transport: Some("vision_tcp"),
         endpoint_fingerprint: Some("fingerprint".to_owned()),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "https://public.example".to_owned(),
+        public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
     };
     client.mark_direct_validation_success_at(&peer, None).await;
     let records_lock = client.hold_direct_validation_records_for_test().await;
@@ -214,23 +220,34 @@ async fn public_admission_timeout_does_not_dispatch_after_circuit_lock_wait() {
 #[tokio::test]
 async fn public_success_cleanup_converges_after_request_deadline() {
     let circuits = PeerCircuitBreakers::default();
-    circuits.record_public_failure("peer").await;
-    circuits.set_public_probe_ready_for_test("peer").await;
+    circuits
+        .record_public_failure(xp_test_fixtures::primary_node_id())
+        .await;
+    circuits
+        .set_public_probe_ready_for_test(xp_test_fixtures::primary_node_id())
+        .await;
     let operation_id = circuits.next_operation();
     let public_peers = circuits.hold_public_peers_for_test().await;
-    circuits.spawn_public_success_cleanup("peer", operation_id);
+    circuits.spawn_public_success_cleanup(xp_test_fixtures::primary_node_id(), operation_id);
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert!(
-        tokio::time::timeout(Duration::from_millis(25), circuits.public_state("peer"))
-            .await
-            .is_err(),
+        tokio::time::timeout(
+            Duration::from_millis(25),
+            circuits.public_state(xp_test_fixtures::primary_node_id())
+        )
+        .await
+        .is_err(),
         "public success cleanup should remain pending while its state lock is held"
     );
     drop(public_peers);
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            if circuits.public_state("peer").await == BreakerState::Closed {
+            if circuits
+                .public_state(xp_test_fixtures::primary_node_id())
+                .await
+                == BreakerState::Closed
+            {
                 break;
             }
             tokio::task::yield_now().await;

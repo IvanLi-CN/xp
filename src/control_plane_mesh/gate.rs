@@ -710,13 +710,13 @@ mod tests {
         let client =
             MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
         let peer = MeshPeerTarget {
-            node_id: "peer".to_owned(),
-            node_name: "peer".to_owned(),
-            mesh_base_url: None,
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            mesh_base_url: xp_test_fixtures::none(),
             endpoint_transport: None,
             endpoint_fingerprint: None,
             mesh_reason: MeshPeerReason::MissingEndpoint,
-            public_base_url: "https://public.example".to_owned(),
+            public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
         };
         let gate_guard = client.mesh_gate_lock.clone().read_owned().await;
         let response = reqwest::Response::from(
@@ -752,7 +752,7 @@ mod tests {
         assert_eq!(
             client
                 .circuits()
-                .before_attempt_with_probe("peer", true, false)
+                .before_attempt_with_probe(xp_test_fixtures::primary_node_id(), true, false)
                 .await,
             MeshAttemptDecision::Quarantined
         );
@@ -761,13 +761,13 @@ mod tests {
     async fn expired_mesh_failure_schedules_breaker_cleanup() {
         let client = MeshAwareHttpClient::new(reqwest::Client::new());
         let peer = MeshPeerTarget {
-            node_id: "peer".to_owned(),
-            node_name: "peer".to_owned(),
-            mesh_base_url: None,
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            mesh_base_url: xp_test_fixtures::none(),
             endpoint_transport: None,
             endpoint_fingerprint: None,
             mesh_reason: MeshPeerReason::MissingEndpoint,
-            public_base_url: "https://public.example".to_owned(),
+            public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
         };
         let circuits = client.circuits();
         let peers_lock = circuits.peers.lock().await;
@@ -790,7 +790,7 @@ mod tests {
                     .peers
                     .lock()
                     .await
-                    .get("peer")
+                    .get(xp_test_fixtures::primary_node_id())
                     .is_some_and(|circuit| circuit.failures == 1)
                 {
                     break;
@@ -806,13 +806,13 @@ mod tests {
         let client =
             MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
         let peer = MeshPeerTarget {
-            node_id: "peer".to_owned(),
-            node_name: "peer".to_owned(),
-            mesh_base_url: Some("https://mesh.example".to_owned()),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
             endpoint_transport: Some("xhttp_reality_fallback"),
             endpoint_fingerprint: Some("fingerprint".to_owned()),
             mesh_reason: MeshPeerReason::MeshAvailable,
-            public_base_url: "https://public.example".to_owned(),
+            public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
         };
         client.mark_direct_validation_success_at(&peer, None).await;
         let peers_lock = client.circuits.peers.lock().await;
@@ -851,13 +851,13 @@ mod tests {
             .with_mesh_observability(telemetry.clone());
         client.cluster_mesh_enabled.store(false, Ordering::Release);
         let peer = MeshPeerTarget {
-            node_id: "peer".to_owned(),
-            node_name: "peer".to_owned(),
-            mesh_base_url: Some("https://mesh.example".to_owned()),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
             endpoint_transport: Some("xhttp_reality_fallback"),
             endpoint_fingerprint: Some("fingerprint".to_owned()),
             mesh_reason: MeshPeerReason::MeshAvailable,
-            public_base_url: "https://public.example".to_owned(),
+            public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
         };
         client
             .record_public_outcome_for_epoch(
@@ -874,7 +874,7 @@ mod tests {
         let peer = snapshot
             .peers
             .iter()
-            .find(|peer| peer.peer_id == "peer")
+            .find(|peer| peer.peer_id == xp_test_fixtures::primary_node_id())
             .expect("disabled Mesh must still record the Public peer");
         assert_eq!(peer.last_path, Some(TelemetryPath::Public));
         assert_eq!(
@@ -897,13 +897,13 @@ mod tests {
             .with_mesh_observability(telemetry.clone())
             .with_mesh_gate_lock(gate_lock.clone());
         let peer = MeshPeerTarget {
-            node_id: "peer".to_owned(),
-            node_name: "peer".to_owned(),
-            mesh_base_url: Some("https://mesh.example".to_owned()),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
             endpoint_transport: Some("xhttp_reality_fallback"),
             endpoint_fingerprint: Some("fingerprint".to_owned()),
             mesh_reason: MeshPeerReason::MeshAvailable,
-            public_base_url: "https://public.example".to_owned(),
+            public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
         };
         let request = MeshRequest {
             method: reqwest::Method::GET,
@@ -914,7 +914,7 @@ mod tests {
             allow_ambiguous_fallback: false,
             request_id: "telemetry-body-regression".to_owned(),
             route: InternalRoute::HealthV2,
-            cluster_id: "cluster".to_owned(),
+            cluster_id: xp_test_fixtures::primary_cluster_id().to_owned(),
             sender_id: "sender".to_owned(),
             updates_active_path: false,
         };
@@ -957,7 +957,7 @@ mod tests {
                     .await
                     .peers
                     .iter()
-                    .any(|peer| peer.peer_id == "peer")
+                    .any(|peer| peer.peer_id == xp_test_fixtures::primary_node_id())
                 {
                     break;
                 }
