@@ -391,9 +391,9 @@ impl MeshAwareHttpClient {
         if let Some(mesh_probe_guard) = mesh_probe_guard.as_mut() {
             mesh_probe_guard.disarm();
         }
-        self.set_mesh_breaker_for_epoch_until(peer, breaker_state, None, epoch, deadline)
+        self.set_mesh_breaker_deferred_for_epoch_until(peer, breaker_state, None, epoch, deadline)
             .await;
-        self.record_sample_for_epoch_until(
+        self.record_sample_deferred_for_epoch_until(
             peer,
             telemetry_sample(
                 TelemetryPath::Mesh,

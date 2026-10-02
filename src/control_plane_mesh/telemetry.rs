@@ -166,6 +166,39 @@ impl MeshAwareHttpClient {
         }
     }
 
+    async fn record_sample_deferred_until(
+        &self,
+        peer: &MeshPeerTarget,
+        sample: MeshTelemetrySample,
+        deadline: Instant,
+    ) {
+        if let Some(telemetry) = &self.telemetry {
+            let _ = super::await_until(
+                deadline,
+                telemetry.record_sample_deferred(&peer.node_id, &peer.node_name, sample),
+            )
+            .await;
+        }
+    }
+
+    pub(super) async fn record_sample_deferred_for_epoch_until(
+        &self,
+        peer: &MeshPeerTarget,
+        sample: MeshTelemetrySample,
+        epoch: u64,
+        deadline: Instant,
+    ) {
+        let Some(_epoch_guard) = self.try_mesh_epoch_guard(epoch, true) else {
+            return;
+        };
+        self.record_sample_deferred_until(peer, sample, deadline)
+            .await;
+        if sample.success && sample.path == TelemetryPath::Mesh {
+            self.record_mesh_reason_until(peer, MeshPeerReason::MeshAvailable, deadline)
+                .await;
+        }
+    }
+
     pub(super) async fn record_sample_for_epoch_until(
         &self,
         peer: &MeshPeerTarget,
@@ -232,6 +265,27 @@ impl MeshAwareHttpClient {
         let _ = super::await_until(
             deadline,
             telemetry.set_breaker(&peer.node_id, state, event_message),
+        )
+        .await;
+    }
+
+    pub(super) async fn set_mesh_breaker_deferred_for_epoch_until(
+        &self,
+        peer: &MeshPeerTarget,
+        state: BreakerState,
+        event_message: Option<String>,
+        epoch: u64,
+        deadline: Instant,
+    ) {
+        let Some(_epoch_guard) = self.try_mesh_epoch_guard(epoch, true) else {
+            return;
+        };
+        let Some(telemetry) = &self.telemetry else {
+            return;
+        };
+        let _ = super::await_until(
+            deadline,
+            telemetry.set_breaker_deferred(&peer.node_id, state, event_message),
         )
         .await;
     }

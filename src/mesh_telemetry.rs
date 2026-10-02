@@ -312,6 +312,15 @@ impl MeshTelemetryHandle {
         self.record_sample_with_active_route(peer_id, peer_name, sample, None, false)
             .await
     }
+    pub(crate) async fn record_sample_deferred(
+        &self,
+        peer_id: impl Into<String>,
+        peer_name: impl Into<String>,
+        sample: MeshTelemetrySample,
+    ) -> anyhow::Result<()> {
+        self.record_sample_with_active_route(peer_id, peer_name, sample, None, true)
+            .await
+    }
     async fn record_sample_with_active_route(
         &self,
         peer_id: impl Into<String>,
@@ -417,6 +426,15 @@ impl MeshTelemetryHandle {
         event_message: Option<String>,
     ) -> anyhow::Result<()> {
         self.set_breaker_with_mode(peer_id, state_value, event_message, false)
+            .await
+    }
+    pub(crate) async fn set_breaker_deferred(
+        &self,
+        peer_id: impl Into<String>,
+        state_value: BreakerState,
+        event_message: Option<String>,
+    ) -> anyhow::Result<()> {
+        self.set_breaker_with_mode(peer_id, state_value, event_message, true)
             .await
     }
     async fn set_breaker_with_mode(
