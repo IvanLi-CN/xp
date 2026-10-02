@@ -675,12 +675,9 @@ impl PeerCircuitBreakers {
         let peer_id = peer_id.to_owned();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let deadline = Instant::now() + Duration::from_millis(100);
-                let _ = crate::control_plane_mesh::await_until(
-                    deadline,
-                    circuits.record_public_success_at(&peer_id, operation_id),
-                )
-                .await;
+                circuits
+                    .record_public_success_at(&peer_id, operation_id)
+                    .await;
             });
         }
     }

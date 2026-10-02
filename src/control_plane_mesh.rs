@@ -432,31 +432,6 @@ impl MeshAwareHttpClient {
         )?;
         Ok(response)
     }
-    /// Sends through Mesh first, then public only after a retryable transport failure.
-    pub async fn send_peer_request(
-        &self,
-        peer: &MeshPeerTarget,
-        request: MeshRequest,
-        cluster_ca_key_pem: &str,
-        cluster_ca_cert_pem: &str,
-    ) -> Result<reqwest::Response, MeshRequestError> {
-        match self
-            .send_peer_request_with_legacy_not_found(
-                peer,
-                request,
-                cluster_ca_key_pem,
-                cluster_ca_cert_pem,
-                false,
-                gate::PublicFallbackPolicy::Always,
-            )
-            .await?
-        {
-            PeerRequestResponse::Verified(response) => Ok(response),
-            PeerRequestResponse::PredecessorNotFound => Err(MeshRequestError::Protocol(
-                "unexpected predecessor capability response".to_string(),
-            )),
-        }
-    }
     /// Allows a predecessor's unsigned 404 only for an explicit compatibility probe.
     pub(crate) async fn send_peer_request_allowing_legacy_not_found(
         &self,
@@ -484,6 +459,7 @@ impl MeshAwareHttpClient {
                 cluster_ca_cert_pem,
                 true,
                 gate::PublicFallbackPolicy::WhenMeshDisabled,
+                None,
             )
             .await?;
         Ok(match response {
@@ -494,6 +470,7 @@ impl MeshAwareHttpClient {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn send_peer_request_with_legacy_not_found(
         &self,
         peer: &MeshPeerTarget,
@@ -502,6 +479,7 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
         allow_unsigned_not_found: bool,
         public_fallback_policy: gate::PublicFallbackPolicy,
+        body_lease: Option<Duration>,
     ) -> Result<PeerRequestResponse, MeshRequestError> {
         let started = Instant::now();
         let request_deadline = started + request.total_budget;
@@ -642,6 +620,7 @@ impl MeshAwareHttpClient {
                     allow_unsigned_not_found,
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
+                    body_lease,
                 )
                 .await?
             {
@@ -734,6 +713,7 @@ impl MeshAwareHttpClient {
                         cluster_ca_cert_pem,
                         reverse_deadline,
                         reverse_class,
+                        body_lease,
                     )
                     .await
                 {
@@ -977,9 +957,12 @@ impl MeshAwareHttpClient {
             return Ok(PeerRequestResponse::PredecessorNotFound);
         }
         let operation_id = self.circuits.next_operation();
+        let body_deadline = body_lease
+            .map(|lease| Instant::now() + lease)
+            .unwrap_or(request_deadline);
         let response = reverse::attach_response_with_finish(
             response,
-            request_deadline,
+            body_deadline,
             Some(self.public_success_telemetry_callback(
                 peer,
                 started,
@@ -988,7 +971,7 @@ impl MeshAwareHttpClient {
                 public_epoch,
                 operation_id,
                 public_probe_guard.take(),
-                request_deadline,
+                body_deadline,
             )),
         );
         Ok(PeerRequestResponse::Verified(response))
@@ -1004,6 +987,7 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
         deadline: Instant,
         class: reverse::ReverseRequestClass,
+        body_lease: Option<Duration>,
     ) -> Result<reqwest::Response, MeshRequestError> {
         if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
@@ -1062,6 +1046,7 @@ impl MeshAwareHttpClient {
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
                 &self.mesh_gate_lock,
+                body_lease,
             )
             .await?;
             response = Some(local_response);
@@ -1082,6 +1067,7 @@ impl MeshAwareHttpClient {
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
                 &self.mesh_gate_lock,
+                body_lease,
             )
             .await
             {
@@ -1126,6 +1112,7 @@ impl MeshAwareHttpClient {
                     request.allow_ambiguous_fallback,
                     &self.cluster_mesh_enabled,
                     &self.mesh_gate_lock,
+                    body_lease,
                 )
                 .await?
             }

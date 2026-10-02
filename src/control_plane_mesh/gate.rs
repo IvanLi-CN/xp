@@ -55,6 +55,7 @@ impl MeshAwareHttpClient {
         allow_unsigned_not_found: bool,
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
+        body_lease: Option<Duration>,
     ) -> Result<MeshAttemptResult, MeshRequestError> {
         let request_deadline = started + request.total_budget;
         let mesh_send_deadline = started + budget;
@@ -136,10 +137,13 @@ impl MeshAwareHttpClient {
                             .await);
                     }
                     let operation_id = self.circuits.next_operation();
+                    let body_deadline = body_lease
+                        .map(|lease| Instant::now() + lease)
+                        .unwrap_or(request_deadline);
                     let response = reverse::attach_mesh_gate_with_finish(
                         response,
                         gate_guard,
-                        request_deadline,
+                        body_deadline,
                         Some(self.mesh_success_telemetry_callback(
                             peer,
                             started,
@@ -149,7 +153,7 @@ impl MeshAwareHttpClient {
                             validation_revision,
                             operation_id,
                             mesh_probe_guard.take(),
-                            request_deadline,
+                            body_deadline,
                         )),
                     );
                     return Ok(MeshAttemptResult::Response(PeerRequestResponse::Verified(
@@ -339,21 +343,21 @@ impl MeshAwareHttpClient {
             operation_id,
             &epoch_guard,
         );
-        if breaker_state.is_some()
-            && let Some(mesh_probe_guard) = mesh_probe_guard.as_mut()
-        {
+        drop(epoch_guard);
+        let Some(breaker_state) = breaker_state else {
+            return;
+        };
+        if let Some(mesh_probe_guard) = mesh_probe_guard.as_mut() {
             mesh_probe_guard.disarm();
         }
         let Some(telemetry) = &self.telemetry else {
             return;
         };
-        if let Some(breaker_state) = breaker_state {
-            let _ = super::await_until(
-                deadline,
-                telemetry.set_breaker_deferred(&peer.node_id, breaker_state, None),
-            )
-            .await;
-        }
+        let _ = super::await_until(
+            deadline,
+            telemetry.set_breaker_deferred(&peer.node_id, breaker_state, None),
+        )
+        .await;
         let _ = super::await_until(
             deadline,
             telemetry.record_sample_deferred(

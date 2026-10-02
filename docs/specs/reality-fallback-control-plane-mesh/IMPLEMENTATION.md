@@ -43,14 +43,16 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   not queue the write-preferring barrier; only first authenticated initialization and explicit Mesh
   switch changes take the write side. Reconcile also skips the write side when the authoritative
   value is already unchanged, regardless of an unrelated state-generation advance. Mesh admission
-  and response-body guards use the caller's
-  absolute deadline; an independent body timer releases an unconsumed response guard, and terminal
-  body states release it without retrying a signed response through Public. Signed Mesh success
+  and response-body guards use the caller's absolute deadline; runtime-events SSE keeps the
+  three-second admission/first-byte budget but uses a fixed internal fifteen-minute body lease.
+  An independent body timer releases an unconsumed response guard, and terminal body states
+  release it without retrying a signed response through Public. Signed Mesh success
   reserves its circuit operation id at header verification and carries the half-open probe guard
   through body completion, so a late body cannot overwrite a newer protocol rejection and a second
   half-open probe cannot start while the first body is active. Breaker/validation state updates stay
   under the bounded admission guard, while persistence telemetry is deadline-aware after the guard
-  is released.
+  is released. Completion work is dispatched through a bounded queue and active-worker window;
+  overflow drops only deferred completion work after its RAII probe guard is released.
   Non-bootstrap nodes hold the local gate closed until the first authenticated Raft state or
   snapshot is applied, so a joining node cannot emit Mesh traffic from the default local state.
   Snapshots carry an explicit `mesh_state_applied` payload marker plus snapshot identity fields.

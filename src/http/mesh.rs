@@ -13,6 +13,8 @@ mod liveness;
 mod preflight;
 #[path = "mesh/status.rs"]
 mod status;
+#[path = "mesh/stream_request.rs"]
+mod stream_request;
 
 use status::{AdminMeshConnectionUsage, AdminMeshTransportStatus, AdminReverseUnderlayStatus};
 
@@ -21,6 +23,7 @@ pub(super) use liveness::{
     admin_internal_mesh_health, admin_internal_reverse_probe, spawn_reverse_link_probe_worker,
 };
 pub(super) use preflight::{admin_internal_mesh_preflight, run_mesh_enable_preflight};
+pub(super) use stream_request::send_mesh_internal_stream_read;
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
     generated_at: String,
@@ -1423,7 +1426,7 @@ pub(super) async fn send_mesh_internal_resource_read(
     budget: Duration,
 ) -> Result<reqwest::Response, ApiError> {
     let support_id = crate::id::new_ulid_string();
-    let response = send_mesh_internal_request_raw(
+    let response = stream_request::send_mesh_internal_request_raw(
         state,
         client,
         node,
@@ -1505,7 +1508,7 @@ pub(super) async fn send_mesh_internal_request(
     allow_ambiguous_fallback: bool,
     request_id: String,
 ) -> Result<reqwest::Response, ApiError> {
-    let response = send_mesh_internal_request_raw(
+    let response = stream_request::send_mesh_internal_request_raw(
         state,
         client,
         node,
@@ -1519,42 +1522,6 @@ pub(super) async fn send_mesh_internal_request(
     )
     .await?;
     response.map_err(|error| ApiError::gateway_timeout(error.to_string()))
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn send_mesh_internal_request_raw(
-    state: &AppState,
-    client: &MeshAwareHttpClient,
-    node: &Node,
-    method: Method,
-    path_and_query: String,
-    body: Vec<u8>,
-    content_type: Option<String>,
-    budget: Duration,
-    allow_ambiguous_fallback: bool,
-    request_id: String,
-) -> Result<Result<reqwest::Response, MeshRequestError>, ApiError> {
-    let ca_key_pem = state
-        .cluster_ca_key_pem
-        .as_deref()
-        .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
-    let peer = mesh_peer_target(state, &node.node_id).await?;
-    let request = MeshRequest {
-        method,
-        path_and_query,
-        content_type,
-        body,
-        total_budget: budget,
-        allow_ambiguous_fallback,
-        request_id,
-        route: internal_auth::InternalRoute::MeshV2,
-        cluster_id: state.cluster.cluster_id.clone(),
-        sender_id: state.cluster.node_id.clone(),
-        updates_active_path: true,
-    };
-    Ok(client
-        .send_peer_request(&peer, request, ca_key_pem, &state.cluster_ca_pem)
-        .await)
 }
 
 pub(super) async fn probe_mesh_peer(state: &AppState, node_id: &str) -> Result<(), ApiError> {

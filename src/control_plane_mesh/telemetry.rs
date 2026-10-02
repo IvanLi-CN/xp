@@ -312,7 +312,7 @@ impl MeshAwareHttpClient {
         mut public_probe_guard: Option<PublicHalfOpenProbeGuard>,
         deadline: Instant,
     ) {
-        let Some(_epoch_guard) = self
+        let Some(epoch_guard) = self
             .mesh_epoch_guard_until(public_epoch, deadline, false)
             .await
         else {
@@ -328,6 +328,7 @@ impl MeshAwareHttpClient {
             self.circuits
                 .spawn_public_success_cleanup(&peer.node_id, operation_id);
         }
+        drop(epoch_guard);
         if public_breaker_result.is_some()
             && let Some(guard) = public_probe_guard.as_mut()
         {

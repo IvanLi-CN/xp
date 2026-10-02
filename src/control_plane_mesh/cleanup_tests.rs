@@ -212,6 +212,35 @@ async fn public_admission_timeout_does_not_dispatch_after_circuit_lock_wait() {
 }
 
 #[tokio::test]
+async fn public_success_cleanup_converges_after_request_deadline() {
+    let circuits = PeerCircuitBreakers::default();
+    circuits.record_public_failure("peer").await;
+    circuits.set_public_probe_ready_for_test("peer").await;
+    let operation_id = circuits.next_operation();
+    let public_peers = circuits.hold_public_peers_for_test().await;
+    circuits.spawn_public_success_cleanup("peer", operation_id);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), circuits.public_state("peer"))
+            .await
+            .is_err(),
+        "public success cleanup should remain pending while its state lock is held"
+    );
+    drop(public_peers);
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if circuits.public_state("peer").await == BreakerState::Closed {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("unbounded public success cleanup should record the breaker state");
+}
+
+#[tokio::test]
 async fn mesh_admission_timeout_does_not_public_dispatch_an_ordinary_mutation() {
     let reconcile = ReconcileHandle::noop();
     let gate = reconcile.mesh_gate();

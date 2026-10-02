@@ -37,10 +37,13 @@
 - 已准入的 Mesh 响应必须把读 guard 绑定到完整 response body 生命周期；准入期间的成功遥测
   必须复用该 guard，不得再次获取同一写优先读写锁而阻塞 gate transition。body guard 受调用方
   绝对 deadline 约束，并在 EOF、body error、取消或 deadline 时释放；deadline timer 必须独立于
-  下一次 body poll，调用方保留未消费的 response 也不能无限持有 guard。guard 释放后的遥测只做
-  原子 epoch/gate 校验，不重新等待该锁，并在剩余请求预算内完成或取消。zero-length body
-  也必须等待实际 EOF；仅有 response headers 不足以释放 guard，未知长度和非空 body 同样覆盖
-  完整 body 生命周期。
+  下一次 body poll，调用方保留未消费的 response 也不能无限持有 guard。runtime-events 的长驻
+  SSE 是内部例外：3 秒请求预算只约束 Mesh admission 与首字节，签名响应头验证完成后改用固定
+  15 分钟 stream lease；lease 到期关闭当前 SSE，客户端按既有 SSE 重连语义重新建立请求。该
+  lease 不暴露为配置，不改变公开 API、wire protocol 或持久化格式。guard 释放后的遥测只做
+  原子 epoch/gate 校验，不重新等待该锁，并在对应请求或 stream lease 预算内完成或取消。
+  zero-length body 也必须等待实际 EOF；仅有 response headers 不足以释放 guard，未知长度和非空
+  body 同样覆盖完整 body 生命周期。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。
@@ -115,7 +118,9 @@
 - Mesh 预算为 `min(5s, max(500ms, total/3))`；公网取得剩余预算。
 - Mesh gate admission 消耗同一请求的 Mesh slice；admission deadline 到期表示请求尚未 dispatch，
   只读、Raft 幂等和 durable history 请求仍可用剩余预算走 Public fallback。已签名响应头之后的
-  body deadline 属于权威响应的终止，不得改走 Public 或其他路径重试。
+  body deadline 属于权威响应的终止，不得改走 Public 或其他路径重试。runtime-events SSE 的
+  3 秒 slice 在首字节后由固定 15 分钟内部 stream lease 接管；EOF、body error、客户端取消和
+  lease 到期都会释放 guard，客户端重新发起下一次 SSE 请求。
 - authoritative gate 的 reconcile 若目标值与当前值及 state generation 均未变化，必须只做原子
   校验而不排队写 barrier；显式 Mesh 开关切换和首次认证初始化仍必须取得 write barrier。
 - 有效 ack 的任何 HTTP status 都是权威结果，禁止降级。
@@ -238,9 +243,10 @@
   且不排队 gate writer；持有 read guard 且已有 gate transition writer 时，Mesh admission 在请求
   deadline 内取消并保留未 dispatch 分类，Public fallback 使用剩余预算。
 - finite、erroring、dropped 与 stalled signed response body 均覆盖 guard 的完整生命周期：EOF、
-  error、取消、未继续 poll 和 deadline 必须释放 guard；signed-header body timeout 不得触发
-  Public fallback。未 dispatch 的 half-open probe 必须释放其占位，限时 telemetry 不得跨过请求
-  deadline 或把旧 epoch 状态写入新 epoch。
+  error、取消、未继续 poll 和 deadline/stream lease 必须释放 guard；runtime-events SSE 的 3 秒
+  admission 不得截断首字节之后的长驻 body，signed-header body timeout 不得触发 Public fallback。
+  未 dispatch 的 half-open probe 必须释放其占位，限时 telemetry 不得跨过请求或 stream lease
+  deadline，或把旧 epoch 状态写入新 epoch。
 - 50-peer 15 分钟 workload 中 XP peak anonymous PSS 不超过 18,432 KiB，XP total PSS 与
   候选完整栈均不高于各自基线 1,024 KiB，XP CPU-seconds 不高于基线 5%。当基线的
   TLS/TCP 建连数高于每个 peer 一条持久连接的 floor 时，候选至少减少 90%；基线已经处于

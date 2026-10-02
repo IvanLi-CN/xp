@@ -394,6 +394,50 @@ async fn mesh_response_body_deadline_releases_gate_guard() {
         .expect("body deadline must release the gate guard");
 }
 
+#[tokio::test(start_paused = true)]
+async fn mesh_response_body_stream_lease_outlives_admission_slice() {
+    use futures_util::StreamExt;
+
+    let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
+    let gate_guard = gate_lock.clone().read_owned().await;
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(reqwest::StatusCode::OK)
+            .body(reqwest::Body::wrap_stream(futures_util::stream::pending::<
+                Result<bytes::Bytes, std::io::Error>,
+            >()))
+            .expect("synthetic response"),
+    );
+    let response = super::reverse::attach_mesh_gate(
+        response,
+        gate_guard,
+        Instant::now() + Duration::from_secs(15 * 60),
+    );
+    let mut body = response.bytes_stream();
+    tokio::task::yield_now().await;
+
+    tokio::time::advance(Duration::from_secs(3)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        gate_lock.clone().try_write_owned().is_err(),
+        "the stream lease must keep the gate guard after the admission slice"
+    );
+
+    tokio::time::advance(Duration::from_secs(15 * 60)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        body.next()
+            .await
+            .expect("stream lease should emit a timeout")
+            .is_err(),
+        "stream lease expiry must terminate a stalled body"
+    );
+    assert!(
+        gate_lock.clone().try_write_owned().is_ok(),
+        "stream lease expiry must release the gate guard"
+    );
+}
+
 #[tokio::test]
 async fn mesh_response_body_guard_is_released_on_eof() {
     use futures_util::StreamExt;

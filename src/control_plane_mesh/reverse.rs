@@ -401,6 +401,7 @@ impl MeshAwareHttpClient {
                     cluster_ca_cert_pem,
                     route_deadline,
                     ReverseRequestClass::Health,
+                    None,
                 )
                 .await
             {
@@ -453,6 +454,7 @@ impl MeshAwareHttpClient {
             cluster_ca_cert_pem,
             Instant::now() + route_budget(request.total_budget),
             ReverseRequestClass::Health,
+            None,
         )
         .await
         .map(|_| ())
@@ -511,6 +513,7 @@ impl MeshAwareHttpClient {
                     cluster_ca_cert_pem,
                     route_deadline,
                     ReverseRequestClass::Control,
+                    None,
                 )
                 .await
             {
@@ -568,6 +571,7 @@ pub(super) async fn send_outer_request(
     allow_ambiguous_fallback: bool,
     cluster_mesh_enabled: &Arc<AtomicBool>,
     mesh_gate_lock: &Arc<tokio::sync::RwLock<()>>,
+    body_lease: Option<Duration>,
 ) -> Result<
     (
         reqwest::Response,
@@ -614,7 +618,13 @@ pub(super) async fn send_outer_request(
     }
     match tokio::time::timeout(remaining, builder.send()).await {
         Ok(Ok(response)) => Ok((
-            attach_mesh_gate(response, gate_guard, deadline),
+            attach_mesh_gate(
+                response,
+                gate_guard,
+                body_lease
+                    .map(|lease| Instant::now() + lease)
+                    .unwrap_or(deadline),
+            ),
             dispatch.inner_verified,
             dispatch.outer_verified,
         )),
