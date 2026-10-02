@@ -60,6 +60,10 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   deadline has expired, while successful body
   telemetry uses bounded deferred persistence after its RAII probe guard is released. Failure,
   cancellation, and deadline telemetry remains immediate and bounded.
+  An unchanged deferred breaker observation does not dirty or rewrite telemetry, while a failed
+  snapshot still retries. A finite body that already reports end-of-stream releases its gate and
+  finishes immediately without allocating another body wrapper or deadline task; a zero
+  Content-Length alone cannot take this path. Streaming leases retain their separate lifecycle.
   Non-bootstrap nodes hold the local gate closed until the first authenticated Raft state or
   snapshot is applied, so a joining node cannot emit Mesh traffic from the default local state.
   Snapshots carry an explicit `mesh_state_applied` payload marker plus snapshot identity fields.
@@ -137,6 +141,9 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   half-open probe slot until a successful response body finishes. They also verify lease expiry
   drops an unpolled upstream body, snapshot gate acquisition is bounded, and queued plus overflow
   completions share the active capacity while the queue remains continuously replenished.
+  Telemetry regressions also distinguish unchanged breaker observations from failed-snapshot
+  retries. Body regressions distinguish a confirmed empty EOF from delayed EOF with zero
+  Content-Length.
   The direct admission path
   preserves `PreDispatchTimeout` while the gate remains enabled; bounded state and telemetry
   updates retain epoch classification.

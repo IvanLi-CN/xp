@@ -470,12 +470,11 @@ impl MeshTelemetryHandle {
             }
             state.persisted.revision += 1;
         }
+        if !changed && (!defer_persist || !state.retry_persist) {
+            return Ok(());
+        }
         if !defer_persist {
-            return if changed {
-                self.persist_immediately(&mut state, Instant::now())
-            } else {
-                Ok(())
-            };
+            return self.persist_immediately(&mut state, Instant::now());
         }
         let deferred_flush = self.schedule_deferred_flush(&mut state, Instant::now(), false);
         drop(state);

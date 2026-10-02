@@ -42,7 +42,8 @@
   15 分钟 stream lease；lease 到期关闭当前 SSE，客户端按既有 SSE 重连语义重新建立请求。该
   lease 不暴露为配置，不改变公开 API、wire protocol 或持久化格式。guard 释放后的遥测只做
   原子 epoch/gate 校验，不重新等待该锁，并在对应请求或 stream lease 预算内完成或取消。
-  zero-length body 也必须等待实际 EOF；仅有 response headers 不足以释放 guard，未知长度和非空
+  zero-length body 也必须等待实际 EOF；若底层 body 已确认 end-of-stream，则立即完成并释放
+  guard，无需额外 poll。Content-Length 或 response headers 不能代替该确认；未知长度和非空
   body 同样覆盖完整 body 生命周期。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。

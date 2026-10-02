@@ -1,4 +1,5 @@
 use super::*;
+use axum::body::HttpBody as _;
 use futures_util::{StreamExt, TryStreamExt};
 use http_body_util::BodyExt as _;
 use reqwest::ResponseBuilderExt;
@@ -301,6 +302,13 @@ fn attach_response_body_with_finish(
     let mut extensions = url_extensions;
     extensions.extend(std::mem::take(&mut parts.extensions));
     parts.extensions = extensions;
+    if body.is_end_stream() {
+        drop(gate_guard);
+        if let Some(on_finish) = on_finish {
+            on_finish(crate::mesh_gate_body::BodyFinish::Complete);
+        }
+        return reqwest::Response::from(axum::http::Response::from_parts(parts, body));
+    }
     let body = body.into_data_stream().map_err(std::io::Error::other);
     let guarded_body = match gate_guard {
         Some(gate_guard) => {

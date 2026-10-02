@@ -23,6 +23,37 @@ impl Drop for DropNotifies {
 }
 
 #[tokio::test]
+async fn completed_empty_mesh_body_releases_guard_without_another_poll() {
+    let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
+    let gate_guard = gate_lock.clone().read_owned().await;
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(reqwest::StatusCode::OK)
+            .body(reqwest::Body::from(Vec::<u8>::new()))
+            .expect("completed empty response"),
+    );
+    let (finished_tx, mut finished_rx) = oneshot::channel();
+    let response = super::reverse::attach_mesh_gate_with_finish(
+        response,
+        gate_guard,
+        Instant::now() + Duration::from_secs(1),
+        Some(Box::new(move |finish| {
+            let _ = finished_tx.send(finish);
+        })),
+    );
+
+    assert!(
+        gate_lock.clone().try_write_owned().is_ok(),
+        "a body already at EOF must not retain a read guard until the caller polls it"
+    );
+    assert_eq!(
+        finished_rx.try_recv().expect("EOF completion"),
+        crate::mesh_gate_body::BodyFinish::Complete
+    );
+    assert!(response.bytes().await.expect("empty body").is_empty());
+}
+
+#[tokio::test]
 async fn zero_length_mesh_response_releases_gate_guard_after_eof() {
     use futures_util::StreamExt;
 
