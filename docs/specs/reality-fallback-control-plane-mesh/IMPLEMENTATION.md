@@ -51,8 +51,10 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   through body completion, so a late body cannot overwrite a newer protocol rejection and a second
   half-open probe cannot start while the first body is active. Breaker/validation state updates stay
   under the bounded admission guard, while persistence telemetry is deadline-aware after the guard
-  is released. Completion work is dispatched through a bounded queue and active-worker window;
-  overflow drops only deferred completion work after its RAII probe guard is released.
+  is released. Critical completion state is coalesced per peer behind a bounded queue and
+  active-worker window; overflow preserves the latest critical state, while successful body
+  telemetry uses bounded deferred persistence after its RAII probe guard is released. Failure,
+  cancellation, and deadline telemetry remains immediate and bounded.
   Non-bootstrap nodes hold the local gate closed until the first authenticated Raft state or
   snapshot is applied, so a joining node cannot emit Mesh traffic from the default local state.
   Snapshots carry an explicit `mesh_state_applied` payload marker plus snapshot identity fields.
@@ -137,18 +139,18 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   copies the resolved executables into the disposable run before measurement, so build scripts and
   release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
   MiB target remains outside this topic's contract.
-- The current locked runtime candidate is `5a9855f6` (full source SHA is recorded in
-  `./evidence/local-checks-5a9855f6.md`). Local command results for the final head are recorded
+- The current locked runtime candidate is `392f4b2a` (full source SHA is recorded in
+  `./evidence/local-checks-392f4b2a.md`). Local command results for the final head are recorded
   there. Signed response headers only
   authenticate the response; Mesh, Direct health preflight, and Public signed success commit
   after the body completes. Error, cancellation, and deadline outcomes release the relevant gate
   or probe without recording success, while the captured Mesh epoch prevents an old response from
   updating a newer gate generation; the captured circuit operation id also prevents an old body
   from reopening a newer protocol-isolated peer. Non-idempotent history cleanup keeps fail-closed
-  `outcome_unknown` handling after an ambiguous response. The preceding `dc7713ad` runner
-  exceeded its CPU relative ceiling; the completion-dispatch optimization passed the formal
-  isolated workload, with the exact command and result recorded in
-  `./evidence/mesh-resource-5a9855f6.md`.
+  `outcome_unknown` handling after an ambiguous response. The same-SHA formal isolated workload
+  passed after two diagnostic runs hit different shared-testbox peak boundaries; the exact
+  successful run and both bounded failures are recorded in
+  `./evidence/mesh-resource-392f4b2a.md`.
 - Host-managed fresh-join and service-recovery evidence passed on the immediately preceding
   runtime candidate. The current repair changes circuit admission and Mesh success telemetry,
   not deployment, membership, persistence, or service activation code; the scope and non-same-SHA
