@@ -124,7 +124,7 @@ impl MeshAwareHttpClient {
         .await;
     }
 
-    async fn record_mesh_reason_for_epoch_until(
+    pub(super) async fn record_mesh_reason_for_epoch_until(
         &self,
         peer: &MeshPeerTarget,
         reason: MeshPeerReason,
@@ -279,24 +279,48 @@ impl MeshAwareHttpClient {
         let client = self.clone();
         let peer = peer.clone();
         Box::new(move |outcome| {
-            if outcome != crate::mesh_gate_body::BodyFinish::Complete {
-                return;
-            }
             let completion_client = client.clone();
-            client.dispatch_completion(async move {
-                completion_client
-                    .record_public_success_after_body(
-                        &peer,
-                        started,
-                        fallback,
-                        updates_active_path,
-                        public_epoch,
-                        operation_id,
-                        public_probe_guard,
-                        deadline,
-                    )
-                    .await;
-            });
+            let key = format!("public:{}", peer.node_id);
+            match outcome {
+                crate::mesh_gate_body::BodyFinish::Complete => {
+                    client.dispatch_critical_completion(key, async move {
+                        completion_client
+                            .record_public_success_after_body(
+                                &peer,
+                                started,
+                                fallback,
+                                updates_active_path,
+                                public_epoch,
+                                operation_id,
+                                public_probe_guard,
+                                deadline,
+                            )
+                            .await;
+                    });
+                }
+                crate::mesh_gate_body::BodyFinish::Error
+                | crate::mesh_gate_body::BodyFinish::Deadline => {
+                    let failure_deadline = (outcome == crate::mesh_gate_body::BodyFinish::Deadline)
+                        .then(Instant::now)
+                        .unwrap_or(deadline);
+                    client.dispatch_critical_completion(key, async move {
+                        completion_client
+                            .record_public_body_failure_after_body(
+                                &peer,
+                                started,
+                                fallback,
+                                updates_active_path,
+                                public_epoch,
+                                operation_id,
+                                public_probe_guard,
+                                failure_deadline,
+                            )
+                            .await;
+                    });
+                }
+                crate::mesh_gate_body::BodyFinish::Cancelled
+                | crate::mesh_gate_body::BodyFinish::LeaseExpired => {}
+            }
         })
     }
 
@@ -312,12 +336,6 @@ impl MeshAwareHttpClient {
         mut public_probe_guard: Option<PublicHalfOpenProbeGuard>,
         deadline: Instant,
     ) {
-        let Some(epoch_guard) = self
-            .mesh_epoch_guard_until(public_epoch, deadline, false)
-            .await
-        else {
-            return;
-        };
         let public_breaker_result = super::await_until(
             deadline,
             self.circuits
@@ -328,15 +346,13 @@ impl MeshAwareHttpClient {
             self.circuits
                 .spawn_public_success_cleanup(&peer.node_id, operation_id);
         }
-        drop(epoch_guard);
-        if public_breaker_result.is_some()
-            && let Some(guard) = public_probe_guard.as_mut()
-        {
+        let Some(public_breaker) = public_breaker_result.flatten() else {
+            return;
+        };
+        if let Some(guard) = public_probe_guard.as_mut() {
             guard.disarm();
         }
-        if let Some(public_breaker) = public_breaker_result.flatten()
-            && let Some(telemetry) = &self.telemetry
-        {
+        if let Some(telemetry) = &self.telemetry {
             let _ = super::await_until(
                 deadline,
                 telemetry.set_public_breaker(&peer.node_id, public_breaker, None),
@@ -347,6 +363,58 @@ impl MeshAwareHttpClient {
             peer,
             started,
             true,
+            fallback,
+            updates_active_path,
+            public_epoch,
+            deadline,
+        )
+        .await;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn record_public_body_failure_after_body(
+        &self,
+        peer: &MeshPeerTarget,
+        started: Instant,
+        fallback: bool,
+        updates_active_path: bool,
+        public_epoch: u64,
+        operation_id: u64,
+        mut public_probe_guard: Option<PublicHalfOpenProbeGuard>,
+        deadline: Instant,
+    ) {
+        let public_breaker_result = super::await_until(
+            deadline,
+            self.circuits
+                .record_public_failure_at(&peer.node_id, operation_id),
+        )
+        .await;
+        if public_breaker_result.is_none() {
+            self.circuits
+                .spawn_public_failure_cleanup(&peer.node_id, operation_id);
+        }
+        let Some(public_breaker) = public_breaker_result.flatten() else {
+            return;
+        };
+        if let Some(guard) = public_probe_guard.as_mut() {
+            guard.disarm();
+        }
+        if let Some(telemetry) = &self.telemetry {
+            let _ = super::await_until(
+                deadline,
+                telemetry.set_public_breaker(
+                    &peer.node_id,
+                    public_breaker,
+                    (public_breaker == BreakerState::Open)
+                        .then(|| "Public response body failed".to_string()),
+                ),
+            )
+            .await;
+        }
+        self.record_public_outcome_for_epoch(
+            peer,
+            started,
+            false,
             fallback,
             updates_active_path,
             public_epoch,

@@ -2,6 +2,7 @@ use super::*;
 
 const POST_DEADLINE_CLEANUP_WAIT: Duration = Duration::from_millis(100);
 const CLEANUP_RETRY_DELAY: Duration = Duration::from_millis(10);
+const POST_DEADLINE_CLEANUP_LIFETIME: Duration = Duration::from_secs(30);
 
 impl MeshAwareHttpClient {
     pub(super) fn spawn_protocol_failure_cleanup(
@@ -49,13 +50,16 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
+                let cleanup_expires_at = Instant::now() + POST_DEADLINE_CLEANUP_LIFETIME;
                 loop {
                     if (require_enabled && !client.mesh_gate_matches(epoch))
                         || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                        || Instant::now() >= cleanup_expires_at
                     {
                         return;
                     }
-                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let deadline =
+                        (Instant::now() + POST_DEADLINE_CLEANUP_WAIT).min(cleanup_expires_at);
                     let Some(epoch_guard) = client
                         .mesh_epoch_guard_until(epoch, deadline, require_enabled)
                         .await
@@ -81,10 +85,12 @@ impl MeshAwareHttpClient {
                 loop {
                     if (require_enabled && !client.mesh_gate_matches(epoch))
                         || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                        || Instant::now() >= cleanup_expires_at
                     {
                         return;
                     }
-                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let deadline =
+                        (Instant::now() + POST_DEADLINE_CLEANUP_WAIT).min(cleanup_expires_at);
                     let Some(epoch_guard) = client
                         .mesh_epoch_guard_until(epoch, deadline, require_enabled)
                         .await
@@ -157,13 +163,16 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
+                let cleanup_expires_at = Instant::now() + POST_DEADLINE_CLEANUP_LIFETIME;
                 loop {
                     if (require_enabled && !client.mesh_gate_matches(epoch))
                         || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                        || Instant::now() >= cleanup_expires_at
                     {
                         return;
                     }
-                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let deadline =
+                        (Instant::now() + POST_DEADLINE_CLEANUP_WAIT).min(cleanup_expires_at);
                     let Some(epoch_guard) = client
                         .mesh_epoch_guard_until(epoch, deadline, require_enabled)
                         .await
@@ -189,10 +198,12 @@ impl MeshAwareHttpClient {
                 loop {
                     if (require_enabled && !client.mesh_gate_matches(epoch))
                         || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                        || Instant::now() >= cleanup_expires_at
                     {
                         return;
                     }
-                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let deadline =
+                        (Instant::now() + POST_DEADLINE_CLEANUP_WAIT).min(cleanup_expires_at);
                     let Some(epoch_guard) = client
                         .mesh_epoch_guard_until(epoch, deadline, require_enabled)
                         .await
@@ -270,13 +281,16 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
+                let cleanup_expires_at = Instant::now() + POST_DEADLINE_CLEANUP_LIFETIME;
                 loop {
                     if (require_enabled && !client.mesh_gate_matches(epoch))
                         || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                        || Instant::now() >= cleanup_expires_at
                     {
                         return;
                     }
-                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let deadline =
+                        (Instant::now() + POST_DEADLINE_CLEANUP_WAIT).min(cleanup_expires_at);
                     let Some(epoch_guard) = client
                         .mesh_epoch_guard_until(epoch, deadline, require_enabled)
                         .await
@@ -349,13 +363,16 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
+                let cleanup_expires_at = Instant::now() + POST_DEADLINE_CLEANUP_LIFETIME;
                 loop {
                     if (require_enabled && !client.mesh_gate_matches(epoch))
                         || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                        || Instant::now() >= cleanup_expires_at
                     {
                         return;
                     }
-                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let deadline =
+                        (Instant::now() + POST_DEADLINE_CLEANUP_WAIT).min(cleanup_expires_at);
                     let Some(epoch_guard) = client
                         .mesh_epoch_guard_until(epoch, deadline, require_enabled)
                         .await
@@ -381,10 +398,12 @@ impl MeshAwareHttpClient {
                 loop {
                     if (require_enabled && !client.mesh_gate_matches(epoch))
                         || (!require_enabled && !client.mesh_epoch_matches(epoch))
+                        || Instant::now() >= cleanup_expires_at
                     {
                         return;
                     }
-                    let deadline = Instant::now() + POST_DEADLINE_CLEANUP_WAIT;
+                    let deadline =
+                        (Instant::now() + POST_DEADLINE_CLEANUP_WAIT).min(cleanup_expires_at);
                     let Some(epoch_guard) = client
                         .mesh_epoch_guard_until(epoch, deadline, require_enabled)
                         .await

@@ -36,7 +36,7 @@ fn workload_duration() -> Duration {
 }
 
 fn cpu_limit_ticks(baseline: u64) -> u64 {
-    baseline.saturating_mul(105).saturating_add(99) / 100
+    baseline.saturating_mul(105) / 100
 }
 
 fn assert_resource_budget(baseline: &ResourceRun, candidate: &ResourceRun) {
@@ -184,6 +184,18 @@ mod budget_tests {
         let baseline = run(25_000, 12_000, 13_000, 50_000);
         let mut candidate = run(25_000, 12_000, 13_000, 50_000);
         candidate.cpu_ticks = 106;
+        candidate.tls_accepts = 10;
+
+        assert_resource_budget(&baseline, &candidate);
+    }
+
+    #[test]
+    #[should_panic(expected = "CPU")]
+    fn resource_budget_rejects_fractional_cpu_limit_rounding_up() {
+        let mut baseline = run(25_000, 12_000, 13_000, 50_000);
+        baseline.cpu_ticks = 201;
+        let mut candidate = run(25_000, 12_000, 13_000, 50_000);
+        candidate.cpu_ticks = 212;
         candidate.tls_accepts = 10;
 
         assert_resource_budget(&baseline, &candidate);

@@ -92,12 +92,12 @@ async fn public_signed_body_commits_success_only_after_completion() {
     assert!(body.next().await.expect("body error item").is_err());
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            if error_circuits.public_state("peer").await == BreakerState::HalfOpen {
+            if error_circuits.public_state("peer").await == BreakerState::Open {
                 break;
             }
             tokio::task::yield_now().await;
         }
     })
     .await
-    .expect("body error must not commit public success");
+    .expect("body error must update the public failure state");
 }

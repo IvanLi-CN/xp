@@ -118,9 +118,12 @@ pub(super) async fn install(
     state_machine.persist_meta().await?;
     if snapshot_mesh_state_applied {
         state_machine.reconcile.note_mesh_state_applied();
-        state_machine
+        let _ = state_machine
             .reconcile
-            .initialize_mesh_gate(mesh_enabled)
+            .initialize_mesh_gate_until(
+                mesh_enabled,
+                std::time::Instant::now() + std::time::Duration::from_secs(3),
+            )
             .await;
     }
     state_machine.reconcile.request_full();

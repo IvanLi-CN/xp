@@ -249,12 +249,37 @@ pub(super) fn attach_mesh_gate_with_finish(
     attach_response_body_with_finish(response, Some(gate_guard), deadline, on_finish)
 }
 
+pub(super) fn attach_mesh_gate_with_body_lease(
+    response: reqwest::Response,
+    gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+    first_byte_deadline: Instant,
+    lease: Duration,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
+) -> reqwest::Response {
+    attach_response_body_with_body_lease(
+        response,
+        Some(gate_guard),
+        first_byte_deadline,
+        lease,
+        on_finish,
+    )
+}
+
 pub(super) fn attach_response_with_finish(
     response: reqwest::Response,
     deadline: Instant,
     on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
 ) -> reqwest::Response {
     attach_response_body_with_finish(response, None, deadline, on_finish)
+}
+
+pub(super) fn attach_response_with_body_lease(
+    response: reqwest::Response,
+    first_byte_deadline: Instant,
+    lease: Duration,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
+) -> reqwest::Response {
+    attach_response_body_with_body_lease(response, None, first_byte_deadline, lease, on_finish)
 }
 
 fn attach_response_body_with_finish(
@@ -283,6 +308,50 @@ fn attach_response_body_with_finish(
                 .boxed()
         }
         None => crate::mesh_gate_body::stream_with_finish(body, deadline, on_finish).boxed(),
+    };
+    reqwest::Response::from(axum::http::Response::from_parts(
+        parts,
+        reqwest::Body::wrap_stream(guarded_body),
+    ))
+}
+
+fn attach_response_body_with_body_lease(
+    response: reqwest::Response,
+    gate_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+    first_byte_deadline: Instant,
+    lease: Duration,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
+) -> reqwest::Response {
+    let response_url = response.url().clone();
+    let response: axum::http::Response<reqwest::Body> = response.into();
+    let (mut parts, body) = response.into_parts();
+    let url_extensions = axum::http::Response::builder()
+        .url(response_url)
+        .body(())
+        .expect("response URL extension builder")
+        .into_parts()
+        .0
+        .extensions;
+    let mut extensions = url_extensions;
+    extensions.extend(std::mem::take(&mut parts.extensions));
+    parts.extensions = extensions;
+    let body = body.into_data_stream().map_err(std::io::Error::other);
+    let guarded_body = match gate_guard {
+        Some(gate_guard) => crate::mesh_gate_body::guard_stream_with_body_lease(
+            body,
+            gate_guard,
+            first_byte_deadline,
+            lease,
+            on_finish,
+        )
+        .boxed(),
+        None => crate::mesh_gate_body::stream_with_body_lease(
+            body,
+            first_byte_deadline,
+            lease,
+            on_finish,
+        )
+        .boxed(),
     };
     reqwest::Response::from(axum::http::Response::from_parts(
         parts,
@@ -618,13 +687,12 @@ pub(super) async fn send_outer_request(
     }
     match tokio::time::timeout(remaining, builder.send()).await {
         Ok(Ok(response)) => Ok((
-            attach_mesh_gate(
-                response,
-                gate_guard,
-                body_lease
-                    .map(|lease| Instant::now() + lease)
-                    .unwrap_or(deadline),
-            ),
+            match body_lease {
+                Some(lease) => {
+                    attach_mesh_gate_with_body_lease(response, gate_guard, deadline, lease, None)
+                }
+                None => attach_mesh_gate(response, gate_guard, deadline),
+            },
             dispatch.inner_verified,
             dispatch.outer_verified,
         )),

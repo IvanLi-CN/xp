@@ -958,22 +958,27 @@ impl MeshAwareHttpClient {
         }
         let operation_id = self.circuits.next_operation();
         let body_deadline = body_lease
-            .map(|lease| Instant::now() + lease)
+            .map(|lease| request_deadline + lease)
             .unwrap_or(request_deadline);
-        let response = reverse::attach_response_with_finish(
-            response,
+        let on_finish = Some(self.public_success_telemetry_callback(
+            peer,
+            started,
+            fallback,
+            request.updates_active_path,
+            public_epoch,
+            operation_id,
+            public_probe_guard.take(),
             body_deadline,
-            Some(self.public_success_telemetry_callback(
-                peer,
-                started,
-                fallback,
-                request.updates_active_path,
-                public_epoch,
-                operation_id,
-                public_probe_guard.take(),
-                body_deadline,
-            )),
-        );
+        ));
+        let response = match body_lease {
+            Some(lease) => reverse::attach_response_with_body_lease(
+                response,
+                request_deadline,
+                lease,
+                on_finish,
+            ),
+            None => reverse::attach_response_with_finish(response, request_deadline, on_finish),
+        };
         Ok(PeerRequestResponse::Verified(response))
     }
 
