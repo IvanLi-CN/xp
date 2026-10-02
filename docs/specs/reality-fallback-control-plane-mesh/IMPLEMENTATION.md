@@ -154,7 +154,9 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   only Cargo's compatible download cache may be shared. Stable source markers include the source
   generated Web-shell archive and build-version identities before a target is reused. The runner
   copies the resolved executables into the disposable run before measurement, so build scripts and
-  release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64
+  release artifacts cannot cross-contaminate the comparison. Remote build and resource-test
+  temporary files use the disposable run's `tmp/` directory inside the owning Agent Directory.
+  The separate full managed-stack 64
   MiB target remains outside this topic's contract.
 - Candidate validation is bound to exact source commits, source and generated Web archive
   digests, and inspectable runner manifests in the delivery evidence. Historical local results
