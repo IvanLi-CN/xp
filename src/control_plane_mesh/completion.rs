@@ -1,7 +1,7 @@
 use std::{future::Future, pin::Pin};
 
 use futures_util::{StreamExt, stream::FuturesUnordered};
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::mpsc;
 
 use super::MeshAwareHttpClient;
 
@@ -22,7 +22,6 @@ pub(super) struct CompletionDispatcher {
 impl CompletionDispatcher {
     pub(super) fn new() -> Self {
         let (sender, mut receiver) = mpsc::channel(COMPLETION_QUEUE_CAPACITY);
-        let active = std::sync::Arc::new(Semaphore::new(COMPLETION_ACTIVE_CAPACITY));
         #[cfg(test)]
         let worker_starts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(1));
         #[cfg(test)]
@@ -35,19 +34,11 @@ impl CompletionDispatcher {
             let _worker_starts = worker_starts_for_task;
             let mut in_flight: FuturesUnordered<Completion> = FuturesUnordered::new();
             loop {
-                while active.available_permits() > 0 {
-                    let permit = active
-                        .clone()
-                        .try_acquire_owned()
-                        .expect("completion permit must be available");
+                while in_flight.len() < COMPLETION_ACTIVE_CAPACITY {
                     match receiver.try_recv() {
-                        Ok(completion) => in_flight.push(with_permit(completion, permit)),
-                        Err(mpsc::error::TryRecvError::Empty) => {
-                            drop(permit);
-                            break;
-                        }
+                        Ok(completion) => in_flight.push(completion),
+                        Err(mpsc::error::TryRecvError::Empty) => break,
                         Err(mpsc::error::TryRecvError::Disconnected) => {
-                            drop(permit);
                             while in_flight.next().await.is_some() {}
                             return;
                         }
@@ -57,28 +48,17 @@ impl CompletionDispatcher {
                     let Some(completion) = receiver.recv().await else {
                         break;
                     };
-                    let permit = active
-                        .clone()
-                        .acquire_owned()
-                        .await
-                        .expect("completion worker semaphore must remain open");
-                    in_flight.push(with_permit(completion, permit));
+                    in_flight.push(completion);
                     continue;
                 }
-                if active.available_permits() == 0 {
+                if in_flight.len() >= COMPLETION_ACTIVE_CAPACITY {
                     let _ = in_flight.next().await;
                     continue;
                 }
                 tokio::select! {
                     _ = in_flight.next() => {}
                     completion = receiver.recv() => match completion {
-                        Some(completion) => {
-                            let permit = active
-                                .clone()
-                                .try_acquire_owned()
-                                .expect("completion permit must be available");
-                            in_flight.push(with_permit(completion, permit));
-                        }
+                        Some(completion) => in_flight.push(completion),
                         None => {
                             while in_flight.next().await.is_some() {}
                             break;
@@ -120,13 +100,6 @@ impl CompletionDispatcher {
         self.dropped_completions
             .load(std::sync::atomic::Ordering::Acquire)
     }
-}
-
-fn with_permit(completion: Completion, permit: tokio::sync::OwnedSemaphorePermit) -> Completion {
-    Box::pin(async move {
-        completion.await;
-        drop(permit);
-    })
 }
 
 impl MeshAwareHttpClient {
