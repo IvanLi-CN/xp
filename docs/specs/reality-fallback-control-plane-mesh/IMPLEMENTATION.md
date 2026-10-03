@@ -33,6 +33,10 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   only a length-delimited digest of all three derivation inputs and the successful 32-byte key.
   PEM parsing and unchanged HKDF run outside the cache lock; poisoned locks use uncached derivation.
   Public signing/verification interfaces still validate every request and acknowledgement.
+- Telemetry atomic replacement streams the existing pretty JSON through a fixed 8 KiB writer
+  instead of allocating a whole-snapshot byte vector. Successful serialization and explicit
+  buffer flush precede the existing file sync and rename; write or flush errors retain the last
+  durable snapshot and the existing dirty retry state. Format, revision and locking stay unchanged.
 - Raft `PersistedState.mesh_enabled` provides the cluster-level Mesh switch. The authenticated
   `/api/admin/mesh/config` endpoint replicates the setting, and every process-wide Mesh client
   observes the same gate. State-machine apply and snapshot installation publish the persisted
@@ -131,6 +135,12 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
 
 ## Validation Notes
 
+- Persistence regressions exercise a 50-peer, 15-minute snapshot through the public telemetry
+  handle. They compare exact predecessor-format bytes and restored state, bound additional
+  allocations independently of snapshot size, inject write/flush failures at the I/O boundary,
+  and verify a failed replacement preserves the durable snapshot before retrying the latest state.
+  The allocation observation belongs only to its integration-test executable and is not a product
+  allocator change or a substitute for the original release resource gate.
 - Public authentication regressions use independent OpenSSL HKDF/HMAC and literal canonical wire
   fixtures for both routes and request/ack domains. They cover key-only and certificate-only
   changes, PEM spelling, more authorities than cache capacity, concurrent callers, malformed PEM,

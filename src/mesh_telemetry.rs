@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     fs,
-    io::Write,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -27,8 +26,10 @@ const MAX_HISTORY_SOURCE_STRING_BYTES: usize = 48;
 const MAX_HISTORY_SOURCE_LATENCY_SAMPLES: usize = 64;
 const SAMPLE_PERSIST_INTERVAL: StdDuration = StdDuration::from_secs(5);
 
+mod persistence;
 mod reverse;
 mod transport;
+use persistence::persist;
 pub use reverse::ReverseRelayTelemetrySample;
 use transport::MeshConnectionTrackers;
 pub(crate) use transport::{MeshConnectionFingerprint, MeshTransportObservation};
@@ -978,20 +979,6 @@ fn parse_persisted_telemetry(bytes: &[u8]) -> anyhow::Result<PersistedTelemetry>
         );
     }
     Ok(parsed)
-}
-
-fn persist(path: &Path, state: &PersistedTelemetry) -> anyhow::Result<()> {
-    let parent = path.parent().expect("mesh telemetry path has a parent");
-    fs::create_dir_all(parent)?;
-    let bytes = serde_json::to_vec_pretty(state)?;
-    let temporary = path.with_extension("json.tmp");
-    {
-        let mut file = fs::File::create(&temporary)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-    }
-    fs::rename(temporary, path)?;
-    Ok(())
 }
 
 #[cfg(test)]
