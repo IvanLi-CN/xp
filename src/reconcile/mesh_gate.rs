@@ -87,6 +87,7 @@ impl ReconcileHandle {
             self.fail_closed_if_disabled(enabled);
             return false;
         };
+        self.mesh_state_applied.store(true, Ordering::Release);
         self.mesh_gate_authoritative.store(true, Ordering::Release);
         self.apply_mesh_enabled_locked(enabled);
         true
@@ -119,6 +120,7 @@ impl ReconcileHandle {
                 self.fail_closed_if_disabled(enabled);
                 return false;
             };
+            self.mesh_state_applied.store(true, Ordering::Release);
             self.mesh_gate_authoritative.store(true, Ordering::Release);
             self.apply_mesh_enabled_locked(enabled);
         }
@@ -153,6 +155,7 @@ impl ReconcileHandle {
         .ok() else {
             return false;
         };
+        self.mesh_state_applied.store(false, Ordering::Release);
         self.mesh_gate_authoritative.store(false, Ordering::Release);
         self.mesh_enabled.store(false, Ordering::Release);
         self.refresh_reverse_gate();
@@ -161,9 +164,13 @@ impl ReconcileHandle {
 
     pub(crate) fn note_mesh_state_applied(&self) {
         self.mesh_state_generation.fetch_add(1, Ordering::AcqRel);
+        self.mesh_state_applied.store(true, Ordering::Release);
     }
 
     pub(super) async fn set_mesh_enabled_if_current(&self, enabled: bool, generation: u64) {
+        if !self.mesh_state_applied.load(Ordering::Acquire) {
+            return;
+        }
         if self.mesh_gate_authoritative.load(Ordering::Acquire)
             && self.mesh_enabled.load(Ordering::Acquire) == enabled
         {
@@ -179,7 +186,9 @@ impl ReconcileHandle {
             self.fail_closed_if_disabled(enabled);
             return;
         };
-        if self.mesh_state_generation.load(Ordering::Acquire) != generation {
+        if !self.mesh_state_applied.load(Ordering::Acquire)
+            || self.mesh_state_generation.load(Ordering::Acquire) != generation
+        {
             return;
         }
         let Some(_epoch_barrier) = tokio::time::timeout_at(
@@ -191,7 +200,9 @@ impl ReconcileHandle {
             self.fail_closed_if_disabled(enabled);
             return;
         };
-        if self.mesh_state_generation.load(Ordering::Acquire) == generation {
+        if self.mesh_state_applied.load(Ordering::Acquire)
+            && self.mesh_state_generation.load(Ordering::Acquire) == generation
+        {
             self.mesh_gate_authoritative.store(true, Ordering::Release);
             self.apply_mesh_enabled_locked(enabled);
         }

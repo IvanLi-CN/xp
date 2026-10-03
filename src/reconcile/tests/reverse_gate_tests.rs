@@ -69,3 +69,37 @@ async fn unchanged_authoritative_reconcile_does_not_queue_gate_writer() {
         .await
         .expect("reconcile task should not panic");
 }
+
+#[tokio::test]
+async fn snapshot_hold_rejects_reconcile_until_authenticated_state_applies() {
+    let reconcile = ReconcileHandle::noop();
+    let generation = reconcile.mesh_state_generation.load(Ordering::Acquire);
+    reconcile.hold_mesh_gate_until_raft_state().await;
+
+    reconcile
+        .set_mesh_enabled_if_current(true, generation)
+        .await;
+    assert!(
+        !reconcile.mesh_gate().load(Ordering::Acquire),
+        "a stale reconcile cannot reopen Mesh without authenticated snapshot/state evidence"
+    );
+    reconcile
+        .set_mesh_enabled_if_current(
+            true,
+            reconcile.mesh_state_generation.load(Ordering::Acquire),
+        )
+        .await;
+    assert!(
+        !reconcile.mesh_gate().load(Ordering::Acquire),
+        "a fresh reconcile of unauthenticated state must also remain closed"
+    );
+
+    reconcile.note_mesh_state_applied();
+    reconcile
+        .set_mesh_enabled_if_current(
+            true,
+            reconcile.mesh_state_generation.load(Ordering::Acquire),
+        )
+        .await;
+    assert!(reconcile.mesh_gate().load(Ordering::Acquire));
+}

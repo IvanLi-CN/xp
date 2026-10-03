@@ -60,20 +60,26 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   is released. Critical completion state is coalesced per peer behind a bounded queue and
   active-worker window; overflow preserves the latest critical state and is serviced fairly
   alongside queued work without exceeding the 32-active bound. Empty overflow state is checked
-  without taking the pending-map lock. Body completion has bounded cleanup grace when its request
-  deadline has expired, while successful body
+  without taking the pending-map lock. Protocol, retryable and validation cleanup share this
+  dispatcher, retain the latest work per peer and cleanup kind, and include queue waiting in
+  their existing absolute thirty-second cleanup lifetime. Body completion has bounded cleanup
+  grace when its request deadline has expired, while successful body
   telemetry uses bounded deferred persistence after its RAII probe guard is released. Failure,
   cancellation, and deadline telemetry remains immediate and bounded.
   An unchanged deferred breaker observation does not dirty or rewrite telemetry, while a failed
-  snapshot still retries. A finite body that already reports end-of-stream releases its gate and
+  snapshot still retries. A body that already reports end-of-stream releases its gate and
   finishes immediately without allocating another body wrapper or deadline task; a zero
-  Content-Length alone cannot take this path. Streaming leases retain their separate lifecycle.
+  Content-Length alone cannot take this path. Both ordinary and leased wrappers use this confirmed
+  EOF rule; nonempty streaming bodies retain their separate lease lifecycle.
   Non-bootstrap nodes hold the local gate closed until the first authenticated Raft state or
   snapshot is applied, so a joining node cannot emit Mesh traffic from the default local state.
   Snapshots carry an explicit `mesh_state_applied` payload marker plus snapshot identity fields.
   Snapshot installation rejects a gate barrier that cannot be acquired within three seconds
   before replacing state. It persists a fail-closed pending marker before replacing state,
   writes data before metadata, and clears the pending marker only after both files are durable.
+  The volatile authenticated-state marker also remains false during replacement or an explicitly
+  unauthenticated snapshot. Reconcile checks that marker under the existing barriers and cannot
+  create authentication evidence; only trusted initialization or authenticated apply publishes it.
   Readers reject
   mismatched identity pairs and authenticated markers without identity evidence.
   Legacy startup migration only reopens the gate when that marker is true and its snapshot metadata
@@ -151,6 +157,9 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   half-open probe slot until a successful response body finishes. They also verify lease expiry
   drops an unpolled upstream body, snapshot gate acquisition is bounded, and queued plus overflow
   completions share the active capacity while the queue remains continuously replenished.
+  Snapshot-hold regressions reject both stale and fresh unauthenticated reconcile, then permit
+  progress after authenticated apply. Repeated known-peer cleanup remains within the shared active
+  window during contention and converges to protocol isolation after the barrier clears.
   Telemetry regressions also distinguish unchanged breaker observations from failed-snapshot
   retries. Body regressions distinguish a confirmed empty EOF from delayed EOF with zero
   Content-Length.

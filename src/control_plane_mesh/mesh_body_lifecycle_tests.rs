@@ -54,6 +54,46 @@ async fn completed_empty_mesh_body_releases_guard_without_another_poll() {
 }
 
 #[tokio::test]
+async fn completed_empty_leased_mesh_body_finishes_without_caller_polling() {
+    let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
+    let gate_guard = gate_lock.clone().read_owned().await;
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(reqwest::StatusCode::OK)
+            .body(reqwest::Body::from(Vec::<u8>::new()))
+            .expect("completed empty response"),
+    );
+    let (finished_tx, mut finished_rx) = oneshot::channel();
+    let response = super::reverse::attach_mesh_gate_with_body_lease(
+        response,
+        gate_guard,
+        Instant::now() + Duration::from_secs(3),
+        Duration::from_secs(15 * 60),
+        Some(Box::new(move |finish| {
+            let _ = finished_tx.send(finish);
+        })),
+    );
+
+    assert!(
+        gate_lock.clone().try_write_owned().is_ok(),
+        "confirmed EOF must release a leased guard without caller polling"
+    );
+    assert_eq!(
+        finished_rx
+            .try_recv()
+            .expect("immediate leased EOF completion"),
+        crate::mesh_gate_body::BodyFinish::Complete
+    );
+    assert!(
+        response
+            .bytes()
+            .await
+            .expect("empty leased body")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn zero_length_mesh_response_releases_gate_guard_after_eof() {
     use futures_util::StreamExt;
 

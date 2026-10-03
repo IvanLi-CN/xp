@@ -16,6 +16,43 @@ impl MeshAwareHttpClient {
 }
 
 #[tokio::test]
+async fn repeated_peer_cleanup_stays_bounded_and_recovers_after_contention() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
+    let peer = primary_reverse_target(None, xp_test_fixtures::secondary_api_url().to_owned());
+    let metrics = tokio::runtime::Handle::current().metrics();
+    let initial_tasks = metrics.num_alive_tasks();
+    let barrier_writer = client.mesh_epoch_barrier.clone().write_owned().await;
+
+    for _ in 0..512 {
+        client.spawn_protocol_failure_cleanup(&peer, 0, None, client.circuits.next_operation());
+    }
+    tokio::task::yield_now().await;
+    let tasks_under_contention = metrics.num_alive_tasks();
+    drop(barrier_writer);
+    assert!(
+        tasks_under_contention <= initial_tasks + 33,
+        "repeated cleanup must share the 32-active window: {tasks_under_contention} tasks"
+    );
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while client.direct_validation_state_for(&peer).await
+            != DirectValidationState::ProtocolRejected
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("retained cleanup state must converge after contention clears");
+    assert_eq!(
+        client
+            .circuits()
+            .before_attempt_with_probe(&peer.node_id, true, false)
+            .await,
+        MeshAttemptDecision::Quarantined
+    );
+}
+
+#[tokio::test]
 async fn protocol_failure_cleanup_waits_for_epoch_barrier_before_state_update() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
     let peer = MeshPeerTarget {
