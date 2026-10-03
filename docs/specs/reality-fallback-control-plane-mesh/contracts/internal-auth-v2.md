@@ -27,6 +27,11 @@
 - Input key material is parsed CA private-key DER.
 - Salt is the CA certificate SHA-256 fingerprint.
 - Request and acknowledgement use separate info labels.
+- A process-local cache retains at most eight successful 32-byte subkeys, identified by a
+  length-delimited SHA-256 of the exact private-key PEM, certificate PEM and info label.
+  Entries contain no raw PEM or errors. Misses run the unchanged DER/HKDF calculation outside
+  the short cache lock; input changes miss and lock failure uses uncached derivation.
+  Caching never replaces per-request canonical, HMAC, identity, clock-window or ack validation.
 - Accepted responses carry `X-XP-Internal-Ack`.
 - The ack binds request ID, the SHA-256 digest of the full canonical request, issued-at,
   responder ID and status.

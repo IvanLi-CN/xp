@@ -102,6 +102,10 @@
 - 认证窗口为 `+/-120s`；不得引入 nonce header 或 nonce cache。
 - request 与 acknowledgement key 经 HKDF-SHA256 做用途分离。
 - key material 来自 parsed CA private-key DER 与 CA certificate fingerprint。
+- 内部派生子密钥缓存最多保留八个成功结果，仅保存 exact private-key PEM、certificate PEM
+  与 HKDF info 的 length-delimited SHA-256 identity 及 32-byte subkey，不保留原始 PEM 或失败。
+  miss 的既有 DER/HKDF 计算在短锁外完成；任一输入变化必须 miss，锁失败使用原有 uncached
+  计算。缓存不得跳过逐请求签名、身份、时间窗口、request ID 或 acknowledgement 校验。
 - canary 顺序固定为 `/generate_204`、health、mesh、ordinary camouflage。
 - Canary 转发只把认证后的原始 path/query 组合到固定 XP loopback origin；HTTP/2
   absolute-form URI 的 origin 不得进入 loopback URL，URL client 会规范化 path/query 时必须拒绝。

@@ -29,6 +29,10 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
 
 - internal-auth v2、purpose-separated ack（完整 canonical request digest）与 strict bodyless
   canary ingress。
+- Authentication subkeys use eight fixed process-local slots with FIFO replacement. Entries hold
+  only a length-delimited digest of all three derivation inputs and the successful 32-byte key.
+  PEM parsing and unchanged HKDF run outside the cache lock; poisoned locks use uncached derivation.
+  Public signing/verification interfaces still validate every request and acknowledgement.
 - Raft `PersistedState.mesh_enabled` provides the cluster-level Mesh switch. The authenticated
   `/api/admin/mesh/config` endpoint replicates the setting, and every process-wide Mesh client
   observes the same gate. State-machine apply and snapshot installation publish the persisted
@@ -121,6 +125,12 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
 
 ## Validation Notes
 
+- Public authentication regressions use independent OpenSSL HKDF/HMAC and literal canonical wire
+  fixtures for both routes and request/ack domains. They cover key-only and certificate-only
+  changes, PEM spelling, more authorities than cache capacity, concurrent callers, malformed PEM,
+  forged MACs, wrong identities, expired timestamps and mismatched acknowledgements. An opt-in
+  repeated-signing seam supports external allocation tracing; its diagnostic reduction does not
+  replace the unchanged release-candidate resource workload.
 - Unit, integration, Web checks, Impeccable detection, Storybook interaction, and controlled local
   visual validation run on this topic branch.
 - Read-only directed-edge checks found no signed `health-v2` acknowledgement from the current
