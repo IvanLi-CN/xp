@@ -8,7 +8,7 @@
 - [0014-xhttp-endpoint-direct-mesh](../../adr/0014-xhttp-endpoint-direct-mesh.md)
 - [ADR 0015](../../adr/0015-directed-mesh-admission-and-peer-isolation.md)
 
-## 背景
+## Context and Scope
 
 - 控制面此前只访问 peer 的公网 `api_base_url`。
 - 内部 HMAC 没有覆盖 body、时间或身份。
@@ -21,6 +21,7 @@
 - 从唯一 managed-default VLESS-REALITY endpoint 派生 HTTPS Mesh 路径。
 - 先尝试 Mesh；路径不可用时再访问 peer 的公网地址。
 - Mesh 请求在共享读准入边界内并发执行；集群 gate 切换取得独占写屏障，等待已准入请求完成后才改变状态，避免关闭后的新请求越过公网-only 边界。
+- 普通 state-machine apply 在 gate 已具备权威状态后只走原子 fast path；只有首次认证初始化和显式 Mesh 开关切换取得写屏障，不得让每条普通日志排队写锁。
 - 用 internal-auth v2、稳定 request ID 和 durable dedupe 保护内部调用。
 - 提供本地持久遥测、管理 API 与 `/system-status`。
 - Direct Mesh 启用前必须通过 current voter 的全有向 `health-v2` 预检：有合格 managed
@@ -34,7 +35,16 @@
   predecessor 404 兼容；专用 Reverse health/link probe 在当前发布中固定停用，即使集群
   Mesh 开关开启也不会重新启用 Native Reverse。
 - 已准入的 Mesh 响应必须把读 guard 绑定到完整 response body 生命周期；准入期间的成功遥测
-  必须复用该 guard，不得再次获取同一写优先读写锁而阻塞 gate transition。
+  必须复用该 guard，不得再次获取同一写优先读写锁而阻塞 gate transition。body guard 受调用方
+  绝对 deadline 约束，并在 EOF、body error、取消或 deadline 时释放；deadline timer 必须独立于
+  下一次 body poll，调用方保留未消费的 response 也不能无限持有 guard。runtime-events 的长驻
+  SSE 是内部例外：3 秒请求预算只约束 Mesh admission 与首字节，签名响应头验证完成后改用固定
+  15 分钟 stream lease；lease 到期关闭当前 SSE，客户端按既有 SSE 重连语义重新建立请求。该
+  lease 不暴露为配置，不改变公开 API、wire protocol 或持久化格式。guard 释放后的遥测只做
+  原子 epoch/gate 校验，不重新等待该锁，并在对应请求或 stream lease 预算内完成或取消。
+  zero-length body 也必须等待实际 EOF；若底层 body 已确认 end-of-stream，则立即完成并释放
+  guard，无需额外 poll。Content-Length 或 response headers 不能代替该确认；未知长度和非空
+  body 同样覆盖完整 body 生命周期。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。
@@ -65,7 +75,18 @@
 - UI 强制选路、重置 breaker 或主动修复。
 - 混合 auth v1/v2 的零停机滚动升级。
 
-## 必须满足
+## Requirements
+
+- **REQ-AUTH**: Mesh 必须验证签名与完整请求身份，保留 request ID 幂等合同；认证或协议错误
+  不得触发跨路径重试。详细约束见本节与传输和幂等规则。
+- **REQ-GATE**: authoritative gate 下普通 Raft apply 必须保持可推进；首次认证与显式开关
+  切换保留 write barrier，准入与状态初始化必须受内部 deadline 约束。
+- **REQ-BODY**: response guard 必须覆盖实际 body 生命周期；普通 body 使用调用方 deadline，
+  runtime-events SSE 使用三秒 admission/首字节及独立十五分钟 lease，终态必须释放 guard。
+- **REQ-RESOURCE**: 共享传输、遥测与完成处理必须遵守本文既定的连接、内存和 CPU 上限。
+- **REQ-OPS**: host-managed 与容器的升级必须遵守既有 auth epoch 维护与回滚合同。
+
+### 必须满足
 
 - Mesh URL 只能由唯一 managed-default VLESS/Reality endpoint 与有效 `access_host` 推导；
   Vision/TCP 标记为 `vision_tcp`，XHTTP 标记为 `xhttp_reality_fallback`。XHTTP Direct Mesh
@@ -81,6 +102,10 @@
 - 认证窗口为 `+/-120s`；不得引入 nonce header 或 nonce cache。
 - request 与 acknowledgement key 经 HKDF-SHA256 做用途分离。
 - key material 来自 parsed CA private-key DER 与 CA certificate fingerprint。
+- 内部派生子密钥缓存最多保留八个成功结果，仅保存 exact private-key PEM、certificate PEM
+  与 HKDF info 的 length-delimited SHA-256 identity 及 32-byte subkey，不保留原始 PEM 或失败。
+  miss 的既有 DER/HKDF 计算在短锁外完成；任一输入变化必须 miss，锁失败使用原有 uncached
+  计算。缓存不得跳过逐请求签名、身份、时间窗口、request ID 或 acknowledgement 校验。
 - canary 顺序固定为 `/generate_204`、health、mesh、ordinary camouflage。
 - Canary 转发只把认证后的原始 path/query 组合到固定 XP loopback origin；HTTP/2
   absolute-form URI 的 origin 不得进入 loopback URL，URL client 会规范化 path/query 时必须拒绝。
@@ -107,6 +132,17 @@
 - half-open 只允许一次探测性 Mesh 请求。
 - auth 或 protocol failure 会释放 half-open 探测槽，但不触发公网降级或改变 breaker 失败计数。
 - Mesh 预算为 `min(5s, max(500ms, total/3))`；公网取得剩余预算。
+- Mesh gate admission 消耗同一请求的 Mesh slice；admission deadline 到期表示请求尚未 dispatch，
+  只读、Raft 幂等和 durable history 请求仍可用剩余预算走 Public fallback。已签名响应头之后的
+  body deadline 属于权威响应的终止，不得改走 Public 或其他路径重试。runtime-events SSE 的
+  3 秒 slice 在首字节后由固定 15 分钟内部 stream lease 接管；EOF、body error、客户端取消和
+  lease 到期都会释放 guard，客户端重新发起下一次 SSE 请求。
+- 请求 deadline 后的 Public 成功/失败状态清理与其他 deferred completion 共用最多 32 个
+  active work 的通道，不得逐请求新增无界等待任务。内部清理的绝对 30 秒期限从调度时起算，
+  包含排队和锁等待；持锁后仍需校验到期及探测 token，过期任务不得写状态或清除较新的探测槽。
+  Public 响应体完成和清理的溢出合并保留较新的 operation，迟到的旧结果不得挤掉新结果。
+- authoritative gate 的 reconcile 若目标值与当前值及 state generation 均未变化，必须只做原子
+  校验而不排队写 barrier；显式 Mesh 开关切换和首次认证初始化仍必须取得 write barrier。
 - 有效 ack 的任何 HTTP status 都是权威结果，禁止降级。
 - 公网边缘返回无签名 `502`、`503`、`504`、`520`、`522`、`523` 或 `524` 时，
   只读、Raft 幂等和 durable history 请求可在原请求预算内按 `200ms`、`500ms` 退避重试两次；
@@ -212,7 +248,17 @@
 - [internal-auth v2](./contracts/internal-auth-v2.md)
 - [Mesh status API](./contracts/mesh-status-api.md)
 
-## 验收
+## Verification
+
+- **VER-AUTH** covers: REQ-AUTH. 签名拒绝、幂等、fallback 分类和协议隔离回归验证安全边界。
+- **VER-GATE** covers: REQ-GATE. state-machine、snapshot 和排队 writer 准入回归验证推进与超时。
+- **VER-BODY** covers: REQ-BODY. EOF/error/drop/unpolled/deadline/lease 回归验证 guard 生命周期。
+- **VER-RESOURCE** covers: REQ-RESOURCE. 真实 TLS 连接复用、完成处理容量与正式 50-peer 资源
+  workload 验证既定门限。
+- **VER-OPS** covers: REQ-OPS. auth epoch 升级回归与隔离 host-managed fresh-join workload
+  验证维护边界和服务身份保持。
+
+### 验收
 
 - body、method、URI、member、target、时间窗、v1 与未认证 Raft 均被拒绝。
 - 已执行但响应丢失的 mutation 复用 request ID，只返回第一次结果。
@@ -223,10 +269,24 @@
 - 缩短的测试 policy 证明 idle timeout 会丢弃旧连接；H2 不可用只触发 transport fallback，
   invalid ack/auth 仍不得降级。
 - 长驻 SSE、Raft burst、8 MiB snapshot 与普通 fan-out 在同一 H2 connection 上并行。
+- authoritative gate 持有 in-flight read guard 时，普通 state-machine apply 仍推进 `last_applied`，
+  且不排队 gate writer；持有 read guard 且已有 gate transition writer 时，Mesh admission 在请求
+  deadline 内取消并保留未 dispatch 分类，Public fallback 使用剩余预算。
+- finite、erroring、dropped 与 stalled signed response body 均覆盖 guard 的完整生命周期：EOF、
+  error、取消、未继续 poll 和 deadline/stream lease 必须释放 guard；runtime-events SSE 的 3 秒
+  admission 不得截断首字节之后的长驻 body，signed-header body timeout 不得触发 Public fallback。
+  未 dispatch 的 half-open probe 必须释放其占位，限时 telemetry 不得跨过请求或 stream lease
+  deadline，或把旧 epoch 状态写入新 epoch。
 - 50-peer 15 分钟 workload 中 XP peak anonymous PSS 不超过 18,432 KiB，XP total PSS 与
-  候选完整栈均不高于各自基线 1,024 KiB，XP CPU-seconds 不高于基线 5%，TLS/TCP 建连至少
-  减少 90%。file-backed PSS 仍计入 total PSS；该相对门禁不代表完整托管栈已经满足 64 MiB
-  总预算。
+  候选完整栈均不高于各自基线 1,024 KiB，XP CPU-seconds 不高于基线 5%。当基线的
+  TLS/TCP 建连数高于每个 peer 一条持久连接的 floor 时，候选至少减少 90%；基线已经处于
+  该 floor 时，候选不得超过该 floor。file-backed PSS 仍计入 total PSS；该相对门禁不代表
+  完整托管栈已经满足 64 MiB 总预算。
+- 隔离 shared-testbox 的 host-managed fresh-join workload 必须验证官方 `xp-ops` deploy、
+  systemd/OpenRC follower 加入、服务重启后的身份保持、OpenRC XP 强杀恢复和三节点成员列表。
+  该 workload 若未暴露 committed、`last_applied` 或选举超时计数，不得把这些未测量指标写成
+  运行证据；它们由 state-machine、admission 和 response-body 的确定性回归覆盖，直到有专门
+  的多节点指标采集器为止。
 - Web 覆盖 healthy、fallback、slow、down、stale、empty、partial 与 50 peers。
 - 后端通过 fmt、clippy 和 test；前端通过 lint、typecheck、Vitest、
   Storybook、Playwright 与 style budget。

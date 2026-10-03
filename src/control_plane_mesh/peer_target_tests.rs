@@ -122,7 +122,7 @@ async fn signed_public(
         .expect("public fallback response")
 }
 
-async fn spawn_stalling_mesh() -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
+pub(super) async fn spawn_stalling_mesh() -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
     let requests = Arc::new(AtomicUsize::new(0));
     let app = Router::new()
         .fallback(any(stall_mesh))

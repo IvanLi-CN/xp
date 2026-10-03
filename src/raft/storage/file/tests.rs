@@ -125,6 +125,54 @@ async fn apply_mesh_switch_publishes_gate_before_reconcile_runs() {
 }
 
 #[tokio::test]
+async fn authoritative_normal_apply_does_not_queue_mesh_gate_writer() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let mut state_machine = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+        .await
+        .unwrap();
+    let gate_lock = reconcile.mesh_gate_lock();
+    let in_flight_mesh_read = gate_lock.clone().read_owned().await;
+    let state_machine_inner = state_machine.inner.clone();
+
+    let mut apply = tokio::spawn(async move {
+        state_machine
+            .apply(vec![build_entry(
+                DesiredStateCommand::SetReverseMeshEpoch { epoch: 1 },
+                1,
+            )])
+            .await
+    });
+    tokio::task::yield_now().await;
+
+    tokio::time::timeout(std::time::Duration::from_millis(100), &mut apply)
+        .await
+        .expect("state-machine apply must finish while a Mesh read guard is held")
+        .expect("state-machine task should not panic")
+        .expect("state-machine apply should succeed");
+    assert_eq!(
+        state_machine_inner
+            .lock()
+            .await
+            .last_applied
+            .expect("apply should advance last_applied")
+            .index,
+        1
+    );
+
+    let later_reader = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        gate_lock.clone().read_owned(),
+    )
+    .await
+    .expect("ordinary apply must not queue a gate writer");
+    drop(later_reader);
+    drop(in_flight_mesh_read);
+}
+
+#[tokio::test]
 async fn ordinary_command_releases_fresh_join_mesh_gate_once_authenticated() {
     let tmp = tempfile::tempdir().unwrap();
     let reconcile = ReconcileHandle::noop();

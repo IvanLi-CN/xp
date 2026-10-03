@@ -40,6 +40,8 @@ impl MeshTelemetryHandle {
                 generation: Some(generation),
                 readiness: Some("active".to_string()),
             }),
+            None,
+            false,
         )
         .await
     }

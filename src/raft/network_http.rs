@@ -106,6 +106,11 @@ impl HttpNetworkFactory {
         self
     }
 
+    pub fn with_mesh_epoch_barrier(mut self, barrier: Arc<tokio::sync::RwLock<()>>) -> Self {
+        self.client = self.client.with_mesh_epoch_barrier(barrier);
+        self
+    }
+
     pub fn mesh_client(&self) -> MeshAwareHttpClient {
         self.client.clone()
     }

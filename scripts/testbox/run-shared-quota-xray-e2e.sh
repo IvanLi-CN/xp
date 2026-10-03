@@ -346,6 +346,9 @@ SOURCE_ARCHIVE_SHA="$(printf '%s' "${SOURCE_ARCHIVE_SHA_B64:?}" | base64 -d)"
 WEB_DIST_ARCHIVE_SHA="$(printf '%s' "${WEB_DIST_ARCHIVE_SHA_B64:?}" | base64 -d)"
 BASELINE_ARCHIVE_SHA="$(printf '%s' "${BASELINE_ARCHIVE_SHA_B64:?}" | base64 -d)"
 
+export TMPDIR="$REMOTE_RUN/tmp"
+mkdir -p "$TMPDIR"
+
 cleanup() {
   if [ "${CLEANUP_DONE:-0}" = "1" ]; then
     return

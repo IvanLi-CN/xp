@@ -330,6 +330,130 @@ async fn deferred_flush_persists_the_latest_sample_without_another_request() {
     assert!(!telemetry.state.lock().await.dirty);
 }
 
+#[tokio::test(start_paused = true)]
+async fn unchanged_deferred_breaker_does_not_rewrite_persisted_telemetry() {
+    let temp = tempfile::tempdir().unwrap();
+    let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+    telemetry
+        .set_breaker(
+            xp_test_fixtures::primary_node_id(),
+            BreakerState::Closed,
+            None,
+        )
+        .await
+        .unwrap();
+    let persisted_revision = MeshTelemetryHandle::load(temp.path())
+        .unwrap()
+        .snapshot()
+        .await
+        .revision;
+
+    for _ in 0..50 {
+        telemetry
+            .set_breaker_deferred(
+                xp_test_fixtures::primary_node_id(),
+                BreakerState::Closed,
+                None,
+            )
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+        tokio::time::advance(SAMPLE_PERSIST_INTERVAL).await;
+        tokio::task::yield_now().await;
+    }
+
+    assert_eq!(telemetry.snapshot().await.revision, persisted_revision);
+    assert_eq!(
+        telemetry.persist_count(),
+        1,
+        "unchanged breaker observations must not write identical snapshots"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn unchanged_deferred_breaker_retries_a_failed_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+    let blocked_temporary = temp.path().join("mesh/telemetry.json.tmp");
+    fs::create_dir_all(&blocked_temporary).unwrap();
+    assert!(
+        telemetry
+            .set_breaker(
+                xp_test_fixtures::primary_node_id(),
+                BreakerState::Closed,
+                None
+            )
+            .await
+            .is_err()
+    );
+    fs::remove_dir(&blocked_temporary).unwrap();
+
+    telemetry
+        .set_breaker_deferred(
+            xp_test_fixtures::primary_node_id(),
+            BreakerState::Closed,
+            None,
+        )
+        .await
+        .unwrap();
+    tokio::task::yield_now().await;
+    tokio::time::advance(SAMPLE_PERSIST_INTERVAL).await;
+    tokio::task::yield_now().await;
+
+    let restored = MeshTelemetryHandle::load(temp.path())
+        .unwrap()
+        .snapshot()
+        .await;
+    assert_eq!(restored.peers[0].breaker, Some(BreakerState::Closed));
+    assert_eq!(restored.revision, 1);
+    assert_eq!(telemetry.persist_count(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn deferred_mesh_reason_flushes_without_synchronous_persistence() {
+    let temp = tempfile::tempdir().unwrap();
+    let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+
+    telemetry
+        .record_sample_deferred(
+            "peer-a",
+            "alpha",
+            MeshTelemetrySample {
+                path: TelemetryPath::Mesh,
+                success: true,
+                latency_ms: Some(xp_test_fixtures::number_value42()),
+                fallback: false,
+                updates_active_path: true,
+                transport: None,
+            },
+            Some((
+                Some("https://peer-a.example.test:443".to_string()),
+                MeshPeerReason::MeshAvailable,
+            )),
+        )
+        .await
+        .unwrap();
+    assert!(telemetry.state.lock().await.flush_scheduled);
+    assert_eq!(
+        telemetry.persist_count(),
+        0,
+        "deferred reason must not flush synchronously"
+    );
+
+    tokio::task::yield_now().await;
+    tokio::time::advance(SAMPLE_PERSIST_INTERVAL).await;
+    tokio::task::yield_now().await;
+    assert_eq!(
+        MeshTelemetryHandle::load(temp.path())
+            .unwrap()
+            .snapshot()
+            .await
+            .peers[0]
+            .last_mesh_reason,
+        Some(MeshPeerReason::MeshAvailable)
+    );
+}
+
 #[tokio::test]
 async fn retries_a_dirty_sample_after_a_persistence_failure() {
     let temp = tempfile::tempdir().unwrap();

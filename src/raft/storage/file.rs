@@ -4,6 +4,7 @@ use std::{
     ops::RangeBounds,
     path::{Path, PathBuf},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use crate::{
@@ -470,8 +471,12 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         };
         if mesh_state_applied {
             let mesh_enabled = self.store.lock().await.state().mesh_enabled;
-            self.reconcile
-                .initialize_mesh_gate_if_unset(mesh_enabled)
+            let _ = self
+                .reconcile
+                .initialize_mesh_gate_if_unset_until(
+                    mesh_enabled,
+                    Instant::now() + Duration::from_secs(3),
+                )
                 .await;
         }
         Ok((last_applied, last_membership))
@@ -686,9 +691,21 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
             }
             if let Some((explicit, enabled)) = mesh_gate_update {
                 if explicit {
-                    self.reconcile.initialize_mesh_gate(enabled).await;
+                    let _ = self
+                        .reconcile
+                        .initialize_mesh_gate_until(
+                            enabled,
+                            Instant::now() + Duration::from_secs(3),
+                        )
+                        .await;
                 } else {
-                    self.reconcile.initialize_mesh_gate_if_unset(enabled).await;
+                    let _ = self
+                        .reconcile
+                        .initialize_mesh_gate_if_unset_until(
+                            enabled,
+                            Instant::now() + Duration::from_secs(3),
+                        )
+                        .await;
                 }
             }
             {
@@ -931,6 +948,9 @@ async fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
     .expect("spawn_blocking write_bytes")
 }
 
+#[cfg(test)]
+#[path = "file/mesh_gate_tests.rs"]
+mod mesh_gate_tests;
 #[cfg(test)]
 mod snapshot_recovery_tests;
 #[cfg(test)]
