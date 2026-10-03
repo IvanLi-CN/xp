@@ -4,7 +4,85 @@ const POST_DEADLINE_CLEANUP_WAIT: Duration = Duration::from_millis(100);
 const CLEANUP_RETRY_DELAY: Duration = Duration::from_millis(10);
 const POST_DEADLINE_CLEANUP_LIFETIME: Duration = Duration::from_secs(30);
 
+pub(super) struct PublicCleanupContext {
+    expires_at: tokio::time::Instant,
+    probe_id: Option<u64>,
+}
+
+impl PublicCleanupContext {
+    pub(super) fn permits(self, current_probe_id: Option<u64>) -> bool {
+        tokio::time::Instant::now() < self.expires_at
+            && (current_probe_id.is_none() || current_probe_id == self.probe_id)
+    }
+}
+
 impl MeshAwareHttpClient {
+    pub(super) fn defer_public_failure(
+        &self,
+        peer_id: &str,
+        operation_id: u64,
+        probe_id: Option<u64>,
+    ) {
+        let circuits = self.circuits.clone();
+        let peer_id = peer_id.to_owned();
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let expires_at = tokio::time::Instant::now() + POST_DEADLINE_CLEANUP_LIFETIME;
+            self.dispatch_ordered_critical_completion(
+                format!("cleanup:public:{peer_id}"),
+                operation_id,
+                async move {
+                    if tokio::time::Instant::now() < expires_at {
+                        let _ = tokio::time::timeout_at(
+                            expires_at,
+                            circuits.record_public_failure_at_with_cleanup(
+                                &peer_id,
+                                operation_id,
+                                Some(PublicCleanupContext {
+                                    expires_at,
+                                    probe_id,
+                                }),
+                            ),
+                        )
+                        .await;
+                    }
+                },
+            );
+        }
+    }
+
+    pub(super) fn defer_public_success(
+        &self,
+        peer_id: &str,
+        operation_id: u64,
+        probe_id: Option<u64>,
+    ) {
+        let circuits = self.circuits.clone();
+        let peer_id = peer_id.to_owned();
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let expires_at = tokio::time::Instant::now() + POST_DEADLINE_CLEANUP_LIFETIME;
+            self.dispatch_ordered_critical_completion(
+                format!("cleanup:public:{peer_id}"),
+                operation_id,
+                async move {
+                    if tokio::time::Instant::now() < expires_at {
+                        let _ = tokio::time::timeout_at(
+                            expires_at,
+                            circuits.record_public_success_at_with_cleanup(
+                                &peer_id,
+                                operation_id,
+                                Some(PublicCleanupContext {
+                                    expires_at,
+                                    probe_id,
+                                }),
+                            ),
+                        )
+                        .await;
+                    }
+                },
+            );
+        }
+    }
+
     pub(super) fn spawn_protocol_failure_cleanup(
         &self,
         peer: &MeshPeerTarget,

@@ -613,7 +613,22 @@ impl PeerCircuitBreakers {
         peer_id: &str,
         operation_id: u64,
     ) -> Option<BreakerState> {
+        self.record_public_success_at_with_cleanup(peer_id, operation_id, None)
+            .await
+    }
+
+    pub(super) async fn record_public_success_at_with_cleanup(
+        &self,
+        peer_id: &str,
+        operation_id: u64,
+        cleanup: Option<cleanup::PublicCleanupContext>,
+    ) -> Option<BreakerState> {
         let mut peers = self.public_peers.lock().await;
+        if cleanup.is_some_and(|cleanup| {
+            !cleanup.permits(peers.get(peer_id).and_then(|peer| peer.half_open_probe_id))
+        }) {
+            return None;
+        }
         let circuit = peers.entry(peer_id.to_string()).or_default();
         if circuit.operation_id > operation_id {
             return None;
@@ -641,8 +656,23 @@ impl PeerCircuitBreakers {
         peer_id: &str,
         operation_id: u64,
     ) -> Option<BreakerState> {
+        self.record_public_failure_at_with_cleanup(peer_id, operation_id, None)
+            .await
+    }
+
+    pub(super) async fn record_public_failure_at_with_cleanup(
+        &self,
+        peer_id: &str,
+        operation_id: u64,
+        cleanup: Option<cleanup::PublicCleanupContext>,
+    ) -> Option<BreakerState> {
         let now = Instant::now();
         let mut peers = self.public_peers.lock().await;
+        if cleanup.is_some_and(|cleanup| {
+            !cleanup.permits(peers.get(peer_id).and_then(|peer| peer.half_open_probe_id))
+        }) {
+            return None;
+        }
         let circuit = peers.entry(peer_id.to_string()).or_default();
         if circuit.operation_id > operation_id {
             return None;
@@ -656,30 +686,6 @@ impl PeerCircuitBreakers {
         circuit.half_open_probe_id = None;
         circuit.operation_id = operation_id;
         Some(BreakerState::Open)
-    }
-
-    pub(super) fn spawn_public_failure_cleanup(&self, peer_id: &str, operation_id: u64) {
-        let circuits = self.clone();
-        let peer_id = peer_id.to_owned();
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                circuits
-                    .record_public_failure_at(&peer_id, operation_id)
-                    .await;
-            });
-        }
-    }
-
-    pub(super) fn spawn_public_success_cleanup(&self, peer_id: &str, operation_id: u64) {
-        let circuits = self.clone();
-        let peer_id = peer_id.to_owned();
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                circuits
-                    .record_public_success_at(&peer_id, operation_id)
-                    .await;
-            });
-        }
     }
 
     pub async fn public_state(&self, peer_id: &str) -> BreakerState {
@@ -822,32 +828,6 @@ mod tests {
             Some("vision_tcp"),
         );
         assert_ne!(first, second);
-    }
-
-    #[tokio::test]
-    async fn public_failure_cleanup_converges_after_request_deadline() {
-        let circuits = PeerCircuitBreakers::default();
-        let public_peers = circuits.public_peers.lock().await;
-        circuits.spawn_public_failure_cleanup("peer", circuits.next_operation());
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        assert!(
-            tokio::time::timeout(Duration::from_millis(25), circuits.public_state("peer"))
-                .await
-                .is_err(),
-            "public cleanup should remain pending while its state lock is held"
-        );
-        drop(public_peers);
-
-        tokio::time::timeout(Duration::from_secs(1), async {
-            loop {
-                if circuits.public_state("peer").await == BreakerState::Open {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("bounded public failure cleanup should record the breaker state");
     }
 
     #[tokio::test]

@@ -64,9 +64,15 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   is released. Critical completion state is coalesced per peer behind a bounded queue and
   active-worker window; overflow preserves the latest critical state and is serviced fairly
   alongside queued work without exceeding the 32-active bound. Empty overflow state is checked
-  without taking the pending-map lock. Protocol, retryable and validation cleanup share this
-  dispatcher, retain the latest work per peer and cleanup kind, and include queue waiting in
-  their existing absolute thirty-second cleanup lifetime. Body completion has bounded cleanup
+  without taking the pending-map lock. Protocol, retryable, validation and Public outcome cleanup
+  share this dispatcher, retain the latest work per peer and cleanup kind, and include queue waiting
+  in their absolute thirty-second cleanup lifetime. Public body and cleanup overflow retain the
+  highest operation id; a delayed older completion cannot displace a newer retained outcome.
+  Public cleanup checks expiry and its original probe token again under the state lock, so a lock
+  becoming ready alongside the timeout cannot apply expired work or clear a newer probe. A Public
+  send failure disarms its RAII probe guard only after the state update completes; a timed-out
+  update retains token-qualified release ownership even if the queued outcome later expires.
+  Body completion has bounded cleanup
   grace when its request deadline has expired, while successful body
   telemetry uses bounded deferred persistence after its RAII probe guard is released. Failure,
   cancellation, and deadline telemetry remains immediate and bounded.

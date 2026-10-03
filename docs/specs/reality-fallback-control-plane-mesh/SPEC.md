@@ -137,6 +137,10 @@
   body deadline 属于权威响应的终止，不得改走 Public 或其他路径重试。runtime-events SSE 的
   3 秒 slice 在首字节后由固定 15 分钟内部 stream lease 接管；EOF、body error、客户端取消和
   lease 到期都会释放 guard，客户端重新发起下一次 SSE 请求。
+- 请求 deadline 后的 Public 成功/失败状态清理与其他 deferred completion 共用最多 32 个
+  active work 的通道，不得逐请求新增无界等待任务。内部清理的绝对 30 秒期限从调度时起算，
+  包含排队和锁等待；持锁后仍需校验到期及探测 token，过期任务不得写状态或清除较新的探测槽。
+  Public 响应体完成和清理的溢出合并保留较新的 operation，迟到的旧结果不得挤掉新结果。
 - authoritative gate 的 reconcile 若目标值与当前值及 state generation 均未变化，必须只做原子
   校验而不排队写 barrier；显式 Mesh 开关切换和首次认证初始化仍必须取得 write barrier。
 - 有效 ack 的任何 HTTP status 都是权威结果，禁止降级。

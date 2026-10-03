@@ -16,6 +16,7 @@ use super::MeshAwareHttpClient;
 type Completion = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 struct CriticalCompletion {
     key: String,
+    operation_id: Option<u64>,
     completion: Completion,
 }
 
@@ -26,7 +27,7 @@ const COMPLETION_ACTIVE_CAPACITY: usize = 32;
 pub(super) struct CompletionDispatcher {
     critical_sender: mpsc::Sender<CriticalCompletion>,
     // Saturation keeps the latest critical state per peer instead of dropping it.
-    critical_pending: Arc<std::sync::Mutex<BTreeMap<String, Completion>>>,
+    critical_pending: Arc<std::sync::Mutex<BTreeMap<String, CriticalCompletion>>>,
     critical_pending_ready: Arc<AtomicBool>,
     critical_notify: Arc<Notify>,
     #[cfg(test)]
@@ -136,8 +137,27 @@ impl CompletionDispatcher {
         key: String,
         completion: impl Future<Output = ()> + Send + 'static,
     ) {
+        self.dispatch(key, None, completion);
+    }
+
+    pub(super) fn dispatch_ordered_critical(
+        &self,
+        key: String,
+        operation_id: u64,
+        completion: impl Future<Output = ()> + Send + 'static,
+    ) {
+        self.dispatch(key, Some(operation_id), completion);
+    }
+
+    fn dispatch(
+        &self,
+        key: String,
+        operation_id: Option<u64>,
+        completion: impl Future<Output = ()> + Send + 'static,
+    ) {
         let completion = CriticalCompletion {
             key,
+            operation_id,
             completion: Box::pin(completion),
         };
         match self.critical_sender.try_send(completion) {
@@ -145,7 +165,14 @@ impl CompletionDispatcher {
             Err(mpsc::error::TrySendError::Full(completion))
             | Err(mpsc::error::TrySendError::Closed(completion)) => {
                 if let Ok(mut pending) = self.critical_pending.lock() {
-                    pending.insert(completion.key, completion.completion);
+                    if let Some(previous) = pending.get(&completion.key)
+                        && let Some((previous_id, incoming_id)) =
+                            previous.operation_id.zip(completion.operation_id)
+                        && previous_id > incoming_id
+                    {
+                        return;
+                    }
+                    pending.insert(completion.key.clone(), completion);
                     self.critical_pending_ready.store(true, Ordering::Release);
                 }
                 self.critical_notify.notify_one();
@@ -161,13 +188,15 @@ impl CompletionDispatcher {
 }
 
 fn pop_pending(
-    pending: &std::sync::Mutex<BTreeMap<String, Completion>>,
+    pending: &std::sync::Mutex<BTreeMap<String, CriticalCompletion>>,
     pending_ready: &AtomicBool,
 ) -> Option<Completion> {
     let Ok(mut pending) = pending.lock() else {
         return None;
     };
-    let completion = pending.pop_first().map(|(_, completion)| completion);
+    let completion = pending
+        .pop_first()
+        .map(|(_, completion)| completion.completion);
     if pending.is_empty() {
         pending_ready.store(false, Ordering::Release);
     }
@@ -175,6 +204,17 @@ fn pop_pending(
 }
 
 impl MeshAwareHttpClient {
+    pub(super) fn dispatch_ordered_critical_completion(
+        &self,
+        key: String,
+        operation_id: u64,
+        completion: impl Future<Output = ()> + Send + 'static,
+    ) {
+        self.completion_dispatcher
+            .get_or_init(CompletionDispatcher::new)
+            .dispatch_ordered_critical(key, operation_id, completion);
+    }
+
     pub(super) fn dispatch_critical_completion(
         &self,
         key: impl Into<String>,
@@ -342,9 +382,13 @@ mod tests {
             .expect("pending completion lock")
             .insert(
                 "pending-key".to_string(),
-                Box::pin(async move {
-                    pending_completed_for_task.store(true, Ordering::Release);
-                }),
+                CriticalCompletion {
+                    key: "pending-key".to_string(),
+                    operation_id: None,
+                    completion: Box::pin(async move {
+                        pending_completed_for_task.store(true, Ordering::Release);
+                    }),
+                },
             );
         dispatcher
             .critical_pending_ready

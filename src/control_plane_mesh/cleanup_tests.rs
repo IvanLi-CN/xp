@@ -256,7 +256,8 @@ async fn public_admission_timeout_does_not_dispatch_after_circuit_lock_wait() {
 
 #[tokio::test]
 async fn public_success_cleanup_converges_after_request_deadline() {
-    let circuits = PeerCircuitBreakers::default();
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    let circuits = client.circuits.clone();
     circuits
         .record_public_failure(xp_test_fixtures::primary_node_id())
         .await;
@@ -265,7 +266,7 @@ async fn public_success_cleanup_converges_after_request_deadline() {
         .await;
     let operation_id = circuits.next_operation();
     let public_peers = circuits.hold_public_peers_for_test().await;
-    circuits.spawn_public_success_cleanup(xp_test_fixtures::primary_node_id(), operation_id);
+    client.defer_public_success(xp_test_fixtures::primary_node_id(), operation_id, None);
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert!(
         tokio::time::timeout(
@@ -291,7 +292,7 @@ async fn public_success_cleanup_converges_after_request_deadline() {
         }
     })
     .await
-    .expect("unbounded public success cleanup should record the breaker state");
+    .expect("bounded public success cleanup should record the breaker state");
 }
 
 #[tokio::test]

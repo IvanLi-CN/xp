@@ -347,7 +347,7 @@ impl MeshAwareHttpClient {
             match outcome {
                 crate::mesh_gate_body::BodyFinish::Complete => {
                     let completion_deadline = super::body_completion_deadline(deadline);
-                    client.dispatch_critical_completion(key, async move {
+                    client.dispatch_ordered_critical_completion(key, operation_id, async move {
                         completion_client
                             .record_public_success_after_body(
                                 &peer,
@@ -365,7 +365,7 @@ impl MeshAwareHttpClient {
                 crate::mesh_gate_body::BodyFinish::Error
                 | crate::mesh_gate_body::BodyFinish::Deadline => {
                     let failure_deadline = super::body_completion_deadline(deadline);
-                    client.dispatch_critical_completion(key, async move {
+                    client.dispatch_ordered_critical_completion(key, operation_id, async move {
                         completion_client
                             .record_public_body_failure_after_body(
                                 &peer,
@@ -405,8 +405,13 @@ impl MeshAwareHttpClient {
         )
         .await;
         if public_breaker_result.is_none() {
-            self.circuits
-                .spawn_public_success_cleanup(&peer.node_id, operation_id);
+            self.defer_public_success(
+                &peer.node_id,
+                operation_id,
+                public_probe_guard
+                    .as_ref()
+                    .map(PublicHalfOpenProbeGuard::probe_id),
+            );
         }
         let Some(public_breaker) = public_breaker_result.flatten() else {
             return;
@@ -452,8 +457,13 @@ impl MeshAwareHttpClient {
         )
         .await;
         if public_breaker_result.is_none() {
-            self.circuits
-                .spawn_public_failure_cleanup(&peer.node_id, operation_id);
+            self.defer_public_failure(
+                &peer.node_id,
+                operation_id,
+                public_probe_guard
+                    .as_ref()
+                    .map(PublicHalfOpenProbeGuard::probe_id),
+            );
         }
         let Some(public_breaker) = public_breaker_result.flatten() else {
             return;

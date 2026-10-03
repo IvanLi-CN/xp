@@ -27,6 +27,8 @@ mod error;
 mod gate;
 #[cfg(test)]
 mod mesh_body_lifecycle_tests;
+#[cfg(test)]
+mod public_cleanup_tests;
 mod request;
 mod request_flow;
 mod retry;
@@ -905,10 +907,11 @@ impl MeshAwareHttpClient {
                 )
                 .await;
                 if public_breaker_result.is_none() {
-                    self.circuits
-                        .spawn_public_failure_cleanup(&peer.node_id, operation_id);
+                    self.defer_public_failure(&peer.node_id, operation_id, public_probe_id);
                 }
-                if let Some(guard) = public_probe_guard.as_mut() {
+                if public_breaker_result.is_some()
+                    && let Some(guard) = public_probe_guard.as_mut()
+                {
                     guard.disarm();
                 }
                 if let Some(public_breaker) = public_breaker_result.flatten()
@@ -956,8 +959,7 @@ impl MeshAwareHttpClient {
                 guard.disarm();
             }
             if public_breaker_result.is_none() {
-                self.circuits
-                    .spawn_public_success_cleanup(&peer.node_id, operation_id);
+                self.defer_public_success(&peer.node_id, operation_id, public_probe_id);
             }
             return Ok(PeerRequestResponse::PredecessorNotFound);
         }
