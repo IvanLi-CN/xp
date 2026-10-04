@@ -445,7 +445,7 @@ impl MeshAwareHttpClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn direct_preflight_success_callback(
+    pub(super) fn direct_preflight_success_callback(
         &self,
         peer: &MeshPeerTarget,
         epoch: u64,
@@ -460,9 +460,23 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         Box::new(move |outcome| {
             if outcome != crate::mesh_gate_body::BodyFinish::Complete {
-                if let Some(sender) = completion_sender {
-                    let _ = sender.send(false);
-                }
+                let failure_deadline =
+                    crate::control_plane_mesh::body_completion_deadline(deadline);
+                tokio::spawn(async move {
+                    client
+                        .record_direct_preflight_failure_after_body(
+                            &peer,
+                            epoch,
+                            validation_revision,
+                            operation_id,
+                            allow_mesh_when_disabled,
+                            failure_deadline,
+                        )
+                        .await;
+                    if let Some(sender) = completion_sender {
+                        let _ = sender.send(false);
+                    }
+                });
                 return;
             }
             tokio::spawn(async move {
@@ -482,6 +496,53 @@ impl MeshAwareHttpClient {
                 }
             });
         })
+    }
+
+    async fn record_direct_preflight_failure_after_body(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        allow_mesh_when_disabled: bool,
+        deadline: Instant,
+    ) -> bool {
+        let cleanup_revision = validation_revision.clone();
+        let Some(_epoch_guard) = self
+            .mesh_epoch_guard_until(epoch, deadline, !allow_mesh_when_disabled)
+            .await
+        else {
+            self.spawn_validation_failure_cleanup_for_preflight(
+                peer,
+                epoch,
+                DirectValidationState::TransportFailed,
+                cleanup_revision,
+                operation_id,
+                allow_mesh_when_disabled,
+            );
+            return false;
+        };
+        let recorded = crate::control_plane_mesh::await_until(
+            deadline,
+            self.mark_direct_validation_failure_with_operation(
+                peer,
+                DirectValidationState::TransportFailed,
+                validation_revision,
+                operation_id,
+            ),
+        )
+        .await;
+        if recorded.is_none() {
+            self.spawn_validation_failure_cleanup_for_preflight(
+                peer,
+                epoch,
+                DirectValidationState::TransportFailed,
+                cleanup_revision,
+                operation_id,
+                allow_mesh_when_disabled,
+            );
+        }
+        recorded.unwrap_or(false)
     }
 
     #[allow(clippy::too_many_arguments)]

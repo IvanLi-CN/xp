@@ -117,3 +117,101 @@ async fn public_signed_body_commits_success_only_after_completion() {
     .await
     .expect("body error must update the public failure state");
 }
+
+#[tokio::test]
+async fn public_body_cancellation_and_lease_expiry_record_failure_telemetry() {
+    use futures_util::StreamExt;
+
+    let temp = tempfile::tempdir().expect("telemetry directory");
+    let telemetry = MeshTelemetryHandle::load(temp.path()).expect("telemetry");
+    let client =
+        MeshAwareHttpClient::new(reqwest::Client::new()).with_mesh_observability(telemetry.clone());
+    let peer = MeshPeerTarget {
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(xp_test_fixtures::primary_api_url().to_owned()),
+        endpoint_transport: Some("xhttp_reality_fallback"),
+        endpoint_fingerprint: Some("fingerprint".to_owned()),
+        mesh_reason: MeshPeerReason::MeshAvailable,
+        public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+    };
+    let response_with_lease = |lease| {
+        let response = reqwest::Response::from(
+            axum::http::Response::builder()
+                .status(reqwest::StatusCode::OK)
+                .body(reqwest::Body::wrap_stream(
+                    futures_util::stream::once(async {
+                        Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"first"))
+                    })
+                    .chain(futures_util::stream::pending()),
+                ))
+                .expect("streaming response"),
+        );
+        super::reverse::attach_response_with_body_lease(
+            response,
+            Instant::now() + Duration::from_secs(1),
+            lease,
+            Some(client.public_success_telemetry_callback(
+                &peer,
+                Instant::now(),
+                true,
+                false,
+                0,
+                client.circuits.next_operation(),
+                None,
+                Instant::now() + Duration::from_secs(1),
+            )),
+        )
+    };
+
+    let mut cancelled_body = response_with_lease(Duration::from_secs(10)).bytes_stream();
+    assert!(
+        cancelled_body
+            .next()
+            .await
+            .expect("first body chunk")
+            .is_ok()
+    );
+    drop(cancelled_body);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let snapshot = telemetry.snapshot().await;
+            if snapshot
+                .peers
+                .first()
+                .and_then(|peer| peer.buckets.back())
+                .is_some_and(|bucket| bucket.public_failure == 1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cancellation must be recorded as a Public failure");
+
+    let mut expired_body = response_with_lease(Duration::from_millis(10)).bytes_stream();
+    assert!(expired_body.next().await.expect("first body chunk").is_ok());
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), expired_body.next())
+            .await
+            .expect("lease expiry should be bounded")
+            .is_none()
+    );
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let snapshot = telemetry.snapshot().await;
+            if snapshot
+                .peers
+                .first()
+                .and_then(|peer| peer.buckets.back())
+                .is_some_and(|bucket| bucket.public_failure == 2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("lease expiry must be recorded as a Public failure");
+}

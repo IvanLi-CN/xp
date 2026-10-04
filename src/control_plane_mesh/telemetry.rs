@@ -105,12 +105,7 @@ impl MeshAwareHttpClient {
                     });
                 }
                 crate::mesh_gate_body::BodyFinish::Error
-                | crate::mesh_gate_body::BodyFinish::Deadline => {
-                    let reason = if outcome == crate::mesh_gate_body::BodyFinish::Deadline {
-                        MeshPeerReason::TransportTimeout
-                    } else {
-                        MeshPeerReason::TransportError
-                    };
+                | crate::mesh_gate_body::BodyFinish::Cancelled => {
                     let failure_deadline = super::body_completion_deadline(deadline);
                     let finished = completion.take();
                     client.dispatch_ordered_critical_completion(key, operation_id, async move {
@@ -124,7 +119,7 @@ impl MeshAwareHttpClient {
                                 validation_revision,
                                 operation_id,
                                 mesh_probe_guard,
-                                reason,
+                                MeshPeerReason::TransportError,
                                 failure_deadline,
                             )
                             .await;
@@ -133,11 +128,29 @@ impl MeshAwareHttpClient {
                         }
                     });
                 }
-                crate::mesh_gate_body::BodyFinish::Cancelled
+                crate::mesh_gate_body::BodyFinish::Deadline
                 | crate::mesh_gate_body::BodyFinish::LeaseExpired => {
-                    if let Some(finished) = completion.take() {
-                        let _ = finished.send(());
-                    }
+                    let failure_deadline = super::body_completion_deadline(deadline);
+                    let finished = completion.take();
+                    client.dispatch_ordered_critical_completion(key, operation_id, async move {
+                        completion_client
+                            .record_mesh_body_failure_after_body(
+                                &peer,
+                                started,
+                                updates_active_path,
+                                transport,
+                                epoch,
+                                validation_revision,
+                                operation_id,
+                                mesh_probe_guard,
+                                MeshPeerReason::TransportTimeout,
+                                failure_deadline,
+                            )
+                            .await;
+                        if let Some(finished) = finished {
+                            let _ = finished.send(());
+                        }
+                    });
                 }
             }
         })
@@ -505,7 +518,20 @@ impl MeshAwareHttpClient {
                     });
                 }
                 crate::mesh_gate_body::BodyFinish::Error
-                | crate::mesh_gate_body::BodyFinish::Deadline => {
+                | crate::mesh_gate_body::BodyFinish::Cancelled
+                | crate::mesh_gate_body::BodyFinish::Deadline
+                | crate::mesh_gate_body::BodyFinish::LeaseExpired => {
+                    let reason = match outcome {
+                        crate::mesh_gate_body::BodyFinish::Deadline
+                        | crate::mesh_gate_body::BodyFinish::LeaseExpired => {
+                            MeshPeerReason::TransportTimeout
+                        }
+                        crate::mesh_gate_body::BodyFinish::Error
+                        | crate::mesh_gate_body::BodyFinish::Cancelled => {
+                            MeshPeerReason::TransportError
+                        }
+                        crate::mesh_gate_body::BodyFinish::Complete => unreachable!(),
+                    };
                     let failure_deadline = super::body_completion_deadline(deadline);
                     client.dispatch_ordered_critical_completion(key, operation_id, async move {
                         completion_client
@@ -517,13 +543,12 @@ impl MeshAwareHttpClient {
                                 public_epoch,
                                 operation_id,
                                 public_probe_guard,
+                                reason,
                                 failure_deadline,
                             )
                             .await;
                     });
                 }
-                crate::mesh_gate_body::BodyFinish::Cancelled
-                | crate::mesh_gate_body::BodyFinish::LeaseExpired => {}
             }
         })
     }
@@ -590,6 +615,7 @@ impl MeshAwareHttpClient {
         public_epoch: u64,
         operation_id: u64,
         mut public_probe_guard: Option<PublicHalfOpenProbeGuard>,
+        reason: MeshPeerReason,
         deadline: Instant,
     ) {
         let public_breaker_result = super::await_until(
@@ -620,7 +646,7 @@ impl MeshAwareHttpClient {
                     &peer.node_id,
                     public_breaker,
                     (public_breaker == BreakerState::Open)
-                        .then(|| "Public response body failed".to_string()),
+                        .then(|| format!("Public response body {reason:?}")),
                 ),
             )
             .await;

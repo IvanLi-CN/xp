@@ -24,6 +24,59 @@ impl Drop for DropNotifies {
 }
 
 #[tokio::test]
+async fn signed_preflight_body_failure_invalidates_previous_direct_validation() {
+    use futures_util::StreamExt;
+
+    let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
+    let peer = super::peer_target_tests::primary_reverse_target(
+        Some(xp_test_fixtures::primary_api_url().to_owned()),
+        xp_test_fixtures::secondary_api_url().to_owned(),
+    );
+    client.mark_direct_validation_success_at(&peer, None).await;
+    assert_eq!(
+        client.direct_validation_state_for(&peer).await,
+        DirectValidationState::Verified
+    );
+    let (completion_sender, completion) = oneshot::channel();
+    let operation_id = client.circuits.next_operation();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let callback = client.direct_preflight_success_callback(
+        &peer,
+        0,
+        None,
+        operation_id,
+        None,
+        true,
+        deadline,
+        Some(completion_sender),
+    );
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(reqwest::StatusCode::OK)
+            .body(reqwest::Body::wrap_stream(futures_util::stream::iter([
+                Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"partial")),
+                Err(std::io::Error::other("synthetic signed body failure")),
+            ])))
+            .expect("synthetic signed response"),
+    );
+    let response = super::reverse::attach_response_with_finish(response, deadline, Some(callback));
+    let mut body = response.bytes_stream();
+    assert!(body.next().await.expect("partial response chunk").is_ok());
+    assert!(body.next().await.expect("response body error").is_err());
+    assert!(
+        !tokio::time::timeout(Duration::from_secs(1), completion)
+            .await
+            .expect("body outcome should be reported")
+            .expect("preflight completion sender")
+    );
+    assert_eq!(
+        client.direct_validation_state_for(&peer).await,
+        DirectValidationState::TransportFailed,
+        "a body failure must invalidate an earlier Direct validation receipt"
+    );
+}
+
+#[tokio::test]
 async fn completed_empty_mesh_body_releases_guard_without_another_poll() {
     let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
     let gate_guard = gate_lock.clone().read_owned().await;

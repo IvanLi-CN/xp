@@ -31,6 +31,10 @@
 - Direct validation、Public circuit、active route 和 endpoint 资格必须作为独立事实显示；
   5 分钟没有有效 Direct ACK、成员或 endpoint fingerprint 变化、或进程重启后，受影响 peer
   进入 `configured_unverified` 并暂走 Public。
+- Direct health preflight 只有在签名响应 body 完整到达 EOF 后才能提交 `verified`；body error、
+  cancellation、deadline 或 stream lease 到期必须把该 preflight 的验证状态写为
+  `transport_failed`，不能保留更早的 `verified` 回执。失败更新绑定捕获的 membership revision 和
+  operation ID，迟到的旧响应不得覆盖更新的验证结果。
 - `PersistedState.mesh_enabled` 是集群级开关，默认开启；关闭时控制面只访问 peer 注册的
   公网 `api_base_url`，不改用私网或 Reverse Mesh。能力探测也使用同一签名的公网请求并保留
   predecessor 404 兼容；专用 Reverse health/link probe 在当前发布中固定停用，即使集群

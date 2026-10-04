@@ -77,6 +77,10 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   originating half-open probe token; an expired or stale cleanup cannot clear a newer probe.
   Direct body completion uses its reserved operation id when entering the bounded dispatcher, so
   an older body cannot evict a newer queued outcome during overflow.
+  Direct health preflight body error, cancellation, deadline and lease expiry invalidate any older
+  `Verified` receipt as `TransportFailed` using the captured membership revision and operation id;
+  when the bounded immediate update cannot complete, the same ordered preflight cleanup retries it
+  without allowing an older body to replace newer validation state.
   Body completion has bounded cleanup
   grace when its request deadline has expired, while successful body
   telemetry uses bounded deferred persistence after its RAII probe guard is released. Failure,
