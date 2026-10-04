@@ -480,7 +480,7 @@ async fn signed_snapshot_admission_rejects_before_openraft_and_retries_successfu
         reconcile: target_reconcile.clone(),
     };
     let auth = RaftRpcAuth {
-        cluster_id: cluster_id.to_owned(),
+        cluster_id: xp_test_fixtures::primary_cluster_id().to_owned(),
         local_node_id: target_identity.clone(),
         cluster_ca_key_pem: ca.key_pem.clone(),
         cluster_ca_cert_pem: ca.cert_pem.clone(),
