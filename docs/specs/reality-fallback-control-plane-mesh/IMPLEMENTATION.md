@@ -99,7 +99,10 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   calling OpenRaft. It returns a signed HTTP 503 if existing Mesh bodies do not drain within three
   seconds; this keeps admission contention out of the OpenRaft state-machine worker. After a
   successful drain it sets an RAII reservation that prevents new Mesh dispatch while releasing
-  the write locks for snapshot storage to acquire. The install runs in an owned task, so HTTP
+  the write locks for snapshot storage to acquire. Re-enable preflight takes the same Mesh read
+  admission even while the cluster switch is disabled. New deferred completion and telemetry epoch
+  readers reject the active reservation, so they cannot contend with snapshot storage after
+  admission. The install runs in an owned task, so HTTP
   request cancellation cannot release that reservation early; the task releases it only after
   OpenRaft returns. Signed 503 maps to unreachable/retry and never triggers Public fallback.
   Readers reject
@@ -187,7 +190,11 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   completions share the active capacity while the queue remains continuously replenished.
   Snapshot-hold regressions reject both stale and fresh unauthenticated reconcile, then permit
   progress after authenticated apply. Repeated known-peer cleanup remains within the shared active
-  window during contention and converges to protocol isolation after the barrier clears.
+  window during contention and converges to protocol isolation after the barrier clears. A body
+  completion with telemetry persistence blocked cannot acquire an epoch reader during snapshot
+  reservation; disabled-gate re-enable preflight is known-not-dispatched until reservation release.
+  Saturated Direct cleanup preserves the newest protocol rejection when an older operation arrives
+  later.
   Telemetry regressions also distinguish unchanged breaker observations from failed-snapshot
   retries. Body regressions distinguish a confirmed empty EOF from delayed EOF with zero
   Content-Length.

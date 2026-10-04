@@ -147,8 +147,9 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         if tokio::runtime::Handle::try_current().is_ok() {
             let cleanup_expires_at = Instant::now() + POST_DEADLINE_CLEANUP_LIFETIME;
-            self.dispatch_critical_completion(
+            self.dispatch_ordered_critical_completion(
                 format!("cleanup:protocol:{}", peer.node_id),
+                operation_id,
                 async move {
                     loop {
                         if (require_enabled && !client.mesh_gate_matches(epoch))
@@ -263,8 +264,9 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         if tokio::runtime::Handle::try_current().is_ok() {
             let cleanup_expires_at = Instant::now() + POST_DEADLINE_CLEANUP_LIFETIME;
-            self.dispatch_critical_completion(
+            self.dispatch_ordered_critical_completion(
                 format!("cleanup:retryable:{}", peer.node_id),
+                operation_id,
                 async move {
                     loop {
                         if (require_enabled && !client.mesh_gate_matches(epoch))
@@ -384,8 +386,9 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         if tokio::runtime::Handle::try_current().is_ok() {
             let cleanup_expires_at = Instant::now() + POST_DEADLINE_CLEANUP_LIFETIME;
-            self.dispatch_critical_completion(
+            self.dispatch_ordered_critical_completion(
                 format!("cleanup:validation-failure:{}", peer.node_id),
+                operation_id,
                 async move {
                     loop {
                         if (require_enabled && !client.mesh_gate_matches(epoch))
@@ -474,8 +477,9 @@ impl MeshAwareHttpClient {
         let peer = peer.clone();
         if tokio::runtime::Handle::try_current().is_ok() {
             let cleanup_expires_at = Instant::now() + POST_DEADLINE_CLEANUP_LIFETIME;
-            self.dispatch_critical_completion(
+            self.dispatch_ordered_critical_completion(
                 format!("cleanup:validation-success:{}", peer.node_id),
+                operation_id,
                 async move {
                     loop {
                         if (require_enabled && !client.mesh_gate_matches(epoch))

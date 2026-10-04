@@ -132,6 +132,7 @@ impl CompletionDispatcher {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn dispatch_critical(
         &self,
         key: String,
@@ -215,6 +216,7 @@ impl MeshAwareHttpClient {
             .dispatch_ordered_critical(key, operation_id, completion);
     }
 
+    #[cfg(test)]
     pub(super) fn dispatch_critical_completion(
         &self,
         key: impl Into<String>,

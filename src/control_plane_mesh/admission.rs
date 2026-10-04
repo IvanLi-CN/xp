@@ -681,6 +681,25 @@ impl MeshAwareHttpClient {
             .then_some(guard)
     }
 
+    pub(super) async fn mesh_reenable_read_guard_until(
+        &self,
+        deadline: Instant,
+    ) -> Result<tokio::sync::OwnedRwLockReadGuard<()>, MeshRequestError> {
+        if self.snapshot_installing.load(Ordering::Acquire) {
+            return Err(MeshRequestError::PreDispatchTimeout);
+        }
+        let guard = crate::control_plane_mesh::await_until(
+            deadline,
+            self.mesh_gate_lock.clone().read_owned(),
+        )
+        .await
+        .ok_or(MeshRequestError::PreDispatchTimeout)?;
+        if self.snapshot_installing.load(Ordering::Acquire) {
+            return Err(MeshRequestError::PreDispatchTimeout);
+        }
+        Ok(guard)
+    }
+
     pub(super) async fn mesh_direct_read_guard_until(
         &self,
         deadline: Instant,

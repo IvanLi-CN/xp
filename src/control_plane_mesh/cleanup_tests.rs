@@ -401,3 +401,83 @@ async fn dispatched_mesh_timeout_is_not_reported_as_pre_dispatch_timeout() {
     mesh_task.abort();
     public_task.abort();
 }
+
+async fn occupy_direct_cleanup_completion_window(
+    client: &MeshAwareHttpClient,
+) -> Arc<tokio::sync::Semaphore> {
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
+    for index in 0..super::completion::COMPLETION_ACTIVE_CAPACITY {
+        let release = release.clone();
+        let started_tx = started_tx.clone();
+        client.dispatch_critical_completion(format!("direct-active-{index}"), async move {
+            started_tx
+                .send(())
+                .expect("active completion start receiver");
+            release
+                .acquire()
+                .await
+                .expect("active completion release")
+                .forget();
+        });
+    }
+    for _ in 0..super::completion::COMPLETION_ACTIVE_CAPACITY {
+        started_rx
+            .recv()
+            .await
+            .expect("all active completion slots should be occupied");
+    }
+    release
+}
+
+#[tokio::test]
+async fn older_direct_cleanup_cannot_displace_latest_overflow_protocol_rejection() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
+    let peer = primary_reverse_target(None, xp_test_fixtures::secondary_api_url().to_owned());
+    let older_operation = client.circuits.next_operation();
+    let successful_operation = client.circuits.next_operation();
+    let latest_operation = client.circuits.next_operation();
+    client
+        .circuits
+        .record_success_at(&peer.node_id, successful_operation)
+        .await;
+    client
+        .mark_direct_validation_success_with_operation(&peer, None, successful_operation)
+        .await;
+
+    let release = occupy_direct_cleanup_completion_window(&client).await;
+    for index in 0..super::completion::COMPLETION_QUEUE_CAPACITY {
+        let release = release.clone();
+        client.dispatch_critical_completion(format!("direct-queued-{index}"), async move {
+            release
+                .acquire()
+                .await
+                .expect("queued completion release")
+                .forget();
+        });
+    }
+    client.spawn_protocol_failure_cleanup(&peer, 0, None, latest_operation);
+    client.spawn_protocol_failure_cleanup(&peer, 0, None, older_operation);
+    release.add_permits(
+        super::completion::COMPLETION_ACTIVE_CAPACITY
+            + super::completion::COMPLETION_QUEUE_CAPACITY,
+    );
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let circuit = client
+                .circuits
+                .before_attempt_with_probe(&peer.node_id, true, false)
+                .await;
+            let validation = client.direct_validation_state_for(&peer).await;
+            if circuit == MeshAttemptDecision::Quarantined
+                && validation == DirectValidationState::ProtocolRejected
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("latest Direct protocol rejection must survive overflow and converge");
+}

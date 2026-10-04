@@ -361,7 +361,10 @@ impl MeshAwareHttpClient {
     ) -> Result<reqwest::Response, MeshRequestError> {
         let mesh_gate_read = if path == PeerDirectPath::RealityMesh && mesh_gate_read.is_none() {
             if allow_mesh_when_disabled {
-                None
+                Some(
+                    self.mesh_reenable_read_guard_until(request_deadline)
+                        .await?,
+                )
             } else {
                 Some(self.mesh_direct_read_guard_until(request_deadline).await?)
             }

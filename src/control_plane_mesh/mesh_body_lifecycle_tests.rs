@@ -1,4 +1,5 @@
 use super::*;
+use crate::reconcile::ReconcileHandle;
 use tokio::sync::oneshot;
 
 struct DropNotifies(Option<oneshot::Sender<()>>);
@@ -284,4 +285,71 @@ async fn mesh_response_body_lease_drops_unpolled_upstream_on_expiry() {
         }
     }
     panic!("lease expiry must cancel and drop an upstream body that is no longer polled");
+}
+
+#[tokio::test]
+async fn reenable_preflight_waits_for_snapshot_reservation_before_dispatch() {
+    let reconcile = ReconcileHandle::noop();
+    assert!(
+        reconcile
+            .initialize_mesh_gate_until(false, Instant::now() + Duration::from_secs(1))
+            .await
+    );
+    let (mesh_base_url, mesh_requests, mesh_task) =
+        super::peer_target_tests::spawn_stalling_mesh().await;
+    let peer = super::peer_target_tests::primary_reverse_target(
+        Some(mesh_base_url),
+        xp_test_fixtures::primary_api_url().to_owned(),
+    );
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let client = MeshAwareHttpClient::new(reqwest::Client::new())
+        .with_mesh_gate_epoch(reconcile.mesh_gate(), reconcile.mesh_gate_epoch())
+        .with_mesh_gate_lock(reconcile.mesh_gate_lock())
+        .with_mesh_epoch_barrier(reconcile.mesh_epoch_barrier())
+        .with_snapshot_install_reservation(reconcile.snapshot_installing());
+    let reservation = reconcile
+        .begin_snapshot_install_until(Instant::now() + Duration::from_secs(1))
+        .await
+        .expect("snapshot should reserve Mesh admission");
+    let request = MeshRequest {
+        method: reqwest::Method::GET,
+        path_and_query: "/api/admin/_internal/mesh/health".to_owned(),
+        content_type: None,
+        body: Vec::new(),
+        total_budget: Duration::from_millis(200),
+        allow_ambiguous_fallback: false,
+        request_id: "reenable-preflight-snapshot-reservation".to_owned(),
+        route: InternalRoute::HealthV2,
+        cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+        sender_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+        updates_active_path: false,
+    };
+
+    let error = client
+        .send_peer_direct_preflight_for_reenable(&peer, request.clone(), &ca.key_pem, &ca.cert_pem)
+        .await
+        .expect_err("snapshot reservation must reject re-enable preflight before dispatch");
+    assert!(
+        matches!(error, MeshRequestError::PreDispatchTimeout),
+        "reservation rejection should be known-not-dispatched, got {error:?}"
+    );
+    assert_eq!(
+        mesh_requests.load(Ordering::SeqCst),
+        0,
+        "reservation-time preflight must be known not dispatched"
+    );
+
+    drop(reservation);
+    let _ = client
+        .send_peer_direct_preflight_for_reenable(&peer, request, &ca.key_pem, &ca.cert_pem)
+        .await;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while mesh_requests.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("re-enable preflight should resume after reservation release");
+    mesh_task.abort();
 }

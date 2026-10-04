@@ -48,10 +48,11 @@
   body 同样覆盖完整 body 生命周期。
 - 已认证 Raft snapshot 必须在调用 OpenRaft 前取得有界的 exclusive Mesh admission。准入先排空
   当前 gate/epoch reader，再建立独立 reservation；reservation 持续到真实 snapshot 安装任务终态，
-  期间新 Mesh 请求不得 dispatch。3 秒内无法排空时返回带 internal-auth acknowledgement 的 HTTP
-  503，使发送方得到可重试的 unreachable，而不是把 admission contention 作为 state-machine
-  storage error 交给 OpenRaft。客户端取消不能提前释放已准入 snapshot 的 reservation；真实存储错误
-  与 snapshot fail-closed marker 语义保持不变。
+  期间新 Mesh 请求和 Mesh-disabled 状态下的 re-enable preflight 均不得 dispatch；延迟 body completion
+  及 telemetry callback 也不得取得新的 epoch reader。3 秒内无法排空时返回带 internal-auth
+  acknowledgement 的 HTTP 503，使发送方得到可重试的 unreachable，而不是把 admission contention
+  作为 state-machine storage error 交给 OpenRaft。客户端取消不能提前释放已准入 snapshot 的
+  reservation；真实存储错误与 snapshot fail-closed marker 语义保持不变。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。
@@ -281,6 +282,11 @@
   Raft 保持运行、`last_applied` 不变，释放 guard 后重试相同 snapshot 必须应用并推进目标状态。
 - snapshot handler 被取消时，已准入安装继续持有 reservation，直至 OpenRaft 安装任务真正终止；reservation
   期间的新 Mesh admission 不得进入响应 body。
+- reservation 期间完成 signed body callback 且 telemetry 锁被占用时，callback 不得持有 epoch reader，
+  snapshot state-machine barrier 仍须可取得；Mesh-disabled re-enable preflight 返回
+  `PreDispatchTimeout` 且不产生网络请求，reservation 释放后恢复 dispatch。
+- Direct cleanup 在 active/queued completion 饱和时按 peer 与 cleanup kind 保留最高 operation ID；
+  较迟到的旧 cleanup 不得替换较新的 protocol rejection。
 - authoritative gate 持有 in-flight read guard 时，普通 state-machine apply 仍推进 `last_applied`，
   且不排队 gate writer；持有 read guard 且已有 gate transition writer 时，Mesh admission 在请求
   deadline 内取消并保留未 dispatch 分类，Public fallback 使用剩余预算。

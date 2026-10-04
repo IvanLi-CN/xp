@@ -570,13 +570,15 @@ impl MeshAwareHttpClient {
         epoch: u64,
         require_enabled: bool,
     ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-        if (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
+        if self.snapshot_installing.load(Ordering::Acquire)
+            || (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
             || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
         {
             return None;
         }
         let guard = self.mesh_epoch_barrier.clone().try_read_owned().ok()?;
-        if (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
+        if self.snapshot_installing.load(Ordering::Acquire)
+            || (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
             || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
         {
             return None;
@@ -590,7 +592,8 @@ impl MeshAwareHttpClient {
         deadline: Instant,
         require_enabled: bool,
     ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-        if (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
+        if self.snapshot_installing.load(Ordering::Acquire)
+            || (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
             || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
         {
             return None;
@@ -600,7 +603,8 @@ impl MeshAwareHttpClient {
             self.mesh_epoch_barrier.clone().read_owned(),
         )
         .await?;
-        if (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
+        if self.snapshot_installing.load(Ordering::Acquire)
+            || (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
             || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
         {
             return None;
