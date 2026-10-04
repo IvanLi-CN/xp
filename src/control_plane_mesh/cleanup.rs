@@ -16,6 +16,25 @@ impl PublicCleanupContext {
     }
 }
 
+pub(super) struct DirectCleanupContext {
+    expires_at: Instant,
+    probe_id: Option<u64>,
+}
+
+impl DirectCleanupContext {
+    pub(super) fn new(expires_at: Instant, probe_id: Option<u64>) -> Self {
+        Self {
+            expires_at,
+            probe_id,
+        }
+    }
+
+    pub(super) fn permits(self, current_probe_id: Option<u64>) -> bool {
+        Instant::now() < self.expires_at
+            && (current_probe_id.is_none() || current_probe_id == self.probe_id)
+    }
+}
+
 impl MeshAwareHttpClient {
     pub(super) fn defer_public_failure(
         &self,
@@ -411,6 +430,7 @@ impl MeshAwareHttpClient {
         epoch: u64,
         validation_revision: Option<String>,
         operation_id: u64,
+        probe_id: Option<u64>,
     ) {
         self.spawn_validation_success_cleanup_with_requirement(
             peer,
@@ -418,6 +438,7 @@ impl MeshAwareHttpClient {
             validation_revision,
             operation_id,
             true,
+            probe_id,
         );
     }
 
@@ -428,6 +449,7 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         operation_id: u64,
         allow_mesh_when_disabled: bool,
+        probe_id: Option<u64>,
     ) {
         self.spawn_validation_success_cleanup_with_requirement(
             peer,
@@ -435,6 +457,7 @@ impl MeshAwareHttpClient {
             validation_revision,
             operation_id,
             !allow_mesh_when_disabled,
+            probe_id,
         );
     }
 
@@ -445,6 +468,7 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         operation_id: u64,
         require_enabled: bool,
+        probe_id: Option<u64>,
     ) {
         let client = self.clone();
         let peer = peer.clone();
@@ -471,14 +495,19 @@ impl MeshAwareHttpClient {
                         };
                         let breaker_result = crate::control_plane_mesh::await_until(
                             deadline,
-                            client
-                                .circuits
-                                .record_success_at(&peer.node_id, operation_id),
+                            client.circuits.record_success_at_with_cleanup(
+                                &peer.node_id,
+                                operation_id,
+                                Some(DirectCleanupContext::new(deadline, probe_id)),
+                            ),
                         )
                         .await;
                         drop(epoch_guard);
                         match breaker_result {
                             Some(Some(_)) => break,
+                            Some(None) if Instant::now() >= deadline => {
+                                tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
+                            }
                             Some(None) => return,
                             None => tokio::time::sleep(CLEANUP_RETRY_DELAY).await,
                         }

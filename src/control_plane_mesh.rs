@@ -152,6 +152,7 @@ pub struct MeshAwareHttpClient {
     direct_validation: DirectValidationStore,
     enforce_direct_validation: bool,
     cluster_mesh_enabled: Arc<AtomicBool>,
+    snapshot_installing: Arc<AtomicBool>,
     cluster_mesh_epoch: Arc<std::sync::atomic::AtomicU64>,
     mesh_epoch_barrier: Arc<tokio::sync::RwLock<()>>,
     mesh_epoch_reset_lock: Arc<Mutex<u64>>,
@@ -176,6 +177,7 @@ impl MeshAwareHttpClient {
             direct_validation: DirectValidationStore::default(),
             enforce_direct_validation: false,
             cluster_mesh_enabled: Arc::new(AtomicBool::new(true)),
+            snapshot_installing: Arc::new(AtomicBool::new(false)),
             cluster_mesh_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             mesh_epoch_barrier: Arc::new(tokio::sync::RwLock::new(())),
             mesh_epoch_reset_lock: Arc::new(Mutex::new(0)),
@@ -226,12 +228,6 @@ impl MeshAwareHttpClient {
         release: Arc<tokio::sync::Notify>,
     ) -> Self {
         self.mesh_observation_pause = Some((observed, release));
-        self
-    }
-    /// Attach the Raft-authoritative cluster Mesh switch. Public direct requests remain
-    /// available when this gate is closed.
-    pub fn with_mesh_gate(mut self, gate: Arc<AtomicBool>) -> Self {
-        self.cluster_mesh_enabled = gate;
         self
     }
     pub async fn set_reverse_route(
@@ -1058,6 +1054,7 @@ impl MeshAwareHttpClient {
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
                 &self.mesh_gate_lock,
+                &self.snapshot_installing,
                 body_lease,
             )
             .await?;
@@ -1079,6 +1076,7 @@ impl MeshAwareHttpClient {
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
                 &self.mesh_gate_lock,
+                &self.snapshot_installing,
                 body_lease,
             )
             .await
@@ -1124,6 +1122,7 @@ impl MeshAwareHttpClient {
                     request.allow_ambiguous_fallback,
                     &self.cluster_mesh_enabled,
                     &self.mesh_gate_lock,
+                    &self.snapshot_installing,
                     body_lease,
                 )
                 .await?

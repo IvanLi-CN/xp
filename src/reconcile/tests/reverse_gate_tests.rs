@@ -71,6 +71,34 @@ async fn unchanged_authoritative_reconcile_does_not_queue_gate_writer() {
 }
 
 #[tokio::test]
+async fn stale_mesh_disable_timeout_cannot_close_a_newer_generation() {
+    let reconcile = ReconcileHandle::noop();
+    let generation = reconcile.mesh_state_generation.load(Ordering::Acquire);
+    let in_flight_mesh_read = reconcile.mesh_gate_lock().read_owned().await;
+    let stale_reconcile = tokio::spawn({
+        let reconcile = reconcile.clone();
+        async move {
+            reconcile
+                .set_mesh_enabled_if_current(false, generation)
+                .await;
+        }
+    });
+    tokio::task::yield_now().await;
+
+    reconcile.note_mesh_state_applied();
+    assert!(reconcile.mesh_gate().load(Ordering::Acquire));
+    stale_reconcile
+        .await
+        .expect("stale reconcile task should finish after its deadline");
+    drop(in_flight_mesh_read);
+
+    assert!(
+        reconcile.mesh_gate().load(Ordering::Acquire),
+        "a timed-out old disable must not override the newer authenticated generation"
+    );
+}
+
+#[tokio::test]
 async fn snapshot_hold_rejects_reconcile_until_authenticated_state_applies() {
     let reconcile = ReconcileHandle::noop();
     let generation = reconcile.mesh_state_generation.load(Ordering::Acquire);
@@ -102,4 +130,42 @@ async fn snapshot_hold_rejects_reconcile_until_authenticated_state_applies() {
         )
         .await;
     assert!(reconcile.mesh_gate().load(Ordering::Acquire));
+}
+
+#[tokio::test]
+async fn snapshot_admission_is_bounded_and_reserves_mesh_until_install_finishes() {
+    let reconcile = ReconcileHandle::noop();
+    let in_flight_mesh_read = reconcile.mesh_gate_lock().read_owned().await;
+    assert!(
+        reconcile
+            .begin_snapshot_install_until(
+                std::time::Instant::now() + std::time::Duration::from_millis(10),
+            )
+            .await
+            .is_none(),
+        "snapshot admission must reject before OpenRaft when Mesh readers do not drain"
+    );
+    assert!(reconcile.mesh_gate().load(Ordering::Acquire));
+
+    drop(in_flight_mesh_read);
+    let admission = reconcile
+        .begin_snapshot_install_until(std::time::Instant::now() + std::time::Duration::from_secs(1))
+        .await
+        .expect("drained Mesh gate should admit a snapshot");
+    assert!(
+        reconcile
+            .mesh_gate_read_until(std::time::Instant::now() + std::time::Duration::from_millis(10))
+            .await
+            .is_none(),
+        "new Mesh work must not enter while snapshot installation owns its reservation"
+    );
+
+    drop(admission);
+    assert!(
+        reconcile
+            .mesh_gate_read_until(std::time::Instant::now() + std::time::Duration::from_secs(1))
+            .await
+            .is_some(),
+        "Mesh admission should resume after snapshot installation terminates"
+    );
 }

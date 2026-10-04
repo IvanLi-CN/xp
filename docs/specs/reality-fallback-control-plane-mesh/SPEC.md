@@ -7,6 +7,7 @@
 
 - [0014-xhttp-endpoint-direct-mesh](../../adr/0014-xhttp-endpoint-direct-mesh.md)
 - [ADR 0015](../../adr/0015-directed-mesh-admission-and-peer-isolation.md)
+- [ADR 0017](../../adr/0017-bounded-raft-snapshot-admission.md)
 
 ## Context and Scope
 
@@ -45,6 +46,12 @@
   zero-length body 也必须等待实际 EOF；若底层 body 已确认 end-of-stream，则立即完成并释放
   guard，无需额外 poll。Content-Length 或 response headers 不能代替该确认；未知长度和非空
   body 同样覆盖完整 body 生命周期。
+- 已认证 Raft snapshot 必须在调用 OpenRaft 前取得有界的 exclusive Mesh admission。准入先排空
+  当前 gate/epoch reader，再建立独立 reservation；reservation 持续到真实 snapshot 安装任务终态，
+  期间新 Mesh 请求不得 dispatch。3 秒内无法排空时返回带 internal-auth acknowledgement 的 HTTP
+  503，使发送方得到可重试的 unreachable，而不是把 admission contention 作为 state-machine
+  storage error 交给 OpenRaft。客户端取消不能提前释放已准入 snapshot 的 reservation；真实存储错误
+  与 snapshot fail-closed marker 语义保持不变。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。
@@ -251,7 +258,8 @@
 ## Verification
 
 - **VER-AUTH** covers: REQ-AUTH. 签名拒绝、幂等、fallback 分类和协议隔离回归验证安全边界。
-- **VER-GATE** covers: REQ-GATE. state-machine、snapshot 和排队 writer 准入回归验证推进与超时。
+- **VER-GATE** covers: REQ-GATE. state-machine、snapshot 前置 admission、reservation 和排队 writer
+  准入回归验证推进、可重试拒绝与超时。
 - **VER-BODY** covers: REQ-BODY. EOF/error/drop/unpolled/deadline/lease 回归验证 guard 生命周期。
 - **VER-RESOURCE** covers: REQ-RESOURCE. 真实 TLS 连接复用、完成处理容量与正式 50-peer 资源
   workload 验证既定门限。
@@ -269,6 +277,10 @@
 - 缩短的测试 policy 证明 idle timeout 会丢弃旧连接；H2 不可用只触发 transport fallback，
   invalid ack/auth 仍不得降级。
 - 长驻 SSE、Raft burst、8 MiB snapshot 与普通 fan-out 在同一 H2 connection 上并行。
+- 持有 Mesh body read guard 时，签名 snapshot 必须在 OpenRaft dispatch 前有界地返回签名 503；目标
+  Raft 保持运行、`last_applied` 不变，释放 guard 后重试相同 snapshot 必须应用并推进目标状态。
+- snapshot handler 被取消时，已准入安装继续持有 reservation，直至 OpenRaft 安装任务真正终止；reservation
+  期间的新 Mesh admission 不得进入响应 body。
 - authoritative gate 持有 in-flight read guard 时，普通 state-machine apply 仍推进 `last_applied`，
   且不排队 gate writer；持有 read guard 且已有 gate transition writer 时，Mesh admission 在请求
   deadline 内取消并保留未 dispatch 分类，Public fallback 使用剩余预算。

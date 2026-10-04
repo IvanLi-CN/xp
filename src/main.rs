@@ -427,6 +427,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     )
     .with_mesh_gate_epoch(reconcile.mesh_gate(), reconcile.mesh_gate_epoch())
     .with_mesh_gate_lock(reconcile.mesh_gate_lock())
+    .with_snapshot_install_reservation(reconcile.snapshot_installing())
     .with_mesh_epoch_barrier(reconcile.mesh_epoch_barrier());
     let mesh_client = raft_network.mesh_client();
     let raft = xp::raft::runtime::start_raft(

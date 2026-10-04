@@ -66,12 +66,17 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   alongside queued work without exceeding the 32-active bound. Empty overflow state is checked
   without taking the pending-map lock. Protocol, retryable, validation and Public outcome cleanup
   share this dispatcher, retain the latest work per peer and cleanup kind, and include queue waiting
-  in their absolute thirty-second cleanup lifetime. Public body and cleanup overflow retain the
-  highest operation id; a delayed older completion cannot displace a newer retained outcome.
+  in their absolute thirty-second cleanup lifetime. Mesh body, Public body and cleanup overflow
+  retain the highest operation id; a delayed older completion cannot displace a newer
+  retained outcome.
   Public cleanup checks expiry and its original probe token again under the state lock, so a lock
   becoming ready alongside the timeout cannot apply expired work or clear a newer probe. A Public
   send failure disarms its RAII probe guard only after the state update completes; a timed-out
   update retains token-qualified release ownership even if the queued outcome later expires.
+  Direct deferred success cleanup applies the same under-lock deadline check and carries the
+  originating half-open probe token; an expired or stale cleanup cannot clear a newer probe.
+  Direct body completion uses its reserved operation id when entering the bounded dispatcher, so
+  an older body cannot evict a newer queued outcome during overflow.
   Body completion has bounded cleanup
   grace when its request deadline has expired, while successful body
   telemetry uses bounded deferred persistence after its RAII probe guard is released. Failure,
@@ -90,6 +95,13 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   The volatile authenticated-state marker also remains false during replacement or an explicitly
   unauthenticated snapshot. Reconcile checks that marker under the existing barriers and cannot
   create authentication evidence; only trusted initialization or authenticated apply publishes it.
+  The authenticated `/raft/snapshot` route acquires the gate and epoch write barriers before
+  calling OpenRaft. It returns a signed HTTP 503 if existing Mesh bodies do not drain within three
+  seconds; this keeps admission contention out of the OpenRaft state-machine worker. After a
+  successful drain it sets an RAII reservation that prevents new Mesh dispatch while releasing
+  the write locks for snapshot storage to acquire. The install runs in an owned task, so HTTP
+  request cancellation cannot release that reservation early; the task releases it only after
+  OpenRaft returns. Signed 503 maps to unreachable/retry and never triggers Public fallback.
   Readers reject
   mismatched identity pairs and authenticated markers without identity evidence.
   Legacy startup migration only reopens the gate when that marker is true and its snapshot metadata

@@ -17,6 +17,10 @@ impl ReconcileHandle {
         self.mesh_epoch_barrier.clone()
     }
 
+    pub fn snapshot_installing(&self) -> Arc<AtomicBool> {
+        self.snapshot_installing.clone()
+    }
+
     pub async fn mesh_gate_read(&self) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
         self.mesh_gate_read_until(std::time::Instant::now() + Duration::from_secs(5))
             .await
@@ -26,7 +30,9 @@ impl ReconcileHandle {
         &self,
         deadline: std::time::Instant,
     ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-        if !self.mesh_enabled.load(Ordering::Acquire) {
+        if self.snapshot_installing.load(Ordering::Acquire)
+            || !self.mesh_enabled.load(Ordering::Acquire)
+        {
             return None;
         }
         let guard = tokio::time::timeout_at(
@@ -35,7 +41,36 @@ impl ReconcileHandle {
         )
         .await
         .ok()?;
-        self.mesh_enabled.load(Ordering::Acquire).then_some(guard)
+        (!self.snapshot_installing.load(Ordering::Acquire)
+            && self.mesh_enabled.load(Ordering::Acquire))
+        .then_some(guard)
+    }
+
+    pub(crate) async fn begin_snapshot_install_until(
+        &self,
+        deadline: std::time::Instant,
+    ) -> Option<super::SnapshotInstallAdmission> {
+        if self.snapshot_installing.load(Ordering::Acquire) {
+            return None;
+        }
+        let _gate_lock = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(deadline),
+            self.mesh_gate_lock.clone().write_owned(),
+        )
+        .await
+        .ok()?;
+        let _epoch_barrier = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(deadline),
+            self.mesh_epoch_barrier.clone().write_owned(),
+        )
+        .await
+        .ok()?;
+        self.snapshot_installing
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()?;
+        Some(super::SnapshotInstallAdmission {
+            snapshot_installing: self.snapshot_installing.clone(),
+        })
     }
 
     pub async fn initialize_mesh_gate(&self, enabled: bool) {
@@ -163,11 +198,29 @@ impl ReconcileHandle {
     }
 
     pub(crate) fn note_mesh_state_applied(&self) {
+        let _generation_guard = self
+            .mesh_generation_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.mesh_state_generation.fetch_add(1, Ordering::AcqRel);
         self.mesh_state_applied.store(true, Ordering::Release);
     }
 
     pub(super) async fn set_mesh_enabled_if_current(&self, enabled: bool, generation: u64) {
+        self.set_mesh_enabled_if_current_until(
+            enabled,
+            generation,
+            std::time::Instant::now() + Duration::from_secs(3),
+        )
+        .await;
+    }
+
+    pub(super) async fn set_mesh_enabled_if_current_until(
+        &self,
+        enabled: bool,
+        generation: u64,
+        deadline: std::time::Instant,
+    ) {
         if !self.mesh_state_applied.load(Ordering::Acquire) {
             return;
         }
@@ -176,14 +229,13 @@ impl ReconcileHandle {
         {
             return;
         }
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
         let Some(_gate_lock) = tokio::time::timeout_at(
             tokio::time::Instant::from_std(deadline),
             self.mesh_gate_lock.clone().write_owned(),
         )
         .await
         .ok() else {
-            self.fail_closed_if_disabled(enabled);
+            self.fail_closed_if_current_generation(enabled, generation);
             return;
         };
         if !self.mesh_state_applied.load(Ordering::Acquire)
@@ -197,7 +249,7 @@ impl ReconcileHandle {
         )
         .await
         .ok() else {
-            self.fail_closed_if_disabled(enabled);
+            self.fail_closed_if_current_generation(enabled, generation);
             return;
         };
         if self.mesh_state_applied.load(Ordering::Acquire)
@@ -228,6 +280,18 @@ impl ReconcileHandle {
         if !enabled {
             self.mesh_enabled.store(false, Ordering::Release);
             self.refresh_reverse_gate();
+        }
+    }
+
+    fn fail_closed_if_current_generation(&self, enabled: bool, generation: u64) {
+        let _generation_guard = self
+            .mesh_generation_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.mesh_state_applied.load(Ordering::Acquire)
+            && self.mesh_state_generation.load(Ordering::Acquire) == generation
+        {
+            self.fail_closed_if_disabled(enabled);
         }
     }
 }

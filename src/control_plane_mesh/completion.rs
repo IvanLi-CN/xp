@@ -20,8 +20,8 @@ struct CriticalCompletion {
     completion: Completion,
 }
 
-const COMPLETION_QUEUE_CAPACITY: usize = 256;
-const COMPLETION_ACTIVE_CAPACITY: usize = 32;
+pub(super) const COMPLETION_QUEUE_CAPACITY: usize = 256;
+pub(super) const COMPLETION_ACTIVE_CAPACITY: usize = 32;
 
 #[derive(Clone)]
 pub(super) struct CompletionDispatcher {

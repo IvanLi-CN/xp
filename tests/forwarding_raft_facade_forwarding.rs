@@ -85,7 +85,10 @@ async fn spawn_raft_rpc_server(raft: openraft::Raft<TypeConfig>) -> anyhow::Resu
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .context("bind raft rpc listener")?;
-    let router = build_raft_rpc_router(RaftRpcState { raft });
+    let router = build_raft_rpc_router(RaftRpcState {
+        raft,
+        reconcile: ReconcileHandle::noop(),
+    });
     spawn_server(listener, router).await
 }
 

@@ -41,7 +41,8 @@ async fn delayed_mesh_success_cannot_overwrite_newer_protocol_rejection() {
     let client = MeshAwareHttpClient::new(reqwest::Client::new());
     let peer = peer();
     let operation_id = client.circuits.next_operation();
-    let callback = client.mesh_success_telemetry_callback(
+    let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+    let callback = client.mesh_success_telemetry_callback_with_completion(
         &peer,
         Instant::now(),
         &request(),
@@ -51,6 +52,7 @@ async fn delayed_mesh_success_cannot_overwrite_newer_protocol_rejection() {
         operation_id,
         None,
         Instant::now() + Duration::from_secs(1),
+        completion_tx,
     );
 
     let newer_operation_id = client.circuits.next_operation();
@@ -60,22 +62,116 @@ async fn delayed_mesh_success_cannot_overwrite_newer_protocol_rejection() {
         .await
         .expect("newer protocol rejection should apply");
     callback(crate::mesh_gate_body::BodyFinish::Complete);
+    tokio::time::timeout(Duration::from_secs(1), completion_rx)
+        .await
+        .expect("queued Mesh body completion should run")
+        .expect("Mesh body completion signal");
+    assert_eq!(
+        client
+            .circuits
+            .before_attempt_with_probe(&peer.node_id, true, false)
+            .await,
+        MeshAttemptDecision::Quarantined,
+        "newer protocol rejection must remain authoritative after the old body task runs"
+    );
+}
 
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if client
-                .circuits
-                .before_attempt_with_probe(&peer.node_id, true, false)
+#[tokio::test]
+async fn older_mesh_body_completion_cannot_evict_newer_state_when_queue_is_full() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    let peer = peer();
+    for _ in 0..2 {
+        let operation_id = client.circuits.next_operation();
+        client
+            .circuits
+            .record_retryable_failure_at(&peer.node_id, operation_id)
+            .await;
+    }
+
+    let release = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let active = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    for index in 0..super::completion::COMPLETION_ACTIVE_CAPACITY {
+        let release = release.clone();
+        let active = active.clone();
+        client.dispatch_critical_completion(format!("active-{index}"), async move {
+            active.fetch_add(1, Ordering::AcqRel);
+            release
+                .acquire()
                 .await
-                == MeshAttemptDecision::Quarantined
-            {
-                break;
-            }
+                .expect("active completion release")
+                .forget();
+        });
+    }
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while active.load(Ordering::Acquire) != super::completion::COMPLETION_ACTIVE_CAPACITY {
             tokio::task::yield_now().await;
         }
     })
     .await
-    .expect("newer protocol rejection must remain authoritative");
+    .expect("completion worker should fill its active window");
+
+    for index in 0..super::completion::COMPLETION_QUEUE_CAPACITY {
+        let release = release.clone();
+        client.dispatch_critical_completion(format!("queued-{index}"), async move {
+            release
+                .acquire()
+                .await
+                .expect("queued completion release")
+                .forget();
+        });
+    }
+
+    let old_operation = client.circuits.next_operation();
+    let new_operation = client.circuits.next_operation();
+    let (new_tx, new_rx) = tokio::sync::oneshot::channel();
+    let new_completion = client.mesh_success_telemetry_callback_with_completion(
+        &peer,
+        Instant::now(),
+        &request(),
+        transport(),
+        0,
+        None,
+        new_operation,
+        None,
+        Instant::now() + Duration::from_secs(1),
+        new_tx,
+    );
+    let (old_tx, old_rx) = tokio::sync::oneshot::channel();
+    let old_completion = client.mesh_success_telemetry_callback_with_completion(
+        &peer,
+        Instant::now(),
+        &request(),
+        transport(),
+        0,
+        None,
+        old_operation,
+        None,
+        Instant::now() + Duration::from_secs(1),
+        old_tx,
+    );
+    new_completion(crate::mesh_gate_body::BodyFinish::Deadline);
+    old_completion(crate::mesh_gate_body::BodyFinish::Complete);
+
+    release.add_permits(
+        super::completion::COMPLETION_ACTIVE_CAPACITY
+            + super::completion::COMPLETION_QUEUE_CAPACITY,
+    );
+    tokio::time::timeout(Duration::from_secs(2), new_rx)
+        .await
+        .expect("newer completion should run after queue recovery")
+        .expect("newer completion must not be evicted by an older event");
+    let _ = tokio::time::timeout(Duration::from_secs(2), old_rx)
+        .await
+        .expect("older completion should either run or be superseded");
+
+    assert_eq!(
+        client
+            .circuits
+            .before_attempt_with_probe(&peer.node_id, true, false)
+            .await,
+        MeshAttemptDecision::SkipOpen,
+        "the newest transport failure must remain after all dispatched work completes"
+    );
 }
 
 #[tokio::test]

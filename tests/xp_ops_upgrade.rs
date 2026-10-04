@@ -270,7 +270,12 @@ esac\n\
         fs::create_dir_all(&bin_dir).unwrap();
         write_systemctl_with_xp_state(
             &bin_dir.join("systemctl"),
-            "[ -z \"$T\" ] || cmp -s \"$T\" \"$E\" || exit 1\n",
+            concat!(
+                "[ -z \"$T\" ] || python3 -c ",
+                "'import filecmp, sys; sys.exit(not filecmp.cmp( ",
+                "sys.argv[1], sys.argv[2], shallow=False))' ",
+                "\"$T\" \"$E\" || exit 1\n",
+            ),
             "exit 0\n",
         );
         write_executable(

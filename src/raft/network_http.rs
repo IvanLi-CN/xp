@@ -106,6 +106,14 @@ impl HttpNetworkFactory {
         self
     }
 
+    pub fn with_snapshot_install_reservation(
+        mut self,
+        installing: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        self.client = self.client.with_snapshot_install_reservation(installing);
+        self
+    }
+
     pub fn with_mesh_epoch_barrier(mut self, barrier: Arc<tokio::sync::RwLock<()>>) -> Self {
         self.client = self.client.with_mesh_epoch_barrier(barrier);
         self

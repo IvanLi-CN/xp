@@ -439,6 +439,9 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<(), MeshRequestError> {
+        if self.snapshot_installing.load(Ordering::Acquire) {
+            return Err(MeshRequestError::PreDispatchTimeout);
+        }
         if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled by the cluster Mesh gate".to_string(),
@@ -512,6 +515,9 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<(), MeshRequestError> {
+        if self.snapshot_installing.load(Ordering::Acquire) {
+            return Err(MeshRequestError::PreDispatchTimeout);
+        }
         if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled by the cluster Mesh gate".to_string(),
@@ -554,6 +560,9 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        if self.snapshot_installing.load(Ordering::Acquire) {
+            return Err(MeshRequestError::PreDispatchTimeout);
+        }
         if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled by the cluster Mesh gate".to_string(),
@@ -655,6 +664,7 @@ pub(super) async fn send_outer_request(
     allow_ambiguous_fallback: bool,
     cluster_mesh_enabled: &Arc<AtomicBool>,
     mesh_gate_lock: &Arc<tokio::sync::RwLock<()>>,
+    snapshot_installing: &Arc<AtomicBool>,
     body_lease: Option<Duration>,
 ) -> Result<
     (
@@ -664,6 +674,9 @@ pub(super) async fn send_outer_request(
     ),
     MeshRequestError,
 > {
+    if snapshot_installing.load(Ordering::Acquire) {
+        return Err(MeshRequestError::PreDispatchTimeout);
+    }
     let gate_guard = match tokio::time::timeout_at(
         tokio::time::Instant::from_std(deadline),
         mesh_gate_lock.clone().read_owned(),
@@ -681,6 +694,9 @@ pub(super) async fn send_outer_request(
         return Err(MeshRequestError::Reverse(
             "cluster Mesh gate is disabled".to_string(),
         ));
+    }
+    if snapshot_installing.load(Ordering::Acquire) {
+        return Err(MeshRequestError::PreDispatchTimeout);
     }
     let dispatch = signed_reverse_dispatch(
         peer,

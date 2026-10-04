@@ -14,8 +14,10 @@ impl ReconcileHandle {
             mesh_enabled: Arc::new(AtomicBool::new(true)),
             mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
             mesh_state_generation: Arc::new(AtomicU64::new(0)),
+            mesh_generation_lock: Arc::new(std::sync::Mutex::new(())),
             mesh_state_applied: Arc::new(AtomicBool::new(true)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
+            snapshot_installing: Arc::new(AtomicBool::new(false)),
             mesh_gate_lock: Arc::new(RwLock::new(())),
             mesh_epoch_barrier: Arc::new(RwLock::new(())),
         }
@@ -35,8 +37,10 @@ impl ReconcileHandle {
             mesh_enabled: Arc::new(AtomicBool::new(true)),
             mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
             mesh_state_generation: Arc::new(AtomicU64::new(0)),
+            mesh_generation_lock: Arc::new(std::sync::Mutex::new(())),
             mesh_state_applied: Arc::new(AtomicBool::new(true)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
+            snapshot_installing: Arc::new(AtomicBool::new(false)),
             mesh_gate_lock: Arc::new(RwLock::new(())),
             mesh_epoch_barrier: Arc::new(RwLock::new(())),
         }

@@ -126,6 +126,7 @@ async fn mesh_success_telemetry_does_not_requeue_gate_reader() {
             None,
             client.circuits.next_operation(),
             None,
+            None,
             Instant::now() + Duration::from_millis(10),
         ),
     )

@@ -1,6 +1,18 @@
 use super::*;
 
 impl MeshAwareHttpClient {
+    /// Attach the Raft-authoritative cluster Mesh switch. Public direct requests remain
+    /// available when this gate is closed.
+    pub fn with_mesh_gate(mut self, gate: Arc<AtomicBool>) -> Self {
+        self.cluster_mesh_enabled = gate;
+        self
+    }
+
+    pub fn with_snapshot_install_reservation(mut self, installing: Arc<AtomicBool>) -> Self {
+        self.snapshot_installing = installing;
+        self
+    }
+
     pub(crate) async fn direct_validation_snapshot(
         &self,
         peer: &MeshPeerTarget,
@@ -483,6 +495,9 @@ impl MeshAwareHttpClient {
         allow_mesh_when_disabled: bool,
         deadline: Instant,
     ) -> bool {
+        let probe_id = mesh_probe_guard
+            .as_ref()
+            .map(MeshHalfOpenProbeGuard::probe_id);
         let Some(_epoch_guard) = self
             .mesh_epoch_guard_until(epoch, deadline, !allow_mesh_when_disabled)
             .await
@@ -515,9 +530,16 @@ impl MeshAwareHttpClient {
                     cleanup_revision,
                     operation_id,
                     true,
+                    probe_id,
                 );
             } else {
-                self.spawn_validation_success_cleanup(peer, epoch, cleanup_revision, operation_id);
+                self.spawn_validation_success_cleanup(
+                    peer,
+                    epoch,
+                    cleanup_revision,
+                    operation_id,
+                    probe_id,
+                );
             }
         }
         if breaker_recorded && let Some(guard) = mesh_probe_guard.as_mut() {
@@ -644,13 +666,17 @@ impl MeshAwareHttpClient {
         epoch: u64,
         deadline: Instant,
     ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+        if self.snapshot_installing.load(Ordering::Acquire) {
+            return None;
+        }
         let guard = tokio::time::timeout_at(
             tokio::time::Instant::from_std(deadline),
             self.mesh_gate_lock.clone().read_owned(),
         )
         .await
         .ok()?;
-        (self.cluster_mesh_enabled.load(Ordering::Acquire)
+        (!self.snapshot_installing.load(Ordering::Acquire)
+            && self.cluster_mesh_enabled.load(Ordering::Acquire)
             && self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch)
             .then_some(guard)
     }

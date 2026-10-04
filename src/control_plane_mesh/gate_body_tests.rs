@@ -122,6 +122,7 @@ async fn mesh_success_telemetry_skips_after_epoch_changes() {
                     None,
                     client.circuits.next_operation(),
                     None,
+                    None,
                     Instant::now() + Duration::from_secs(1),
                 )
                 .await;

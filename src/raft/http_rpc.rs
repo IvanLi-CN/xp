@@ -24,6 +24,7 @@ use openraft::error::RaftError;
 #[derive(Clone)]
 pub struct RaftRpcState {
     pub raft: openraft::Raft<TypeConfig>,
+    pub reconcile: crate::reconcile::ReconcileHandle,
 }
 
 /// Authentication context used by the production Raft RPC router. Keeping it separate from the
@@ -245,13 +246,31 @@ async fn vote(
 async fn install_snapshot(
     State(state): State<RaftRpcState>,
     Json(req): Json<openraft::raft::InstallSnapshotRequest<TypeConfig>>,
-) -> Json<
-    Result<
-        openraft::raft::InstallSnapshotResponse<NodeId>,
-        RaftError<NodeId, openraft::error::InstallSnapshotError>,
-    >,
-> {
-    Json(state.raft.install_snapshot(req).await)
+) -> Response {
+    const SNAPSHOT_ADMISSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+    let deadline = std::time::Instant::now() + SNAPSHOT_ADMISSION_TIMEOUT;
+    let Some(admission) = state.reconcile.begin_snapshot_install_until(deadline).await else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "snapshot admission timed out",
+        )
+            .into_response();
+    };
+
+    let raft = state.raft.clone();
+    match tokio::spawn(async move {
+        let _admission = admission;
+        raft.install_snapshot(req).await
+    })
+    .await
+    {
+        Ok(result) => Json(result).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("snapshot install task failed: {error}"),
+        )
+            .into_response(),
+    }
 }
 
 #[cfg(test)]

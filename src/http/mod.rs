@@ -975,6 +975,7 @@ pub fn build_router_with_mesh_telemetry(
     let mesh_client = mesh_client
         .with_mesh_gate_epoch(reconcile.mesh_gate(), reconcile.mesh_gate_epoch())
         .with_mesh_gate_lock(reconcile.mesh_gate_lock())
+        .with_snapshot_install_reservation(reconcile.snapshot_installing())
         .with_mesh_epoch_barrier(reconcile.mesh_epoch_barrier());
     let cluster_id = cluster.cluster_id.clone();
     let internal_idempotency = InternalIdempotencyLedger::load(&config.data_dir)
@@ -1465,7 +1466,10 @@ pub fn build_router_with_mesh_telemetry(
         .fallback(embedded_ui::embedded_spa_fallback);
 
     if let Some(raft) = raft_rpc {
-        let raft_state = crate::raft::http_rpc::RaftRpcState { raft };
+        let raft_state = crate::raft::http_rpc::RaftRpcState {
+            raft,
+            reconcile: app_state.reconcile.clone(),
+        };
         app = match app_state.cluster_ca_key_pem.as_deref() {
             Some(cluster_ca_key_pem) => {
                 app.merge(crate::raft::http_rpc::build_authenticated_raft_rpc_router(

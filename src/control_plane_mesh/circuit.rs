@@ -243,6 +243,8 @@ pub(super) struct MeshHalfOpenProbeGuard {
     epoch: u64,
     probe_id: u64,
     armed: bool,
+    #[cfg(test)]
+    drop_completed: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl MeshHalfOpenProbeGuard {
@@ -261,6 +263,8 @@ impl MeshHalfOpenProbeGuard {
                 epoch,
                 probe_id,
                 armed: true,
+                #[cfg(test)]
+                drop_completed: None,
             })
     }
 
@@ -270,6 +274,15 @@ impl MeshHalfOpenProbeGuard {
 
     pub(super) fn probe_id(&self) -> u64 {
         self.probe_id
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_drop_completion_for_test(
+        mut self,
+    ) -> (Self, tokio::sync::oneshot::Receiver<()>) {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.drop_completed = Some(sender);
+        (self, receiver)
     }
 }
 
@@ -282,11 +295,17 @@ impl Drop for MeshHalfOpenProbeGuard {
         let peer_id = self.peer_id.clone();
         let epoch = self.epoch;
         let probe_id = self.probe_id;
+        #[cfg(test)]
+        let drop_completed = self.drop_completed.take();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 circuits
                     .release_half_open_probe_for_epoch(&peer_id, epoch, probe_id)
                     .await;
+                #[cfg(test)]
+                if let Some(drop_completed) = drop_completed {
+                    let _ = drop_completed.send(());
+                }
             });
         }
     }
@@ -458,7 +477,22 @@ impl PeerCircuitBreakers {
         peer_id: &str,
         operation_id: u64,
     ) -> Option<BreakerState> {
+        self.record_success_at_with_cleanup(peer_id, operation_id, None)
+            .await
+    }
+
+    pub(super) async fn record_success_at_with_cleanup(
+        &self,
+        peer_id: &str,
+        operation_id: u64,
+        cleanup: Option<cleanup::DirectCleanupContext>,
+    ) -> Option<BreakerState> {
         let mut peers = self.peers.lock().await;
+        if cleanup.is_some_and(|cleanup| {
+            !cleanup.permits(peers.get(peer_id).and_then(|peer| peer.half_open_probe_id))
+        }) {
+            return None;
+        }
         let circuit = peers.entry(peer_id.to_string()).or_default();
         if circuit.operation_id > operation_id {
             return None;
@@ -926,50 +960,8 @@ mod tests {
             "a timed-out admission must leave the half-open slot available"
         );
     }
-
-    #[tokio::test]
-    async fn disarmed_mesh_probe_guard_cannot_release_a_new_probe() {
-        let circuits = PeerCircuitBreakers::default();
-        {
-            let mut peers = circuits.peers.lock().await;
-            let circuit = peers.entry("peer".to_owned()).or_default();
-            circuit.failures = MESH_FAILURES_BEFORE_OPEN;
-            circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
-        }
-        let decision = circuits
-            .before_attempt_with_probe_at_epoch("peer", true, true, Some(7))
-            .await;
-        let old_probe_id = circuits
-            .peers
-            .lock()
-            .await
-            .get("peer")
-            .and_then(|circuit| circuit.half_open_probe_id)
-            .expect("first health request should own the probe slot");
-        let old_guard =
-            MeshHalfOpenProbeGuard::new(&circuits, "peer", decision, 7, Some(old_probe_id))
-                .expect("first health request should own the probe slot");
-        circuits
-            .release_half_open_probe_for_epoch("peer", 7, old_probe_id)
-            .await;
-
-        let next_decision = circuits
-            .before_attempt_with_probe_at_epoch("peer", true, true, Some(7))
-            .await;
-        assert_eq!(next_decision, MeshAttemptDecision::Probe);
-        let next_probe_id = circuits
-            .peers
-            .lock()
-            .await
-            .get("peer")
-            .and_then(|circuit| circuit.half_open_probe_id)
-            .expect("second health request should own the probe slot");
-        let _next_guard =
-            MeshHalfOpenProbeGuard::new(&circuits, "peer", next_decision, 7, Some(next_probe_id));
-        drop(old_guard);
-        assert_eq!(
-            circuits.before_attempt("peer", true).await,
-            MeshAttemptDecision::SkipOpen
-        );
-    }
 }
+
+#[cfg(test)]
+#[path = "circuit_race_tests.rs"]
+mod race_tests;

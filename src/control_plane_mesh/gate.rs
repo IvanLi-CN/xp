@@ -264,6 +264,7 @@ impl MeshAwareHttpClient {
         epoch: u64,
         validation_revision: Option<String>,
         operation_id: u64,
+        probe_id: Option<u64>,
         _epoch_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
     ) -> Option<BreakerState> {
         if !self.mesh_gate_matches(epoch) {
@@ -273,7 +274,13 @@ impl MeshAwareHttpClient {
             .circuits
             .try_record_success_at(&peer.node_id, operation_id)
         else {
-            self.spawn_validation_success_cleanup(peer, epoch, validation_revision, operation_id);
+            self.spawn_validation_success_cleanup(
+                peer,
+                epoch,
+                validation_revision,
+                operation_id,
+                probe_id,
+            );
             return None;
         };
         if !self.mesh_gate_matches(epoch) {
@@ -286,78 +293,15 @@ impl MeshAwareHttpClient {
             operation_id,
         ) != Some(true)
         {
-            self.spawn_validation_success_cleanup(peer, epoch, cleanup_revision, operation_id);
+            self.spawn_validation_success_cleanup(
+                peer,
+                epoch,
+                cleanup_revision,
+                operation_id,
+                probe_id,
+            );
         }
         Some(breaker_state)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn mesh_success_telemetry_callback(
-        &self,
-        peer: &MeshPeerTarget,
-        started: Instant,
-        request: &MeshRequest,
-        transport: MeshTransportObservation,
-        epoch: u64,
-        validation_revision: Option<String>,
-        operation_id: u64,
-        mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
-        deadline: Instant,
-    ) -> Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static> {
-        let client = self.clone();
-        let peer = peer.clone();
-        let updates_active_path = request.updates_active_path;
-        Box::new(move |outcome| {
-            let completion_client = client.clone();
-            let key = format!("mesh:{}", peer.node_id);
-            match outcome {
-                crate::mesh_gate_body::BodyFinish::Complete => {
-                    let completion_deadline = super::body_completion_deadline(deadline);
-                    client.dispatch_critical_completion(key, async move {
-                        completion_client
-                            .record_mesh_success_after_body(
-                                &peer,
-                                started,
-                                updates_active_path,
-                                transport,
-                                epoch,
-                                validation_revision,
-                                operation_id,
-                                mesh_probe_guard,
-                                completion_deadline,
-                            )
-                            .await;
-                    });
-                }
-                crate::mesh_gate_body::BodyFinish::Error
-                | crate::mesh_gate_body::BodyFinish::Deadline => {
-                    let reason = if outcome == crate::mesh_gate_body::BodyFinish::Deadline {
-                        MeshPeerReason::TransportTimeout
-                    } else {
-                        MeshPeerReason::TransportError
-                    };
-                    let failure_deadline = super::body_completion_deadline(deadline);
-                    client.dispatch_critical_completion(key, async move {
-                        completion_client
-                            .record_mesh_body_failure_after_body(
-                                &peer,
-                                started,
-                                updates_active_path,
-                                transport,
-                                epoch,
-                                validation_revision,
-                                operation_id,
-                                mesh_probe_guard,
-                                reason,
-                                failure_deadline,
-                            )
-                            .await;
-                    });
-                }
-                crate::mesh_gate_body::BodyFinish::Cancelled
-                | crate::mesh_gate_body::BodyFinish::LeaseExpired => {}
-            }
-        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -370,12 +314,19 @@ impl MeshAwareHttpClient {
         epoch: u64,
         validation_revision: Option<String>,
         operation_id: u64,
+        probe_id: Option<u64>,
         mut mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
         deadline: Instant,
     ) {
         let cleanup_revision = validation_revision.clone();
         let Some(epoch_guard) = self.mesh_epoch_guard_until(epoch, deadline, true).await else {
-            self.spawn_validation_success_cleanup(peer, epoch, cleanup_revision, operation_id);
+            self.spawn_validation_success_cleanup(
+                peer,
+                epoch,
+                cleanup_revision,
+                operation_id,
+                probe_id,
+            );
             return;
         };
         let breaker_state = self.record_mesh_success_state(
@@ -383,6 +334,7 @@ impl MeshAwareHttpClient {
             epoch,
             validation_revision,
             operation_id,
+            probe_id,
             &epoch_guard,
         );
         drop(epoch_guard);
@@ -411,7 +363,7 @@ impl MeshAwareHttpClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn record_mesh_body_failure_after_body(
+    pub(super) async fn record_mesh_body_failure_after_body(
         &self,
         peer: &MeshPeerTarget,
         started: Instant,
@@ -666,6 +618,9 @@ impl MeshAwareHttpClient {
         F: FnOnce(Duration) -> Fut,
         Fut: std::future::Future<Output = T>,
     {
+        if self.snapshot_installing.load(Ordering::Acquire) {
+            return None;
+        }
         let gate_lock = self.mesh_gate_lock.clone();
         let gate_guard = tokio::time::timeout_at(
             tokio::time::Instant::from_std(deadline),
@@ -673,7 +628,8 @@ impl MeshAwareHttpClient {
         )
         .await
         .ok()?;
-        if !self.cluster_mesh_enabled.load(Ordering::Acquire)
+        if self.snapshot_installing.load(Ordering::Acquire)
+            || !self.cluster_mesh_enabled.load(Ordering::Acquire)
             || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
         {
             return None;

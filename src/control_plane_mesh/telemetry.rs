@@ -2,6 +2,148 @@ use super::*;
 
 impl MeshAwareHttpClient {
     #[allow(clippy::too_many_arguments)]
+    pub(super) fn mesh_success_telemetry_callback(
+        &self,
+        peer: &MeshPeerTarget,
+        started: Instant,
+        request: &MeshRequest,
+        transport: MeshTransportObservation,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
+        deadline: Instant,
+    ) -> Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static> {
+        self.mesh_success_telemetry_callback_inner(
+            peer,
+            started,
+            request,
+            transport,
+            epoch,
+            validation_revision,
+            operation_id,
+            mesh_probe_guard,
+            deadline,
+            None,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn mesh_success_telemetry_callback_with_completion(
+        &self,
+        peer: &MeshPeerTarget,
+        started: Instant,
+        request: &MeshRequest,
+        transport: MeshTransportObservation,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
+        deadline: Instant,
+        completion: tokio::sync::oneshot::Sender<()>,
+    ) -> Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static> {
+        self.mesh_success_telemetry_callback_inner(
+            peer,
+            started,
+            request,
+            transport,
+            epoch,
+            validation_revision,
+            operation_id,
+            mesh_probe_guard,
+            deadline,
+            Some(completion),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn mesh_success_telemetry_callback_inner(
+        &self,
+        peer: &MeshPeerTarget,
+        started: Instant,
+        request: &MeshRequest,
+        transport: MeshTransportObservation,
+        epoch: u64,
+        validation_revision: Option<String>,
+        operation_id: u64,
+        mesh_probe_guard: Option<MeshHalfOpenProbeGuard>,
+        deadline: Instant,
+        completion: Option<tokio::sync::oneshot::Sender<()>>,
+    ) -> Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static> {
+        let client = self.clone();
+        let peer = peer.clone();
+        let updates_active_path = request.updates_active_path;
+        let probe_id = mesh_probe_guard
+            .as_ref()
+            .map(MeshHalfOpenProbeGuard::probe_id);
+        let mut completion = completion;
+        Box::new(move |outcome| {
+            let completion_client = client.clone();
+            let key = format!("mesh:{}", peer.node_id);
+            match outcome {
+                crate::mesh_gate_body::BodyFinish::Complete => {
+                    let completion_deadline = super::body_completion_deadline(deadline);
+                    let finished = completion.take();
+                    client.dispatch_ordered_critical_completion(key, operation_id, async move {
+                        completion_client
+                            .record_mesh_success_after_body(
+                                &peer,
+                                started,
+                                updates_active_path,
+                                transport,
+                                epoch,
+                                validation_revision,
+                                operation_id,
+                                probe_id,
+                                mesh_probe_guard,
+                                completion_deadline,
+                            )
+                            .await;
+                        if let Some(finished) = finished {
+                            let _ = finished.send(());
+                        }
+                    });
+                }
+                crate::mesh_gate_body::BodyFinish::Error
+                | crate::mesh_gate_body::BodyFinish::Deadline => {
+                    let reason = if outcome == crate::mesh_gate_body::BodyFinish::Deadline {
+                        MeshPeerReason::TransportTimeout
+                    } else {
+                        MeshPeerReason::TransportError
+                    };
+                    let failure_deadline = super::body_completion_deadline(deadline);
+                    let finished = completion.take();
+                    client.dispatch_ordered_critical_completion(key, operation_id, async move {
+                        completion_client
+                            .record_mesh_body_failure_after_body(
+                                &peer,
+                                started,
+                                updates_active_path,
+                                transport,
+                                epoch,
+                                validation_revision,
+                                operation_id,
+                                mesh_probe_guard,
+                                reason,
+                                failure_deadline,
+                            )
+                            .await;
+                        if let Some(finished) = finished {
+                            let _ = finished.send(());
+                        }
+                    });
+                }
+                crate::mesh_gate_body::BodyFinish::Cancelled
+                | crate::mesh_gate_body::BodyFinish::LeaseExpired => {
+                    if let Some(finished) = completion.take() {
+                        let _ = finished.send(());
+                    }
+                }
+            }
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn record_mesh_transport_failure(
         &self,
         peer: &MeshPeerTarget,

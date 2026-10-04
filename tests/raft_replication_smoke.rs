@@ -9,12 +9,19 @@ use tokio::{
 };
 
 use xp::{
+    cluster_identity::generate_cluster_ca,
     domain::{User, UserQuotaReset},
+    internal_auth::{
+        self, InternalRoute, RequestContext, VerifiedRequest, sign_request_v2, verify_ack_v2,
+        verify_request_v2,
+    },
     raft::storage::StorePaths,
     raft::{
         NodeId, NodeMeta,
         app::RaftFacade as _,
-        http_rpc::{RaftRpcState, build_raft_rpc_router},
+        http_rpc::{
+            RaftRpcAuth, RaftRpcState, build_authenticated_raft_rpc_router, build_raft_rpc_router,
+        },
         network_http::HttpNetworkFactory,
         runtime::start_raft,
         types::TypeConfig,
@@ -22,6 +29,8 @@ use xp::{
     reconcile::ReconcileHandle,
     state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
 };
+
+static RAFT_REPLICATION_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
 struct RpcServerHandle {
     base_url: String,
@@ -45,13 +54,19 @@ impl RpcServerHandle {
 async fn spawn_raft_rpc_server(
     raft: openraft::Raft<TypeConfig>,
 ) -> anyhow::Result<RpcServerHandle> {
+    spawn_raft_rpc_router(build_raft_rpc_router(RaftRpcState {
+        raft,
+        reconcile: ReconcileHandle::noop(),
+    }))
+    .await
+}
+
+async fn spawn_raft_rpc_router(router: axum::Router) -> anyhow::Result<RpcServerHandle> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .context("bind raft rpc listener")?;
     let addr = listener.local_addr().context("raft rpc local_addr")?;
     let base_url = format!("http://{addr}");
-
-    let router = build_raft_rpc_router(RaftRpcState { raft });
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let join = tokio::spawn(async move {
@@ -69,6 +84,59 @@ async fn spawn_raft_rpc_server(
         shutdown_tx: Some(shutdown_tx),
         join,
     })
+}
+
+fn signed_snapshot_request(
+    base_url: &str,
+    body: &[u8],
+    ca_key_pem: &str,
+    ca_cert_pem: &str,
+    cluster_id: &str,
+    node_id: &str,
+) -> anyhow::Result<(reqwest::RequestBuilder, VerifiedRequest)> {
+    let method = axum::http::Method::POST;
+    let uri: axum::http::Uri = format!("{base_url}/raft/snapshot").parse()?;
+    let context = RequestContext::now(
+        InternalRoute::MeshV2,
+        cluster_id,
+        node_id,
+        node_id,
+        xp::id::new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    sign_request_v2(
+        ca_key_pem,
+        ca_cert_pem,
+        &method,
+        &uri,
+        Some("application/json"),
+        body,
+        &context,
+        &mut headers,
+    )?;
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        "application/json".parse()?,
+    );
+    headers.insert(
+        axum::http::header::CONTENT_LENGTH,
+        body.len().to_string().parse()?,
+    );
+    let verified = verify_request_v2(
+        ca_key_pem,
+        ca_cert_pem,
+        &method,
+        &uri,
+        &headers,
+        body,
+        cluster_id,
+        node_id,
+    )?;
+    let request = reqwest::Client::new()
+        .post(uri.to_string())
+        .headers(headers)
+        .body(body.to_vec());
+    Ok((request, verified))
 }
 
 fn store_init(data_dir: &Path, bootstrap_node_id: String, node_name: String) -> StoreInit {
@@ -162,10 +230,9 @@ async fn wait_for_snapshot(
             Ok(Some(_)) => return Ok(()),
             Ok(None) => {}
             Err(e) => {
-                // `get_snapshot()` may transiently error while a freshly-triggered snapshot is
-                // being materialized on disk (e.g. metadata points to a snapshot file not yet
-                // present). Treat "NotFound" as retriable within the timeout window.
-                if !error_chain_has_not_found(&e) {
+                // Snapshot payload and metadata are written separately, so a read can observe
+                // their brief mismatch while a fresh snapshot is being materialized.
+                if !error_chain_is_transient_snapshot_read(&e) {
                     return Err(anyhow::anyhow!("raft get_snapshot: {e}"));
                 }
             }
@@ -179,11 +246,58 @@ async fn wait_for_snapshot(
     }
 }
 
-fn error_chain_has_not_found(err: &(dyn std::error::Error + 'static)) -> bool {
+async fn wait_for_snapshot_completion(
+    raft: &openraft::Raft<TypeConfig>,
+    expected: &Option<openraft::LogId<NodeId>>,
+    timeout: Duration,
+) -> anyhow::Result<()> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let metrics = raft.metrics().borrow().clone();
+        if metrics.snapshot.as_ref() == expected.as_ref() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "timeout waiting for snapshot completion: expected={expected:?}, \
+                 last_applied={:?}, snapshot={:?}",
+                metrics.last_applied,
+                metrics.snapshot
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn wait_for_applied_after(
+    raft: &openraft::Raft<TypeConfig>,
+    previous: &Option<openraft::LogId<NodeId>>,
+    timeout: Duration,
+) -> anyhow::Result<Option<openraft::LogId<NodeId>>> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let last_applied = raft.metrics().borrow().last_applied.clone();
+        if last_applied.as_ref() > previous.as_ref() {
+            return Ok(last_applied);
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!("timeout waiting for Raft apply after {previous:?}");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+fn error_chain_is_transient_snapshot_read(err: &(dyn std::error::Error + 'static)) -> bool {
     let mut current: &(dyn std::error::Error + 'static) = err;
     loop {
-        if let Some(io) = current.downcast_ref::<std::io::Error>()
-            && io.kind() == std::io::ErrorKind::NotFound
+        if let Some(io) = current.downcast_ref::<std::io::Error>() {
+            if io.kind() == std::io::ErrorKind::NotFound {
+                return true;
+            }
+        }
+        if current
+            .to_string()
+            .ends_with("snapshot payload metadata mismatch")
         {
             return true;
         }
@@ -194,24 +308,368 @@ fn error_chain_has_not_found(err: &(dyn std::error::Error + 'static)) -> bool {
     }
 }
 
+#[cfg(test)]
+mod snapshot_read_tests {
+    use super::error_chain_is_transient_snapshot_read;
+    use std::fmt;
+
+    #[derive(Debug)]
+    struct SnapshotReadContext(std::io::Error);
+
+    impl fmt::Display for SnapshotReadContext {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                formatter,
+                "when Read Snapshot(None): std::io::error::Error: {}",
+                self.0
+            )
+        }
+    }
+
+    impl std::error::Error for SnapshotReadContext {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[test]
+    fn retries_the_known_snapshot_materialization_error_through_storage_context() {
+        let error =
+            SnapshotReadContext(std::io::Error::other("snapshot payload metadata mismatch"));
+
+        assert!(error_chain_is_transient_snapshot_read(&error));
+    }
+
+    #[test]
+    fn does_not_retry_unrecognized_snapshot_storage_errors() {
+        let error = std::io::Error::other("snapshot checksum mismatch");
+
+        assert!(!error_chain_is_transient_snapshot_read(&error));
+    }
+}
+
 #[tokio::test]
 async fn raft_two_node_replication_smoke() -> anyhow::Result<()> {
+    let _serial = RAFT_REPLICATION_TEST_LOCK.lock().await;
     run_raft_cluster_replication_smoke(2).await
 }
 
 #[tokio::test]
 async fn raft_single_node_replication_smoke() -> anyhow::Result<()> {
+    let _serial = RAFT_REPLICATION_TEST_LOCK.lock().await;
     run_raft_cluster_replication_smoke(1).await
 }
 
 #[tokio::test]
 async fn raft_three_node_replication_smoke() -> anyhow::Result<()> {
+    let _serial = RAFT_REPLICATION_TEST_LOCK.lock().await;
     run_raft_cluster_replication_smoke(3).await
 }
 
 #[tokio::test]
 async fn raft_four_node_replication_smoke() -> anyhow::Result<()> {
+    let _serial = RAFT_REPLICATION_TEST_LOCK.lock().await;
     run_raft_cluster_replication_smoke(4).await
+}
+
+#[tokio::test]
+async fn signed_snapshot_admission_rejects_before_openraft_and_retries_successfully()
+-> anyhow::Result<()> {
+    let _serial = RAFT_REPLICATION_TEST_LOCK.lock().await;
+    let tmp = tempfile::tempdir().context("tempdir")?;
+    let source_dir = tmp.path().join("source");
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&source_dir).context("create source directory")?;
+    std::fs::create_dir_all(&target_dir).context("create target directory")?;
+
+    let cluster_id = xp_test_fixtures::primary_cluster_id();
+    let ca = generate_cluster_ca(cluster_id).context("generate cluster CA")?;
+    let source_identity = xp::id::new_ulid_string();
+    let target_identity = xp::id::new_ulid_string();
+    let source_store = Arc::new(Mutex::new(
+        JsonSnapshotStore::load_or_init(store_init(
+            &source_dir,
+            source_identity,
+            "snapshot-source".to_owned(),
+        ))
+        .context("init source store")?,
+    ));
+    let target_store = Arc::new(Mutex::new(
+        JsonSnapshotStore::load_or_init(store_init(
+            &target_dir,
+            target_identity.clone(),
+            "snapshot-target".to_owned(),
+        ))
+        .context("init target store")?,
+    ));
+    let cluster_name = "raft-snapshot-admission-smoke".to_owned();
+    let source = start_raft(
+        &source_dir,
+        cluster_name.clone(),
+        1,
+        source_store,
+        ReconcileHandle::noop(),
+        HttpNetworkFactory::new(),
+    )
+    .await
+    .context("start source Raft")?;
+    let target_reconcile = ReconcileHandle::noop();
+    let target = start_raft(
+        &target_dir,
+        cluster_name,
+        2,
+        target_store.clone(),
+        target_reconcile.clone(),
+        HttpNetworkFactory::new(),
+    )
+    .await
+    .context("start target Raft")?;
+
+    source
+        .initialize_single_node_if_needed(
+            1,
+            NodeMeta {
+                name: "snapshot-source".to_owned(),
+                api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
+                raft_endpoint: "http://127.0.0.1:1".to_owned(),
+            },
+        )
+        .await
+        .context("initialize source Raft")?;
+    wait_for_leader(source.metrics(), 1, Duration::from_secs(10)).await?;
+    let user = User {
+        user_id: "snapshot-admission-user".to_owned(),
+        display_name: "snapshot-admission".to_owned(),
+        subscription_token: xp_test_fixtures::label_sub_test_token().to_owned(),
+        credential_epoch: 0,
+        priority_tier: Default::default(),
+        quota_reset: UserQuotaReset::Monthly {
+            day_of_month: 1,
+            tz_offset_minutes: 480,
+        },
+    };
+    source
+        .client_write(DesiredStateCommand::UpsertUser { user: user.clone() })
+        .await
+        .context("write snapshot test state")?;
+    source
+        .raft()
+        .trigger()
+        .snapshot()
+        .await
+        .context("trigger source snapshot")?;
+    wait_for_snapshot(&source.raft(), Duration::from_secs(10)).await?;
+    let snapshot = source
+        .raft()
+        .get_snapshot()
+        .await
+        .context("read source snapshot")?
+        .context("source snapshot missing")?;
+    let snapshot_log_id = snapshot.meta.last_log_id.clone();
+    wait_for_snapshot_completion(&source.raft(), &snapshot_log_id, Duration::from_secs(10)).await?;
+    let snapshot_request = openraft::raft::InstallSnapshotRequest::<TypeConfig> {
+        vote: openraft::Vote::new_committed(1, 1),
+        meta: snapshot.meta,
+        offset: 0,
+        data: (*snapshot.snapshot).into_inner(),
+        done: true,
+    };
+    let body = serde_json::to_vec(&snapshot_request).context("encode snapshot request")?;
+    let router_state = RaftRpcState {
+        raft: target.raft(),
+        reconcile: target_reconcile.clone(),
+    };
+    let auth = RaftRpcAuth {
+        cluster_id: cluster_id.to_owned(),
+        local_node_id: target_identity.clone(),
+        cluster_ca_key_pem: ca.key_pem.clone(),
+        cluster_ca_cert_pem: ca.cert_pem.clone(),
+        store: target_store.clone(),
+        bootstrap_sender: None,
+    };
+    let rpc = spawn_raft_rpc_router(build_authenticated_raft_rpc_router(router_state, auth))
+        .await
+        .context("start authenticated snapshot RPC")?;
+
+    let held_mesh_read = target_reconcile.mesh_gate_lock().read_owned().await;
+    let (request, verified) = signed_snapshot_request(
+        &rpc.base_url,
+        &body,
+        &ca.key_pem,
+        &ca.cert_pem,
+        cluster_id,
+        &target_identity,
+    )?;
+    let response = request.send().await.context("send contended snapshot")?;
+    assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    let ack = response
+        .headers()
+        .get(internal_auth::INTERNAL_ACK_HEADER)
+        .context("signed rejection acknowledgement missing")?
+        .to_str()
+        .context("snapshot acknowledgement is not ASCII")?;
+    verify_ack_v2(
+        &ca.key_pem,
+        &ca.cert_pem,
+        &verified,
+        &target_identity,
+        reqwest::StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+        ack,
+    )
+    .context("verify signed admission rejection")?;
+    assert_ne!(
+        target.metrics().borrow().state,
+        openraft::ServerState::Shutdown,
+        "admission contention must not shut down the OpenRaft worker"
+    );
+    assert_eq!(
+        target.metrics().borrow().last_applied,
+        None,
+        "rejected snapshot must not be dispatched to OpenRaft"
+    );
+
+    drop(held_mesh_read);
+    let (request, _) = signed_snapshot_request(
+        &rpc.base_url,
+        &body,
+        &ca.key_pem,
+        &ca.cert_pem,
+        cluster_id,
+        &target_identity,
+    )?;
+    let response = request.send().await.context("retry snapshot")?;
+    anyhow::ensure!(
+        response.status().is_success(),
+        "snapshot retry was rejected"
+    );
+    wait_for_user(&target_store, &user.user_id, Duration::from_secs(10))
+        .await
+        .context("wait for snapshot state on target")?;
+    assert_ne!(
+        target.metrics().borrow().state,
+        openraft::ServerState::Shutdown,
+        "successful snapshot installation must leave Raft running"
+    );
+    assert_eq!(
+        target.metrics().borrow().last_applied,
+        snapshot_log_id,
+        "target applied index should advance to the snapshot boundary"
+    );
+
+    let cancellation_user = User {
+        user_id: "snapshot-cancel-user".to_owned(),
+        display_name: "snapshot-cancel".to_owned(),
+        ..user
+    };
+    source
+        .client_write(DesiredStateCommand::UpsertUser {
+            user: cancellation_user.clone(),
+        })
+        .await
+        .context("write snapshot cancellation state")?;
+    let cancellation_log_id =
+        wait_for_applied_after(&source.raft(), &snapshot_log_id, Duration::from_secs(10))
+            .await
+            .context("wait for cancellation command to apply")?;
+    source
+        .raft()
+        .trigger()
+        .snapshot()
+        .await
+        .context("trigger cancellation snapshot")?;
+    wait_for_snapshot_completion(
+        &source.raft(),
+        &cancellation_log_id,
+        Duration::from_secs(30),
+    )
+    .await
+    .context("wait for cancellation snapshot")?;
+    let cancellation_snapshot = source
+        .raft()
+        .get_snapshot()
+        .await
+        .context("read cancellation snapshot")?
+        .context("cancellation snapshot missing")?;
+    let cancellation_request = openraft::raft::InstallSnapshotRequest::<TypeConfig> {
+        vote: openraft::Vote::new_committed(1, 1),
+        meta: cancellation_snapshot.meta,
+        offset: 0,
+        data: (*cancellation_snapshot.snapshot).into_inner(),
+        done: true,
+    };
+    let cancellation_rpc = spawn_raft_rpc_router(build_raft_rpc_router(RaftRpcState {
+        raft: target.raft(),
+        reconcile: target_reconcile.clone(),
+    }))
+    .await
+    .context("start cancellation snapshot RPC")?;
+    let held_store = target_store.clone().lock_owned().await;
+    let request_body = serde_json::to_vec(&cancellation_request)
+        .context("encode cancellation snapshot request")?;
+    let request_url = format!("{}/raft/snapshot", cancellation_rpc.base_url);
+    let request_task = tokio::spawn(async move {
+        reqwest::Client::new()
+            .post(request_url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(request_body)
+            .send()
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !target_reconcile
+            .snapshot_installing()
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .context("snapshot request should reserve Mesh before OpenRaft install")?;
+    request_task.abort();
+    let _ = request_task.await;
+    assert!(
+        target_reconcile
+            .snapshot_installing()
+            .load(std::sync::atomic::Ordering::Acquire),
+        "disconnecting the HTTP caller must not release an admitted installation"
+    );
+    assert!(
+        target_reconcile
+            .mesh_gate_read_until(std::time::Instant::now() + Duration::from_millis(20))
+            .await
+            .is_none(),
+        "new Mesh work must remain blocked after the HTTP caller disconnects"
+    );
+    drop(held_store);
+    let installed_user = wait_for_user(
+        &target_store,
+        &cancellation_user.user_id,
+        Duration::from_secs(10),
+    )
+    .await
+    .context("wait for cancelled-request snapshot installation")?;
+    assert_eq!(installed_user, cancellation_user);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while target_reconcile
+            .snapshot_installing()
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .context("snapshot task should release Mesh reservation after install")?;
+    assert!(
+        target_reconcile
+            .mesh_gate_read_until(std::time::Instant::now() + Duration::from_secs(1))
+            .await
+            .is_some(),
+        "Mesh admission should resume after the owned install task terminates"
+    );
+
+    rpc.shutdown().await?;
+    cancellation_rpc.shutdown().await?;
+    Ok(())
 }
 
 async fn run_raft_cluster_replication_smoke(node_count: usize) -> anyhow::Result<()> {

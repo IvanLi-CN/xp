@@ -90,10 +90,22 @@ pub struct ReconcileHandle {
     mesh_enabled: Arc<AtomicBool>,
     mesh_enabled_epoch: Arc<AtomicU64>,
     mesh_state_generation: Arc<AtomicU64>,
+    mesh_generation_lock: Arc<std::sync::Mutex<()>>,
     mesh_state_applied: Arc<AtomicBool>,
     mesh_gate_authoritative: Arc<AtomicBool>,
+    snapshot_installing: Arc<AtomicBool>,
     mesh_gate_lock: Arc<RwLock<()>>,
     mesh_epoch_barrier: Arc<RwLock<()>>,
+}
+
+pub(crate) struct SnapshotInstallAdmission {
+    snapshot_installing: Arc<AtomicBool>,
+}
+
+impl Drop for SnapshotInstallAdmission {
+    fn drop(&mut self) {
+        self.snapshot_installing.store(false, Ordering::Release);
+    }
 }
 impl ReconcileHandle {
     pub fn request(&self, req: ReconcileRequest) {
@@ -262,8 +274,10 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         mesh_enabled: Arc::new(AtomicBool::new(true)),
         mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
         mesh_state_generation: Arc::new(AtomicU64::new(0)),
+        mesh_generation_lock: Arc::new(std::sync::Mutex::new(())),
         mesh_state_applied: Arc::new(AtomicBool::new(false)),
         mesh_gate_authoritative: Arc::new(AtomicBool::new(false)),
+        snapshot_installing: Arc::new(AtomicBool::new(false)),
         mesh_gate_lock: Arc::new(RwLock::new(())),
         mesh_epoch_barrier: Arc::new(RwLock::new(())),
     };
