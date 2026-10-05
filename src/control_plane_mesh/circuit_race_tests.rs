@@ -98,6 +98,98 @@ async fn deferred_direct_success_cannot_clear_a_new_half_open_probe() {
 }
 
 #[tokio::test]
+async fn deferred_direct_retryable_failure_cannot_clear_a_new_half_open_probe() {
+    let circuits = PeerCircuitBreakers::default();
+    {
+        let mut peers = circuits.peers.lock().await;
+        let circuit = peers.entry("peer".to_owned()).or_default();
+        circuit.failures = MESH_FAILURES_BEFORE_OPEN;
+        circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+    }
+    let (old_decision, old_probe_id) = circuits
+        .before_attempt_with_probe_at_epoch_with_token("peer", true, true, Some(7))
+        .await;
+    let old_probe_id = old_probe_id.expect("old probe token");
+    assert_eq!(old_decision, MeshAttemptDecision::Probe);
+    let stale_operation = circuits.next_operation();
+    circuits
+        .release_half_open_probe_for_epoch("peer", 7, old_probe_id)
+        .await;
+
+    let (new_decision, new_probe_id) = circuits
+        .before_attempt_with_probe_at_epoch_with_token("peer", true, true, Some(7))
+        .await;
+    let new_probe_id = new_probe_id.expect("new probe token");
+    assert_eq!(new_decision, MeshAttemptDecision::Probe);
+
+    circuits
+        .record_retryable_failure_at_with_cleanup(
+            "peer",
+            stale_operation,
+            Some(cleanup::DirectCleanupContext::new(
+                Instant::now() + Duration::from_secs(1),
+                Some(old_probe_id),
+            )),
+        )
+        .await;
+
+    assert_eq!(
+        circuits
+            .peers
+            .lock()
+            .await
+            .get("peer")
+            .and_then(|circuit| circuit.half_open_probe_id),
+        Some(new_probe_id),
+        "an older Direct failure must not release the current probe slot"
+    );
+}
+
+#[tokio::test]
+async fn queued_direct_retryable_cleanup_preserves_a_new_probe_token() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    let peer = super::peer_target_tests::primary_reverse_target(
+        Some(xp_test_fixtures::primary_api_url().to_owned()),
+        xp_test_fixtures::secondary_api_url().to_owned(),
+    );
+    let circuits = client.circuits();
+    {
+        let mut peers = circuits.peers.lock().await;
+        let circuit = peers.entry(peer.node_id.clone()).or_default();
+        circuit.failures = MESH_FAILURES_BEFORE_OPEN;
+        circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+    }
+    let (old_decision, old_probe_id) = circuits
+        .before_attempt_with_probe_at_epoch_with_token(&peer.node_id, true, true, Some(0))
+        .await;
+    let old_probe_id = old_probe_id.expect("old probe token");
+    assert_eq!(old_decision, MeshAttemptDecision::Probe);
+    let stale_operation = circuits.next_operation();
+    circuits
+        .release_half_open_probe_for_epoch(&peer.node_id, 0, old_probe_id)
+        .await;
+
+    let (new_decision, new_probe_id) = circuits
+        .before_attempt_with_probe_at_epoch_with_token(&peer.node_id, true, true, Some(0))
+        .await;
+    let new_probe_id = new_probe_id.expect("new probe token");
+    assert_eq!(new_decision, MeshAttemptDecision::Probe);
+    client.spawn_retryable_failure_cleanup(&peer, 0, None, stale_operation, Some(old_probe_id));
+
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(
+        circuits
+            .peers
+            .lock()
+            .await
+            .get(&peer.node_id)
+            .and_then(|circuit| circuit.half_open_probe_id),
+        Some(new_probe_id),
+        "queued cleanup must retain ownership of the probe that produced it"
+    );
+}
+
+#[tokio::test]
 async fn direct_cleanup_does_not_write_after_its_deadline_while_waiting_for_lock() {
     let circuits = PeerCircuitBreakers::default();
     {

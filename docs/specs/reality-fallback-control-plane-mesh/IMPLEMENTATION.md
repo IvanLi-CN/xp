@@ -81,10 +81,11 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   `Verified` receipt as `TransportFailed` using the captured membership revision and operation id;
   when the bounded immediate update cannot complete, the same ordered preflight cleanup retries it
   without allowing an older body to replace newer validation state.
-  Body completion has bounded cleanup
-  grace when its request deadline has expired, while successful body
-  telemetry uses bounded deferred persistence after its RAII probe guard is released. Failure,
-  cancellation, and deadline telemetry remains immediate and bounded.
+  Body completion has bounded cleanup grace when its request deadline has expired. Circuit,
+  validation, and telemetry writes check their absolute deadline after acquiring the relevant
+  lock. Successful Mesh body completion synchronously persists its breaker and `MeshAvailable`
+  route reason; ordinary samples retain the five-second coalescing window. Failure, cancellation,
+  and deadline telemetry remains bounded.
   An unchanged deferred breaker observation does not dirty or rewrite telemetry, while a failed
   snapshot still retries. A body that already reports end-of-stream releases its gate and
   finishes immediately without allocating another body wrapper or deadline task; a zero

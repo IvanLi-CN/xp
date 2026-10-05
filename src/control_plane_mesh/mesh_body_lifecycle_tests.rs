@@ -77,6 +77,113 @@ async fn signed_preflight_body_failure_invalidates_previous_direct_validation() 
 }
 
 #[tokio::test]
+async fn stale_mesh_body_failure_does_not_write_validation_after_epoch_advances() {
+    let reconcile = ReconcileHandle::noop();
+    assert!(
+        reconcile
+            .initialize_mesh_gate_until(true, Instant::now() + Duration::from_secs(1))
+            .await
+    );
+    let peer = super::peer_target_tests::primary_reverse_target(
+        Some(xp_test_fixtures::primary_api_url().to_owned()),
+        xp_test_fixtures::secondary_api_url().to_owned(),
+    );
+    let client = MeshAwareHttpClient::new(reqwest::Client::new())
+        .with_direct_validation_required()
+        .with_mesh_gate_epoch(reconcile.mesh_gate(), reconcile.mesh_gate_epoch())
+        .with_mesh_epoch_barrier(reconcile.mesh_epoch_barrier())
+        .with_snapshot_install_reservation(reconcile.snapshot_installing());
+    client.mark_direct_validation_success_at(&peer, None).await;
+    client
+        .circuits()
+        .record_retryable_failure(&peer.node_id)
+        .await;
+    client
+        .circuits()
+        .record_retryable_failure(&peer.node_id)
+        .await;
+
+    let records_lock = client.hold_direct_validation_records_for_test().await;
+    let operation_id = client.circuits.next_operation();
+    let epoch = reconcile.mesh_gate_epoch().load(Ordering::Acquire);
+    let callback_client = client.clone();
+    let callback_peer = peer.clone();
+    let callback = tokio::spawn(async move {
+        callback_client
+            .record_mesh_body_failure_after_body(
+                &callback_peer,
+                Instant::now(),
+                false,
+                MeshTransportObservation {
+                    protocol: MeshTransportProtocol::H2,
+                    fingerprint: None,
+                },
+                epoch,
+                None,
+                operation_id,
+                None,
+                MeshPeerReason::TransportError,
+                Instant::now() + Duration::from_secs(2),
+            )
+            .await;
+    });
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while client.circuits().state(&peer.node_id, true).await != BreakerState::Open {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("body failure should update the breaker before validation cleanup");
+
+    let epoch_writer = reconcile.mesh_epoch_barrier().write_owned().await;
+    reconcile.mesh_gate_epoch().fetch_add(1, Ordering::AcqRel);
+    drop(epoch_writer);
+    drop(records_lock);
+    callback.await.expect("body callback");
+
+    assert_eq!(
+        client.direct_validation_state_for(&peer).await,
+        DirectValidationState::Verified,
+        "a body callback from the prior epoch must not update Direct validation"
+    );
+}
+
+#[tokio::test]
+async fn direct_preflight_body_completions_use_the_bounded_dispatcher() {
+    let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
+    let peer = super::peer_target_tests::primary_reverse_target(
+        Some(xp_test_fixtures::primary_api_url().to_owned()),
+        xp_test_fixtures::secondary_api_url().to_owned(),
+    );
+    let records_lock = client.hold_direct_validation_records_for_test().await;
+    let metrics = tokio::runtime::Handle::current().metrics();
+    let initial_tasks = metrics.num_alive_tasks();
+
+    for _ in 0..512 {
+        let callback = client.direct_preflight_success_callback(
+            &peer,
+            0,
+            None,
+            client.circuits.next_operation(),
+            None,
+            true,
+            Instant::now() + Duration::from_secs(30),
+            None,
+        );
+        callback(crate::mesh_gate_body::BodyFinish::Complete);
+    }
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let queued_tasks = metrics.num_alive_tasks();
+    assert!(
+        queued_tasks <= initial_tasks + super::completion::COMPLETION_ACTIVE_CAPACITY + 2,
+        "preflight body completion must use the bounded dispatcher: {queued_tasks} live tasks"
+    );
+    drop(records_lock);
+}
+
+#[tokio::test]
 async fn completed_empty_mesh_body_releases_guard_without_another_poll() {
     let gate_lock = Arc::new(tokio::sync::RwLock::new(()));
     let gate_guard = gate_lock.clone().read_owned().await;

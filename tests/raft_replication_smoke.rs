@@ -276,7 +276,7 @@ async fn wait_for_applied_after(
 ) -> anyhow::Result<Option<openraft::LogId<NodeId>>> {
     let deadline = Instant::now() + timeout;
     loop {
-        let last_applied = raft.metrics().borrow().last_applied.clone();
+        let last_applied = raft.metrics().borrow().last_applied;
         if last_applied.as_ref() > previous.as_ref() {
             return Ok(last_applied);
         }
@@ -290,10 +290,10 @@ async fn wait_for_applied_after(
 fn error_chain_is_transient_snapshot_read(err: &(dyn std::error::Error + 'static)) -> bool {
     let mut current: &(dyn std::error::Error + 'static) = err;
     loop {
-        if let Some(io) = current.downcast_ref::<std::io::Error>() {
-            if io.kind() == std::io::ErrorKind::NotFound {
-                return true;
-            }
+        if let Some(io) = current.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::NotFound
+        {
+            return true;
         }
         if current
             .to_string()
@@ -465,7 +465,7 @@ async fn signed_snapshot_admission_rejects_before_openraft_and_retries_successfu
         .await
         .context("read source snapshot")?
         .context("source snapshot missing")?;
-    let snapshot_log_id = snapshot.meta.last_log_id.clone();
+    let snapshot_log_id = snapshot.meta.last_log_id;
     wait_for_snapshot_completion(&source.raft(), &snapshot_log_id, Duration::from_secs(10)).await?;
     let snapshot_request = openraft::raft::InstallSnapshotRequest::<TypeConfig> {
         vote: openraft::Vote::new_committed(1, 1),

@@ -2,6 +2,8 @@ use super::*;
 use sha2::{Digest, Sha256};
 use std::sync::atomic::AtomicU64;
 
+mod validation;
+
 pub(super) fn endpoint_fingerprint(
     endpoint: &Endpoint,
     access_host: &str,
@@ -166,32 +168,6 @@ impl DirectValidationStore {
             },
         );
         true
-    }
-
-    pub(super) fn try_record_at_if_newer(
-        &self,
-        peer: &MeshPeerTarget,
-        state: DirectValidationState,
-        membership_revision: Option<&str>,
-        operation_id: u64,
-    ) -> Option<bool> {
-        let mut records = self.records.try_lock().ok()?;
-        if records
-            .get(&peer.node_id)
-            .is_some_and(|record| record.operation_id > operation_id)
-        {
-            return Some(false);
-        }
-        records.insert(
-            peer.node_id.clone(),
-            DirectValidationRecord {
-                fingerprint: Self::fingerprint(peer, membership_revision),
-                state,
-                verified_at: (state == DirectValidationState::Verified).then_some(Instant::now()),
-                operation_id,
-            },
-        );
-        Some(true)
     }
 
     #[cfg(test)]
@@ -451,12 +427,27 @@ impl PeerCircuitBreakers {
             .expect("fresh circuit operation must apply")
     }
 
+    #[cfg(test)]
     pub(super) fn try_record_success_at(
         &self,
         peer_id: &str,
         operation_id: u64,
     ) -> Option<BreakerState> {
+        self.try_record_success_at_with_cleanup(peer_id, operation_id, None)
+    }
+
+    pub(super) fn try_record_success_at_with_cleanup(
+        &self,
+        peer_id: &str,
+        operation_id: u64,
+        cleanup: Option<cleanup::DirectCleanupContext>,
+    ) -> Option<BreakerState> {
         let mut peers = self.peers.try_lock().ok()?;
+        if cleanup.is_some_and(|cleanup| {
+            !cleanup.permits(peers.get(peer_id).and_then(|peer| peer.half_open_probe_id))
+        }) {
+            return None;
+        }
         let circuit = peers.entry(peer_id.to_string()).or_default();
         if circuit.operation_id > operation_id {
             return None;
@@ -536,13 +527,29 @@ impl PeerCircuitBreakers {
             .expect("fresh circuit operation must apply")
     }
 
+    #[cfg(test)]
     pub(super) async fn record_retryable_failure_at(
         &self,
         peer_id: &str,
         operation_id: u64,
     ) -> Option<BreakerState> {
+        self.record_retryable_failure_at_with_cleanup(peer_id, operation_id, None)
+            .await
+    }
+
+    pub(super) async fn record_retryable_failure_at_with_cleanup(
+        &self,
+        peer_id: &str,
+        operation_id: u64,
+        cleanup: Option<cleanup::DirectCleanupContext>,
+    ) -> Option<BreakerState> {
         let now = Instant::now();
         let mut peers = self.peers.lock().await;
+        if cleanup.is_some_and(|cleanup| {
+            !cleanup.permits(peers.get(peer_id).and_then(|peer| peer.half_open_probe_id))
+        }) {
+            return None;
+        }
         let circuit = peers.entry(peer_id.to_string()).or_default();
         if circuit.operation_id > operation_id {
             return None;
@@ -574,8 +581,23 @@ impl PeerCircuitBreakers {
         peer_id: &str,
         operation_id: u64,
     ) -> Option<BreakerState> {
+        self.record_protocol_failure_at_with_cleanup(peer_id, operation_id, None)
+            .await
+    }
+
+    pub(super) async fn record_protocol_failure_at_with_cleanup(
+        &self,
+        peer_id: &str,
+        operation_id: u64,
+        cleanup: Option<cleanup::DirectCleanupContext>,
+    ) -> Option<BreakerState> {
         let now = Instant::now();
         let mut peers = self.peers.lock().await;
+        if cleanup.is_some_and(|cleanup| {
+            !cleanup.permits(peers.get(peer_id).and_then(|peer| peer.half_open_probe_id))
+        }) {
+            return None;
+        }
         let circuit = peers.entry(peer_id.to_string()).or_default();
         if circuit.operation_id > operation_id {
             return None;
@@ -732,6 +754,16 @@ impl PeerCircuitBreakers {
             Some(retry_at) if Instant::now() < retry_at => BreakerState::Open,
             Some(_) => BreakerState::HalfOpen,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) async fn public_failure_snapshot_for_test(
+        &self,
+        peer_id: &str,
+    ) -> Option<(u64, usize, Option<Instant>)> {
+        let peers = self.public_peers.lock().await;
+        let circuit = peers.get(peer_id)?;
+        Some((circuit.operation_id, circuit.open_count, circuit.retry_at))
     }
 
     pub async fn retry_after_seconds(&self, peer_id: &str, public_path: bool) -> Option<u64> {

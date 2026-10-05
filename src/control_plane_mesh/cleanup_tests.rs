@@ -24,7 +24,13 @@ async fn repeated_peer_cleanup_stays_bounded_and_recovers_after_contention() {
     let barrier_writer = client.mesh_epoch_barrier.clone().write_owned().await;
 
     for _ in 0..512 {
-        client.spawn_protocol_failure_cleanup(&peer, 0, None, client.circuits.next_operation());
+        client.spawn_protocol_failure_cleanup(
+            &peer,
+            0,
+            None,
+            client.circuits.next_operation(),
+            None,
+        );
     }
     tokio::task::yield_now().await;
     let tasks_under_contention = metrics.num_alive_tasks();
@@ -65,7 +71,7 @@ async fn protocol_failure_cleanup_waits_for_epoch_barrier_before_state_update() 
         public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
     };
     let barrier_writer = client.mesh_epoch_barrier.clone().write_owned().await;
-    client.spawn_protocol_failure_cleanup(&peer, 0, None, client.circuits.next_operation());
+    client.spawn_protocol_failure_cleanup(&peer, 0, None, client.circuits.next_operation(), None);
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(
         client
@@ -115,7 +121,7 @@ async fn stale_failure_cleanup_cannot_overwrite_newer_success() {
         .mark_direct_validation_success_with_operation(&peer, None, current_operation)
         .await;
 
-    client.spawn_protocol_failure_cleanup(&peer, 0, None, stale_operation);
+    client.spawn_protocol_failure_cleanup(&peer, 0, None, stale_operation, None);
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     assert_eq!(
@@ -153,6 +159,7 @@ async fn protocol_validation_timeout_converges_in_background() {
                 None,
                 &gate_guard,
                 Instant::now() + Duration::from_millis(10),
+                None,
             )
             .await
             .is_some()
@@ -198,6 +205,7 @@ async fn transport_validation_timeout_converges_in_background() {
             gate_guard,
             None,
             Instant::now() + Duration::from_millis(10),
+            None,
         )
         .await;
     drop(records_lock);
@@ -456,8 +464,8 @@ async fn older_direct_cleanup_cannot_displace_latest_overflow_protocol_rejection
                 .forget();
         });
     }
-    client.spawn_protocol_failure_cleanup(&peer, 0, None, latest_operation);
-    client.spawn_protocol_failure_cleanup(&peer, 0, None, older_operation);
+    client.spawn_protocol_failure_cleanup(&peer, 0, None, latest_operation, None);
+    client.spawn_protocol_failure_cleanup(&peer, 0, None, older_operation, None);
     release.add_permits(
         super::completion::COMPLETION_ACTIVE_CAPACITY
             + super::completion::COMPLETION_QUEUE_CAPACITY,

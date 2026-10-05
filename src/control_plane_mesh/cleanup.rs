@@ -10,6 +10,13 @@ pub(super) struct PublicCleanupContext {
 }
 
 impl PublicCleanupContext {
+    pub(super) fn new(expires_at: Instant, probe_id: Option<u64>) -> Self {
+        Self {
+            expires_at: tokio::time::Instant::from_std(expires_at),
+            probe_id,
+        }
+    }
+
     pub(super) fn permits(self, current_probe_id: Option<u64>) -> bool {
         tokio::time::Instant::now() < self.expires_at
             && (current_probe_id.is_none() || current_probe_id == self.probe_id)
@@ -108,12 +115,14 @@ impl MeshAwareHttpClient {
         epoch: u64,
         validation_revision: Option<String>,
         operation_id: u64,
+        probe_id: Option<u64>,
     ) {
         self.spawn_protocol_failure_cleanup_with_requirement(
             peer,
             epoch,
             validation_revision,
             operation_id,
+            probe_id,
             true,
         );
     }
@@ -125,12 +134,14 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         operation_id: u64,
         allow_mesh_when_disabled: bool,
+        probe_id: Option<u64>,
     ) {
         self.spawn_protocol_failure_cleanup_with_requirement(
             peer,
             epoch,
             validation_revision,
             operation_id,
+            probe_id,
             !allow_mesh_when_disabled,
         );
     }
@@ -141,6 +152,7 @@ impl MeshAwareHttpClient {
         epoch: u64,
         validation_revision: Option<String>,
         operation_id: u64,
+        probe_id: Option<u64>,
         require_enabled: bool,
     ) {
         let client = self.clone();
@@ -169,9 +181,11 @@ impl MeshAwareHttpClient {
                         };
                         let breaker_result = crate::control_plane_mesh::await_until(
                             deadline,
-                            client
-                                .circuits
-                                .record_protocol_failure_at(&peer.node_id, operation_id),
+                            client.circuits.record_protocol_failure_at_with_cleanup(
+                                &peer.node_id,
+                                operation_id,
+                                Some(DirectCleanupContext::new(cleanup_expires_at, probe_id)),
+                            ),
                         )
                         .await;
                         drop(epoch_guard);
@@ -198,16 +212,14 @@ impl MeshAwareHttpClient {
                             tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
                             continue;
                         };
-                        let validation_result = crate::control_plane_mesh::await_until(
-                            deadline,
-                            client.mark_direct_validation_failure_with_operation(
+                        let validation_result = client
+                            .try_mark_direct_validation_failure_with_operation_until(
                                 &peer,
                                 DirectValidationState::ProtocolRejected,
                                 validation_revision.clone(),
                                 operation_id,
-                            ),
-                        )
-                        .await;
+                                cleanup_expires_at,
+                            );
                         drop(epoch_guard);
                         match validation_result {
                             Some(_) => return,
@@ -225,12 +237,14 @@ impl MeshAwareHttpClient {
         epoch: u64,
         validation_revision: Option<String>,
         operation_id: u64,
+        probe_id: Option<u64>,
     ) {
         self.spawn_retryable_failure_cleanup_with_requirement(
             peer,
             epoch,
             validation_revision,
             operation_id,
+            probe_id,
             true,
         );
     }
@@ -242,12 +256,14 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         operation_id: u64,
         allow_mesh_when_disabled: bool,
+        probe_id: Option<u64>,
     ) {
         self.spawn_retryable_failure_cleanup_with_requirement(
             peer,
             epoch,
             validation_revision,
             operation_id,
+            probe_id,
             !allow_mesh_when_disabled,
         );
     }
@@ -258,6 +274,7 @@ impl MeshAwareHttpClient {
         epoch: u64,
         validation_revision: Option<String>,
         operation_id: u64,
+        probe_id: Option<u64>,
         require_enabled: bool,
     ) {
         let client = self.clone();
@@ -286,9 +303,11 @@ impl MeshAwareHttpClient {
                         };
                         let breaker_result = crate::control_plane_mesh::await_until(
                             deadline,
-                            client
-                                .circuits
-                                .record_retryable_failure_at(&peer.node_id, operation_id),
+                            client.circuits.record_retryable_failure_at_with_cleanup(
+                                &peer.node_id,
+                                operation_id,
+                                Some(DirectCleanupContext::new(cleanup_expires_at, probe_id)),
+                            ),
                         )
                         .await;
                         drop(epoch_guard);
@@ -315,16 +334,14 @@ impl MeshAwareHttpClient {
                             tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
                             continue;
                         };
-                        let validation_result = crate::control_plane_mesh::await_until(
-                            deadline,
-                            client.mark_direct_validation_failure_with_operation(
+                        let validation_result = client
+                            .try_mark_direct_validation_failure_with_operation_until(
                                 &peer,
                                 DirectValidationState::TransportFailed,
                                 validation_revision.clone(),
                                 operation_id,
-                            ),
-                        )
-                        .await;
+                                cleanup_expires_at,
+                            );
                         drop(epoch_guard);
                         match validation_result {
                             Some(_) => return,
@@ -406,16 +423,14 @@ impl MeshAwareHttpClient {
                             tokio::time::sleep(CLEANUP_RETRY_DELAY).await;
                             continue;
                         };
-                        let validation_result = crate::control_plane_mesh::await_until(
-                            deadline,
-                            client.mark_direct_validation_failure_with_operation(
+                        let validation_result = client
+                            .try_mark_direct_validation_failure_with_operation_until(
                                 &peer,
                                 state,
                                 validation_revision.clone(),
                                 operation_id,
-                            ),
-                        )
-                        .await;
+                                deadline,
+                            );
                         drop(epoch_guard);
                         match validation_result {
                             Some(_) => return,
@@ -535,10 +550,11 @@ impl MeshAwareHttpClient {
                         };
                         let validation_result = crate::control_plane_mesh::await_until(
                             deadline,
-                            client.mark_direct_validation_success_with_operation(
+                            client.mark_direct_validation_success_with_operation_until(
                                 &peer,
                                 validation_revision.clone(),
                                 operation_id,
+                                deadline,
                             ),
                         )
                         .await;

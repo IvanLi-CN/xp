@@ -1,4 +1,7 @@
-use super::{ActiveRouteKind, MeshActiveRoute, MeshTelemetryHandle, MeshTelemetrySample};
+use super::{
+    ActiveRouteKind, MeshActiveRoute, MeshTelemetryHandle, MeshTelemetrySample,
+    writes::SampleWriteOptions,
+};
 
 #[derive(Debug, Clone)]
 pub struct ReverseRelayTelemetrySample {
@@ -31,19 +34,21 @@ impl MeshTelemetryHandle {
             peer_id,
             peer_name,
             sample,
-            Some(MeshActiveRoute {
-                kind: ActiveRouteKind::ReverseRelay,
-                rendezvous: Some(rendezvous),
-                rendezvous_role: Some(rendezvous_role),
-                primary_rendezvous: Some(primary_rendezvous),
-                standby_rendezvous,
-                generation: Some(generation),
-                readiness: Some("active".to_string()),
-            }),
-            None,
-            false,
+            SampleWriteOptions {
+                active_route: Some(MeshActiveRoute {
+                    kind: ActiveRouteKind::ReverseRelay,
+                    rendezvous: Some(rendezvous),
+                    rendezvous_role: Some(rendezvous_role),
+                    primary_rendezvous: Some(primary_rendezvous),
+                    standby_rendezvous,
+                    generation: Some(generation),
+                    readiness: Some("active".to_string()),
+                }),
+                ..SampleWriteOptions::default()
+            },
         )
         .await
+        .map(|_| ())
     }
 }
 

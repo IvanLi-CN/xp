@@ -102,13 +102,33 @@ impl MeshAwareHttpClient {
             .await
     }
 
-    pub(super) fn try_mark_direct_validation_success_with_operation(
+    pub(super) async fn mark_direct_validation_success_with_operation_until(
         &self,
         peer: &MeshPeerTarget,
         membership_revision: Option<String>,
         operation_id: u64,
+        deadline: Instant,
     ) -> Option<bool> {
-        self.direct_validation.try_record_at_if_newer(
+        self.direct_validation
+            .record_at_if_newer_until(
+                deadline,
+                peer,
+                DirectValidationState::Verified,
+                membership_revision.as_deref(),
+                operation_id,
+            )
+            .await
+    }
+
+    pub(super) fn try_mark_direct_validation_success_with_operation_until(
+        &self,
+        peer: &MeshPeerTarget,
+        membership_revision: Option<String>,
+        operation_id: u64,
+        deadline: Instant,
+    ) -> Option<bool> {
+        self.direct_validation.try_record_at_if_newer_until(
+            deadline,
             peer,
             DirectValidationState::Verified,
             membership_revision.as_deref(),
@@ -126,6 +146,42 @@ impl MeshAwareHttpClient {
         self.direct_validation
             .record_at_if_newer(peer, state, membership_revision.as_deref(), operation_id)
             .await
+    }
+
+    pub(super) async fn mark_direct_validation_failure_with_operation_until(
+        &self,
+        peer: &MeshPeerTarget,
+        state: DirectValidationState,
+        membership_revision: Option<String>,
+        operation_id: u64,
+        deadline: Instant,
+    ) -> Option<bool> {
+        self.direct_validation
+            .record_at_if_newer_until(
+                deadline,
+                peer,
+                state,
+                membership_revision.as_deref(),
+                operation_id,
+            )
+            .await
+    }
+
+    pub(super) fn try_mark_direct_validation_failure_with_operation_until(
+        &self,
+        peer: &MeshPeerTarget,
+        state: DirectValidationState,
+        membership_revision: Option<String>,
+        operation_id: u64,
+        deadline: Instant,
+    ) -> Option<bool> {
+        self.direct_validation.try_record_at_if_newer_until(
+            deadline,
+            peer,
+            state,
+            membership_revision.as_deref(),
+            operation_id,
+        )
     }
 
     pub async fn set_membership_revision(&self, revision: Option<String>) {
@@ -266,6 +322,9 @@ impl MeshAwareHttpClient {
             .ok_or(MeshRequestError::PreDispatchTimeout)?;
         let mut mesh_probe_guard =
             MeshHalfOpenProbeGuard::new(&self.circuits, &peer.node_id, decision, epoch, probe_id);
+        let probe_id = mesh_probe_guard
+            .as_ref()
+            .map(MeshHalfOpenProbeGuard::probe_id);
         if matches!(
             decision,
             MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined
@@ -313,6 +372,7 @@ impl MeshAwareHttpClient {
                             cleanup_revision,
                             operation_id,
                             allow_mesh_when_disabled,
+                            probe_id,
                         );
                     }
                     MeshRequestError::PreDispatchAuth(_)
@@ -326,6 +386,7 @@ impl MeshAwareHttpClient {
                             cleanup_revision,
                             operation_id,
                             allow_mesh_when_disabled,
+                            probe_id,
                         );
                     }
                 }
@@ -361,16 +422,28 @@ impl MeshAwareHttpClient {
             let recorded = match validation_state {
                 DirectValidationState::ProtocolRejected => crate::control_plane_mesh::await_until(
                     request_deadline,
-                    self.circuits
-                        .record_protocol_failure_at(&peer.node_id, operation_id),
+                    self.circuits.record_protocol_failure_at_with_cleanup(
+                        &peer.node_id,
+                        operation_id,
+                        Some(cleanup::DirectCleanupContext::new(
+                            request_deadline,
+                            probe_id,
+                        )),
+                    ),
                 )
                 .await
                 .flatten()
                 .is_some(),
                 DirectValidationState::TransportFailed => crate::control_plane_mesh::await_until(
                     request_deadline,
-                    self.circuits
-                        .record_retryable_failure_at(&peer.node_id, operation_id),
+                    self.circuits.record_retryable_failure_at_with_cleanup(
+                        &peer.node_id,
+                        operation_id,
+                        Some(cleanup::DirectCleanupContext::new(
+                            request_deadline,
+                            probe_id,
+                        )),
+                    ),
                 )
                 .await
                 .flatten()
@@ -386,6 +459,7 @@ impl MeshAwareHttpClient {
                             validation_revision.clone(),
                             operation_id,
                             allow_mesh_when_disabled,
+                            probe_id,
                         ),
                     DirectValidationState::TransportFailed => self
                         .spawn_retryable_failure_cleanup_for_preflight(
@@ -394,6 +468,7 @@ impl MeshAwareHttpClient {
                             validation_revision.clone(),
                             operation_id,
                             allow_mesh_when_disabled,
+                            probe_id,
                         ),
                     _ => unreachable!("preflight failure state is classified above"),
                 }
@@ -401,15 +476,17 @@ impl MeshAwareHttpClient {
             let cleanup_revision = validation_revision.clone();
             let validation_recorded = crate::control_plane_mesh::await_until(
                 request_deadline,
-                self.mark_direct_validation_failure_with_operation(
+                self.mark_direct_validation_failure_with_operation_until(
                     peer,
                     validation_state,
                     validation_revision,
                     operation_id,
+                    request_deadline,
                 ),
             )
             .await
-            .is_some_and(|recorded| recorded);
+            .flatten()
+            .unwrap_or(false);
             if !validation_recorded {
                 self.spawn_validation_failure_cleanup_for_preflight(
                     peer,
@@ -458,12 +535,16 @@ impl MeshAwareHttpClient {
     ) -> crate::mesh_gate_body::FinishCallback {
         let client = self.clone();
         let peer = peer.clone();
+        let key = format!("direct-preflight:{}", peer.node_id);
+        let mut completion_sender = completion_sender;
         Box::new(move |outcome| {
+            let completion_client = client.clone();
+            let finished = completion_sender.take();
             if outcome != crate::mesh_gate_body::BodyFinish::Complete {
                 let failure_deadline =
                     crate::control_plane_mesh::body_completion_deadline(deadline);
-                tokio::spawn(async move {
-                    client
+                client.dispatch_ordered_critical_completion(key, operation_id, async move {
+                    completion_client
                         .record_direct_preflight_failure_after_body(
                             &peer,
                             epoch,
@@ -473,14 +554,14 @@ impl MeshAwareHttpClient {
                             failure_deadline,
                         )
                         .await;
-                    if let Some(sender) = completion_sender {
+                    if let Some(sender) = finished {
                         let _ = sender.send(false);
                     }
                 });
                 return;
             }
-            tokio::spawn(async move {
-                let committed = client
+            client.dispatch_ordered_critical_completion(key, operation_id, async move {
+                let committed = completion_client
                     .record_direct_preflight_success_after_body(
                         &peer,
                         epoch,
@@ -491,7 +572,7 @@ impl MeshAwareHttpClient {
                         deadline,
                     )
                     .await;
-                if let Some(sender) = completion_sender {
+                if let Some(sender) = finished {
                     let _ = sender.send(committed);
                 }
             });
@@ -524,15 +605,16 @@ impl MeshAwareHttpClient {
         };
         let recorded = crate::control_plane_mesh::await_until(
             deadline,
-            self.mark_direct_validation_failure_with_operation(
+            self.mark_direct_validation_failure_with_operation_until(
                 peer,
                 DirectValidationState::TransportFailed,
                 validation_revision,
                 operation_id,
+                deadline,
             ),
         )
         .await;
-        if recorded.is_none() {
+        if !recorded.flatten().unwrap_or(false) {
             self.spawn_validation_failure_cleanup_for_preflight(
                 peer,
                 epoch,
@@ -542,7 +624,7 @@ impl MeshAwareHttpClient {
                 allow_mesh_when_disabled,
             );
         }
-        recorded.unwrap_or(false)
+        recorded.flatten().unwrap_or(false)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -567,7 +649,11 @@ impl MeshAwareHttpClient {
         };
         let breaker_recorded = crate::control_plane_mesh::await_until(
             deadline,
-            self.circuits.record_success_at(&peer.node_id, operation_id),
+            self.circuits.record_success_at_with_cleanup(
+                &peer.node_id,
+                operation_id,
+                Some(cleanup::DirectCleanupContext::new(deadline, probe_id)),
+            ),
         )
         .await
         .flatten()
@@ -575,14 +661,16 @@ impl MeshAwareHttpClient {
         let cleanup_revision = validation_revision.clone();
         let validation_recorded = crate::control_plane_mesh::await_until(
             deadline,
-            self.mark_direct_validation_success_with_operation(
+            self.mark_direct_validation_success_with_operation_until(
                 peer,
                 validation_revision,
                 operation_id,
+                deadline,
             ),
         )
         .await
-        .is_some_and(|recorded| recorded);
+        .flatten()
+        .unwrap_or(false);
         if !breaker_recorded || !validation_recorded {
             if allow_mesh_when_disabled {
                 self.spawn_validation_success_cleanup_for_preflight(

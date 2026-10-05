@@ -48,6 +48,7 @@ async fn stale_mesh_epoch_cannot_reopen_current_breaker() {
                 gate_guard,
                 None,
                 Instant::now() + Duration::from_secs(1),
+                None,
             )
             .await;
     }
@@ -683,6 +684,7 @@ async fn stale_epoch_protocol_failure_does_not_quarantine_current_circuit() {
                 Some("stale-membership".to_owned()),
                 &gate_guard,
                 Instant::now() + Duration::from_secs(1),
+                None,
             )
             .await
             .is_none()
@@ -717,6 +719,7 @@ async fn stale_epoch_transport_failure_does_not_overwrite_current_validation() {
             gate_guard,
             None,
             Instant::now() + Duration::from_secs(1),
+            None,
         )
         .await;
 

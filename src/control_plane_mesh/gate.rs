@@ -59,6 +59,9 @@ impl MeshAwareHttpClient {
     ) -> Result<MeshAttemptResult, MeshRequestError> {
         let request_deadline = started + request.total_budget;
         let mesh_send_deadline = started + budget;
+        let probe_id = mesh_probe_guard
+            .as_ref()
+            .map(MeshHalfOpenProbeGuard::probe_id);
         let send_result = self
             .with_mesh_send_until(mesh_epoch, mesh_send_deadline, |remaining| async move {
                 signed_send(
@@ -91,6 +94,7 @@ impl MeshAwareHttpClient {
                             validation_revision.clone(),
                             MeshRequestError::Protocol("Mesh response did not use HTTP/2".into()),
                             request_deadline,
+                            probe_id,
                         )
                         .await);
                 }
@@ -112,6 +116,7 @@ impl MeshAwareHttpClient {
                                             .into(),
                                     ),
                                     request_deadline,
+                                    probe_id,
                                 )
                                 .await);
                         }
@@ -133,6 +138,7 @@ impl MeshAwareHttpClient {
                                 validation_revision.clone(),
                                 error.into(),
                                 request_deadline,
+                                probe_id,
                             )
                             .await);
                     }
@@ -200,6 +206,7 @@ impl MeshAwareHttpClient {
                             "Mesh response did not carry a valid signed acknowledgement".into(),
                         ),
                         request_deadline,
+                        probe_id,
                     )
                     .await)
             }
@@ -216,6 +223,7 @@ impl MeshAwareHttpClient {
                     gate_guard,
                     validation_revision,
                     request_deadline,
+                    probe_id,
                 )
                 .await;
                 Ok(MeshAttemptResult::Fallback {
@@ -232,6 +240,7 @@ impl MeshAwareHttpClient {
                     gate_guard,
                     validation_revision,
                     request_deadline,
+                    probe_id,
                 )
                 .await;
                 Ok(MeshAttemptResult::Fallback {
@@ -265,15 +274,17 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         operation_id: u64,
         probe_id: Option<u64>,
+        deadline: Instant,
         _epoch_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
     ) -> Option<BreakerState> {
-        if !self.mesh_gate_matches(epoch) {
+        if Instant::now() >= deadline || !self.mesh_gate_matches(epoch) {
             return None;
         }
-        let Some(breaker_state) = self
-            .circuits
-            .try_record_success_at(&peer.node_id, operation_id)
-        else {
+        let Some(breaker_state) = self.circuits.try_record_success_at_with_cleanup(
+            &peer.node_id,
+            operation_id,
+            Some(cleanup::DirectCleanupContext::new(deadline, probe_id)),
+        ) else {
             self.spawn_validation_success_cleanup(
                 peer,
                 epoch,
@@ -283,14 +294,15 @@ impl MeshAwareHttpClient {
             );
             return None;
         };
-        if !self.mesh_gate_matches(epoch) {
+        if Instant::now() >= deadline || !self.mesh_gate_matches(epoch) {
             return None;
         }
         let cleanup_revision = validation_revision.clone();
-        if self.try_mark_direct_validation_success_with_operation(
+        if self.try_mark_direct_validation_success_with_operation_until(
             peer,
             validation_revision,
             operation_id,
+            deadline,
         ) != Some(true)
         {
             self.spawn_validation_success_cleanup(
@@ -335,6 +347,7 @@ impl MeshAwareHttpClient {
             validation_revision,
             operation_id,
             probe_id,
+            deadline,
             &epoch_guard,
         );
         drop(epoch_guard);
@@ -344,9 +357,9 @@ impl MeshAwareHttpClient {
         if let Some(mesh_probe_guard) = mesh_probe_guard.as_mut() {
             mesh_probe_guard.disarm();
         }
-        self.set_mesh_breaker_deferred_for_epoch_until(peer, breaker_state, None, epoch, deadline)
+        self.set_mesh_breaker_for_epoch_until(peer, breaker_state, None, epoch, deadline)
             .await;
-        self.record_sample_deferred_for_epoch_until(
+        self.record_sample_for_epoch_until(
             peer,
             telemetry_sample(
                 TelemetryPath::Mesh,
@@ -377,8 +390,17 @@ impl MeshAwareHttpClient {
         deadline: Instant,
     ) {
         let cleanup_revision = validation_revision.clone();
+        let probe_id = mesh_probe_guard
+            .as_ref()
+            .map(MeshHalfOpenProbeGuard::probe_id);
         let Some(epoch_guard) = self.mesh_epoch_guard_until(epoch, deadline, true).await else {
-            self.spawn_retryable_failure_cleanup(peer, epoch, cleanup_revision, operation_id);
+            self.spawn_retryable_failure_cleanup(
+                peer,
+                epoch,
+                cleanup_revision,
+                operation_id,
+                probe_id,
+            );
             return;
         };
         if !self.mesh_gate_matches(epoch) {
@@ -387,8 +409,11 @@ impl MeshAwareHttpClient {
         }
         let breaker_result = super::await_until(
             deadline,
-            self.circuits
-                .record_retryable_failure_at(&peer.node_id, operation_id),
+            self.circuits.record_retryable_failure_at_with_cleanup(
+                &peer.node_id,
+                operation_id,
+                Some(cleanup::DirectCleanupContext::new(deadline, probe_id)),
+            ),
         )
         .await;
         drop(epoch_guard);
@@ -399,22 +424,24 @@ impl MeshAwareHttpClient {
                     epoch,
                     validation_revision,
                     operation_id,
+                    probe_id,
                 );
             }
             return;
         };
         let cleanup_revision = validation_revision.clone();
-        let validation_recorded = super::await_until(
-            deadline,
-            self.mark_direct_validation_failure_with_operation(
-                peer,
-                DirectValidationState::TransportFailed,
-                validation_revision,
-                operation_id,
-            ),
-        )
-        .await
-        .is_some_and(|recorded| recorded);
+        let validation_recorded = self
+            .try_mesh_epoch_guard(epoch, true)
+            .and_then(|_epoch_guard| {
+                self.try_mark_direct_validation_failure_with_operation_until(
+                    peer,
+                    DirectValidationState::TransportFailed,
+                    validation_revision,
+                    operation_id,
+                    deadline,
+                )
+            })
+            == Some(true);
         if !validation_recorded {
             self.spawn_validation_failure_cleanup(
                 peer,
@@ -466,6 +493,7 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         error: MeshRequestError,
         deadline: Instant,
+        probe_id: Option<u64>,
     ) -> MeshRequestError {
         drop(response);
         let Some(breaker_state) = self
@@ -475,6 +503,7 @@ impl MeshAwareHttpClient {
                 validation_revision,
                 &gate_guard,
                 deadline,
+                probe_id,
             )
             .await
         else {
@@ -504,6 +533,7 @@ impl MeshAwareHttpClient {
         validation_revision: Option<String>,
         _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
         deadline: Instant,
+        probe_id: Option<u64>,
     ) -> Option<BreakerState> {
         if !self.mesh_gate_matches(epoch) {
             return None;
@@ -511,8 +541,11 @@ impl MeshAwareHttpClient {
         let operation_id = self.circuits.next_operation();
         let Some(breaker_state) = crate::control_plane_mesh::await_until(
             deadline,
-            self.circuits
-                .record_protocol_failure_at(&peer.node_id, operation_id),
+            self.circuits.record_protocol_failure_at_with_cleanup(
+                &peer.node_id,
+                operation_id,
+                Some(cleanup::DirectCleanupContext::new(deadline, probe_id)),
+            ),
         )
         .await
         .flatten() else {
@@ -521,6 +554,7 @@ impl MeshAwareHttpClient {
                 epoch,
                 validation_revision.clone(),
                 operation_id,
+                probe_id,
             );
             return None;
         };
@@ -530,14 +564,16 @@ impl MeshAwareHttpClient {
         let cleanup_revision = validation_revision.clone();
         let recorded = crate::control_plane_mesh::await_until(
             deadline,
-            self.mark_direct_validation_failure_with_operation(
+            self.mark_direct_validation_failure_with_operation_until(
                 peer,
                 DirectValidationState::ProtocolRejected,
                 validation_revision,
                 operation_id,
+                deadline,
             ),
         )
         .await
+        .flatten()
             == Some(true);
         if !recorded {
             self.spawn_validation_failure_cleanup(
@@ -592,7 +628,8 @@ impl MeshAwareHttpClient {
         deadline: Instant,
         require_enabled: bool,
     ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-        if self.snapshot_installing.load(Ordering::Acquire)
+        if Instant::now() >= deadline
+            || self.snapshot_installing.load(Ordering::Acquire)
             || (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
             || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
         {
@@ -603,7 +640,8 @@ impl MeshAwareHttpClient {
             self.mesh_epoch_barrier.clone().read_owned(),
         )
         .await?;
-        if self.snapshot_installing.load(Ordering::Acquire)
+        if Instant::now() >= deadline
+            || self.snapshot_installing.load(Ordering::Acquire)
             || (require_enabled && !self.cluster_mesh_enabled.load(Ordering::Acquire))
             || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
         {
@@ -666,6 +704,20 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn expired_mesh_epoch_deadline_cannot_acquire_an_available_guard() {
+        let client = MeshAwareHttpClient::new(reqwest::Client::new());
+
+        let guard = client
+            .mesh_epoch_guard_until(0, Instant::now() - Duration::from_millis(1), true)
+            .await;
+
+        assert!(
+            guard.is_none(),
+            "an expired epoch admission must not succeed"
+        );
+    }
+
+    #[tokio::test]
     async fn protocol_failure_cleanup_converges_after_request_deadline() {
         let client =
             MeshAwareHttpClient::new(reqwest::Client::new()).with_direct_validation_required();
@@ -694,6 +746,7 @@ mod tests {
                 None,
                 MeshRequestError::Protocol("synthetic rejection".to_owned()),
                 Instant::now(),
+                None,
             )
             .await;
         assert!(matches!(error, MeshRequestError::Protocol(_)));
@@ -741,6 +794,7 @@ mod tests {
                 gate_guard,
                 None,
                 Instant::now(),
+                None,
             )
             .await;
         drop(peers_lock);
@@ -787,6 +841,7 @@ mod tests {
                 gate_guard,
                 None,
                 Instant::now(),
+                None,
             )
             .await;
         client.cluster_mesh_epoch.store(1, Ordering::Release);
