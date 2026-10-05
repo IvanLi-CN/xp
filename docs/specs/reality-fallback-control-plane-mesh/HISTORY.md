@@ -25,6 +25,15 @@
 - Connection reuse telemetry derives an ephemeral fingerprint from socket metadata but persists
   only aggregate generations and counters. This makes churn diagnosable without exposing network
   identity.
+- Authenticated snapshot admission belongs before OpenRaft dispatch: contention is a signed,
+  retryable transport refusal, while an admitted reservation blocks regular and re-enable Mesh
+  dispatch plus new deferred epoch readers until the real installation task ends without holding the
+  state-machine gate recursively. Direct cleanup overflow retains the newest operation identity so
+  a delayed older callback cannot displace a newer safety result.
+- Body-completion commits recheck absolute deadlines after acquiring circuit, validation, and
+  telemetry locks. A callback that is first polled after expiry cannot mutate status; completed Mesh
+  success synchronously persists its breaker and route reason, while ordinary samples remain
+  coalesced.
 - Web upgrade 的互斥所有权属于活进程锁，而不是锁文件路径。OpenRC one-shot 必须在退出后
   清理自身状态；409 只有在状态刷新证明任务仍 active 时才进入观察，否则作为 stale conflict
   立即解锁。

@@ -10,6 +10,12 @@ enum MeshPreflightRoute {
     RegisteredApi,
 }
 
+#[derive(Debug)]
+pub(super) enum MeshPreflightBodyError {
+    Transport(String),
+    Oversized,
+}
+
 fn mesh_preflight_route(target: &MeshPeerTarget) -> MeshPreflightRoute {
     if target.mesh_base_url.is_some() {
         MeshPreflightRoute::Direct
@@ -321,27 +327,59 @@ async fn run_peer_health_preflight(
         sender_id: state.cluster.node_id.clone(),
         updates_active_path: false,
     };
-    let result = match mesh_preflight_route(target) {
-        MeshPreflightRoute::Direct => {
-            state
-                .mesh_client
-                .send_peer_direct_preflight_for_reenable(
-                    target,
-                    request,
-                    ca_key_pem,
-                    &state.cluster_ca_pem,
-                )
-                .await
-        }
-        MeshPreflightRoute::RegisteredApi => {
-            state
-                .mesh_client
-                .send_peer_request(target, request, ca_key_pem, &state.cluster_ca_pem)
-                .await
-        }
+    let (response, completion) = match mesh_preflight_route(target) {
+        MeshPreflightRoute::Direct => state
+            .mesh_client
+            .send_peer_direct_preflight_for_reenable(
+                target,
+                request,
+                ca_key_pem,
+                &state.cluster_ca_pem,
+            )
+            .await
+            .map(|(response, completion)| (response, Some(completion)))?,
+        MeshPreflightRoute::RegisteredApi => state
+            .mesh_client
+            .send_peer_request(target, request, ca_key_pem, &state.cluster_ca_pem)
+            .await
+            .map(|response| (response, None))?,
     };
-    let response = result?;
-    drop(response);
+    consume_bounded_preflight_body(response)
+        .await
+        .map_err(|error| match error {
+            MeshPreflightBodyError::Transport(_) => MeshRequestError::TransportTimeout,
+            MeshPreflightBodyError::Oversized => {
+                MeshRequestError::Protocol("mesh preflight response body is oversized".into())
+            }
+        })?;
+    if let Some(completion) = completion
+        && !completion.await.unwrap_or(false)
+    {
+        return Err(MeshRequestError::TransportTimeout);
+    }
+    Ok(())
+}
+
+pub(super) async fn consume_bounded_preflight_body(
+    mut response: reqwest::Response,
+) -> Result<(), MeshPreflightBodyError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_MESH_PREFLIGHT_RESPONSE_BYTES as u64)
+    {
+        return Err(MeshPreflightBodyError::Oversized);
+    }
+    let mut bytes = 0usize;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| MeshPreflightBodyError::Transport(error.to_string()))?
+    {
+        bytes = bytes.saturating_add(chunk.len());
+        if bytes > MAX_MESH_PREFLIGHT_RESPONSE_BYTES {
+            return Err(MeshPreflightBodyError::Oversized);
+        }
+    }
     Ok(())
 }
 
@@ -483,5 +521,39 @@ mod tests {
         assert!(!validate_remote_preflight_response(
             &response, "node-b", &expected
         ));
+    }
+
+    #[tokio::test]
+    async fn health_preflight_body_is_bounded_without_content_length() {
+        let body =
+            reqwest::Body::wrap_stream(futures_util::stream::iter([Ok::<_, std::io::Error>(
+                vec![0u8; MAX_MESH_PREFLIGHT_RESPONSE_BYTES + 1],
+            )]));
+        let response = reqwest::Response::from(
+            axum::http::Response::builder()
+                .body(body)
+                .expect("synthetic response"),
+        );
+
+        let error = consume_bounded_preflight_body(response)
+            .await
+            .expect_err("oversized health body must fail closed");
+        assert!(matches!(error, MeshPreflightBodyError::Oversized));
+    }
+
+    #[tokio::test]
+    async fn health_preflight_body_accepts_the_configured_limit() {
+        let response = reqwest::Response::from(
+            axum::http::Response::builder()
+                .body(reqwest::Body::from(vec![
+                    0u8;
+                    MAX_MESH_PREFLIGHT_RESPONSE_BYTES
+                ]))
+                .expect("synthetic response"),
+        );
+
+        consume_bounded_preflight_body(response)
+            .await
+            .expect("health body at the limit must be accepted");
     }
 }

@@ -4,9 +4,11 @@ use axum::http::{HeaderMap, Method, Uri};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, Mac};
-use openssl::{pkey::PKey, x509::X509};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+mod subkeys;
+use subkeys::derive_subkey;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -411,35 +413,6 @@ fn hmac_base64(key: &[u8], message: &[u8]) -> Result<String, AuthError> {
     let mut mac = HmacSha256::new_from_slice(key).map_err(|e| AuthError::Crypto(e.to_string()))?;
     mac.update(message);
     Ok(URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()))
-}
-
-fn derive_subkey(
-    cluster_ca_key_pem: &str,
-    cluster_ca_cert_pem: &str,
-    info: &[u8],
-) -> Result<[u8; 32], AuthError> {
-    let key = PKey::private_key_from_pem(cluster_ca_key_pem.as_bytes())
-        .map_err(|e| AuthError::Crypto(format!("parse CA private key: {e}")))?;
-    let key_der = key
-        .private_key_to_der()
-        .map_err(|e| AuthError::Crypto(format!("encode CA private key: {e}")))?;
-    let cert = X509::from_pem(cluster_ca_cert_pem.as_bytes())
-        .map_err(|e| AuthError::Crypto(format!("parse CA certificate: {e}")))?;
-    let cert_der = cert
-        .to_der()
-        .map_err(|e| AuthError::Crypto(format!("encode CA certificate: {e}")))?;
-    let salt = Sha256::digest(cert_der);
-
-    // HKDF-Extract(salt, IKM), then HKDF-Expand(PRK, info || 0x01).
-    let mut extract =
-        HmacSha256::new_from_slice(&salt).map_err(|e| AuthError::Crypto(e.to_string()))?;
-    extract.update(&key_der);
-    let prk = extract.finalize().into_bytes();
-    let mut expand =
-        HmacSha256::new_from_slice(&prk).map_err(|e| AuthError::Crypto(e.to_string()))?;
-    expand.update(info);
-    expand.update(&[1]);
-    Ok(expand.finalize().into_bytes().into())
 }
 
 fn now_unix_secs() -> i64 {

@@ -1,11 +1,13 @@
 use super::*;
 use super::{bootstrap, mesh_peer_target};
+use futures_util::TryStreamExt;
 
 pub(super) fn build_reverse_relay_response(
     response: reqwest::Response,
     status: StatusCode,
     inner_ack: &str,
     gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+    deadline: std::time::Instant,
 ) -> Result<Response, ApiError> {
     let mut builder = Response::builder().status(status);
     if let Some(content_type) = response.headers().get(header::CONTENT_TYPE) {
@@ -15,23 +17,8 @@ pub(super) fn build_reverse_relay_response(
         header::HeaderName::from_static(crate::reverse_mesh::RELAY_INNER_ACK_HEADER),
         inner_ack,
     );
-    let stream = response.bytes_stream();
-    let guarded_stream = futures_util::stream::unfold(
-        (stream, Some(gate_guard)),
-        |(mut stream, mut gate_guard)| async move {
-            match stream.next().await {
-                Some(Ok(item)) => Some((Ok(item), (stream, gate_guard))),
-                Some(Err(error)) => {
-                    drop(gate_guard.take());
-                    Some((Err(std::io::Error::other(error)), (stream, gate_guard)))
-                }
-                None => {
-                    drop(gate_guard.take());
-                    None
-                }
-            }
-        },
-    );
+    let stream = response.bytes_stream().map_err(std::io::Error::other);
+    let guarded_stream = crate::mesh_gate_body::guard_stream(stream, gate_guard, deadline);
     builder
         .body(Body::from_stream(guarded_stream))
         .map_err(|_| ApiError::internal("build reverse relay response"))
@@ -247,9 +234,14 @@ async fn probe_reverse_link(
 ) -> Result<(), ApiError> {
     // Hold shared Mesh admission through asynchronous target lookup and dispatch. This
     // dedicated probe must never fall back to the rendezvous public API path.
-    let gate_guard = state.reconcile.mesh_gate_read().await.ok_or_else(|| {
-        ApiError::conflict("reverse link probing is disabled by the cluster Mesh gate")
-    })?;
+    let request_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let gate_guard = state
+        .reconcile
+        .mesh_gate_read_until(request_deadline)
+        .await
+        .ok_or_else(|| {
+            ApiError::conflict("reverse link probing is disabled by the cluster Mesh gate")
+        })?;
     if link.target_node_id != state.cluster.node_id {
         return Err(ApiError::invalid_request(
             "reverse link target is not local",
@@ -268,7 +260,7 @@ async fn probe_reverse_link(
     .map_err(|error| ApiError::internal(format!("encode reverse link probe: {error}")))?;
     state
         .mesh_client
-        .send_peer_direct_request_with_gate(
+        .send_peer_direct_request_with_gate_until(
             &rendezvous,
             crate::control_plane_mesh::PeerDirectPath::RealityMesh,
             MeshRequest {
@@ -287,6 +279,7 @@ async fn probe_reverse_link(
             ca_key_pem,
             &state.cluster_ca_pem,
             Some(gate_guard),
+            request_deadline,
         )
         .await
         .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
@@ -320,9 +313,15 @@ pub(in crate::http) async fn admin_internal_mesh_health(
         ));
     }
     let _mesh_gate_read = if link.is_some() {
-        Some(state.reconcile.mesh_gate_read().await.ok_or_else(|| {
-            ApiError::conflict("reverse health is disabled by the cluster Mesh gate")
-        })?)
+        Some(
+            state
+                .reconcile
+                .mesh_gate_read_until(std::time::Instant::now() + Duration::from_secs(5))
+                .await
+                .ok_or_else(|| {
+                    ApiError::conflict("reverse health is disabled by the cluster Mesh gate")
+                })?,
+        )
     } else {
         None
     };

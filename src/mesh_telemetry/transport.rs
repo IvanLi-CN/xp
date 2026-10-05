@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, VecDeque},
     net::SocketAddr,
     sync::Arc,
+    time::Instant,
 };
 
 use chrono::{DateTime, Duration, Utc};
@@ -64,15 +65,45 @@ impl MeshConnectionTrackers {
         peer_id: &str,
         observation: Option<MeshTransportObservation>,
     ) -> Option<ObservedTransport> {
-        let observation = observation?;
+        self.observe_inner(peer_id, observation, None).await.1
+    }
+
+    pub async fn observe_until(
+        &self,
+        peer_id: &str,
+        observation: Option<MeshTransportObservation>,
+        deadline: Instant,
+    ) -> (bool, Option<ObservedTransport>) {
+        self.observe_inner(peer_id, observation, Some(deadline))
+            .await
+    }
+
+    async fn observe_inner(
+        &self,
+        peer_id: &str,
+        observation: Option<MeshTransportObservation>,
+        deadline: Option<Instant>,
+    ) -> (bool, Option<ObservedTransport>) {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return (false, None);
+        }
+        let Some(observation) = observation else {
+            return (true, None);
+        };
         let Some(fingerprint) = observation.fingerprint else {
-            return Some(ObservedTransport {
-                protocol: observation.protocol,
-                connection_started: false,
-                current_connection_requests: None,
-            });
+            return (
+                true,
+                Some(ObservedTransport {
+                    protocol: observation.protocol,
+                    connection_started: false,
+                    current_connection_requests: None,
+                }),
+            );
         };
         let mut peers = self.peers.lock().await;
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return (false, None);
+        }
         let tracker = peers.entry(peer_id.to_string()).or_default();
         let connection_started = !tracker.recent.contains(&fingerprint);
         if connection_started {
@@ -85,12 +116,15 @@ impl MeshConnectionTrackers {
         } else if tracker.current == Some(fingerprint) {
             tracker.current_requests = tracker.current_requests.saturating_add(1);
         }
-        Some(ObservedTransport {
-            protocol: observation.protocol,
-            connection_started,
-            current_connection_requests: (tracker.current == Some(fingerprint))
-                .then_some(tracker.current_requests),
-        })
+        (
+            true,
+            Some(ObservedTransport {
+                protocol: observation.protocol,
+                connection_started,
+                current_connection_requests: (tracker.current == Some(fingerprint))
+                    .then_some(tracker.current_requests),
+            }),
+        )
     }
 }
 

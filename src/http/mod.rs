@@ -42,7 +42,8 @@ use mesh::{
     admin_internal_mesh_preflight, admin_internal_raft_client_write, admin_internal_reverse_probe,
     admin_internal_reverse_relay, admin_run_mesh_probes, admin_update_mesh_config,
     send_mesh_internal_capability_read, send_mesh_internal_read, send_mesh_internal_request,
-    spawn_mesh_probe_worker, spawn_reverse_assignment_worker, spawn_reverse_link_probe_worker,
+    send_mesh_internal_stream_read, spawn_mesh_probe_worker, spawn_reverse_assignment_worker,
+    spawn_reverse_link_probe_worker,
 };
 use node_delete::AdminNodeDeletePreviewEndpoint;
 use resource_alerts::admin_get_alerts_response;
@@ -973,7 +974,9 @@ pub fn build_router_with_mesh_telemetry(
 ) -> Router {
     let mesh_client = mesh_client
         .with_mesh_gate_epoch(reconcile.mesh_gate(), reconcile.mesh_gate_epoch())
-        .with_mesh_gate_lock(reconcile.mesh_gate_lock());
+        .with_mesh_gate_lock(reconcile.mesh_gate_lock())
+        .with_snapshot_install_reservation(reconcile.snapshot_installing())
+        .with_mesh_epoch_barrier(reconcile.mesh_epoch_barrier());
     let cluster_id = cluster.cluster_id.clone();
     let internal_idempotency = InternalIdempotencyLedger::load(&config.data_dir)
         .expect("load local internal idempotency ledger");
@@ -1463,7 +1466,10 @@ pub fn build_router_with_mesh_telemetry(
         .fallback(embedded_ui::embedded_spa_fallback);
 
     if let Some(raft) = raft_rpc {
-        let raft_state = crate::raft::http_rpc::RaftRpcState { raft };
+        let raft_state = crate::raft::http_rpc::RaftRpcState {
+            raft,
+            reconcile: app_state.reconcile.clone(),
+        };
         app = match app_state.cluster_ca_key_pem.as_deref() {
             Some(cluster_ca_key_pem) => {
                 app.merge(crate::raft::http_rpc::build_authenticated_raft_rpc_router(
@@ -3658,7 +3664,7 @@ async fn forward_remote_node_runtime_events(
     tx: mpsc::Sender<Event>,
 ) {
     let node_id = node.node_id.clone();
-    let response = match send_mesh_internal_read(
+    let response = match send_mesh_internal_stream_read(
         &state,
         &client,
         &node,

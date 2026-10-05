@@ -47,6 +47,10 @@ and copies the resolved XP and resource-test executables into the disposable
 run before measurement. The run directory is cleaned by the existing runner
 trap; it is not a cache.
 
+Remote build and test processes inherit `TMPDIR=<disposable-run>/tmp`. Rust
+resource fixtures therefore keep temporary node state, SQLite files and logs
+inside the owning Agent Directory, alongside the run's other disposable files.
+
 Use `scripts/cargo-cache/status.sh --cache-root PATH` to inspect both slots.
 The status command is read-only. `scripts/cargo-cache/test.sh` is the local
 fixture for the wrapper's Cargo invalidation, path, slot and lock behavior.

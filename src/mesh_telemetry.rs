@@ -1,13 +1,12 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     fs,
-    io::Write,
     path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Duration as StdDuration,
+    time::{Duration as StdDuration, Instant as StdInstant},
 };
 
 use chrono::{DateTime, Duration, SecondsFormat, Timelike, Utc};
@@ -27,8 +26,11 @@ const MAX_HISTORY_SOURCE_STRING_BYTES: usize = 48;
 const MAX_HISTORY_SOURCE_LATENCY_SAMPLES: usize = 64;
 const SAMPLE_PERSIST_INTERVAL: StdDuration = StdDuration::from_secs(5);
 
+mod persistence;
 mod reverse;
 mod transport;
+mod writes;
+use persistence::persist;
 pub use reverse::ReverseRelayTelemetrySample;
 use transport::MeshConnectionTrackers;
 pub(crate) use transport::{MeshConnectionFingerprint, MeshTransportObservation};
@@ -188,10 +190,8 @@ pub struct MeshTelemetrySnapshot {
     pub events: Vec<MeshTelemetryEvent>,
 }
 
-/// Bounded Mesh telemetry view used by the history source worker.
-///
-/// History source observations describe the latest peer state. They do not need to duplicate the
-/// full local 24-hour bucket series on every one-minute source segment.
+/// Bounded Mesh telemetry view used by the history source worker. History source observations
+/// describe the latest peer state without duplicating the full 24-hour bucket series.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct MeshTelemetryHistorySourceSnapshot {
     pub generated_at: String,
@@ -242,14 +242,17 @@ impl MeshTelemetryHandle {
             persist_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })
     }
-
     /// Limits all scheduled and operator-triggered peer probes on this node together.
     pub fn probe_gate(&self) -> Arc<Semaphore> {
         self.probe_gate.clone()
     }
-
     pub fn try_acquire_operator_probe_batch(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
         self.operator_probe_gate.clone().try_acquire_owned().ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn hold_state_for_test(&self) -> impl Send + use<> {
+        self.state.clone().lock_owned().await
     }
 
     pub async fn snapshot(&self) -> MeshTelemetrySnapshot {
@@ -280,8 +283,7 @@ impl MeshTelemetryHandle {
 
         let start = self
             .history_source_cursor
-            // Advance one starting position per collection. The byte budget can admit fewer than
-            // `max_peers`, so advancing a full window could permanently skip its tail.
+            // Advance one position per collection; a byte-limited window must not skip its tail.
             .fetch_add(1, Ordering::Relaxed)
             % peers.len();
         for offset in 0..peers.len() {
@@ -300,121 +302,53 @@ impl MeshTelemetryHandle {
         }
         snapshot
     }
-
-    pub async fn record_sample(
-        &self,
-        peer_id: impl Into<String>,
-        peer_name: impl Into<String>,
-        sample: MeshTelemetrySample,
-    ) -> anyhow::Result<()> {
-        self.record_sample_with_active_route(peer_id, peer_name, sample, None)
-            .await
-    }
-
-    async fn record_sample_with_active_route(
-        &self,
-        peer_id: impl Into<String>,
-        peer_name: impl Into<String>,
-        sample: MeshTelemetrySample,
-        active_route: Option<MeshActiveRoute>,
-    ) -> anyhow::Result<()> {
-        let now = Utc::now();
-        let peer_id = peer_id.into();
-        let observed_transport = self.connections.observe(&peer_id, sample.transport).await;
-        let mut state = self.state.lock().await;
-        let peer = state
-            .persisted
-            .peers
-            .entry(peer_id.clone())
-            .or_insert_with(|| MeshPeerTelemetry {
-                peer_id: peer_id.clone(),
-                ..MeshPeerTelemetry::default()
-            });
-        peer.peer_name = peer_name.into();
-        let previous_path = peer.last_path;
-        let updates_active_path = sample.updates_active_path && sample.success;
-        if updates_active_path {
-            peer.last_path = Some(sample.path);
-            let active_route = active_route.unwrap_or(MeshActiveRoute {
-                kind: match sample.path {
-                    TelemetryPath::Mesh => ActiveRouteKind::RealityDirect,
-                    TelemetryPath::Public => ActiveRouteKind::Public,
-                },
-                rendezvous: None,
-                rendezvous_role: None,
-                primary_rendezvous: None,
-                standby_rendezvous: None,
-                generation: None,
-                readiness: None,
-            });
-            peer.active_route = Some(active_route);
-        }
-        peer.last_sample_at = Some(timestamp(now));
-        if updates_active_path && previous_path != Some(sample.path) {
-            peer.last_transition_at = Some(timestamp(now));
-        }
-        if let Some(observed) = observed_transport {
-            peer.last_mesh_protocol = Some(observed.protocol);
-            if observed.connection_started {
-                peer.connection_generation = peer.connection_generation.saturating_add(1);
-                peer.last_connection_started_at = Some(timestamp(now));
-            }
-            if let Some(requests) = observed.current_connection_requests {
-                peer.current_connection_requests = requests;
-            }
-        }
-        let bucket = ensure_bucket(peer, now);
-        match (sample.path, sample.success) {
-            (TelemetryPath::Mesh, true) => {
-                bucket.mesh_success += 1;
-                bucket.end_to_end_success += 1;
-            }
-            (TelemetryPath::Mesh, false) => bucket.mesh_failure += 1,
-            (TelemetryPath::Public, true) => {
-                bucket.public_success += 1;
-                bucket.end_to_end_success += 1;
-            }
-            (TelemetryPath::Public, false) => {
-                bucket.public_failure += 1;
-                bucket.end_to_end_failure += 1;
-            }
-        }
-        if sample.fallback && sample.success {
-            bucket.fallback_success += 1;
-        }
-        if let Some(observed) = observed_transport {
-            if observed.protocol == MeshTransportProtocol::H2 {
-                bucket.mesh_h2_requests = bucket.mesh_h2_requests.saturating_add(1);
-            }
-            if observed.connection_started {
-                bucket.mesh_connection_starts = bucket.mesh_connection_starts.saturating_add(1);
-            }
-        }
-        if let Some(latency_ms) = sample.latency_ms {
-            // Per-minute quantiles do not need unbounded precision. Keeping 64 values remains
-            // stable under probe bursts while retaining enough signal for p50/p95.
-            if bucket.latency_samples_ms.len() < 64 {
-                bucket.latency_samples_ms.push(latency_ms);
-            }
-        }
-        state.persisted.revision += 1;
-        let deferred_flush = self.persist_sample_if_due(&mut state, Instant::now())?;
-        drop(state);
-        if let Some(delay) = deferred_flush {
-            self.spawn_deferred_flush(delay);
-        }
-        Ok(())
-    }
-
     pub async fn set_breaker(
         &self,
         peer_id: impl Into<String>,
         state_value: BreakerState,
         event_message: Option<String>,
     ) -> anyhow::Result<()> {
+        self.set_breaker_with_mode(peer_id, state_value, event_message, false, None)
+            .await
+            .map(|_| ())
+    }
+    pub(crate) async fn set_breaker_until(
+        &self,
+        peer_id: impl Into<String>,
+        state_value: BreakerState,
+        event_message: Option<String>,
+        deadline: StdInstant,
+    ) -> anyhow::Result<bool> {
+        self.set_breaker_with_mode(peer_id, state_value, event_message, false, Some(deadline))
+            .await
+    }
+    #[cfg(test)]
+    pub(crate) async fn set_breaker_deferred(
+        &self,
+        peer_id: impl Into<String>,
+        state_value: BreakerState,
+        event_message: Option<String>,
+    ) -> anyhow::Result<()> {
+        self.set_breaker_with_mode(peer_id, state_value, event_message, true, None)
+            .await
+            .map(|_| ())
+    }
+    async fn set_breaker_with_mode(
+        &self,
+        peer_id: impl Into<String>,
+        state_value: BreakerState,
+        event_message: Option<String>,
+        defer_persist: bool,
+        deadline: Option<StdInstant>,
+    ) -> anyhow::Result<bool> {
+        if deadline.is_some_and(|deadline| StdInstant::now() >= deadline) {
+            return Ok(false);
+        }
         let peer_id = peer_id.into();
-        let now = Utc::now();
         let mut state = self.state.lock().await;
+        if deadline.is_some_and(|deadline| StdInstant::now() >= deadline) {
+            return Ok(false);
+        }
         let peer = state
             .persisted
             .peers
@@ -423,14 +357,13 @@ impl MeshTelemetryHandle {
                 peer_id: peer_id.clone(),
                 ..MeshPeerTelemetry::default()
             });
-        let previous = peer.breaker;
-        peer.breaker = Some(state_value);
-        if previous != Some(state_value) {
+        let changed = peer.breaker.replace(state_value) != Some(state_value);
+        if changed {
             if let Some(message) = event_message {
                 push_event(
                     &mut state.persisted.events,
                     MeshTelemetryEvent {
-                        at: timestamp(now),
+                        at: timestamp(Utc::now()),
                         peer_id,
                         kind: "breaker".to_string(),
                         message,
@@ -438,20 +371,57 @@ impl MeshTelemetryHandle {
                 );
             }
             state.persisted.revision += 1;
-            self.persist_immediately(&mut state, Instant::now())?;
         }
-        Ok(())
+        if !changed && (!defer_persist || !state.retry_persist) {
+            return Ok(true);
+        }
+        if !defer_persist {
+            self.persist_immediately(&mut state, Instant::now())?;
+            return Ok(true);
+        }
+        let deferred_flush = self.schedule_deferred_flush(&mut state, Instant::now(), false);
+        drop(state);
+        if let Some(delay) = deferred_flush {
+            self.spawn_deferred_flush(delay);
+        }
+        Ok(true)
     }
-
     pub async fn set_public_breaker(
         &self,
         peer_id: impl Into<String>,
         state_value: BreakerState,
         event_message: Option<String>,
     ) -> anyhow::Result<()> {
+        self.set_public_breaker_with_deadline(peer_id, state_value, event_message, None)
+            .await
+            .map(|_| ())
+    }
+    pub(crate) async fn set_public_breaker_until(
+        &self,
+        peer_id: impl Into<String>,
+        state_value: BreakerState,
+        event_message: Option<String>,
+        deadline: StdInstant,
+    ) -> anyhow::Result<bool> {
+        self.set_public_breaker_with_deadline(peer_id, state_value, event_message, Some(deadline))
+            .await
+    }
+    async fn set_public_breaker_with_deadline(
+        &self,
+        peer_id: impl Into<String>,
+        state_value: BreakerState,
+        event_message: Option<String>,
+        deadline: Option<StdInstant>,
+    ) -> anyhow::Result<bool> {
+        if deadline.is_some_and(|deadline| StdInstant::now() >= deadline) {
+            return Ok(false);
+        }
         let peer_id = peer_id.into();
         let now = Utc::now();
         let mut state = self.state.lock().await;
+        if deadline.is_some_and(|deadline| StdInstant::now() >= deadline) {
+            return Ok(false);
+        }
         let peer = state
             .persisted
             .peers
@@ -477,17 +447,43 @@ impl MeshTelemetryHandle {
             state.persisted.revision += 1;
             self.persist_immediately(&mut state, Instant::now())?;
         }
-        Ok(())
+        Ok(true)
     }
-
     pub async fn set_mesh_reason(
         &self,
         peer_id: impl Into<String>,
         mesh_target: Option<&str>,
         reason: MeshPeerReason,
     ) -> anyhow::Result<()> {
+        self.set_mesh_reason_with_deadline(peer_id, mesh_target, reason, None)
+            .await
+            .map(|_| ())
+    }
+    pub(crate) async fn set_mesh_reason_until(
+        &self,
+        peer_id: impl Into<String>,
+        mesh_target: Option<&str>,
+        reason: MeshPeerReason,
+        deadline: StdInstant,
+    ) -> anyhow::Result<bool> {
+        self.set_mesh_reason_with_deadline(peer_id, mesh_target, reason, Some(deadline))
+            .await
+    }
+    async fn set_mesh_reason_with_deadline(
+        &self,
+        peer_id: impl Into<String>,
+        mesh_target: Option<&str>,
+        reason: MeshPeerReason,
+        deadline: Option<StdInstant>,
+    ) -> anyhow::Result<bool> {
+        if deadline.is_some_and(|deadline| StdInstant::now() >= deadline) {
+            return Ok(false);
+        }
         let peer_id = peer_id.into();
         let mut state = self.state.lock().await;
+        if deadline.is_some_and(|deadline| StdInstant::now() >= deadline) {
+            return Ok(false);
+        }
         let peer = state
             .persisted
             .peers
@@ -498,25 +494,49 @@ impl MeshTelemetryHandle {
             });
         let mesh_target = mesh_target.map(str::to_string);
         if peer.last_mesh_reason == Some(reason) && peer.last_mesh_target == mesh_target {
-            return Ok(());
+            return Ok(true);
         }
         peer.last_mesh_reason = Some(reason);
         peer.last_mesh_target = mesh_target;
         state.persisted.revision += 1;
-        self.persist_immediately(&mut state, Instant::now())
+        self.persist_immediately(&mut state, Instant::now())?;
+        Ok(true)
     }
-
-    /// Records a final request failure after an earlier transport sample. This keeps path-attempt
-    /// diagnostics separate from the end-to-end outcome so one failed Mesh attempt followed by a
-    /// fallback remains one logical request.
+    /// Records a final request failure separately from the transport sample so Mesh fallback
+    /// remains one logical request.
     pub async fn record_terminal_failure(
         &self,
         peer_id: impl Into<String>,
         peer_name: impl Into<String>,
     ) -> anyhow::Result<()> {
+        self.record_terminal_failure_with_deadline(peer_id, peer_name, None)
+            .await
+            .map(|_| ())
+    }
+    pub(crate) async fn record_terminal_failure_until(
+        &self,
+        peer_id: impl Into<String>,
+        peer_name: impl Into<String>,
+        deadline: StdInstant,
+    ) -> anyhow::Result<bool> {
+        self.record_terminal_failure_with_deadline(peer_id, peer_name, Some(deadline))
+            .await
+    }
+    async fn record_terminal_failure_with_deadline(
+        &self,
+        peer_id: impl Into<String>,
+        peer_name: impl Into<String>,
+        deadline: Option<StdInstant>,
+    ) -> anyhow::Result<bool> {
+        if deadline.is_some_and(|deadline| StdInstant::now() >= deadline) {
+            return Ok(false);
+        }
         let now = Utc::now();
         let peer_id = peer_id.into();
         let mut state = self.state.lock().await;
+        if deadline.is_some_and(|deadline| StdInstant::now() >= deadline) {
+            return Ok(false);
+        }
         let peer = state
             .persisted
             .peers
@@ -534,9 +554,8 @@ impl MeshTelemetryHandle {
         if let Some(delay) = deferred_flush {
             self.spawn_deferred_flush(delay);
         }
-        Ok(())
+        Ok(true)
     }
-
     pub async fn record_event(
         &self,
         peer_id: impl Into<String>,
@@ -555,6 +574,28 @@ impl MeshTelemetryHandle {
         );
         state.persisted.revision += 1;
         self.persist_immediately(&mut state, Instant::now())
+    }
+
+    fn schedule_deferred_flush(
+        &self,
+        state: &mut TelemetryState,
+        now: Instant,
+        sample_dirty: bool,
+    ) -> Option<StdDuration> {
+        state.dirty = true;
+        state.sample_dirty |= sample_dirty;
+        if state.flush_scheduled {
+            return None;
+        }
+        state.flush_scheduled = true;
+        Some(
+            state
+                .last_sample_persist_at
+                .map(|last_persist| {
+                    SAMPLE_PERSIST_INTERVAL.saturating_sub(now.duration_since(last_persist))
+                })
+                .unwrap_or_default(),
+        )
     }
 
     fn persist_sample_if_due(
@@ -920,20 +961,6 @@ fn parse_persisted_telemetry(bytes: &[u8]) -> anyhow::Result<PersistedTelemetry>
         );
     }
     Ok(parsed)
-}
-
-fn persist(path: &Path, state: &PersistedTelemetry) -> anyhow::Result<()> {
-    let parent = path.parent().expect("mesh telemetry path has a parent");
-    fs::create_dir_all(parent)?;
-    let bytes = serde_json::to_vec_pretty(state)?;
-    let temporary = path.with_extension("json.tmp");
-    {
-        let mut file = fs::File::create(&temporary)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-    }
-    fs::rename(temporary, path)?;
-    Ok(())
 }
 
 #[cfg(test)]

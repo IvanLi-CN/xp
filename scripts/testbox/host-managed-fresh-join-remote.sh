@@ -6,6 +6,8 @@ REMOTE_WORKSPACE="$(printf '%s' "${REMOTE_WORKSPACE_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 RUST_IMAGE="$(printf '%s' "${RUST_IMAGE_B64:?}" | base64 -d)"
 XP_TEST_IMAGE="$(printf '%s' "${XP_TEST_IMAGE_B64:?}" | base64 -d)"
+GIT_SHA="$(printf '%s' "${GIT_SHA_B64:?}" | base64 -d)"
+SOURCE_ARCHIVE_SHA256="$(printf '%s' "${SOURCE_ARCHIVE_SHA256_B64:?}" | base64 -d)"
 XP_HOST_IMAGE_PREFIX="$COMPOSE_PROJECT"
 RECEIPT_PATH="$REMOTE_WORKSPACE/receipts/host-managed-fresh-join-${COMPOSE_PROJECT}.txt"
 BUILDER_NAME="${COMPOSE_PROJECT}-musl-builder"
@@ -20,6 +22,8 @@ cleanup() {
     printf '%s\n' \
       "result=failed" \
       "project=$COMPOSE_PROJECT" \
+      "candidate_commit=$GIT_SHA" \
+      "source_archive_sha256=$SOURCE_ARCHIVE_SHA256" \
       "exit_status=$status" > "$RECEIPT_PATH"
     if [ -d "$COMPOSE_DIR" ]; then
       (
@@ -142,22 +146,31 @@ assert_follower() {
   compose exec -T "$service" grep -q '^XP_ADMIN_TOKEN_HASH=' /etc/xp/xp.env
 }
 
+node_id() {
+  compose exec -T "$1" curl -fsS "https://$1/api/cluster/info" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["node_id"])'
+}
+
 systemd_token="$(issue_join_token)"
 deploy_node systemd "$systemd_token"
 compose exec -T systemd systemctl is-active --quiet xray.service
 compose exec -T systemd systemctl is-active --quiet xp.service
 assert_follower systemd
+systemd_node_id_before_restart="$(node_id systemd)"
 
 openrc_token="$(issue_join_token)"
 deploy_node openrc "$openrc_token"
 compose exec -T openrc rc-service xray status
 compose exec -T openrc rc-service xp status
 assert_follower openrc
+openrc_node_id_before_restart="$(node_id openrc)"
 
 compose exec -T systemd systemctl restart xp.service
 compose exec -T openrc rc-service xp restart
 assert_follower systemd
 assert_follower openrc
+test "$(node_id systemd)" = "$systemd_node_id_before_restart"
+test "$(node_id openrc)" = "$openrc_node_id_before_restart"
 
 # Prove that supervise-daemon owns XP recovery after an abrupt process death.
 openrc_xp_pid="$(compose exec -T openrc sh -c "ps | awk '\$0 ~ /xp run --data-dir/ {print \$1; exit}'" | tr -d '\r')"
@@ -167,6 +180,7 @@ wait_for "OpenRC XP SIGKILL respawn" assert_follower openrc
 sleep 1
 wait_for "OpenRC XP successive ready health" assert_follower openrc
 assert_follower openrc
+test "$(node_id openrc)" = "$openrc_node_id_before_restart"
 
 leader_nodes="$(compose exec -T leader curl -fsS -H 'Authorization: Bearer testbox-admin-token-0123456789abcdef' http://127.0.0.1:62416/api/admin/nodes)"
 printf '%s' "$leader_nodes" | python3 -c 'import json,sys; names={item["node_name"] for item in json.load(sys.stdin)["items"]}; assert {"leader","systemd","openrc"} <= names, names'
@@ -174,10 +188,14 @@ printf '%s' "$leader_nodes" | python3 -c 'import json,sys; names={item["node_nam
 printf '%s\n' \
   "result=passed" \
   "project=$COMPOSE_PROJECT" \
+  "candidate_commit=$GIT_SHA" \
+  "source_archive_sha256=$SOURCE_ARCHIVE_SHA256" \
   "deploy=official-xp-ops" \
   "nodes=leader,systemd,openrc" \
   "roles=systemd:follower,openrc:follower" \
   "restart_identity=preserved" \
+  "systemd_node_id=$systemd_node_id_before_restart" \
+  "openrc_node_id=$openrc_node_id_before_restart" \
   "openrc_xp_sigkill_respawn=verified" > "$RECEIPT_PATH"
 
 echo "host-managed fresh join passed: systemd and OpenRC deployed through xp-ops"

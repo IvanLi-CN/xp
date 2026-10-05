@@ -12,6 +12,19 @@ pub(crate) struct SignedRequest {
     pub(crate) verified: internal_auth::VerifiedRequest,
 }
 
+pub(super) fn public_transport_error(
+    error: reqwest::Error,
+    allow_ambiguous_fallback: bool,
+) -> MeshRequestError {
+    if allow_ambiguous_fallback {
+        MeshRequestError::Public(error)
+    } else if error.is_timeout() && !error.is_connect() {
+        MeshRequestError::TransportTimeout
+    } else {
+        MeshRequestError::OutcomeUnknown
+    }
+}
+
 pub(crate) fn signed_request(
     client: &reqwest::Client,
     url: &str,
@@ -143,28 +156,27 @@ fn is_retryable_public_gateway_response(response: &reqwest::Response) -> bool {
         )
 }
 
-fn next_retry_delay(started: Instant, budget: Duration, retry: usize) -> Option<Duration> {
+fn next_retry_delay(deadline: Instant, retry: usize) -> Option<Duration> {
     let delay = PUBLIC_GATEWAY_RETRY_DELAYS.get(retry).copied()?;
-    (delay < budget.saturating_sub(started.elapsed())).then_some(delay)
+    (delay < deadline.saturating_duration_since(Instant::now())).then_some(delay)
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn signed_send_with_public_gateway_retries(
+pub(super) async fn signed_send_with_public_gateway_retries_until(
     client: &reqwest::Client,
     url: &str,
     request: &MeshRequest,
     target_id: &str,
     cluster_ca_key_pem: &str,
     cluster_ca_cert_pem: &str,
-    budget: Duration,
+    deadline: Instant,
     allow_retry: bool,
 ) -> Result<(reqwest::Response, internal_auth::VerifiedRequest), MeshRequestError> {
     let allow_retry = allow_retry && request_allows_public_gateway_retry(request);
-    let started = Instant::now();
     let mut retry = 0;
     let mut confirmed_timeout = false;
     loop {
-        let remaining = budget.saturating_sub(started.elapsed());
+        let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err(if confirmed_timeout {
                 MeshRequestError::TransportTimeout
@@ -189,7 +201,7 @@ pub(super) async fn signed_send_with_public_gateway_retries(
                 confirmed_timeout |= error.is_timeout() && !error.is_connect();
                 if allow_retry
                     && is_retryable_public_transport_error(&error)
-                    && let Some(delay) = next_retry_delay(started, budget, retry)
+                    && let Some(delay) = next_retry_delay(deadline, retry)
                 {
                     tokio::time::sleep(delay).await;
                     retry += 1;
@@ -202,7 +214,7 @@ pub(super) async fn signed_send_with_public_gateway_retries(
                 ));
             }
             Err(SignedSendError::Timeout) => {
-                if allow_retry && let Some(delay) = next_retry_delay(started, budget, retry) {
+                if allow_retry && let Some(delay) = next_retry_delay(deadline, retry) {
                     tokio::time::sleep(delay).await;
                     retry += 1;
                     continue;
@@ -216,7 +228,7 @@ pub(super) async fn signed_send_with_public_gateway_retries(
         };
         if allow_retry
             && is_retryable_public_gateway_response(&response)
-            && let Some(delay) = next_retry_delay(started, budget, retry)
+            && let Some(delay) = next_retry_delay(deadline, retry)
         {
             drop(response);
             tokio::time::sleep(delay).await;

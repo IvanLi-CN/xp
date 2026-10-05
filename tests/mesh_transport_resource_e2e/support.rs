@@ -1,3 +1,4 @@
+use super::mesh_transport_resource_warmup::wait_for_peer_fleet_warmup;
 use axum::{
     Router,
     body::{Body, to_bytes},
@@ -360,6 +361,7 @@ impl XpProcess {
         self.pid
     }
 }
+
 fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpProcess {
     let cluster = ClusterMetadata::load(data_dir).expect("load XP cluster metadata");
     let log_path = data_dir.join(format!("{label}.log"));
@@ -701,6 +703,7 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
             tokio::task::yield_now().await;
         }
         request_active.store(true, Ordering::Release);
+        tokio::task::yield_now().await;
         let responses = join_all((0..4).map(|_| {
             request
                 .try_clone()
@@ -925,6 +928,7 @@ pub async fn run_resource_workload(
     let log_path = temp.path().join(format!("{label}.log"));
     let mut child = spawn_xp(binary, temp.path(), bind_port, label);
     wait_for_xp(&mut child, bind_port, &log_path).await;
+    wait_for_peer_fleet_warmup!(&fleet, label);
     let pid = child.id();
     assert_expected_memory_scope(pid);
     let cpu_started = read_cpu_ticks(pid);

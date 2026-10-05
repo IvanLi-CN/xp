@@ -26,6 +26,7 @@ use tokio::{
     time::{Instant, MissedTickBehavior},
 };
 use tracing::{debug, warn};
+mod handle;
 mod mesh_gate;
 mod node;
 mod reverse;
@@ -89,45 +90,24 @@ pub struct ReconcileHandle {
     mesh_enabled: Arc<AtomicBool>,
     mesh_enabled_epoch: Arc<AtomicU64>,
     mesh_state_generation: Arc<AtomicU64>,
+    mesh_generation_lock: Arc<std::sync::Mutex<()>>,
+    mesh_state_applied: Arc<AtomicBool>,
     mesh_gate_authoritative: Arc<AtomicBool>,
+    snapshot_installing: Arc<AtomicBool>,
     mesh_gate_lock: Arc<RwLock<()>>,
+    mesh_epoch_barrier: Arc<RwLock<()>>,
+}
+
+pub(crate) struct SnapshotInstallAdmission {
+    snapshot_installing: Arc<AtomicBool>,
+}
+
+impl Drop for SnapshotInstallAdmission {
+    fn drop(&mut self) {
+        self.snapshot_installing.store(false, Ordering::Release);
+    }
 }
 impl ReconcileHandle {
-    pub fn noop() -> Self {
-        Self {
-            tx: None,
-            restart_requested: Arc::new(AtomicBool::new(false)),
-            reverse_enabled: Arc::new(AtomicBool::new(true)),
-            reverse_supervisor_enabled: Arc::new(AtomicBool::new(true)),
-            reverse_runtime_ready: Arc::new(AtomicBool::new(true)),
-            reverse_recovery_required: Arc::new(AtomicBool::new(false)),
-            reverse_operator_enabled: Arc::new(AtomicBool::new(true)),
-            reverse_links: ReverseLinkRuntime::default(),
-            mesh_enabled: Arc::new(AtomicBool::new(true)),
-            mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
-            mesh_state_generation: Arc::new(AtomicU64::new(0)),
-            mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
-            mesh_gate_lock: Arc::new(RwLock::new(())),
-        }
-    }
-    #[cfg(test)]
-    pub(crate) fn from_sender(tx: mpsc::UnboundedSender<ReconcileRequest>) -> Self {
-        Self {
-            tx: Some(tx),
-            restart_requested: Arc::new(AtomicBool::new(false)),
-            reverse_enabled: Arc::new(AtomicBool::new(true)),
-            reverse_supervisor_enabled: Arc::new(AtomicBool::new(true)),
-            reverse_runtime_ready: Arc::new(AtomicBool::new(true)),
-            reverse_recovery_required: Arc::new(AtomicBool::new(false)),
-            reverse_operator_enabled: Arc::new(AtomicBool::new(true)),
-            reverse_links: ReverseLinkRuntime::default(),
-            mesh_enabled: Arc::new(AtomicBool::new(true)),
-            mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
-            mesh_state_generation: Arc::new(AtomicU64::new(0)),
-            mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
-            mesh_gate_lock: Arc::new(RwLock::new(())),
-        }
-    }
     pub fn request(&self, req: ReconcileRequest) {
         if let Some(tx) = &self.tx {
             let _ = tx.send(req);
@@ -172,7 +152,6 @@ impl ReconcileHandle {
             email: email.into(),
         });
     }
-
     pub fn request_rebuild_inbound(&self, endpoint_id: impl Into<String>) {
         self.request(ReconcileRequest::RebuildInbound {
             endpoint_id: endpoint_id.into(),
@@ -202,11 +181,9 @@ impl<R: RngCore> BackoffState<R> {
             rng,
         }
     }
-
     fn reset(&mut self) {
         self.attempt = 0;
     }
-
     fn next_delay(&mut self) -> Duration {
         let base = base_delay_for_attempt(self.cfg.base, self.cfg.cap, self.attempt);
         self.attempt = self.attempt.saturating_add(1);
@@ -297,8 +274,12 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         mesh_enabled: Arc::new(AtomicBool::new(true)),
         mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
         mesh_state_generation: Arc::new(AtomicU64::new(0)),
+        mesh_generation_lock: Arc::new(std::sync::Mutex::new(())),
+        mesh_state_applied: Arc::new(AtomicBool::new(false)),
         mesh_gate_authoritative: Arc::new(AtomicBool::new(false)),
+        snapshot_installing: Arc::new(AtomicBool::new(false)),
         mesh_gate_lock: Arc::new(RwLock::new(())),
+        mesh_epoch_barrier: Arc::new(RwLock::new(())),
     };
     let restart_handle = handle.clone();
 
@@ -658,7 +639,6 @@ async fn reconcile_once_with_runtime(
     if should_force_rebuild_remove_grants {
         forced_rebuild_inbounds.extend(local_endpoint_ids.clone());
     }
-
     let reverse_mesh_enabled = config.reverse_mesh_enabled
         && cluster_mesh_enabled
         && crate::reverse_mesh::NATIVE_REVERSE_ENABLED;

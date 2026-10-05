@@ -1,5 +1,6 @@
 use super::*;
-use futures_util::StreamExt;
+use axum::body::HttpBody as _;
+use futures_util::{StreamExt, TryStreamExt};
 use http_body_util::BodyExt as _;
 use reqwest::ResponseBuilderExt;
 use std::sync::Arc;
@@ -7,6 +8,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub(crate) const REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS: usize = 8;
 pub(super) const REVERSE_HEALTH_RESERVED_SLOTS: usize = 1;
+pub(super) const MESH_GATE_ADMISSION_TIMEOUT: &str =
+    "Mesh gate admission timed out before dispatch";
 pub(super) type ReverseInFlight =
     Arc<tokio::sync::Mutex<std::collections::BTreeMap<String, Arc<Semaphore>>>>;
 
@@ -150,12 +153,16 @@ pub(super) struct LocalReverseRelay {
 }
 
 impl PeerCircuitBreakers {
-    pub(super) async fn try_reverse_slot(
+    pub(super) async fn try_reverse_slot_until(
         &self,
         rendezvous_node_id: &str,
         class: ReverseRequestClass,
+        deadline: Instant,
     ) -> Result<OwnedSemaphorePermit, MeshRequestError> {
-        let mut limits = self.reverse_in_flight.lock().await;
+        let mut limits =
+            crate::control_plane_mesh::await_until(deadline, self.reverse_in_flight.lock())
+                .await
+                .ok_or(MeshRequestError::PreDispatchTimeout)?;
         let semaphore = limits
             .entry(rendezvous_node_id.to_owned())
             .or_insert_with(|| Arc::new(Semaphore::new(REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS)))
@@ -172,6 +179,20 @@ impl PeerCircuitBreakers {
                 "reverse relay concurrency limit reached for rendezvous {rendezvous_node_id}"
             ))
         })
+    }
+
+    #[cfg(test)]
+    pub(super) async fn try_reverse_slot(
+        &self,
+        rendezvous_node_id: &str,
+        class: ReverseRequestClass,
+    ) -> Result<OwnedSemaphorePermit, MeshRequestError> {
+        self.try_reverse_slot_until(
+            rendezvous_node_id,
+            class,
+            Instant::now() + Duration::from_secs(60),
+        )
+        .await
     }
 }
 
@@ -215,6 +236,58 @@ pub(super) fn attach_reverse_slot(
 pub(super) fn attach_mesh_gate(
     response: reqwest::Response,
     gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+    deadline: Instant,
+) -> reqwest::Response {
+    attach_mesh_gate_with_finish(response, gate_guard, deadline, None)
+}
+
+pub(super) fn attach_mesh_gate_with_finish(
+    response: reqwest::Response,
+    gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+    deadline: Instant,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
+) -> reqwest::Response {
+    attach_response_body_with_finish(response, Some(gate_guard), deadline, on_finish)
+}
+
+pub(super) fn attach_mesh_gate_with_body_lease(
+    response: reqwest::Response,
+    gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+    first_byte_deadline: Instant,
+    lease: Duration,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
+) -> reqwest::Response {
+    attach_response_body_with_body_lease(
+        response,
+        Some(gate_guard),
+        first_byte_deadline,
+        lease,
+        on_finish,
+    )
+}
+
+pub(super) fn attach_response_with_finish(
+    response: reqwest::Response,
+    deadline: Instant,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
+) -> reqwest::Response {
+    attach_response_body_with_finish(response, None, deadline, on_finish)
+}
+
+pub(super) fn attach_response_with_body_lease(
+    response: reqwest::Response,
+    first_byte_deadline: Instant,
+    lease: Duration,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
+) -> reqwest::Response {
+    attach_response_body_with_body_lease(response, None, first_byte_deadline, lease, on_finish)
+}
+
+fn attach_response_body_with_finish(
+    response: reqwest::Response,
+    gate_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+    deadline: Instant,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
 ) -> reqwest::Response {
     let response_url = response.url().clone();
     let response: axum::http::Response<reqwest::Body> = response.into();
@@ -229,23 +302,72 @@ pub(super) fn attach_mesh_gate(
     let mut extensions = url_extensions;
     extensions.extend(std::mem::take(&mut parts.extensions));
     parts.extensions = extensions;
-    let body = body.into_data_stream();
-    let guarded_body = futures_util::stream::unfold(
-        (body, Some(gate_guard)),
-        |(mut body, mut gate_guard)| async move {
-            match body.next().await {
-                Some(Ok(item)) => Some((Ok(item), (body, gate_guard))),
-                Some(Err(error)) => {
-                    drop(gate_guard.take());
-                    Some((Err(error), (body, gate_guard)))
-                }
-                None => {
-                    drop(gate_guard.take());
-                    None
-                }
-            }
-        },
-    );
+    if body.is_end_stream() {
+        drop(gate_guard);
+        if let Some(on_finish) = on_finish {
+            on_finish(crate::mesh_gate_body::BodyFinish::Complete);
+        }
+        return reqwest::Response::from(axum::http::Response::from_parts(parts, body));
+    }
+    let body = body.into_data_stream().map_err(std::io::Error::other);
+    let guarded_body = match gate_guard {
+        Some(gate_guard) => {
+            crate::mesh_gate_body::guard_stream_with_finish(body, gate_guard, deadline, on_finish)
+                .boxed()
+        }
+        None => crate::mesh_gate_body::stream_with_finish(body, deadline, on_finish).boxed(),
+    };
+    reqwest::Response::from(axum::http::Response::from_parts(
+        parts,
+        reqwest::Body::wrap_stream(guarded_body),
+    ))
+}
+
+fn attach_response_body_with_body_lease(
+    response: reqwest::Response,
+    gate_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+    first_byte_deadline: Instant,
+    lease: Duration,
+    on_finish: Option<Box<dyn FnOnce(crate::mesh_gate_body::BodyFinish) + Send + 'static>>,
+) -> reqwest::Response {
+    let response_url = response.url().clone();
+    let response: axum::http::Response<reqwest::Body> = response.into();
+    let (mut parts, body) = response.into_parts();
+    let url_extensions = axum::http::Response::builder()
+        .url(response_url)
+        .body(())
+        .expect("response URL extension builder")
+        .into_parts()
+        .0
+        .extensions;
+    let mut extensions = url_extensions;
+    extensions.extend(std::mem::take(&mut parts.extensions));
+    parts.extensions = extensions;
+    if body.is_end_stream() {
+        drop(gate_guard);
+        if let Some(on_finish) = on_finish {
+            on_finish(crate::mesh_gate_body::BodyFinish::Complete);
+        }
+        return reqwest::Response::from(axum::http::Response::from_parts(parts, body));
+    }
+    let body = body.into_data_stream().map_err(std::io::Error::other);
+    let guarded_body = match gate_guard {
+        Some(gate_guard) => crate::mesh_gate_body::guard_stream_with_body_lease(
+            body,
+            gate_guard,
+            first_byte_deadline,
+            lease,
+            on_finish,
+        )
+        .boxed(),
+        None => crate::mesh_gate_body::stream_with_body_lease(
+            body,
+            first_byte_deadline,
+            lease,
+            on_finish,
+        )
+        .boxed(),
+    };
     reqwest::Response::from(axum::http::Response::from_parts(
         parts,
         reqwest::Body::wrap_stream(guarded_body),
@@ -260,6 +382,7 @@ impl MeshAwareHttpClient {
         request: &MeshRequest,
         route: &ReverseRelayRoute,
         epoch: u64,
+        deadline: Instant,
     ) {
         // Every successful reverse response carries the Mesh read guard in its body stream.
         // Do not reacquire the write-preferring lock here: a queued gate transition would
@@ -268,25 +391,29 @@ impl MeshAwareHttpClient {
             return;
         }
         if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .record_reverse_sample(crate::mesh_telemetry::ReverseRelayTelemetrySample {
-                    peer_id: peer.node_id.clone(),
-                    peer_name: peer.node_name.clone(),
-                    rendezvous: route.rendezvous.node_id.clone(),
-                    rendezvous_role: route.role.as_str().to_string(),
-                    primary_rendezvous: route.assignment.primary_node_id.clone(),
-                    standby_rendezvous: route.assignment.standby_node_id.clone(),
-                    generation: route.assignment.generation,
-                    sample: telemetry_sample(
-                        TelemetryPath::Mesh,
-                        true,
-                        started.elapsed(),
-                        true,
-                        request.updates_active_path,
-                        None,
-                    ),
-                })
-                .await;
+            let _ = super::await_until(
+                deadline,
+                telemetry.record_reverse_sample(
+                    crate::mesh_telemetry::ReverseRelayTelemetrySample {
+                        peer_id: peer.node_id.clone(),
+                        peer_name: peer.node_name.clone(),
+                        rendezvous: route.rendezvous.node_id.clone(),
+                        rendezvous_role: route.role.as_str().to_string(),
+                        primary_rendezvous: route.assignment.primary_node_id.clone(),
+                        standby_rendezvous: route.assignment.standby_node_id.clone(),
+                        generation: route.assignment.generation,
+                        sample: telemetry_sample(
+                            TelemetryPath::Mesh,
+                            true,
+                            started.elapsed(),
+                            true,
+                            request.updates_active_path,
+                            None,
+                        ),
+                    },
+                ),
+            )
+            .await;
         }
     }
 
@@ -312,6 +439,9 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<(), MeshRequestError> {
+        if self.snapshot_installing.load(Ordering::Acquire) {
+            return Err(MeshRequestError::PreDispatchTimeout);
+        }
         if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled by the cluster Mesh gate".to_string(),
@@ -330,21 +460,22 @@ impl MeshAwareHttpClient {
                 "reverse health probe must be a bodyless GET".to_string(),
             ));
         }
-        let route = self
-            .reverse_routes
-            .read()
-            .await
-            .get(&peer.node_id)
-            .cloned()
-            .ok_or_else(|| {
-                MeshRequestError::Reverse("no reverse assignment is available".into())
-            })?;
         let started = Instant::now();
+        let request_deadline = started + request.total_budget;
+        let route = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(request_deadline),
+            self.reverse_routes.read(),
+        )
+        .await
+        .map_err(|_| MeshRequestError::PreDispatchTimeout)?
+        .get(&peer.node_id)
+        .cloned()
+        .ok_or_else(|| MeshRequestError::Reverse("no reverse assignment is available".into()))?;
         let mut first_error = None;
         for candidate in route.candidates() {
-            let budget = route_budget(request.total_budget)
-                .min(request.total_budget.saturating_sub(started.elapsed()));
-            if budget.is_zero() {
+            let route_deadline =
+                (started + route_budget(request.total_budget)).min(request_deadline);
+            if route_deadline <= Instant::now() {
                 first_error.get_or_insert(MeshRequestError::OutcomeUnknown);
                 break;
             }
@@ -355,8 +486,9 @@ impl MeshAwareHttpClient {
                     &request,
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
-                    budget,
+                    route_deadline,
                     ReverseRequestClass::Health,
+                    None,
                 )
                 .await
             {
@@ -383,6 +515,9 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<(), MeshRequestError> {
+        if self.snapshot_installing.load(Ordering::Acquire) {
+            return Err(MeshRequestError::PreDispatchTimeout);
+        }
         if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled by the cluster Mesh gate".to_string(),
@@ -407,8 +542,9 @@ impl MeshAwareHttpClient {
             &request,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
-            route_budget(request.total_budget),
+            Instant::now() + route_budget(request.total_budget),
             ReverseRequestClass::Health,
+            None,
         )
         .await
         .map(|_| ())
@@ -424,6 +560,9 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        if self.snapshot_installing.load(Ordering::Acquire) {
+            return Err(MeshRequestError::PreDispatchTimeout);
+        }
         if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled by the cluster Mesh gate".to_string(),
@@ -439,21 +578,22 @@ impl MeshAwareHttpClient {
                 "recursive reverse relay is not allowed".to_string(),
             ));
         }
-        let route = self
-            .reverse_routes
-            .read()
-            .await
-            .get(&peer.node_id)
-            .cloned()
-            .ok_or_else(|| {
-                MeshRequestError::Reverse("no reverse assignment is available".into())
-            })?;
         let started = Instant::now();
+        let request_deadline = started + request.total_budget;
+        let route = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(request_deadline),
+            self.reverse_routes.read(),
+        )
+        .await
+        .map_err(|_| MeshRequestError::PreDispatchTimeout)?
+        .get(&peer.node_id)
+        .cloned()
+        .ok_or_else(|| MeshRequestError::Reverse("no reverse assignment is available".into()))?;
         let mut last_error = None;
         for candidate in route.candidates() {
-            let budget = route_budget(request.total_budget)
-                .min(request.total_budget.saturating_sub(started.elapsed()));
-            if budget.is_zero() {
+            let route_deadline =
+                (started + route_budget(request.total_budget)).min(request_deadline);
+            if route_deadline <= Instant::now() {
                 break;
             }
             let mesh_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
@@ -464,14 +604,22 @@ impl MeshAwareHttpClient {
                     &request,
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
-                    budget,
+                    route_deadline,
                     ReverseRequestClass::Control,
+                    None,
                 )
                 .await
             {
                 Ok(response) => {
-                    self.record_reverse_sample(peer, started, &request, &candidate, mesh_epoch)
-                        .await;
+                    self.record_reverse_sample(
+                        peer,
+                        started,
+                        &request,
+                        &candidate,
+                        mesh_epoch,
+                        started + request.total_budget,
+                    )
+                    .await;
                     return Ok(response);
                 }
                 Err(
@@ -512,10 +660,12 @@ pub(super) async fn send_outer_request(
     cluster_ca_key_pem: &str,
     cluster_ca_cert_pem: &str,
     url: &str,
-    budget: Duration,
+    deadline: Instant,
     allow_ambiguous_fallback: bool,
     cluster_mesh_enabled: &Arc<AtomicBool>,
     mesh_gate_lock: &Arc<tokio::sync::RwLock<()>>,
+    snapshot_installing: &Arc<AtomicBool>,
+    body_lease: Option<Duration>,
 ) -> Result<
     (
         reqwest::Response,
@@ -524,11 +674,29 @@ pub(super) async fn send_outer_request(
     ),
     MeshRequestError,
 > {
-    let gate_guard = mesh_gate_lock.clone().read_owned().await;
+    if snapshot_installing.load(Ordering::Acquire) {
+        return Err(MeshRequestError::PreDispatchTimeout);
+    }
+    let gate_guard = match tokio::time::timeout_at(
+        tokio::time::Instant::from_std(deadline),
+        mesh_gate_lock.clone().read_owned(),
+    )
+    .await
+    {
+        Ok(guard) => guard,
+        Err(_) => {
+            return Err(MeshRequestError::Reverse(
+                MESH_GATE_ADMISSION_TIMEOUT.to_string(),
+            ));
+        }
+    };
     if !cluster_mesh_enabled.load(Ordering::Acquire) {
         return Err(MeshRequestError::Reverse(
             "cluster Mesh gate is disabled".to_string(),
         ));
+    }
+    if snapshot_installing.load(Ordering::Acquire) {
+        return Err(MeshRequestError::PreDispatchTimeout);
     }
     let dispatch = signed_reverse_dispatch(
         peer,
@@ -544,13 +712,25 @@ pub(super) async fn send_outer_request(
     for (name, value) in &dispatch.headers {
         builder = builder.header(name, value);
     }
-    match tokio::time::timeout(budget, builder.send()).await {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(MeshRequestError::PreDispatchTimeout);
+    }
+    match tokio::time::timeout(remaining, builder.send()).await {
         Ok(Ok(response)) => Ok((
-            attach_mesh_gate(response, gate_guard),
+            match body_lease {
+                Some(lease) => {
+                    attach_mesh_gate_with_body_lease(response, gate_guard, deadline, lease, None)
+                }
+                None => attach_mesh_gate(response, gate_guard, deadline),
+            },
             dispatch.inner_verified,
             dispatch.outer_verified,
         )),
-        Ok(Err(error)) => Err(public_transport_error(error, allow_ambiguous_fallback)),
+        Ok(Err(error)) => Err(retry::public_transport_error(
+            error,
+            allow_ambiguous_fallback,
+        )),
         Err(_) => Err(MeshRequestError::OutcomeUnknown),
     }
 }

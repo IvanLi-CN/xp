@@ -19,23 +19,33 @@ use crate::{
     reverse_mesh::{ReverseMeshAssignment, ReverseRelayEnvelope, ReverseRole, route_budget},
 };
 
+mod admission;
 mod circuit;
+mod cleanup;
+mod completion;
 mod error;
 mod gate;
+#[cfg(test)]
+mod mesh_body_lifecycle_tests;
+#[cfg(test)]
+mod public_cleanup_tests;
 mod request;
+mod request_flow;
 mod retry;
 mod reverse;
 mod telemetry;
 mod transport;
 pub use circuit::DirectValidationState;
 use circuit::{
-    DirectValidationStore, MeshAttemptDecision, PeerCircuitBreakers, endpoint_fingerprint,
-    mesh_attempt_budget,
+    DirectValidationStore, MeshAttemptDecision, MeshHalfOpenProbeGuard, PeerCircuitBreakers,
+    PublicHalfOpenProbeGuard, endpoint_fingerprint, mesh_attempt_budget,
 };
 pub use error::MeshRequestError;
+use error::{classify_mesh_failure, public_timeout};
 pub(crate) use request::CapabilityProbeResponse;
 use request::PeerRequestResponse;
 pub use request::{MeshRequest, PeerDirectPath};
+use request_flow::direct_mesh_is_eligible;
 pub(super) use retry::{SignedSendError, signed_headers, signed_send};
 #[cfg(test)]
 pub(crate) use transport::build_mesh_http_client_with_policy;
@@ -52,6 +62,20 @@ pub const MESH_BACKOFF: [Duration; 5] = [
 ];
 pub const DIRECT_VALIDATION_TTL: Duration = Duration::from_secs(5 * 60);
 const LEGACY_CAPABILITIES_PROBE_PATH: &str = "/api/admin/_internal/capabilities";
+
+pub(super) async fn await_until<T>(
+    deadline: Instant,
+    future: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), future)
+        .await
+        .ok()
+}
+
+pub(super) fn body_completion_deadline(deadline: Instant) -> Instant {
+    let grace_deadline = Instant::now() + Duration::from_millis(100);
+    deadline.max(grace_deadline)
+}
 
 #[derive(Debug, Clone)]
 pub struct MeshPeerTarget {
@@ -128,9 +152,12 @@ pub struct MeshAwareHttpClient {
     direct_validation: DirectValidationStore,
     enforce_direct_validation: bool,
     cluster_mesh_enabled: Arc<AtomicBool>,
+    snapshot_installing: Arc<AtomicBool>,
     cluster_mesh_epoch: Arc<std::sync::atomic::AtomicU64>,
+    mesh_epoch_barrier: Arc<tokio::sync::RwLock<()>>,
     mesh_epoch_reset_lock: Arc<Mutex<u64>>,
     mesh_gate_lock: Arc<tokio::sync::RwLock<()>>,
+    completion_dispatcher: Arc<std::sync::OnceLock<completion::CompletionDispatcher>>,
     telemetry: Option<MeshTelemetryHandle>,
     reverse_routes: Arc<RwLock<BTreeMap<String, ReverseRelayRoute>>>,
     reverse_enabled: Arc<AtomicBool>,
@@ -150,9 +177,12 @@ impl MeshAwareHttpClient {
             direct_validation: DirectValidationStore::default(),
             enforce_direct_validation: false,
             cluster_mesh_enabled: Arc::new(AtomicBool::new(true)),
+            snapshot_installing: Arc::new(AtomicBool::new(false)),
             cluster_mesh_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            mesh_epoch_barrier: Arc::new(tokio::sync::RwLock::new(())),
             mesh_epoch_reset_lock: Arc::new(Mutex::new(0)),
             mesh_gate_lock: Arc::new(tokio::sync::RwLock::new(())),
+            completion_dispatcher: Arc::new(std::sync::OnceLock::new()),
             telemetry: None,
             reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
             reverse_enabled: Arc::new(AtomicBool::new(cfg!(test))),
@@ -168,6 +198,7 @@ impl MeshAwareHttpClient {
         self.telemetry = Some(telemetry);
         self
     }
+
     pub fn with_circuits(mut self, circuits: PeerCircuitBreakers) -> Self {
         self.circuits = circuits;
         self
@@ -199,12 +230,6 @@ impl MeshAwareHttpClient {
         self.mesh_observation_pause = Some((observed, release));
         self
     }
-    /// Attach the Raft-authoritative cluster Mesh switch. Public direct requests remain
-    /// available when this gate is closed.
-    pub fn with_mesh_gate(mut self, gate: Arc<AtomicBool>) -> Self {
-        self.cluster_mesh_enabled = gate;
-        self
-    }
     pub async fn set_reverse_route(
         &self,
         target_node_id: impl Into<String>,
@@ -227,7 +252,11 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
-        let cluster_mesh_enabled = self.observe_mesh_gate().await;
+        let request_deadline = Instant::now() + request.total_budget;
+        let cluster_mesh_enabled = self
+            .observe_mesh_gate_until(request_deadline)
+            .await
+            .ok_or(MeshRequestError::PreDispatchTimeout)?;
         match path {
             PeerDirectPath::RealityMesh if !cluster_mesh_enabled => {
                 return Err(MeshRequestError::InvalidTarget(
@@ -239,20 +268,24 @@ impl MeshAwareHttpClient {
             })?,
             PeerDirectPath::ApiBaseUrl => &peer.public_base_url,
         };
-        let mesh_gate_read = self.mesh_read_guard_for_path(path).await?;
-        self.send_peer_direct_request_with_gate(
+        let mesh_gate_read = self
+            .mesh_read_guard_for_path_until(path, request_deadline)
+            .await?;
+        self.send_peer_direct_request_with_gate_until(
             peer,
             path,
             request,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
             mesh_gate_read,
+            request_deadline,
         )
         .await
     }
-    /// Sends over one direct path with a caller-owned Mesh admission guard. The guard may
-    /// span asynchronous target preparation for dedicated probes and is never reacquired.
-    pub(crate) async fn send_peer_direct_request_with_gate(
+    /// Sends over one direct path with a caller-owned Mesh admission guard and deadline. The
+    /// guard may span asynchronous target preparation and is never reacquired.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn send_peer_direct_request_with_gate_until(
         &self,
         peer: &MeshPeerTarget,
         path: PeerDirectPath,
@@ -260,6 +293,7 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
         mesh_gate_read: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+        request_deadline: Instant,
     ) -> Result<reqwest::Response, MeshRequestError> {
         self.send_peer_direct_request_with_options(
             peer,
@@ -269,6 +303,7 @@ impl MeshAwareHttpClient {
             cluster_ca_cert_pem,
             mesh_gate_read,
             false,
+            request_deadline,
         )
         .await
     }
@@ -287,6 +322,7 @@ impl MeshAwareHttpClient {
             false,
         )
         .await
+        .map(|(response, _)| response)
     }
 
     pub(crate) async fn send_peer_direct_preflight_for_reenable(
@@ -295,7 +331,7 @@ impl MeshAwareHttpClient {
         request: MeshRequest,
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
-    ) -> Result<reqwest::Response, MeshRequestError> {
+    ) -> Result<(reqwest::Response, tokio::sync::oneshot::Receiver<bool>), MeshRequestError> {
         self.send_peer_direct_preflight_with_admission(
             peer,
             request,
@@ -304,6 +340,12 @@ impl MeshAwareHttpClient {
             true,
         )
         .await
+        .map(|(response, completion)| {
+            (
+                response,
+                completion.expect("reenable preflight must expose completion"),
+            )
+        })
     }
     #[allow(clippy::too_many_arguments)]
     async fn send_peer_direct_request_with_options(
@@ -315,12 +357,16 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
         mesh_gate_read: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
         allow_mesh_when_disabled: bool,
+        request_deadline: Instant,
     ) -> Result<reqwest::Response, MeshRequestError> {
         let mesh_gate_read = if path == PeerDirectPath::RealityMesh && mesh_gate_read.is_none() {
             if allow_mesh_when_disabled {
-                None
+                Some(
+                    self.mesh_reenable_read_guard_until(request_deadline)
+                        .await?,
+                )
             } else {
-                Some(self.mesh_direct_read_guard().await?)
+                Some(self.mesh_direct_read_guard_until(request_deadline).await?)
             }
         } else {
             mesh_gate_read
@@ -348,23 +394,26 @@ impl MeshAwareHttpClient {
             PeerDirectPath::RealityMesh => &self.mesh,
             PeerDirectPath::ApiBaseUrl => &self.public_direct,
         };
-        let (response, verified) = retry::signed_send_with_public_gateway_retries(
+        if request_deadline <= Instant::now() {
+            return Err(MeshRequestError::PreDispatchTimeout);
+        }
+        let (response, verified) = retry::signed_send_with_public_gateway_retries_until(
             client,
             &url,
             &request,
             &peer.node_id,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
-            request.total_budget,
+            request_deadline,
             path == PeerDirectPath::ApiBaseUrl,
         )
         .await?;
         let response = match mesh_gate_read {
-            Some(gate_guard) => reverse::attach_mesh_gate(response, gate_guard),
+            Some(gate_guard) => reverse::attach_mesh_gate(response, gate_guard, request_deadline),
             None => response,
         };
         if path == PeerDirectPath::RealityMesh
-            && mesh_transport_observation(&response).protocol != MeshTransportProtocol::H2
+            && gate::mesh_transport_observation(&response).protocol != MeshTransportProtocol::H2
         {
             return Err(MeshRequestError::Protocol(
                 "Mesh response did not use HTTP/2".to_string(),
@@ -388,31 +437,6 @@ impl MeshAwareHttpClient {
             ack,
         )?;
         Ok(response)
-    }
-    /// Sends through Mesh first, then public only after a retryable transport failure.
-    pub async fn send_peer_request(
-        &self,
-        peer: &MeshPeerTarget,
-        request: MeshRequest,
-        cluster_ca_key_pem: &str,
-        cluster_ca_cert_pem: &str,
-    ) -> Result<reqwest::Response, MeshRequestError> {
-        match self
-            .send_peer_request_with_legacy_not_found(
-                peer,
-                request,
-                cluster_ca_key_pem,
-                cluster_ca_cert_pem,
-                false,
-                gate::PublicFallbackPolicy::Always,
-            )
-            .await?
-        {
-            PeerRequestResponse::Verified(response) => Ok(response),
-            PeerRequestResponse::PredecessorNotFound => Err(MeshRequestError::Protocol(
-                "unexpected predecessor capability response".to_string(),
-            )),
-        }
     }
     /// Allows a predecessor's unsigned 404 only for an explicit compatibility probe.
     pub(crate) async fn send_peer_request_allowing_legacy_not_found(
@@ -441,6 +465,7 @@ impl MeshAwareHttpClient {
                 cluster_ca_cert_pem,
                 true,
                 gate::PublicFallbackPolicy::WhenMeshDisabled,
+                None,
             )
             .await?;
         Ok(match response {
@@ -451,6 +476,7 @@ impl MeshAwareHttpClient {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn send_peer_request_with_legacy_not_found(
         &self,
         peer: &MeshPeerTarget,
@@ -459,9 +485,15 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
         allow_unsigned_not_found: bool,
         public_fallback_policy: gate::PublicFallbackPolicy,
+        body_lease: Option<Duration>,
     ) -> Result<PeerRequestResponse, MeshRequestError> {
         let started = Instant::now();
-        let cluster_mesh_enabled = self.observe_mesh_gate().await;
+        let request_deadline = started + request.total_budget;
+        let mesh_admission_deadline =
+            started + mesh_attempt_budget(request.total_budget).min(request.total_budget);
+        let observed_mesh_gate = self.observe_mesh_gate_until(mesh_admission_deadline).await;
+        let admission_timed_out = observed_mesh_gate.is_none();
+        let cluster_mesh_enabled = observed_mesh_gate.unwrap_or(true);
         #[cfg(test)]
         if let Some((observed, release)) = &self.mesh_observation_pause {
             observed.notify_one();
@@ -470,29 +502,67 @@ impl MeshAwareHttpClient {
         let mut allow_public_fallback = public_fallback_policy.allows(cluster_mesh_enabled)
             || (request.path_and_query == LEGACY_CAPABILITIES_PROBE_PATH
                 && !matches!(peer.mesh_reason, MeshPeerReason::MeshAvailable));
-        let (direct_validation, validation_revision, membership_read_guard) =
-            self.direct_validation_snapshot(peer).await;
-        let mut membership_read_guard = Some(membership_read_guard);
+        let validation_snapshot = if admission_timed_out {
+            None
+        } else {
+            self.direct_validation_snapshot_until(peer, mesh_admission_deadline)
+                .await
+        };
+        let validation_snapshot_timed_out = validation_snapshot.is_none();
+        let (direct_validation, validation_revision, mut membership_read_guard) =
+            match validation_snapshot {
+                Some((state, revision, guard)) => (state, revision, Some(guard)),
+                None => (DirectValidationState::ConfiguredUnverified, None, None),
+            };
+        let mut admission_timed_out = admission_timed_out || validation_snapshot_timed_out;
+        let admission_fallback_allowed = request.allow_ambiguous_fallback
+            || matches!(request.method, reqwest::Method::GET | reqwest::Method::HEAD);
+        if admission_timed_out && !admission_fallback_allowed {
+            allow_public_fallback = false;
+        }
         if cluster_mesh_enabled
             && peer.mesh_base_url.is_some()
             && direct_validation == DirectValidationState::ProtocolRejected
         {
-            self.record_terminal_failure(peer).await;
+            self.record_terminal_failure_until(peer, request_deadline)
+                .await;
             return Err(MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
                 dispatched: false,
             });
         }
         let mesh_enabled = direct_mesh_is_eligible(peer, cluster_mesh_enabled, direct_validation);
-        let (decision, mesh_epoch) = self
-            .before_mesh_request(&peer.node_id, mesh_enabled, request.route)
-            .await;
+        let (decision, mesh_epoch, mesh_probe_id) = match self
+            .before_mesh_request_until_with_token(
+                &peer.node_id,
+                mesh_enabled,
+                request.route,
+                mesh_admission_deadline,
+            )
+            .await
+        {
+            Some(decision) => decision,
+            None => {
+                admission_timed_out = true;
+                (
+                    MeshAttemptDecision::Disabled,
+                    self.cluster_mesh_epoch.load(Ordering::Acquire),
+                    None,
+                )
+            }
+        };
+        if admission_timed_out && !admission_fallback_allowed {
+            allow_public_fallback = false;
+        }
+        let mut mesh_probe_guard =
+            self.mesh_probe_guard(&peer.node_id, decision, mesh_epoch, mesh_probe_id);
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
         let mut mesh_outcome_ambiguous = false;
         let mut mesh_outcome_timed_out = false;
 
         if matches!(decision, MeshAttemptDecision::Quarantined) {
-            self.record_terminal_failure(peer).await;
+            self.record_terminal_failure_until(peer, request_deadline)
+                .await;
             return Err(MeshRequestError::CircuitOpen {
                 path: "Direct Mesh",
                 dispatched: false,
@@ -502,11 +572,18 @@ impl MeshAwareHttpClient {
         if matches!(
             decision,
             MeshAttemptDecision::Attempt | MeshAttemptDecision::Probe
-        ) && !self.mesh_attempt_is_current(mesh_epoch).await
+        ) && !self
+            .mesh_attempt_is_current_until(mesh_epoch, mesh_admission_deadline)
+            .await
         {
             if matches!(decision, MeshAttemptDecision::Probe) {
-                self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
-                    .await;
+                self.release_mesh_probe_guard_until(
+                    &mut mesh_probe_guard,
+                    &peer.node_id,
+                    mesh_epoch,
+                    request_deadline,
+                )
+                .await;
             }
             fallback = true;
         }
@@ -523,8 +600,13 @@ impl MeshAwareHttpClient {
                 Ok(url) => url,
                 Err(error) => {
                     if matches!(decision, MeshAttemptDecision::Probe) {
-                        self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
-                            .await;
+                        self.release_mesh_probe_guard_until(
+                            &mut mesh_probe_guard,
+                            &peer.node_id,
+                            mesh_epoch,
+                            request_deadline,
+                        )
+                        .await;
                     }
                     return Err(error);
                 }
@@ -539,10 +621,12 @@ impl MeshAwareHttpClient {
                     mesh_epoch,
                     validation_revision.clone(),
                     membership_read_guard.take(),
+                    &mut mesh_probe_guard,
                     started,
                     allow_unsigned_not_found,
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
+                    body_lease,
                 )
                 .await?
             {
@@ -550,9 +634,22 @@ impl MeshAwareHttpClient {
                     ambiguous,
                     timed_out,
                 } => {
+                    if matches!(decision, MeshAttemptDecision::Probe) {
+                        self.release_mesh_probe_guard_until(
+                            &mut mesh_probe_guard,
+                            &peer.node_id,
+                            mesh_epoch,
+                            request_deadline,
+                        )
+                        .await;
+                    }
                     fallback = true;
                     mesh_outcome_ambiguous |= ambiguous;
                     mesh_outcome_timed_out |= timed_out;
+                    admission_timed_out |= timed_out && !ambiguous;
+                    if timed_out && !admission_fallback_allowed {
+                        allow_public_fallback = false;
+                    }
                 }
                 gate::MeshAttemptResult::Response(response) => return Ok(response),
             }
@@ -567,12 +664,26 @@ impl MeshAwareHttpClient {
             && (mesh_outcome_ambiguous
                 || !mesh_enabled
                 || matches!(decision, MeshAttemptDecision::SkipOpen));
-        if self.reverse_enabled.load(Ordering::Acquire)
+        let reverse_route = if self.reverse_enabled.load(Ordering::Acquire)
             && should_try_reverse
             && (request.allow_ambiguous_fallback || !mesh_outcome_ambiguous)
-            && let Some(reverse_route) =
-                self.reverse_routes.read().await.get(&peer.node_id).cloned()
         {
+            match tokio::time::timeout_at(
+                tokio::time::Instant::from_std(request_deadline),
+                self.reverse_routes.read(),
+            )
+            .await
+            {
+                Ok(routes) => routes.get(&peer.node_id).cloned(),
+                Err(_) => {
+                    admission_timed_out = true;
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(reverse_route) = reverse_route {
             // Keep one normal Mesh-sized slice for the public path. A short Raft TTL can be
             // exhausted by the failed Mesh attempt plus Reverse otherwise, leaving the known
             // reachable public origin no time to establish quorum.
@@ -597,6 +708,7 @@ impl MeshAwareHttpClient {
                 if reverse_budget.is_zero() {
                     break;
                 }
+                let reverse_deadline = request_deadline.min(Instant::now() + reverse_budget);
                 let mesh_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
                 match self
                     .send_reverse_relay(
@@ -605,14 +717,22 @@ impl MeshAwareHttpClient {
                         &request,
                         cluster_ca_key_pem,
                         cluster_ca_cert_pem,
-                        reverse_budget,
+                        reverse_deadline,
                         reverse_class,
+                        body_lease,
                     )
                     .await
                 {
                     Ok(response) => {
-                        self.record_reverse_sample(peer, started, &request, &candidate, mesh_epoch)
-                            .await;
+                        self.record_reverse_sample(
+                            peer,
+                            started,
+                            &request,
+                            &candidate,
+                            mesh_epoch,
+                            request_deadline,
+                        )
+                        .await;
                         return Ok(PeerRequestResponse::Verified(response));
                     }
                     Err(error) => {
@@ -631,7 +751,8 @@ impl MeshAwareHttpClient {
                                     | MeshRequestError::ReverseTimeout
                             )
                         {
-                            self.record_terminal_failure(peer).await;
+                            self.record_terminal_failure_until(peer, request_deadline)
+                                .await;
                             return Err(error);
                         }
                         if matches!(
@@ -643,10 +764,18 @@ impl MeshAwareHttpClient {
                             return Err(error);
                         }
                         if matches!(
+                            &error,
+                            MeshRequestError::Reverse(reason)
+                                if reason == reverse::MESH_GATE_ADMISSION_TIMEOUT
+                        ) {
+                            continue;
+                        }
+                        if matches!(
                             error,
                             MeshRequestError::Auth(_) | MeshRequestError::Protocol(_)
                         ) {
-                            self.record_terminal_failure(peer).await;
+                            self.record_terminal_failure_until(peer, request_deadline)
+                                .await;
                             return Err(error);
                         }
                         // A gate rejection happens before dispatch and cannot make the outcome
@@ -675,45 +804,52 @@ impl MeshAwareHttpClient {
             // A gate transition may have happened after the initial observation while the
             // circuit decision or reverse route was waiting. Re-observe before refusing the
             // public compatibility path so a disabled gate cannot strand the probe.
-            allow_public_fallback = !self.observe_mesh_gate().await;
+            allow_public_fallback = match self.observe_mesh_gate_until(request_deadline).await {
+                Some(enabled) => !enabled,
+                None => {
+                    admission_timed_out = true;
+                    false
+                }
+            };
         }
         if !allow_public_fallback {
-            self.record_terminal_failure(peer).await;
-            return Err(if matches!(decision, MeshAttemptDecision::Disabled) {
-                MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
-            } else {
-                if mesh_outcome_timed_out {
-                    MeshRequestError::TransportTimeout
-                } else {
-                    MeshRequestError::OutcomeUnknown
-                }
-            });
+            self.record_terminal_failure_until(peer, request_deadline)
+                .await;
+            return Err(classify_mesh_failure(
+                admission_timed_out,
+                mesh_outcome_ambiguous,
+                mesh_outcome_timed_out,
+                decision,
+            ));
         }
         if !request.allow_ambiguous_fallback && mesh_outcome_ambiguous {
-            self.record_terminal_failure(peer).await;
+            self.record_terminal_failure_until(peer, request_deadline)
+                .await;
             return Err(if mesh_outcome_timed_out {
                 MeshRequestError::TransportTimeout
             } else {
                 MeshRequestError::OutcomeUnknown
             });
         }
-        let elapsed = started.elapsed();
         let public_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
-        let remaining = request.total_budget.saturating_sub(elapsed);
-        if remaining.is_zero() {
-            self.record_terminal_failure(peer).await;
-            return Err(if mesh_outcome_timed_out {
-                MeshRequestError::TransportTimeout
-            } else {
-                MeshRequestError::OutcomeUnknown
-            });
-        }
-        match self
-            .before_public_request(&peer.node_id, request.route)
+        let Some((public_decision, public_probe_id)) = self
+            .before_public_request_until(&peer.node_id, request.route, request_deadline)
             .await
-        {
+        else {
+            self.record_terminal_failure_until(peer, request_deadline)
+                .await;
+            return Err(public_timeout(
+                mesh_outcome_ambiguous,
+                mesh_outcome_timed_out,
+                decision,
+            ));
+        };
+        let mut public_probe_guard =
+            self.public_probe_guard(&peer.node_id, public_decision, public_probe_id);
+        match public_decision {
             MeshAttemptDecision::SkipOpen | MeshAttemptDecision::Quarantined => {
-                self.record_terminal_failure(peer).await;
+                self.record_terminal_failure_until(peer, request_deadline)
+                    .await;
                 return Err(MeshRequestError::CircuitOpen {
                     path: "Public",
                     dispatched: mesh_outcome_ambiguous,
@@ -726,9 +862,12 @@ impl MeshAwareHttpClient {
         let public_url = match join_url(&peer.public_base_url, &request.path_and_query, false) {
             Ok(url) => url,
             Err(error) => {
-                self.circuits
-                    .release_public_half_open_probe(&peer.node_id)
-                    .await;
+                self.release_public_probe_guard_until(
+                    &mut public_probe_guard,
+                    &peer.node_id,
+                    request_deadline,
+                )
+                .await;
                 return Err(error);
             }
         };
@@ -739,7 +878,7 @@ impl MeshAwareHttpClient {
                 &peer.node_id,
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
-                remaining,
+                request_deadline,
                 allow_unsigned_not_found,
             )
             .await
@@ -750,21 +889,42 @@ impl MeshAwareHttpClient {
                 | MeshRequestError::PreDispatchTimeout
                 | MeshRequestError::InvalidTarget(_)),
             ) => {
-                self.circuits
-                    .release_public_half_open_probe(&peer.node_id)
-                    .await;
+                self.release_public_probe_guard_until(
+                    &mut public_probe_guard,
+                    &peer.node_id,
+                    request_deadline,
+                )
+                .await;
                 return Err(error);
             }
             Err(error) => {
-                let public_breaker = self.circuits.record_public_failure(&peer.node_id).await;
-                if let Some(telemetry) = &self.telemetry {
-                    let _ = telemetry
-                        .set_public_breaker(
+                let operation_id = self.circuits.next_operation();
+                let public_breaker_result = await_until(
+                    request_deadline,
+                    self.circuits
+                        .record_public_failure_at(&peer.node_id, operation_id),
+                )
+                .await;
+                if public_breaker_result.is_none() {
+                    self.defer_public_failure(&peer.node_id, operation_id, public_probe_id);
+                }
+                if public_breaker_result.is_some()
+                    && let Some(guard) = public_probe_guard.as_mut()
+                {
+                    guard.disarm();
+                }
+                if let Some(public_breaker) = public_breaker_result.flatten()
+                    && let Some(telemetry) = &self.telemetry
+                {
+                    let _ = await_until(
+                        request_deadline,
+                        telemetry.set_public_breaker(
                             &peer.node_id,
                             public_breaker,
                             Some(format!("Public circuit opened: {error}")),
-                        )
-                        .await;
+                        ),
+                    )
+                    .await;
                 }
                 self.record_public_outcome_for_epoch(
                     peer,
@@ -773,6 +933,7 @@ impl MeshAwareHttpClient {
                     fallback,
                     request.updates_active_path,
                     public_epoch,
+                    request_deadline,
                 )
                 .await;
                 return Err(error);
@@ -784,74 +945,47 @@ impl MeshAwareHttpClient {
                 .headers()
                 .contains_key(internal_auth::INTERNAL_ACK_HEADER)
         {
-            self.circuits.record_public_success(&peer.node_id).await;
+            let operation_id = self.circuits.next_operation();
+            let public_breaker_result = await_until(
+                request_deadline,
+                self.circuits
+                    .record_public_success_at(&peer.node_id, operation_id),
+            )
+            .await;
+            if public_breaker_result.is_some()
+                && let Some(guard) = public_probe_guard.as_mut()
+            {
+                guard.disarm();
+            }
+            if public_breaker_result.is_none() {
+                self.defer_public_success(&peer.node_id, operation_id, public_probe_id);
+            }
             return Ok(PeerRequestResponse::PredecessorNotFound);
         }
-        let public_breaker = self.circuits.record_public_success(&peer.node_id).await;
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .set_public_breaker(&peer.node_id, public_breaker, None)
-                .await;
-        }
-        self.record_public_outcome_for_epoch(
+        let operation_id = self.circuits.next_operation();
+        let body_deadline = body_lease
+            .map(|lease| request_deadline + lease)
+            .unwrap_or(request_deadline);
+        let on_finish = Some(self.public_success_telemetry_callback(
             peer,
             started,
-            true,
             fallback,
             request.updates_active_path,
             public_epoch,
-        )
-        .await;
-        Ok(PeerRequestResponse::Verified(response))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn send_public_signed(
-        &self,
-        url: &str,
-        request: &MeshRequest,
-        target_id: &str,
-        cluster_ca_key_pem: &str,
-        cluster_ca_cert_pem: &str,
-        budget: Duration,
-        allow_unsigned_not_found: bool,
-    ) -> Result<reqwest::Response, MeshRequestError> {
-        let (response, verified) = retry::signed_send_with_public_gateway_retries(
-            &self.public_direct,
-            url,
-            request,
-            target_id,
-            cluster_ca_key_pem,
-            cluster_ca_cert_pem,
-            budget,
-            true,
-        )
-        .await?;
-        let Some(acknowledgement) = response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
-        else {
-            if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
-                return Ok(response);
-            }
-            return Err(MeshRequestError::Protocol(
-                "public response has no signed acknowledgement".to_string(),
-            ));
+            operation_id,
+            public_probe_guard.take(),
+            body_deadline,
+        ));
+        let response = match body_lease {
+            Some(lease) => reverse::attach_response_with_body_lease(
+                response,
+                request_deadline,
+                lease,
+                on_finish,
+            ),
+            None => reverse::attach_response_with_finish(response, request_deadline, on_finish),
         };
-        let ack = acknowledgement.to_str().map_err(|_| {
-            MeshRequestError::Protocol(
-                "public response carries a malformed signed acknowledgement".to_string(),
-            )
-        })?;
-        if let Err(error) = internal_auth::verify_ack_v2(
-            cluster_ca_key_pem,
-            cluster_ca_cert_pem,
-            &verified,
-            target_id,
-            response.status().as_u16(),
-            ack,
-        ) {
-            return Err(error.into());
-        }
-        Ok(response)
+        Ok(PeerRequestResponse::Verified(response))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -862,8 +996,9 @@ impl MeshAwareHttpClient {
         request: &MeshRequest,
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
-        budget: Duration,
+        deadline: Instant,
         class: reverse::ReverseRequestClass,
+        body_lease: Option<Duration>,
     ) -> Result<reqwest::Response, MeshRequestError> {
         if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
@@ -881,16 +1016,20 @@ impl MeshAwareHttpClient {
                 "invalid reverse assignment or recursive route".to_string(),
             ));
         }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(MeshRequestError::PreDispatchTimeout);
+        }
         let reverse_slot = self
             .circuits
-            .try_reverse_slot(&route.rendezvous.node_id, class)
+            .try_reverse_slot_until(&route.rendezvous.node_id, class, deadline)
             .await?;
         let outer_request = MeshRequest {
             method: reqwest::Method::POST,
             path_and_query: "/api/admin/_internal/mesh/reverse-relay".to_string(),
             content_type: Some("application/octet-stream".to_string()),
             body: request.body.clone(),
-            total_budget: budget,
+            total_budget: remaining,
             allow_ambiguous_fallback: request.allow_ambiguous_fallback,
             request_id: request.request_id.clone(),
             route: InternalRoute::MeshV2,
@@ -898,7 +1037,6 @@ impl MeshAwareHttpClient {
             sender_id: request.sender_id.clone(),
             updates_active_path: false,
         };
-        let outer_started = Instant::now();
         let local_rendezvous = self
             .local_reverse_relay
             .as_ref()
@@ -915,15 +1053,18 @@ impl MeshAwareHttpClient {
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
                 &local_url,
-                budget,
+                deadline,
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
                 &self.mesh_gate_lock,
+                &self.snapshot_installing,
+                body_lease,
             )
             .await?;
             response = Some(local_response);
         } else if let Some(mesh_base_url) = route.rendezvous.mesh_base_url.as_deref() {
-            let mesh_budget = mesh_attempt_budget(budget).min(budget);
+            let mesh_budget =
+                mesh_attempt_budget(deadline.saturating_duration_since(Instant::now()));
             let mesh_url = join_url(mesh_base_url, &outer_request.path_and_query, false)?;
             match reverse::send_outer_request(
                 &self.mesh,
@@ -934,10 +1075,12 @@ impl MeshAwareHttpClient {
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
                 &mesh_url,
-                mesh_budget,
+                deadline.min(Instant::now() + mesh_budget),
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
                 &self.mesh_gate_lock,
+                &self.snapshot_installing,
+                body_lease,
             )
             .await
             {
@@ -961,8 +1104,7 @@ impl MeshAwareHttpClient {
         let (response, inner_verified, outer_verified) = match response {
             Some(response) => response,
             None => {
-                let remaining = budget.saturating_sub(outer_started.elapsed());
-                if remaining.is_zero() {
+                if deadline <= Instant::now() {
                     return Err(MeshRequestError::OutcomeUnknown);
                 }
                 let outer_url = join_url(
@@ -979,10 +1121,12 @@ impl MeshAwareHttpClient {
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
                     &outer_url,
-                    remaining,
+                    deadline,
                     request.allow_ambiguous_fallback,
                     &self.cluster_mesh_enabled,
                     &self.mesh_gate_lock,
+                    &self.snapshot_installing,
+                    body_lease,
                 )
                 .await?
             }
@@ -1010,7 +1154,6 @@ impl MeshAwareHttpClient {
         Ok(reverse::attach_reverse_slot(response, reverse_slot))
     }
 }
-
 fn telemetry_sample(
     path: TelemetryPath,
     success: bool,
@@ -1029,55 +1172,21 @@ fn telemetry_sample(
     }
 }
 
-fn mesh_transport_observation(response: &reqwest::Response) -> MeshTransportObservation {
-    let protocol = if response.version() == reqwest::Version::HTTP_2 {
-        MeshTransportProtocol::H2
-    } else {
-        MeshTransportProtocol::Other
-    };
-    let fingerprint = response
-        .extensions()
-        .get::<hyper_util::client::legacy::connect::HttpInfo>()
-        .map(|info| MeshConnectionFingerprint {
-            local_addr: info.local_addr(),
-            remote_addr: info.remote_addr(),
-        });
-    MeshTransportObservation {
-        protocol,
-        fingerprint,
-    }
-}
-
-fn public_transport_error(
-    error: reqwest::Error,
-    allow_ambiguous_fallback: bool,
-) -> MeshRequestError {
-    if allow_ambiguous_fallback {
-        MeshRequestError::Public(error)
-    } else if error.is_timeout() && !error.is_connect() {
-        MeshRequestError::TransportTimeout
-    } else {
-        MeshRequestError::OutcomeUnknown
-    }
-}
-
-fn direct_mesh_is_eligible(
-    peer: &MeshPeerTarget,
-    cluster_mesh_enabled: bool,
-    validation: DirectValidationState,
-) -> bool {
-    peer.mesh_base_url.is_some()
-        && cluster_mesh_enabled
-        && validation == DirectValidationState::Verified
-}
-
+#[cfg(test)]
+mod cleanup_tests;
 #[cfg(test)]
 mod mesh_fallback_tests;
 #[cfg(test)]
 mod mesh_gate_tests;
 #[cfg(test)]
+mod mesh_success_body_tests;
+#[cfg(test)]
+mod mesh_success_race_tests;
+#[cfg(test)]
 mod peer_target_edge_tests;
 #[cfg(test)]
 mod peer_target_tests;
+#[cfg(test)]
+mod public_body_tests;
 #[cfg(test)]
 mod retry_tests;

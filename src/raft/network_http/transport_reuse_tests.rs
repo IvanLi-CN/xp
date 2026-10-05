@@ -23,10 +23,12 @@ const HEALTH_PATH: &str = "/api/admin/_internal/mesh/health";
 struct SignedServerState {
     ca_key_pem: String,
     ca_cert_pem: String,
+    requests: Option<Arc<AtomicUsize>>,
 }
 
 struct CountingTlsServer {
     addr: std::net::SocketAddr,
+    requests: Arc<AtomicUsize>,
     accepts: Arc<AtomicUsize>,
     active: Arc<AtomicUsize>,
     peak_active: Arc<AtomicUsize>,
@@ -37,6 +39,7 @@ struct CountingTlsServer {
 
 struct Http1Server {
     addr: std::net::SocketAddr,
+    requests: Arc<AtomicUsize>,
     task: JoinHandle<()>,
 }
 
@@ -73,6 +76,9 @@ async fn signed_health(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response<axum::body::Body> {
+    if let Some(requests) = &state.requests {
+        requests.fetch_add(1, Ordering::SeqCst);
+    }
     let verified = crate::internal_auth::verify_request_v2(
         &state.ca_key_pem,
         &state.ca_cert_pem,
@@ -108,13 +114,18 @@ async fn signed_health(
         .expect("response")
 }
 
-fn signed_app(ca_key_pem: &str, ca_cert_pem: &str) -> Router {
+fn signed_app_with_requests(
+    ca_key_pem: &str,
+    ca_cert_pem: &str,
+    requests: Option<Arc<AtomicUsize>>,
+) -> Router {
     Router::new()
         .fallback(any(signed_health))
         .layer(axum::extract::DefaultBodyLimit::disable())
         .with_state(SignedServerState {
             ca_key_pem: ca_key_pem.to_string(),
             ca_cert_pem: ca_cert_pem.to_string(),
+            requests,
         })
 }
 
@@ -137,7 +148,8 @@ async fn spawn_counting_tls_server(ca_key_pem: &str, ca_cert_pem: &str) -> Count
         .set_nonblocking(true)
         .expect("nonblocking server listener");
     let server_addr = server_listener.local_addr().expect("server address");
-    let app = signed_app(ca_key_pem, ca_cert_pem);
+    let requests = Arc::new(AtomicUsize::new(0));
+    let app = signed_app_with_requests(ca_key_pem, ca_cert_pem, Some(requests.clone()));
     let server = axum_server::from_tcp_rustls(server_listener, tls)
         .expect("TLS server")
         .serve(app.into_make_service());
@@ -182,6 +194,7 @@ async fn spawn_counting_tls_server(ca_key_pem: &str, ca_cert_pem: &str) -> Count
     });
     CountingTlsServer {
         addr,
+        requests,
         accepts,
         active,
         peak_active,
@@ -197,14 +210,22 @@ async fn spawn_http1_server(ca_key_pem: &str, ca_cert_pem: &str) -> Http1Server 
         .set_nonblocking(true)
         .expect("nonblocking HTTP/1 listener");
     let addr = listener.local_addr().expect("HTTP/1 address");
+    let requests = Arc::new(AtomicUsize::new(0));
     let server = axum_server::from_tcp(listener)
         .expect("HTTP/1 server")
         .http1_only()
-        .serve(signed_app(ca_key_pem, ca_cert_pem).into_make_service());
+        .serve(
+            signed_app_with_requests(ca_key_pem, ca_cert_pem, Some(requests.clone()))
+                .into_make_service(),
+        );
     let task = tokio::spawn(async move {
         let _ = server.into_future().await;
     });
-    Http1Server { addr, task }
+    Http1Server {
+        addr,
+        requests,
+        task,
+    }
 }
 
 fn mesh_request(index: usize) -> MeshRequest {
@@ -267,6 +288,10 @@ async fn mesh_requests_reuse_one_tls_connection_for_sequential_and_parallel_load
             .await
             .expect("sequential Mesh request");
         assert_eq!(response.version(), Version::HTTP_2);
+        response
+            .bytes()
+            .await
+            .expect("sequential Mesh response body");
     }
 
     let responses = join_all((32..48).map(|index| {
@@ -282,14 +307,29 @@ async fn mesh_requests_reuse_one_tls_connection_for_sequential_and_parallel_load
     }))
     .await;
     for response in responses {
-        assert_eq!(
-            response.expect("parallel Mesh request").version(),
-            Version::HTTP_2
-        );
+        let response = response.expect("parallel Mesh request");
+        assert_eq!(response.version(), Version::HTTP_2);
+        response.bytes().await.expect("parallel Mesh response body");
     }
 
     assert_eq!(server.accepts.load(Ordering::SeqCst), 1);
-    let peer = telemetry.snapshot().await.peers.remove(0);
+    let peer = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let peer = telemetry
+                .snapshot()
+                .await
+                .peers
+                .into_iter()
+                .next()
+                .expect("Mesh telemetry peer");
+            if peer.current_connection_requests == 48 {
+                break peer;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("Mesh telemetry should converge after response bodies are released");
     assert_eq!(peer.connection_generation, 1);
     assert_eq!(peer.current_connection_requests, 48);
     assert_eq!(
@@ -428,6 +468,31 @@ async fn h2_transport_failure_uses_the_compatible_public_client() {
         .await
         .expect("public fallback response");
     assert_eq!(response.version(), Version::HTTP_11);
+    response
+        .bytes()
+        .await
+        .expect("public fallback response body");
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let snapshot = telemetry.snapshot().await;
+            let ready = snapshot
+                .peers
+                .first()
+                .and_then(|peer| peer.buckets.back())
+                .is_some_and(|bucket| {
+                    bucket.mesh_failure == 1
+                        && bucket.public_success == 1
+                        && bucket.fallback_success == 1
+                });
+            if ready {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("public fallback telemetry");
 
     let peer = telemetry.snapshot().await.peers.remove(0);
     let bucket = peer.buckets.back().expect("telemetry bucket");
@@ -574,4 +639,55 @@ async fn long_lived_stream_and_large_request_share_one_h2_connection() {
         );
     }
     assert_eq!(server.accepts.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn signed_mesh_body_holds_gate_until_deadline_without_public_retry() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::primary_cluster_id())
+        .expect("cluster CA");
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(
+        xp_test_fixtures::secondary_node_id(),
+    )
+    .expect("node CSR");
+    let node_cert = crate::cluster_identity::sign_node_csr(
+        xp_test_fixtures::primary_cluster_id(),
+        &ca.key_pem,
+        &csr.csr_pem,
+    )
+    .expect("node certificate");
+    let mesh_server = spawn_counting_tls_server(&ca.key_pem, &ca.cert_pem).await;
+    let server = spawn_http1_server(&ca.key_pem, &ca.cert_pem).await;
+    let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem)
+        .expect("network factory")
+        .mesh_client();
+    let target = MeshPeerTarget {
+        public_base_url: format!("http://{}", server.addr),
+        ..mesh_target(mesh_server.addr)
+    };
+    let mut request = mesh_request(0);
+    request.path_and_query = format!("{HEALTH_PATH}?stream");
+    request.total_budget = std::time::Duration::from_millis(250);
+
+    let response = client
+        .send_peer_request(&target, request, &ca.key_pem, &ca.cert_pem)
+        .await
+        .expect("signed Mesh response");
+    assert_eq!(response.version(), Version::HTTP_2);
+    assert_eq!(mesh_server.requests.load(Ordering::SeqCst), 1);
+
+    let gate_lock = client.mesh_gate_lock_for_test();
+    let transition = tokio::spawn(async move { gate_lock.write_owned().await });
+    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    assert!(
+        !transition.is_finished(),
+        "body guard should hold Mesh admission"
+    );
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), transition)
+        .await
+        .expect("body deadline should release Mesh admission")
+        .expect("transition task should finish");
+    assert_eq!(server.requests.load(Ordering::SeqCst), 0);
+    drop(response);
 }
