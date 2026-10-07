@@ -72,7 +72,8 @@ fn can_schedule_tiered_handoff(
     checkpoint: &InitialPeerBackfillCheckpoint,
     handoff: &InitialPeerTieredHandoff,
 ) -> bool {
-    // Recovery arms one generation; consumption is persisted before replay.
+    // Recovery arms one generation for the next missing sequence. The retained anchor range is
+    // learned from the signed response and may extend once before the generation is consumed.
     let recovery_matches = checkpoint.recovery_generation > 0
         && !checkpoint.recovery_generation_consumed
         && checkpoint.recovery_handoff.as_ref().is_some_and(|armed| {
@@ -853,7 +854,6 @@ mod tests {
             ]
         );
     }
-
     #[test]
     fn tiered_export_uses_only_the_remaining_peer_page_budget() {
         assert_eq!(remaining_peer_page_budget(0), 8);

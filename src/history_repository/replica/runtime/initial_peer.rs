@@ -495,6 +495,15 @@ impl RepositoryReplicaRuntime {
                 "history recovery requires a continuous receiver watermark".to_owned(),
             ));
         }
+        if checkpoint.recovery_generation_consumed
+            && checkpoint.recovery_handoff.as_ref().is_some_and(|handoff| {
+                receiver_watermark == Some(handoff.first_missing.saturating_sub(1))
+            })
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                "history recovery requires receiver watermark progress".to_owned(),
+            ));
+        }
         let capacity = self.runtime_capacity()?;
         let capacity_required_bytes = HISTORY_RECOVERY_PAGE_BUDGET_BYTES
             .saturating_add(HISTORY_RECOVERY_METADATA_BUDGET_BYTES);
@@ -608,7 +617,20 @@ impl RepositoryReplicaRuntime {
         checkpoint.summary_pending_next_cursor = None;
         checkpoint.recovery_generation = preview.generation;
         checkpoint.recovery_generation_consumed = false;
-        checkpoint.recovery_handoff = preview.previous_handoff.clone();
+        // The retained anchor range is only known from the next signed repair response. Bind
+        // this generation to the current source/epoch/stream and the next missing sequence;
+        // the response may extend the missing tail up to its retained anchor exactly once.
+        checkpoint.recovery_handoff = preview.previous_handoff.clone().map(|mut handoff| {
+            let first_missing = preview
+                .receiver_watermark
+                .expect("recovery preview has a receiver watermark")
+                .saturating_add(1);
+            handoff.first_missing = first_missing;
+            handoff.last_missing = first_missing.saturating_sub(1);
+            handoff.next_sequence = first_missing;
+            handoff.end_unix_seconds = 0;
+            handoff
+        });
         if let Err(error) = self.persist_control_state() {
             self.snapshot = previous_snapshot;
             return Err(error);

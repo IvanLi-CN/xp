@@ -37,7 +37,7 @@ BEGIN
     ON CONFLICT(source_node_id, source_epoch, stream, block_index) DO UPDATE SET dirty = 1;
 END;
 CREATE TRIGGER IF NOT EXISTS repository_history_sequence_summary_delete
-AFTER DELETE ON repository_history_records
+AFTER DELETE ON repository_history_records WHEN OLD.is_tombstone = 0
 BEGIN
     UPDATE repository_history_sequence_summary_blocks SET dirty = 1
       WHERE source_node_id = OLD.source_node_id AND source_epoch = OLD.source_epoch
