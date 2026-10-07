@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
 	DEFAULT_SUBSCRIPTION_FORMAT,
@@ -7,6 +7,7 @@ import {
 } from "@/api/subscription";
 import { Badge } from "@/components/ui/badge";
 
+import type { AdminUserMihomoProfile } from "../api/adminUsers";
 import {
 	AccessMatrix,
 	type AccessMatrixCellState,
@@ -15,12 +16,12 @@ import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyButton } from "../components/CopyButton";
 import { Icon } from "../components/Icon";
+import { MihomoProfileEditor } from "../components/MihomoProfileEditor";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
-import { YamlCodeEditor } from "../components/YamlCodeEditor";
 import { buttonVariants } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
@@ -31,6 +32,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { useMihomoProfileDraft } from "../hooks/useMihomoProfileDraft";
 import { DemoUsersTable } from "./DemoUsersTable";
 import {
 	formatGb,
@@ -475,12 +477,6 @@ export function DemoUserDetailsPage() {
 	const [subscriptionError, setSubscriptionError] = useState<string | null>(
 		null,
 	);
-	const [mihomoMixinYaml, setMihomoMixinYaml] = useState(
-		user?.mihomoMixinYaml ?? "",
-	);
-	const [mihomoExtraProxiesYaml, setMihomoExtraProxiesYaml] = useState("");
-	const [mihomoExtraProxyProvidersYaml, setMihomoExtraProxyProvidersYaml] =
-		useState("");
 	const [activeUsageNodeId, setActiveUsageNodeId] = useState<string | null>(
 		null,
 	);
@@ -494,24 +490,45 @@ export function DemoUserDetailsPage() {
 		setTier(user?.tier ?? "p2");
 		setLocale(user?.locale ?? "en-US");
 		setSelectedIds(user?.endpointIds ?? []);
-		setMihomoMixinYaml(user?.mihomoMixinYaml ?? "");
-		setMihomoExtraProxiesYaml("");
-		setMihomoExtraProxyProvidersYaml("");
 	}, [
 		user?.displayName,
 		user?.endpointIds,
 		user?.locale,
-		user?.mihomoMixinYaml,
 		user?.quotaLimitGb,
 		user?.tier,
 	]);
 	const currentUser = user;
+	const mihomoProfile: AdminUserMihomoProfile | undefined = currentUser
+		? {
+				mixin_yaml: currentUser.mihomoMixinYaml,
+				extra_proxies_yaml: currentUser.mihomoExtraProxiesYaml,
+				extra_proxy_providers_yaml: currentUser.mihomoExtraProxyProvidersYaml,
+			}
+		: undefined;
+	const saveMihomoProfileRequest = useCallback(
+		async (profile: AdminUserMihomoProfile) => {
+			if (!currentUser || !canWrite) return profile;
+			updateUser(currentUser.id, {
+				mihomoMixinYaml: profile.mixin_yaml,
+				mihomoExtraProxiesYaml: profile.extra_proxies_yaml,
+				mihomoExtraProxyProvidersYaml: profile.extra_proxy_providers_yaml,
+			});
+			pushToast({ variant: "success", message: "Mihomo profile saved." });
+			return profile;
+		},
+		[canWrite, currentUser, pushToast, updateUser],
+	);
+	const mihomoDraft = useMihomoProfileDraft({
+		userId,
+		profile: mihomoProfile,
+		readOnly: !canWrite,
+		saveProfile: saveMihomoProfileRequest,
+	});
 	const {
 		accessDirty: dirty,
 		mihomoDirty,
 		profileDirty,
 		saveAccess,
-		saveMihomoProfile,
 		saveProfile,
 	} = useDemoUserDraftNavigation({
 		userId,
@@ -526,7 +543,10 @@ export function DemoUserDetailsPage() {
 			tier,
 			locale,
 			selectedIds,
-			mihomoMixinYaml,
+			mihomoMixinYaml: mihomoDraft.draft.mixin_yaml,
+			mihomoExtraProxiesYaml: mihomoDraft.draft.extra_proxies_yaml,
+			mihomoExtraProxyProvidersYaml:
+				mihomoDraft.draft.extra_proxy_providers_yaml,
 		},
 		setters: {
 			setDisplayName,
@@ -536,9 +556,11 @@ export function DemoUserDetailsPage() {
 			setTier,
 			setLocale,
 			setSelectedIds,
-			setMihomoMixinYaml,
-			setMihomoExtraProxiesYaml,
-			setMihomoExtraProxyProvidersYaml,
+		},
+		mihomoProfile: {
+			dirty: mihomoDraft.dirty,
+			save: mihomoDraft.save,
+			discard: mihomoDraft.discard,
 		},
 	});
 
@@ -899,44 +921,19 @@ export function DemoUserDetailsPage() {
 						</div>
 
 						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
-							<div className="font-medium text-sm">
-								Mihomo mixin config (per user)
-							</div>
-							<YamlCodeEditor
-								label="mixin_yaml"
-								value={mihomoMixinYaml}
-								onChange={setMihomoMixinYaml}
-								placeholder="Paste Mihomo mixin YAML"
-								minRows={10}
-								showShortcutHint
+							<MihomoProfileEditor
+								userName={currentUser.displayName}
+								userId={currentUser.id}
+								profile={mihomoDraft.baseline}
+								draft={mihomoDraft.draft}
+								dirty={mihomoDirty}
+								isSaving={mihomoDraft.isSaving}
+								readOnly={!canWrite}
+								error={mihomoDraft.error}
+								isLoaded={mihomoDraft.isLoaded}
+								onChange={mihomoDraft.setField}
+								onSave={mihomoDraft.save}
 							/>
-							<YamlCodeEditor
-								label="extra_proxies_yaml"
-								value={mihomoExtraProxiesYaml}
-								onChange={setMihomoExtraProxiesYaml}
-								placeholder="- name: custom-ss\n  type: ss\n  ..."
-								minRows={6}
-							/>
-							<YamlCodeEditor
-								label="extra_proxy_providers_yaml"
-								value={mihomoExtraProxyProvidersYaml}
-								onChange={setMihomoExtraProxyProvidersYaml}
-								placeholder="ProviderA:\n  type: http\n  ..."
-								minRows={6}
-							/>
-							{mihomoDirty ? (
-								<div className="xp-alert xp-alert-warning px-4 py-2">
-									Mihomo profile has unsaved changes.
-								</div>
-							) : null}
-							<div>
-								<Button
-									disabled={!canWrite || !mihomoDirty}
-									onClick={() => void saveMihomoProfile()}
-								>
-									Save mihomo mixin
-								</Button>
-							</div>
 						</div>
 
 						<Button

@@ -53,6 +53,8 @@ export type DemoUser = {
 	endpointIds: string[];
 	subscriptionToken: string;
 	mihomoMixinYaml: string;
+	mihomoExtraProxiesYaml: string;
+	mihomoExtraProxyProvidersYaml: string;
 	createdAt: string;
 };
 

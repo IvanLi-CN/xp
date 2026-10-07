@@ -65,6 +65,58 @@ test("demo user details follow the production user-management layout", async ({
 	await expect(dialog).toContainText("vless://");
 });
 
+test("expands the Mihomo editor into a persistent file workspace", async ({
+	page,
+}) => {
+	await page.goto("/demo/login");
+	await page.getByRole("button", { name: "Enter demo" }).click();
+	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+
+	const pageUrl = page.url();
+	await page.getByRole("button", { name: "Expand editor" }).click();
+	const workspace = page.getByRole("dialog");
+	await expect(workspace).toBeVisible();
+	await expect(workspace.locator("aside")).toBeVisible();
+	await expect(workspace.locator(".cm-editor")).toHaveCount(3);
+
+	const mixinEditor = workspace.locator(
+		'[data-mihomo-document="mixin_yaml"] .cm-content',
+	);
+	await mixinEditor.click();
+	await page.keyboard.press("ControlOrMeta+End");
+	await page.keyboard.insertText("\n# workspace edit");
+	await workspace.getByRole("button", { name: /extra_proxies_yaml/ }).click();
+	await workspace.getByRole("button", { name: /mixin_yaml/ }).click();
+	await expect(mixinEditor).toContainText("workspace edit");
+
+	await workspace.getByRole("button", { name: "Exit expanded editor" }).click();
+	await expect(workspace).toBeHidden();
+	await expect(page).toHaveURL(pageUrl);
+	await expect(
+		page.getByRole("button", { name: "Expand editor" }),
+	).toBeVisible();
+});
+
+test("uses the Files drawer at a narrow viewport", async ({ page }) => {
+	await page.setViewportSize({ width: 393, height: 852 });
+	await page.goto("/demo/login");
+	await page.getByRole("button", { name: "Enter demo" }).click();
+	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+
+	await page.getByRole("button", { name: "Expand editor" }).click();
+	const workspace = page.getByRole("dialog").first();
+	await expect(workspace.locator("aside")).toBeHidden();
+	await workspace.getByRole("button", { name: "Files" }).click();
+	const files = page.getByRole("heading", { name: "Files" }).last();
+	await expect(files).toBeVisible();
+	await page
+		.getByRole("button", { name: /extra_proxy_providers_yaml/ })
+		.last()
+		.click();
+	await expect(files).toBeHidden();
+	await expect(workspace).toContainText("extra_proxy_providers_yaml");
+});
+
 for (const viewport of [
 	{ width: 320, height: 852 },
 	{ width: 360, height: 800 },

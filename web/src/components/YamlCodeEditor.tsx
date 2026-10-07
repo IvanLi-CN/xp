@@ -22,6 +22,7 @@ type YamlCodeEditorProps = {
 	hideLabel?: boolean;
 	onCreateEditor?: (view: EditorView) => void;
 	showShortcutHint?: boolean;
+	fillHeight?: boolean;
 };
 
 const CODEMIRROR_BASIC_SETUP = {
@@ -54,6 +55,7 @@ export function YamlCodeEditor({
 	hideLabel = false,
 	onCreateEditor,
 	showShortcutHint = false,
+	fillHeight = false,
 }: YamlCodeEditorProps) {
 	const prefs = useUiPrefsOptional();
 	const labelId = useId();
@@ -88,7 +90,12 @@ export function YamlCodeEditor({
 	}
 
 	return (
-		<div className="min-w-0 max-w-full space-y-2">
+		<div
+			className={cn(
+				"min-w-0 max-w-full",
+				fillHeight ? "flex h-full min-h-0 flex-col" : "space-y-2",
+			)}
+		>
 			<span
 				className={
 					hideLabel ? "sr-only" : "text-sm font-medium text-foreground"
@@ -100,12 +107,14 @@ export function YamlCodeEditor({
 			<div
 				className={cn(
 					"min-w-0 max-w-full overflow-hidden",
-					"rounded-2xl border border-border bg-background",
+					fillHeight
+						? "flex min-h-0 flex-1 flex-col rounded-none border-0 bg-transparent"
+						: "rounded-2xl border border-border bg-background",
 				)}
 			>
 				<CodeMirror
 					value={value}
-					height={editorHeight}
+					height={fillHeight ? "100%" : editorHeight}
 					placeholder={placeholder}
 					theme={editorTheme}
 					extensions={extensions}
@@ -115,7 +124,11 @@ export function YamlCodeEditor({
 					onChange={(nextValue) => onChange(nextValue)}
 					onCreateEditor={(view) => onCreateEditor?.(view)}
 					aria-labelledby={labelId}
-					className="min-w-0 max-w-full text-sm font-mono"
+					className={cn(
+						"min-w-0 max-w-full text-sm font-mono",
+						fillHeight &&
+							"min-h-0 flex-1 [&_.cm-editor]:h-full [&_.cm-scroller]:h-full",
+					)}
 				/>
 			</div>
 			{resolvedHelperText ? (

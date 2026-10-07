@@ -2,22 +2,62 @@
 
 ## Current State
 
-- The user Mihomo mixin and provider-template behavior in `SPEC.md` is implemented.
-- Current subscription output remains defined by the live template and API contracts.
+- Subscription rendering, the Profile API, and the User Details editor are implemented.
+- The shared full-viewport workspace is implemented for User Details and Demo User Details.
+- Profile API and subscription contracts remain unchanged.
 
 ## Recorded Delivery State
 
-- Status: 已完成
+- Status: complete for the Mihomo profile workspace scope
 - Created: 2026-03-04
-- Last: 2026-04-24
+- Last: 2026-10-07
 
-## 实现里程碑（Milestones / Delivery checklist）
+## Implementation Milestones
 
-- [x] M1: 状态层新增 `UserMihomoProfile` 持久化与 Raft 命令
-- [x] M2: HTTP 管理 API + 订阅 `format=mihomo` 路由落地
-- [x] M3: Mihomo 渲染引擎（系统节点生成 + 合并 + 冲突重命名 + relay use 注入）
-- [x] M4: Web UserDetails 编辑 + `mihomo` 预览
-- [x] M5: 测试补齐与质量门禁通过
-- [x] M6: 管理 API 主字段切换为 `mixin_yaml`，并移除旧字段 `template_yaml` 兼容层
-- [x] M7: 订阅渲染与后续 provider-only 合同对齐，mixin 不要求包含系统动态组定义
-- [x] M8: provider 为空 / extra proxies 保留 / 共享测试机 Mihomo 校验与脱敏输出证明
+- [x] M1: Persist the user Mihomo Profile and expose the Profile API.
+- [x] M2: Keep `mixin_yaml` as the public Profile field.
+- [x] M3: Keep provider-only subscription rendering and dynamic groups.
+- [x] M4: Add the shared User Details and Demo workspace.
+- [x] M5: Preserve drafts, editor state, permissions, and save protection.
+- [x] M6: Add Storybook states and real CodeMirror browser coverage.
+
+## Workspace Coverage
+
+- `REQ-MIHOMO-WORKSPACE-001`: Expand entry, full viewport, same URL, and user context.
+- `REQ-MIHOMO-WORKSPACE-002`: Three fixed documents share mounted CodeMirror instances.
+- `REQ-MIHOMO-WORKSPACE-003`: Draft Hook protects dirty state and navigation guards.
+- `REQ-MIHOMO-WORKSPACE-004`: One save submits all fields and keeps retryable errors.
+- `REQ-MIHOMO-WORKSPACE-005`: Desktop tree, mobile drawer, dynamic viewport, and scrolling.
+- `REQ-MIHOMO-WORKSPACE-006`: Theme, labels, focus restoration, keyboard, and read-only mode.
+
+## Validation Evidence
+
+- Hook tests cover dirty refresh protection, duplicate saves, and late user responses.
+- User Details tests cover the Profile API payload and normalization behavior.
+- Playwright covers Demo desktop expansion, mobile Files drawer, and real CodeMirror state.
+- Playwright covers User Details expansion with the mocked Profile API.
+- Storybook covers inline, expanded, read-only, save-error, and mobile drawer states.
+- `cd web && bun run lint` passes.
+- `cd web && bun run typecheck` passes.
+- `python3 scripts/check-style-budget.py` passes.
+- `cd web && bun run build` passes.
+- Storybook Mihomo workspace interactions pass.
+- Demo and User Details Mihomo workspace E2E pass at desktop and narrow viewports.
+
+## Scope Notes
+
+- `YamlCodeEditor` keeps fixed-height behavior by default and fills its container in the workspace.
+- ToolsPage, preview, backend routes, Fullscreen API, autosave, and refresh are out of scope.
+
+## Visual Evidence
+
+source_type=storybook_canvas_and_demo_e2e
+target_program=mock-only
+capture_scope=browser-viewport
+sensitive_exclusion=N/A; controlled fixtures only
+requested_viewports=1440x900,393x852
+submission_gate=approved-by-owner
+
+![Mihomo workspace desktop](./assets/mihomo-workspace-dark-desktop.png)
+![Mihomo workspace mobile editor](./assets/mihomo-workspace-dark-mobile.png)
+![Mihomo workspace mobile Files drawer](./assets/mihomo-workspace-dark-files.png)

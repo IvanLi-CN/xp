@@ -16,6 +16,7 @@ type YamlCodeEditorStoryProps = {
 	value: string;
 	placeholder?: string;
 	minRows?: number;
+	fillHeight?: boolean;
 };
 
 function YamlCodeEditorStory({
@@ -23,6 +24,7 @@ function YamlCodeEditorStory({
 	value,
 	placeholder,
 	minRows,
+	fillHeight,
 }: YamlCodeEditorStoryProps) {
 	const [draft, setDraft] = useState(value);
 
@@ -46,6 +48,7 @@ function YamlCodeEditorStory({
 					onChange={setDraft}
 					placeholder={placeholder}
 					minRows={minRows}
+					fillHeight={fillHeight}
 				/>
 				<div className="rounded-xl border border-border/70 bg-muted/30 p-3">
 					<div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
@@ -117,4 +120,17 @@ export const EmptyTemplate: Story = {
 		placeholder: "routes:\n  - cidr: 10.0.0.0/8\n    via: internal",
 		minRows: 6,
 	},
+};
+
+export const FillHeight: Story = {
+	render: () => (
+		<div className="h-[32rem] w-[min(100%,760px)]">
+			<YamlCodeEditorStory
+				label="Expanded editor"
+				value={SAMPLE_REALITY}
+				minRows={8}
+				fillHeight
+			/>
+		</div>
+	),
 };

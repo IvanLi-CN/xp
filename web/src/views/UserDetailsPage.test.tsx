@@ -5,6 +5,7 @@ import {
 	render,
 	screen,
 	waitFor,
+	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureCatalog } from "../fixture-policy/catalog";
@@ -353,7 +354,10 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(accessTab);
 
 		expect(await screenByText("Remaining: 0 MiB")).toBeTruthy();
-		expect(await queryByText(fixtureCatalog.nodeId.fixture134())).toBeNull();
+		const accessPanel = await screen.findByRole("tabpanel", { name: "Access" });
+		expect(
+			within(accessPanel).queryByText(fixtureCatalog.nodeId.fixture134()),
+		).toBeNull();
 	});
 
 	it("applies selected endpoints via putAdminUserAccess", async () => {
@@ -705,7 +709,7 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.change(await screenByLabel("mixin_yaml"), {
 			target: { value: "port: 0\nproxy-groups: []\n" },
 		});
-		fireEvent.click(await screenByRole("button", "Save mihomo mixin"));
+		fireEvent.click(await screenByRole("button", "Save configuration"));
 
 		await waitFor(() => {
 			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
@@ -741,7 +745,11 @@ rules: []
 		await waitFor(() => {
 			expect(fetchAdminUserMihomoProfile).toHaveBeenCalled();
 		});
-		fireEvent.click(await screenByRole("button", "Save mihomo mixin"));
+		const mixinEditor = await screenByLabel("mixin_yaml");
+		fireEvent.change(mixinEditor, {
+			target: { value: `${(mixinEditor as HTMLTextAreaElement).value}\n` },
+		});
+		fireEvent.click(await screenByRole("button", "Save configuration"));
 
 		await waitFor(() => {
 			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
@@ -786,7 +794,11 @@ rules: []
 		await waitFor(() => {
 			expect(fetchAdminUserMihomoProfile).toHaveBeenCalled();
 		});
-		fireEvent.click(await screenByRole("button", "Save mihomo mixin"));
+		const mixinEditor = await screenByLabel("mixin_yaml");
+		fireEvent.change(mixinEditor, {
+			target: { value: `${(mixinEditor as HTMLTextAreaElement).value}\n` },
+		});
+		fireEvent.click(await screenByRole("button", "Save configuration"));
 
 		await waitFor(() => {
 			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(

@@ -22,6 +22,8 @@ type Props = {
 				| "quotaLimitGb"
 				| "endpointIds"
 				| "mihomoMixinYaml"
+				| "mihomoExtraProxiesYaml"
+				| "mihomoExtraProxyProvidersYaml"
 			>
 		>,
 	) => void;
@@ -33,6 +35,8 @@ type Props = {
 		locale: string;
 		selectedIds: string[];
 		mihomoMixinYaml: string;
+		mihomoExtraProxiesYaml: string;
+		mihomoExtraProxyProvidersYaml: string;
 	};
 	setters: {
 		setDisplayName: SetValue<string>;
@@ -42,9 +46,14 @@ type Props = {
 		setTier: SetValue<DemoUser["tier"]>;
 		setLocale: SetValue<string>;
 		setSelectedIds: SetValue<string[]>;
-		setMihomoMixinYaml: SetValue<string>;
-		setMihomoExtraProxiesYaml: SetValue<string>;
-		setMihomoExtraProxyProvidersYaml: SetValue<string>;
+		setMihomoMixinYaml?: SetValue<string>;
+		setMihomoExtraProxiesYaml?: SetValue<string>;
+		setMihomoExtraProxyProvidersYaml?: SetValue<string>;
+	};
+	mihomoProfile?: {
+		dirty: boolean;
+		save: () => Promise<boolean>;
+		discard: () => void;
 	};
 };
 
@@ -61,6 +70,7 @@ export function useDemoUserDraftNavigation({
 	pushToast,
 	draft,
 	setters,
+	mihomoProfile,
 }: Props) {
 	const profileDirty =
 		user !== undefined &&
@@ -71,8 +81,13 @@ export function useDemoUserDraftNavigation({
 	const accessDirty =
 		user !== undefined &&
 		normalizedIds(draft.selectedIds) !== normalizedIds(user.endpointIds);
-	const mihomoDirty =
-		user !== undefined && draft.mihomoMixinYaml !== user.mihomoMixinYaml;
+	const mihomoDirty = mihomoProfile
+		? mihomoProfile.dirty
+		: user !== undefined &&
+			(draft.mihomoMixinYaml !== user.mihomoMixinYaml ||
+				draft.mihomoExtraProxiesYaml !== user.mihomoExtraProxiesYaml ||
+				draft.mihomoExtraProxyProvidersYaml !==
+					user.mihomoExtraProxyProvidersYaml);
 
 	function saveProfile(): Promise<boolean> {
 		if (!user || !canWrite) return Promise.resolve(false);
@@ -113,17 +128,28 @@ export function useDemoUserDraftNavigation({
 	}
 
 	function saveMihomoProfile(): Promise<boolean> {
+		if (mihomoProfile) return mihomoProfile.save();
 		if (!user || !canWrite) return Promise.resolve(false);
-		updateUser(user.id, { mihomoMixinYaml: draft.mihomoMixinYaml });
+		updateUser(user.id, {
+			mihomoMixinYaml: draft.mihomoMixinYaml,
+			mihomoExtraProxiesYaml: draft.mihomoExtraProxiesYaml,
+			mihomoExtraProxyProvidersYaml: draft.mihomoExtraProxyProvidersYaml,
+		});
 		pushToast({ variant: "success", message: "Mihomo profile saved." });
 		return Promise.resolve(true);
 	}
 
 	function discardMihomoProfile() {
+		if (mihomoProfile) {
+			mihomoProfile.discard();
+			return;
+		}
 		if (!user) return;
-		setters.setMihomoMixinYaml(user.mihomoMixinYaml);
-		setters.setMihomoExtraProxiesYaml("");
-		setters.setMihomoExtraProxyProvidersYaml("");
+		setters.setMihomoMixinYaml?.(user.mihomoMixinYaml);
+		setters.setMihomoExtraProxiesYaml?.(user.mihomoExtraProxiesYaml);
+		setters.setMihomoExtraProxyProvidersYaml?.(
+			user.mihomoExtraProxyProvidersYaml,
+		);
 	}
 
 	useObjectNavigationDirtySections(`demo-user:${userId}`, [

@@ -57,3 +57,23 @@ test("creates and deletes a user, fetches subscription", async ({ page }) => {
 	await expect(page).toHaveURL(/\/users$/);
 	await expect(page.getByText("No users yet")).toBeVisible();
 });
+
+test("opens the Mihomo workspace from User Details", async ({ page }) => {
+	await setAdminToken(page);
+	await setupApiMocks(page);
+
+	await page.goto(`/users/${fixtureCatalog.identifier.userPrimary()}`);
+	await page.getByRole("button", { name: "Expand editor" }).click();
+
+	const workspace = page.getByRole("dialog");
+	await expect(workspace).toBeVisible();
+	await expect(workspace.locator("aside")).toBeVisible();
+	await expect(workspace.locator(".cm-editor")).toHaveCount(3);
+	await workspace
+		.getByRole("button", { name: /extra_proxy_providers_yaml/ })
+		.click();
+	await expect(workspace).toContainText("extra_proxy_providers_yaml");
+
+	await workspace.getByRole("button", { name: "Exit expanded editor" }).click();
+	await expect(workspace).toBeHidden();
+});

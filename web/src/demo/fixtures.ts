@@ -163,6 +163,8 @@ const baseUsers: DemoUser[] = [
 		subscriptionToken: fixtureCatalog.identifier.tokenPrimary(),
 		mihomoMixinYaml:
 			"rules:\n  - DOMAIN-SUFFIX,example.net,DIRECT\n  - GEOIP,CN,DIRECT\n",
+		mihomoExtraProxiesYaml: "",
+		mihomoExtraProxyProvidersYaml: "",
 		createdAt: fixtureCatalog.timestamp.baseline(),
 	},
 	{
@@ -177,6 +179,8 @@ const baseUsers: DemoUser[] = [
 		endpointIds: [fixtureCatalog.identifier.endpointSecondary()],
 		subscriptionToken: fixtureCatalog.identifier.tokenSecondary(),
 		mihomoMixinYaml: "proxy-groups:\n  - name: Auto\n    type: url-test\n",
+		mihomoExtraProxiesYaml: "",
+		mihomoExtraProxyProvidersYaml: "",
 		createdAt: fixtureCatalog.timestamp.baseline(),
 	},
 	{
@@ -191,6 +195,8 @@ const baseUsers: DemoUser[] = [
 		endpointIds: [fixtureCatalog.identifier.endpointTertiary()],
 		subscriptionToken: fixtureCatalog.identifier.tokenTertiary(),
 		mihomoMixinYaml: "rules:\n  - MATCH,Proxy\n",
+		mihomoExtraProxiesYaml: "",
+		mihomoExtraProxyProvidersYaml: "",
 		createdAt: fixtureCatalog.timestamp.recent(),
 	},
 	{
@@ -206,6 +212,8 @@ const baseUsers: DemoUser[] = [
 		endpointIds: [fixtureCatalog.identifier.endpointSecondary()],
 		subscriptionToken: fixtureCatalog.identifier.tokenQuaternary(),
 		mihomoMixinYaml: "dns:\n  enable: true\n  enhanced-mode: fake-ip\n",
+		mihomoExtraProxiesYaml: "",
+		mihomoExtraProxyProvidersYaml: "",
 		createdAt: fixtureCatalog.timestamp.recent(),
 	},
 	{
@@ -220,6 +228,8 @@ const baseUsers: DemoUser[] = [
 		endpointIds: [fixtureCatalog.identifier.endpointPrimary()],
 		subscriptionToken: fixtureCatalog.identifier.tokenQuinary(),
 		mihomoMixinYaml: "",
+		mihomoExtraProxiesYaml: "",
+		mihomoExtraProxyProvidersYaml: "",
 		createdAt: fixtureCatalog.timestamp.baseline(),
 	},
 ];
@@ -380,6 +390,8 @@ function largeUsers(): DemoUser[] {
 			subscriptionToken: fixtureCatalog.identifier.tokenPrimary(),
 			mihomoMixinYaml:
 				index % 4 === 0 ? "rules:\n  - DOMAIN-SUFFIX,internal,DIRECT\n" : "",
+			mihomoExtraProxiesYaml: "",
+			mihomoExtraProxyProvidersYaml: "",
 			createdAt: fixtureCatalog.timestamp.baseline(),
 		};
 	});

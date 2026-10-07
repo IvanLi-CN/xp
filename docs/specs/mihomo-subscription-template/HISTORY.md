@@ -15,3 +15,5 @@
 - 2026-03-06: review 收口补充 extra proxy 引用保护：对显式 extra proxies 的名称保持最高优先级，即便名称带有 `-JP` / `-HK` / `-KR` / `-ss` / `-reality` 后缀，也不再被系统动态 remap 误绑。
 - 2026-04-24: 将系统托管地区组切换为“节点主动探测出口 IP + Geo 解析”唯一真相源；新增固定 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other` 地区面，以及高质量/节点选择聚合组自动补点。
 - 2026-06-19: 管理端与文档收口到 raw profile storage 合同；前端与 mock 不再假设会对 `mixin_yaml.proxies` / `mixin_yaml.proxy-providers` 做本地或服务端自动抽取。
+- 2026-10-06: 收敛 Mihomo 全视口编辑需求并纳入本主题；固定三份文档、整份 Profile 保存、草稿保护与窄屏文件抽屉。
+- 2026-10-07: 将全视口工作区收敛为连续的多文件编辑器布局，补齐桌面/窄屏视觉证据，并通过 Storybook、Demo 与 User Details 浏览器验证。
