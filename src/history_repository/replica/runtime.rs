@@ -288,6 +288,10 @@ pub(crate) struct RepositoryReplicaSnapshot {
     partition_summaries_complete: bool,
     #[serde(default)]
     sequence_summary_blocks_complete: bool,
+    #[serde(default)]
+    sequence_summary_migration_cursor: Option<RepositoryHistoryCompactionCursor>,
+    #[serde(default)]
+    sequence_summary_migration_complete: bool,
 }
 
 impl Default for RepositoryReplicaSnapshot {
@@ -326,6 +330,8 @@ impl Default for RepositoryReplicaSnapshot {
             partition_summary_cursor: None,
             partition_summaries_complete: false,
             sequence_summary_blocks_complete: false,
+            sequence_summary_migration_cursor: None,
+            sequence_summary_migration_complete: false,
         }
     }
 }
@@ -886,6 +892,7 @@ mod query;
 mod receive;
 mod repair_batch;
 mod retention;
+mod sequence_summary;
 pub(crate) mod source;
 mod storage;
 mod sync;

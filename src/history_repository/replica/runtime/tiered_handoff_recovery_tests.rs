@@ -142,6 +142,36 @@ fn history_recovery_fingerprint_is_signed_once_and_retries_fail_closed() {
         .expect("preview recovery");
     assert_eq!(preview.generation, 1);
     assert_eq!(preview.receiver_watermark, Some(2));
+    let checkpoint = runtime
+        .snapshot
+        .initial_peer_backfills
+        .get_mut("node-b")
+        .expect("recovery checkpoint");
+    let original = checkpoint
+        .retained_anchor_handoffs
+        .iter()
+        .next()
+        .cloned()
+        .expect("previous handoff");
+    checkpoint.retained_anchor_handoffs.remove(&original);
+    checkpoint
+        .retained_anchor_handoffs
+        .insert(super::InitialPeerTieredHandoff {
+            end_unix_seconds: original.end_unix_seconds + 1,
+            ..original.clone()
+        });
+    assert!(
+        runtime
+            .arm_initial_peer_recovery("node-b", &preview.fingerprint)
+            .is_err()
+    );
+    let checkpoint = runtime
+        .snapshot
+        .initial_peer_backfills
+        .get_mut("node-b")
+        .expect("recovery checkpoint");
+    checkpoint.retained_anchor_handoffs.clear();
+    checkpoint.retained_anchor_handoffs.insert(original);
     runtime
         .arm_initial_peer_recovery("node-b", &preview.fingerprint)
         .expect("arm recovery");

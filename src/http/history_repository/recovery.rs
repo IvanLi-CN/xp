@@ -34,6 +34,26 @@ pub(crate) async fn admin_internal_history_repository_recovery(
             "history recovery must be signed by the local node",
         ));
     }
+    {
+        let store = state.store.lock().await;
+        let Some(membership) = store.state().repository_membership.as_ref() else {
+            return Err(ApiError::conflict(
+                "history repository membership is not configured",
+            ));
+        };
+        let peer = crate::state::history_repository::identity::RepositoryNodeId::try_from(
+            request.peer_node_id.clone(),
+        )
+        .map_err(|_| ApiError::invalid_request("peer node id is invalid"))?;
+        if !membership
+            .repository(&peer)
+            .is_some_and(|member| member.lifecycle() == &RepositoryLifecycle::Ready)
+        {
+            return Err(ApiError::conflict(
+                "history recovery requires a Ready repository peer",
+            ));
+        }
+    }
     if request.apply && !request.yes {
         return Err(ApiError::invalid_request(
             "history recovery apply requires yes",

@@ -42,9 +42,3 @@ BEGIN
       WHERE source_node_id = OLD.source_node_id AND source_epoch = OLD.source_epoch
         AND stream = OLD.stream AND block_index = OLD.sequence / 4096;
 END;
-INSERT OR IGNORE INTO repository_history_sequence_summary_blocks
-  (source_node_id, source_epoch, stream, block_index, first_sequence, last_sequence, record_count, digest, dirty)
-SELECT source_node_id, source_epoch, stream, sequence / 4096,
-       MIN(sequence), MAX(sequence), COUNT(*), zeroblob(32), 1
-  FROM repository_history_records WHERE is_tombstone = 0
- GROUP BY source_node_id, source_epoch, stream, sequence / 4096;

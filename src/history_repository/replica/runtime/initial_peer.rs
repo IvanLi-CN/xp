@@ -499,6 +499,7 @@ impl RepositoryReplicaRuntime {
         hasher.update(previous_handoff.first_missing.to_be_bytes());
         hasher.update(previous_handoff.last_missing.to_be_bytes());
         hasher.update(previous_handoff.next_sequence.to_be_bytes());
+        hasher.update(previous_handoff.end_unix_seconds.to_be_bytes());
         hasher.update(capacity.quota_bytes().to_be_bytes());
         hasher.update(capacity.used_bytes().to_be_bytes());
         hasher.update(capacity.filesystem_available_bytes().to_be_bytes());

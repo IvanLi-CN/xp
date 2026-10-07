@@ -1910,6 +1910,16 @@ async fn admin_internal_capabilities(
         return Err(ApiError::unauthorized("internal auth required"));
     }
     let mut response = api_capabilities().await.0;
+    let summary_v2_ready = state
+        .repository_replica
+        .lock()
+        .await
+        .sequence_summary_blocks_ready();
+    if summary_v2_ready {
+        response
+            .capabilities
+            .push("admin.repository-history-summary-v2");
+    }
     let managed_vless_endpoint = {
         let store = state.store.lock().await;
         store.list_endpoints().into_iter().any(|endpoint| {

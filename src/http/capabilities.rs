@@ -47,7 +47,6 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         "admin.nodes",
         "admin.history-repositories",
         "admin.repository-history",
-        "admin.repository-history-summary-v2",
         "admin.users",
         "admin.endpoints",
         "admin.service-monitors",
