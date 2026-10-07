@@ -509,6 +509,12 @@ impl RepositoryReplicaRuntime {
             ));
         }
         let capacity = self.runtime_capacity()?;
+        if self.storage_degraded {
+            return Err(RepositoryRuntimeError::Storage(
+                "history recovery capacity preflight unavailable while storage is degraded"
+                    .to_owned(),
+            ));
+        }
         let capacity_required_bytes = HISTORY_RECOVERY_PAGE_BUDGET_BYTES
             .saturating_add(HISTORY_RECOVERY_METADATA_BUDGET_BYTES);
         let capacity_filesystem_required_bytes =

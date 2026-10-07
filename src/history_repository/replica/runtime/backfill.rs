@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::history_repository::{
     MAX_INITIAL_BACKFILL_PAGE_BYTES, MAX_INITIAL_BACKFILL_PAGE_RECORDS,
+    control::{
+        HISTORY_RECOVERY_METADATA_BUDGET_BYTES, HISTORY_RECOVERY_PAGE_BUDGET_BYTES,
+        HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES,
+    },
 };
 
 use super::*;
@@ -390,9 +394,25 @@ impl RepositoryReplicaRuntime {
         if records.is_empty() {
             return Ok(());
         }
+        if self.storage_degraded {
+            return Err(RepositoryRuntimeError::Storage(
+                "history recovery write stopped while storage is degraded".to_owned(),
+            ));
+        }
         self.refresh_capacity()?;
         let availability = self.snapshot.capacity.history_write_availability();
-        if !availability.allows_history_writes() {
+        let required = HISTORY_RECOVERY_PAGE_BUDGET_BYTES
+            .saturating_add(HISTORY_RECOVERY_METADATA_BUDGET_BYTES);
+        let available_quota = self
+            .snapshot
+            .capacity
+            .quota_bytes()
+            .saturating_sub(self.snapshot.capacity.used_bytes());
+        let required_filesystem = HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES.saturating_add(required);
+        if !availability.allows_history_writes()
+            || available_quota < required
+            || self.snapshot.capacity.filesystem_available_bytes() < required_filesystem
+        {
             return Err(RepositoryRuntimeError::WriteStopped(availability));
         }
         let previous_snapshot = self.snapshot.clone();
