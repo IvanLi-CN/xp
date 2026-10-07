@@ -163,7 +163,8 @@ impl HistoryStorage {
             .prepare(
                 "SELECT source_node_id, source_epoch, stream, sequence, subject_node_id,
                         observer_node_id, schema_id, schema_version, record_key,
-                        observed_start, payload
+                        observed_start, observed_end, received_at, aggregate_complete,
+                        aggregate_start, aggregate_end, payload
                    FROM repository_history_records
                   WHERE is_tombstone = 0
                     AND source_node_id = ?1 AND source_epoch = ?2 AND stream = ?3
@@ -206,20 +207,45 @@ impl HistoryStorage {
             let key = row.get::<_, Vec<u8>>(8).map_err(sqlite_error)?;
             let observed = checked_u64(row.get::<_, i64>(9).map_err(sqlite_error)?, 9)
                 .map_err(sqlite_error)?;
-            let payload = row.get::<_, Vec<u8>>(10).map_err(sqlite_error)?;
+            let observed_end = checked_u64(row.get::<_, i64>(10).map_err(sqlite_error)?, 10)
+                .map_err(sqlite_error)?;
+            let received_at = checked_u64(row.get::<_, i64>(11).map_err(sqlite_error)?, 11)
+                .map_err(sqlite_error)?;
+            let aggregate_complete = row
+                .get::<_, Option<i64>>(12)
+                .map_err(sqlite_error)?
+                .map(|value| value != 0);
+            let aggregate_start = row
+                .get::<_, Option<i64>>(13)
+                .map_err(sqlite_error)?
+                .map(|value| checked_u64(value, 13))
+                .transpose()
+                .map_err(sqlite_error)?;
+            let aggregate_end = row
+                .get::<_, Option<i64>>(14)
+                .map_err(sqlite_error)?
+                .map(|value| checked_u64(value, 14))
+                .transpose()
+                .map_err(sqlite_error)?;
+            let payload = row.get::<_, Vec<u8>>(15).map_err(sqlite_error)?;
             let mut leaf = sha2::Sha256::new();
             leaf.update(b"xp-history-repository-sequence-leaf-v2\0");
-            leaf.update(source.as_bytes());
+            hash_field(&mut leaf, source.as_bytes());
             leaf.update(epoch.to_be_bytes());
-            leaf.update(stream_name.as_bytes());
+            hash_field(&mut leaf, stream_name.as_bytes());
             leaf.update(sequence.to_be_bytes());
-            leaf.update(subject.as_bytes());
-            leaf.update(observer.as_bytes());
-            leaf.update(schema.as_bytes());
+            hash_field(&mut leaf, subject.as_bytes());
+            hash_field(&mut leaf, observer.as_bytes());
+            hash_field(&mut leaf, schema.as_bytes());
             leaf.update(version.to_be_bytes());
-            leaf.update(key);
+            hash_field(&mut leaf, &key);
             leaf.update(observed.to_be_bytes());
-            leaf.update(payload);
+            leaf.update(observed_end.to_be_bytes());
+            leaf.update(received_at.to_be_bytes());
+            hash_optional_bool(&mut leaf, aggregate_complete);
+            hash_optional_u64(&mut leaf, aggregate_start);
+            hash_optional_u64(&mut leaf, aggregate_end);
+            hash_field(&mut leaf, &payload);
             let leaf: [u8; 32] = leaf.finalize().into();
             let mut node = sha2::Sha256::new();
             node.update(b"xp-history-repository-sequence-node-v2\0");
@@ -430,6 +456,28 @@ fn checked_u64(value: i64, column: usize) -> rusqlite::Result<u64> {
             "summary integer must be nonnegative".into(),
         )
     })
+}
+
+fn hash_field(hasher: &mut sha2::Sha256, value: &[u8]) {
+    hasher.update((value.len() as u64).to_be_bytes());
+    hasher.update(value);
+}
+
+fn hash_optional_u64(hasher: &mut sha2::Sha256, value: Option<u64>) {
+    match value {
+        Some(value) => {
+            hasher.update([1]);
+            hasher.update(value.to_be_bytes());
+        }
+        None => hasher.update([0]),
+    }
+}
+
+fn hash_optional_bool(hasher: &mut sha2::Sha256, value: Option<bool>) {
+    match value {
+        Some(value) => hasher.update([if value { 2 } else { 1 }]),
+        None => hasher.update([0]),
+    }
 }
 
 fn checked_u32(value: i64, column: usize) -> rusqlite::Result<u32> {

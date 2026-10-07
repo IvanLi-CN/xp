@@ -503,6 +503,10 @@ pub struct XpHistoryRepositoryRecoverArgs {
     #[arg(long)]
     pub apply: bool,
 
+    /// Explicitly request the zero-write preview mode.
+    #[arg(long, conflicts_with = "apply")]
+    pub dry_run: bool,
+
     /// Confirm the in-place recovery mutation.
     #[arg(long)]
     pub yes: bool,

@@ -69,6 +69,9 @@ impl RepositoryReplicaRuntime {
             .storage
             .repository_history_sequence_summary_blocks_bounded(MAX_SEQUENCE_SUMMARY_BLOCKS + 1)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        if !complete {
+            return Ok((Vec::new(), false));
+        }
         let blocks = blocks
             .into_iter()
             .take(MAX_SEQUENCE_SUMMARY_BLOCKS)

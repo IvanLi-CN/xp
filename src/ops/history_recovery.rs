@@ -10,6 +10,12 @@ pub(crate) async fn cmd_xp_history_repository_recover(
     if args.apply && !args.yes {
         return Err(ExitError::new(2, "invalid_args: --apply requires --yes"));
     }
+    if args.dry_run && args.apply {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: --dry-run conflicts with --apply",
+        ));
+    }
     if args.apply && args.expected_recovery_fingerprint.is_none() {
         return Err(ExitError::new(
             2,
