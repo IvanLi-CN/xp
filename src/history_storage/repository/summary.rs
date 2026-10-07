@@ -268,6 +268,7 @@ impl HistoryStorage {
         transaction.commit().map_err(sqlite_error)
     }
 
+    #[cfg(test)]
     pub(crate) fn repository_history_sequence_summary_blocks(
         &self,
     ) -> Result<Vec<RepositoryHistorySequenceSummaryBlock>> {
@@ -308,6 +309,52 @@ impl HistoryStorage {
             .map_err(sqlite_error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(sqlite_error)
+    }
+
+    pub(crate) fn repository_history_sequence_summary_blocks_bounded(
+        &self,
+        limit: usize,
+    ) -> Result<(Vec<RepositoryHistorySequenceSummaryBlock>, bool)> {
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Ok((Vec::new(), true));
+        };
+        let mut statement = connection
+            .prepare(
+                "SELECT source_node_id, source_epoch, stream, block_index, first_sequence,
+                        last_sequence, record_count, digest
+                   FROM repository_history_sequence_summary_blocks
+                  WHERE dirty = 0
+                  ORDER BY source_node_id, source_epoch, stream, block_index
+                  LIMIT ?1",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map([i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
+                let digest = row.get::<_, Vec<u8>>(7)?;
+                let digest: [u8; 32] = digest.try_into().map_err(|_| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        7,
+                        rusqlite::types::Type::Blob,
+                        "summary digest must be 32 bytes".into(),
+                    )
+                })?;
+                Ok(RepositoryHistorySequenceSummaryBlock {
+                    source_node_id: row.get(0)?,
+                    source_epoch: checked_u64(row.get::<_, i64>(1)?, 1)?,
+                    stream: row.get(2)?,
+                    block_index: checked_u64(row.get::<_, i64>(3)?, 3)?,
+                    first_sequence: checked_u64(row.get::<_, i64>(4)?, 4)?,
+                    last_sequence: checked_u64(row.get::<_, i64>(5)?, 5)?,
+                    record_count: checked_u64(row.get::<_, i64>(6)?, 6)?,
+                    digest,
+                })
+            })
+            .map_err(sqlite_error)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error)?;
+        let complete = rows.len() < limit;
+        Ok((rows, complete))
     }
     /// Return one bounded keyset page for the persisted partition-summary rebuild. This is a
     /// maintenance path: callers may decode the payloads outside the HTTP summary request.

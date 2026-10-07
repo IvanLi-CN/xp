@@ -52,6 +52,8 @@ pub(crate) struct InitialPeerBackfillCheckpoint {
     pub(crate) recovery_generation: u64,
     #[serde(default)]
     pub(crate) recovery_generation_consumed: bool,
+    #[serde(default)]
+    pub(crate) recovery_handoff: Option<InitialPeerTieredHandoff>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -131,6 +133,7 @@ impl RepositoryReplicaRuntime {
                 summary_tiered_handoff: checkpoint.summary_tiered_handoff,
                 recovery_generation: checkpoint.recovery_generation,
                 recovery_generation_consumed: checkpoint.recovery_generation_consumed,
+                recovery_handoff: checkpoint.recovery_handoff,
             },
         );
         if let Err(error) = self.persist_control_state() {
@@ -307,6 +310,7 @@ impl RepositoryReplicaRuntime {
                 summary_tiered_handoff: Some(handoff),
                 recovery_generation: prior.recovery_generation,
                 recovery_generation_consumed: prior.recovery_generation > 0,
+                recovery_handoff: prior.recovery_handoff,
             },
         );
         self.persist_control_state()
@@ -426,6 +430,7 @@ impl RepositoryReplicaRuntime {
                 summary_tiered_handoff: prior.summary_tiered_handoff,
                 recovery_generation: prior.recovery_generation,
                 recovery_generation_consumed: prior.recovery_generation_consumed,
+                recovery_handoff: prior.recovery_handoff,
                 ..InitialPeerBackfillCheckpoint::default()
             },
         );
@@ -447,12 +452,10 @@ impl RepositoryReplicaRuntime {
                 "history recovery already has an active tiered handoff".to_owned(),
             ));
         }
-        if checkpoint.recovery_generation_consumed {
-            return Err(RepositoryRuntimeError::Storage(
-                "history recovery generation was already consumed".to_owned(),
-            ));
-        }
-        let previous_handoff = checkpoint.retained_anchor_handoffs.iter().max().cloned();
+        let previous_handoff = checkpoint
+            .recovery_handoff
+            .clone()
+            .or_else(|| checkpoint.retained_anchor_handoffs.iter().max().cloned());
         let Some(previous_handoff) = previous_handoff else {
             return Err(RepositoryRuntimeError::Storage(
                 "history recovery requires a completed retained-anchor marker".to_owned(),
@@ -483,11 +486,12 @@ impl RepositoryReplicaRuntime {
                 "history recovery capacity preflight failed".to_owned(),
             ));
         }
-        let generation = if checkpoint.recovery_generation > 0 {
-            checkpoint.recovery_generation
-        } else {
-            1
-        };
+        let generation =
+            if checkpoint.recovery_generation > 0 && !checkpoint.recovery_generation_consumed {
+                checkpoint.recovery_generation
+            } else {
+                checkpoint.recovery_generation.saturating_add(1).max(1)
+            };
         let mut hasher = sha2::Sha256::new();
         hasher.update(b"xp-history-recovery-v1\0");
         hasher.update(peer_node_id.as_bytes());
@@ -545,8 +549,14 @@ impl RepositoryReplicaRuntime {
             .initial_peer_backfills
             .entry(peer_node_id.to_owned())
             .or_default();
+        checkpoint.summary_complete = false;
+        checkpoint.summary_requires_tiered_backfill = true;
+        checkpoint.summary_cursor = None;
+        checkpoint.summary_pending_segment_ids.clear();
+        checkpoint.summary_pending_next_cursor = None;
         checkpoint.recovery_generation = preview.generation;
         checkpoint.recovery_generation_consumed = false;
+        checkpoint.recovery_handoff = preview.previous_handoff.clone();
         if let Err(error) = self.persist_control_state() {
             self.snapshot = previous_snapshot;
             return Err(error);

@@ -605,6 +605,7 @@ fn peer_initial_backfill_checkpoint_survives_restart() {
             summary_tiered_handoff: None,
             recovery_generation: 0,
             recovery_generation_consumed: false,
+            recovery_handoff: None,
         })
     );
 }

@@ -75,20 +75,17 @@ fn can_schedule_tiered_handoff(
     // A legacy completed handoff is never an implicit authorization for crossing retention a
     // second time. The signed local recovery command arms exactly one new generation; consuming
     // that generation is persisted before the bounded response is replayed.
-    checkpoint.summary_tiered_handoff.as_ref() != Some(handoff)
+    let recovery_matches = checkpoint.recovery_generation > 0
+        && !checkpoint.recovery_generation_consumed
+        && checkpoint.recovery_handoff.as_ref() == Some(handoff);
+    (checkpoint.recovery_generation == 0 || checkpoint.recovery_generation_consumed)
+        && checkpoint.summary_tiered_handoff.as_ref() != Some(handoff)
         && !checkpoint.retained_anchor_handoffs.iter().any(|completed| {
             completed.source_node_id == handoff.source_node_id
                 && completed.source_epoch == handoff.source_epoch
                 && completed.stream == handoff.stream
         })
-        || (checkpoint.recovery_generation > 0
-            && !checkpoint.recovery_generation_consumed
-            && checkpoint.summary_tiered_handoff.is_none()
-            && checkpoint.retained_anchor_handoffs.iter().any(|completed| {
-                completed.source_node_id == handoff.source_node_id
-                    && completed.source_epoch == handoff.source_epoch
-                    && completed.stream == handoff.stream
-            }))
+        || recovery_matches
 }
 
 pub(crate) async fn catch_up_against_ready_repositories(
@@ -981,6 +978,7 @@ mod tests {
         let armed_recovery = InitialPeerBackfillCheckpoint {
             recovery_generation: 1,
             recovery_generation_consumed: false,
+            recovery_handoff: Some(same_stream.clone()),
             retained_anchor_handoffs: BTreeSet::from([same_stream.clone()]),
             ..InitialPeerBackfillCheckpoint::default()
         };

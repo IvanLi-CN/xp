@@ -1,5 +1,7 @@
 use super::{RepositoryReplicaRuntime, RepositoryRuntimeError};
 
+pub(crate) const MAX_SEQUENCE_SUMMARY_BLOCKS: usize = 1024;
+
 impl RepositoryReplicaRuntime {
     pub(crate) fn advance_sequence_summary_block_rebuild_page(
         &mut self,
@@ -59,15 +61,17 @@ impl RepositoryReplicaRuntime {
 
     pub(crate) fn sequence_summary_blocks(
         &self,
-    ) -> Result<Vec<super::RepositorySequenceBlockSummary>, RepositoryRuntimeError> {
+    ) -> Result<(Vec<super::RepositorySequenceBlockSummary>, bool), RepositoryRuntimeError> {
         if !self.uses_sqlite_history() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), true));
         }
-        Ok(self
+        let (blocks, complete) = self
             .storage
-            .repository_history_sequence_summary_blocks()
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+            .repository_history_sequence_summary_blocks_bounded(MAX_SEQUENCE_SUMMARY_BLOCKS + 1)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let blocks = blocks
             .into_iter()
+            .take(MAX_SEQUENCE_SUMMARY_BLOCKS)
             .map(|block| super::RepositorySequenceBlockSummary {
                 source_node_id: block.source_node_id,
                 source_epoch: block.source_epoch,
@@ -78,6 +82,7 @@ impl RepositoryReplicaRuntime {
                 hash: block.digest,
                 record_count: block.record_count,
             })
-            .collect())
+            .collect();
+        Ok((blocks, complete))
     }
 }

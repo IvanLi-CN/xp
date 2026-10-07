@@ -372,6 +372,15 @@ impl RepositoryReplicaRuntime {
         } else {
             None
         };
+        let (sequence_blocks, sequence_blocks_complete) = if deep_verification
+            && after_segment_id.is_none()
+            && self.uses_sqlite_history()
+            && self.snapshot.sequence_summary_blocks_complete
+        {
+            self.sequence_summary_blocks()?
+        } else {
+            (Vec::new(), false)
+        };
         Ok(RepositoryReplicaSummary {
             segment_ids: segments.into_iter().map(|segment| segment.id).collect(),
             partitions: if deep_verification
@@ -382,24 +391,8 @@ impl RepositoryReplicaRuntime {
             } else {
                 Vec::new()
             },
-            summary_version: if deep_verification
-                && after_segment_id.is_none()
-                && self.uses_sqlite_history()
-                && self.snapshot.sequence_summary_blocks_complete
-            {
-                2
-            } else {
-                1
-            },
-            sequence_blocks: if deep_verification
-                && after_segment_id.is_none()
-                && self.uses_sqlite_history()
-                && self.snapshot.sequence_summary_blocks_complete
-            {
-                self.sequence_summary_blocks()?
-            } else {
-                Vec::new()
-            },
+            summary_version: if sequence_blocks_complete { 2 } else { 1 },
+            sequence_blocks,
             partitions_included: deep_verification
                 && after_segment_id.is_none()
                 && (!self.uses_sqlite_history() || self.snapshot.partition_summaries_complete),
@@ -444,7 +437,7 @@ impl RepositoryReplicaRuntime {
             true
         } else if remote.summary_version >= 2 && !remote.sequence_blocks.is_empty() {
             !self.sequence_summary_blocks_ready()
-                || self.sequence_summary_blocks()? == remote.sequence_blocks
+                || self.sequence_summary_blocks()?.0 == remote.sequence_blocks
         } else {
             !self.partition_summaries_ready()
                 || self.retained_partition_summaries()? == remote.partitions
@@ -468,7 +461,7 @@ impl RepositoryReplicaRuntime {
         }
         Ok(
             if remote.summary_version >= 2 && !remote.sequence_blocks.is_empty() {
-                self.sequence_summary_blocks()? == remote.sequence_blocks
+                self.sequence_summary_blocks()?.0 == remote.sequence_blocks
             } else {
                 self.retained_partition_summaries()? == remote.partitions
             },
