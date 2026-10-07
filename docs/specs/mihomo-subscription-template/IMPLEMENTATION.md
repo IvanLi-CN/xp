@@ -39,14 +39,14 @@
 - User Details preserves raw profiles and migrates legacy conflicts only after API rejection.
 - Playwright covers Demo desktop/mobile and real CodeMirror state for all documents.
 - Playwright covers User Details expansion, dirty leave/delete, and three-field saves.
-- Storybook covers inline, expanded, saving, read-only, save-error, and mobile drawer states.
+- Storybook covers inline, expanded, saving, read-only, error, drawer, and light-theme states.
 - `cd web && bun run lint` passes.
 - `cd web && bun run typecheck` passes.
 - `python3 scripts/check-style-budget.py` passes.
 - `cd web && bun run build` passes.
 - Storybook Mihomo workspace interactions pass.
-- E2E passes at 320/360/393/768/1440px with continuity, Viewer, Files focus, and dirty navigation.
-- The full frontend suite passes with 107 test files and 516 tests.
+- E2E covers 320/360/393/768/1440px, continuity, Viewer, Files focus, dirty navigation, and resize.
+- The full frontend suite passes with 107 test files and 517 tests.
 - The Impeccable detector reports no findings for the polished workspace and navigation surfaces.
 
 ## Scope Notes

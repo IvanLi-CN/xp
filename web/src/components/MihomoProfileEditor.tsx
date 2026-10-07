@@ -347,6 +347,7 @@ export function MihomoProfileEditor({
 					onInteractOutside={(event) => event.preventDefault()}
 				>
 					<div
+						data-testid="mihomo-workspace-surface"
 						className="flex min-h-0 flex-1 flex-col bg-background text-foreground"
 						style={{ height: viewportHeight ?? "100dvh" }}
 					>

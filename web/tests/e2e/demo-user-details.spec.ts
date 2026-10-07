@@ -187,24 +187,48 @@ test("expands the Mihomo editor into a persistent file workspace", async ({
 });
 
 test("uses the Files drawer at a narrow viewport", async ({ page }) => {
-	await page.setViewportSize({ width: 393, height: 852 });
-	await page.goto("/demo/login");
-	await page.getByRole("button", { name: "Enter demo" }).click();
-	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+	for (const viewport of [
+		{ width: 320, height: 852 },
+		{ width: 393, height: 852 },
+	]) {
+		await page.setViewportSize(viewport);
+		await page.goto("/demo/login");
+		await page.getByRole("button", { name: "Enter demo" }).click();
+		await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
 
-	await page.getByRole("button", { name: "Expand editor" }).click();
-	const workspace = page.getByRole("dialog").first();
-	await expect(workspace.locator("aside")).toBeHidden();
-	await workspace.getByRole("button", { name: "Files" }).click();
-	const files = page.getByRole("heading", { name: "Files" }).last();
-	await expect(files).toBeVisible();
-	await page
-		.getByRole("button", { name: /extra_proxy_providers_yaml/ })
-		.last()
-		.click();
-	await expect(files).toBeHidden();
-	await expect(workspace.getByRole("button", { name: "Files" })).toBeFocused();
-	await expect(workspace).toContainText("extra_proxy_providers_yaml");
+		await page.getByRole("button", { name: "Expand editor" }).click();
+		const workspace = page.getByRole("dialog").first();
+		await expect(workspace.locator("aside")).toBeHidden();
+		const surface = workspace.getByTestId("mihomo-workspace-surface");
+		const visualHeightChanged = await page.evaluate(() => {
+			const viewport = window.visualViewport;
+			if (!viewport) return false;
+			try {
+				Object.defineProperty(viewport, "height", {
+					configurable: true,
+					value: 540,
+				});
+			} catch {
+				return false;
+			}
+			viewport.dispatchEvent(new Event("resize"));
+			return viewport.height === 540;
+		});
+		expect(visualHeightChanged).toBe(true);
+		await expect(surface).toHaveCSS("height", "540px");
+		await workspace.getByRole("button", { name: "Files" }).click();
+		const files = page.getByRole("heading", { name: "Files" }).last();
+		await expect(files).toBeVisible();
+		await page
+			.getByRole("button", { name: /extra_proxy_providers_yaml/ })
+			.last()
+			.click();
+		await expect(files).toBeHidden();
+		await expect(
+			workspace.getByRole("button", { name: "Files" }),
+		).toBeFocused();
+		await expect(workspace).toContainText("extra_proxy_providers_yaml");
+	}
 });
 
 test("keeps the file tree at the desktop breakpoint", async ({ page }) => {

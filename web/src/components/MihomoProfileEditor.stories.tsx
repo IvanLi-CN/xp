@@ -153,6 +153,25 @@ export const Expanded: Story = {
 	},
 };
 
+export const LightTheme: Story = {
+	globals: { theme: "light" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Expand editor" }),
+		);
+		const dialog = await within(document.body).findByRole("dialog");
+		await expect(dialog).toBeVisible();
+		await expect(document.documentElement).toHaveAttribute(
+			"data-theme",
+			"xp-light",
+		);
+		await expect(
+			within(dialog).getByTestId("mihomo-workspace-surface"),
+		).toBeVisible();
+	},
+};
+
 export const ReadOnly: Story = {
 	args: { readOnly: true },
 	play: async ({ canvasElement }) => {
