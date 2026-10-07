@@ -212,6 +212,7 @@ export function MihomoProfileEditor({
 				minRows={DOCUMENT_ROWS[documentId]}
 				readOnly={readOnly || isSaving}
 				fillHeight={expanded}
+				preserveEditorStateOnValueChange
 				hideLabel={expanded}
 				onCreateEditor={(view) => {
 					views.current[documentId] = view;
@@ -476,6 +477,19 @@ export function MihomoProfileEditor({
 										{readOnly ? <span>Read-only</span> : null}
 									</div>
 								</div>
+								{error ? (
+									<div
+										className="xp-alert xp-alert-error mx-3 mt-3 shrink-0 px-3 py-2 text-xs sm:mx-4"
+										role="alert"
+									>
+										<Icon
+											name="tabler:alert-circle"
+											className="mt-0.5 size-4 shrink-0"
+											ariaLabel="Save error"
+										/>
+										<span className="min-w-0 break-words">{error}</span>
+									</div>
+								) : null}
 								<div
 									ref={expandedMount}
 									className="min-h-0 flex-1 overflow-hidden"

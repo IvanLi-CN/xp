@@ -129,6 +129,16 @@ export const ReadOnly: Story = {
 
 export const SaveError: Story = {
 	args: { startWithError: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Expand editor" }),
+		);
+		const dialog = await within(document.body).findByRole("dialog");
+		await expect(within(dialog).getByRole("alert")).toHaveTextContent(
+			"The previous save failed",
+		);
+	},
 };
 
 export const MobileFiles: Story = {

@@ -1,8 +1,11 @@
 import { yaml } from "@codemirror/lang-yaml";
+import { Transaction } from "@codemirror/state";
 import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
-import CodeMirror from "@uiw/react-codemirror";
-import type { EditorView } from "@uiw/react-codemirror";
-import { type ReactNode, useId, useMemo } from "react";
+import CodeMirror, {
+	ExternalChange,
+	type EditorView,
+} from "@uiw/react-codemirror";
+import { type ReactNode, useId, useLayoutEffect, useMemo, useRef } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -23,6 +26,7 @@ type YamlCodeEditorProps = {
 	onCreateEditor?: (view: EditorView) => void;
 	showShortcutHint?: boolean;
 	fillHeight?: boolean;
+	preserveEditorStateOnValueChange?: boolean;
 };
 
 const CODEMIRROR_BASIC_SETUP = {
@@ -56,14 +60,55 @@ export function YamlCodeEditor({
 	onCreateEditor,
 	showShortcutHint = false,
 	fillHeight = false,
+	preserveEditorStateOnValueChange = false,
 }: YamlCodeEditorProps) {
 	const prefs = useUiPrefsOptional();
 	const labelId = useId();
 	const resolvedHelperText = helperText ?? null;
 	const editorHeight = `${Math.max(minRows, 4) * 24}px`;
 	const extensions = useMemo(() => [yaml()], []);
+	const editorViewRef = useRef<EditorView | null>(null);
 	const editorTheme =
 		prefs?.resolvedTheme === "dark" ? githubDark : githubLight;
+
+	useLayoutEffect(() => {
+		if (!preserveEditorStateOnValueChange) return;
+		const view = editorViewRef.current;
+		if (!view) return;
+		const currentValue = view.state.doc.toString();
+		if (currentValue === value) return;
+
+		let from = 0;
+		while (
+			from < currentValue.length &&
+			from < value.length &&
+			currentValue[from] === value[from]
+		) {
+			from += 1;
+		}
+		let currentEnd = currentValue.length;
+		let nextEnd = value.length;
+		while (
+			currentEnd > from &&
+			nextEnd > from &&
+			currentValue[currentEnd - 1] === value[nextEnd - 1]
+		) {
+			currentEnd -= 1;
+			nextEnd -= 1;
+		}
+
+		view.dispatch({
+			changes: {
+				from,
+				to: currentEnd,
+				insert: value.slice(from, nextEnd),
+			},
+			annotations: [
+				ExternalChange.of(true),
+				Transaction.addToHistory.of(false),
+			],
+		});
+	}, [preserveEditorStateOnValueChange, value]);
 
 	if (IS_TEST_MODE) {
 		return (
@@ -122,7 +167,10 @@ export function YamlCodeEditor({
 					readOnly={readOnly}
 					editable={!readOnly}
 					onChange={(nextValue) => onChange(nextValue)}
-					onCreateEditor={(view) => onCreateEditor?.(view)}
+					onCreateEditor={(view) => {
+						editorViewRef.current = view;
+						onCreateEditor?.(view);
+					}}
 					aria-labelledby={labelId}
 					className={cn(
 						"min-w-0 max-w-full text-sm font-mono",
