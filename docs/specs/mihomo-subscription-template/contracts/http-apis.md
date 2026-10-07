@@ -13,7 +13,7 @@ Response `200`:
 ```
 
 - 若用户存在但未配置，返回空字符串字段（不是 404）。
-- 响应只返回 `mixin_yaml`；不再返回旧字段 `template_yaml`。
+- 响应返回三个 profile 字段；不再返回旧字段 `template_yaml`。
 - 返回值按原样反映当前存储内容；服务端不做自动抽取或自动规范化。
 
 ## PUT `/api/admin/users/{user_id}/subscription-mihomo-profile`
@@ -30,7 +30,7 @@ Request body:
 
 Backward compatibility:
 
-- 无；请求与响应统一只接受 `mixin_yaml`。
+- 请求与响应使用上述三个字段；旧字段 `template_yaml` 不再接受。
 
 Validation:
 

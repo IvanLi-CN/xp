@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
 	DEFAULT_SUBSCRIPTION_FORMAT,
@@ -7,6 +7,7 @@ import {
 } from "@/api/subscription";
 import { Badge } from "@/components/ui/badge";
 
+import type { AdminUserMihomoProfile } from "../api/adminUsers";
 import {
 	AccessMatrix,
 	type AccessMatrixCellState,
@@ -15,12 +16,13 @@ import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyButton } from "../components/CopyButton";
 import { Icon } from "../components/Icon";
+import { MihomoProfileEditor } from "../components/MihomoProfileEditor";
+import { useObjectNavigationGuard } from "../components/ObjectNavigationGuard";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
 import { useToast } from "../components/Toast";
-import { YamlCodeEditor } from "../components/YamlCodeEditor";
 import { buttonVariants } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
@@ -31,6 +33,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { useMihomoProfileDraft } from "../hooks/useMihomoProfileDraft";
 import { DemoUsersTable } from "./DemoUsersTable";
 import {
 	formatGb,
@@ -57,6 +60,8 @@ function endpointProtocolId(endpoint: DemoEndpoint) {
 export function DemoUsersPage() {
 	const { state, undoDeleteUser } = useDemo();
 	const { pushToast } = useToast();
+	const navigate = useNavigate();
+	const { requestNavigation } = useObjectNavigationGuard();
 	const [query, setQuery] = useState("");
 	const [status, setStatus] = useState("all");
 	const [sort, setSort] = useState("name");
@@ -199,7 +204,17 @@ export function DemoUsersPage() {
 				/>
 			) : (
 				<>
-					<DemoUsersTable users={visible} />
+					<DemoUsersTable
+						users={visible}
+						onUserNavigate={(nextUserId) => {
+							requestNavigation(() => {
+								void navigate({
+									to: "/demo/users/$userId",
+									params: { userId: nextUserId },
+								});
+							});
+						}}
+					/>
 					<div className="flex items-center justify-between gap-3">
 						<p className="text-sm text-muted-foreground">
 							Page {safePage} of {pages}, {filtered.length} user(s)
@@ -451,6 +466,7 @@ export function DemoUserDetailsPage() {
 	const { state, updateUser, deleteUser } = useDemo();
 	const { pushToast } = useToast();
 	const navigate = useNavigate();
+	const { requestNavigation } = useObjectNavigationGuard();
 	const user = state.users.find((item) => item.id === userId);
 	const [tab, setTab] = useState<DemoUserTab>("user");
 	const [deleteOpen, setDeleteOpen] = useState(false);
@@ -475,18 +491,14 @@ export function DemoUserDetailsPage() {
 	const [subscriptionError, setSubscriptionError] = useState<string | null>(
 		null,
 	);
-	const [mihomoMixinYaml, setMihomoMixinYaml] = useState(
-		user?.mihomoMixinYaml ?? "",
-	);
-	const [mihomoExtraProxiesYaml, setMihomoExtraProxiesYaml] = useState("");
-	const [mihomoExtraProxyProvidersYaml, setMihomoExtraProxyProvidersYaml] =
-		useState("");
 	const [activeUsageNodeId, setActiveUsageNodeId] = useState<string | null>(
 		null,
 	);
 	const canWrite = state.session?.role !== "viewer";
+	const currentUserId = user?.id;
 
 	useEffect(() => {
+		if (currentUserId && currentUserId !== userId) return;
 		setDisplayName(user?.displayName ?? "");
 		setResetPolicy(user?.quotaLimitGb === null ? "unlimited" : "monthly");
 		setResetDay(1);
@@ -494,24 +506,49 @@ export function DemoUserDetailsPage() {
 		setTier(user?.tier ?? "p2");
 		setLocale(user?.locale ?? "en-US");
 		setSelectedIds(user?.endpointIds ?? []);
-		setMihomoMixinYaml(user?.mihomoMixinYaml ?? "");
-		setMihomoExtraProxiesYaml("");
-		setMihomoExtraProxyProvidersYaml("");
 	}, [
+		currentUserId,
+		userId,
 		user?.displayName,
 		user?.endpointIds,
 		user?.locale,
-		user?.mihomoMixinYaml,
 		user?.quotaLimitGb,
 		user?.tier,
 	]);
 	const currentUser = user;
+	const mihomoProfile: AdminUserMihomoProfile | undefined = currentUser
+		? {
+				mixin_yaml: currentUser.mihomoMixinYaml,
+				extra_proxies_yaml: currentUser.mihomoExtraProxiesYaml,
+				extra_proxy_providers_yaml: currentUser.mihomoExtraProxyProvidersYaml,
+			}
+		: undefined;
+	const saveMihomoProfileRequest = useCallback(
+		async (profile: AdminUserMihomoProfile) => {
+			if (!currentUser || !canWrite) return profile;
+			updateUser(currentUser.id, {
+				mihomoMixinYaml: profile.mixin_yaml,
+				mihomoExtraProxiesYaml: profile.extra_proxies_yaml,
+				mihomoExtraProxyProvidersYaml: profile.extra_proxy_providers_yaml,
+			});
+			pushToast({ variant: "success", message: "Mihomo profile saved." });
+			return profile;
+		},
+		[canWrite, currentUser, pushToast, updateUser],
+	);
+	const mihomoDraft = useMihomoProfileDraft({
+		userId,
+		profile: mihomoProfile,
+		readOnly: !canWrite,
+		saveProfile: saveMihomoProfileRequest,
+	});
+	const mihomoSavingRef = useRef(false);
+	mihomoSavingRef.current = mihomoDraft.isSaving;
 	const {
 		accessDirty: dirty,
 		mihomoDirty,
 		profileDirty,
 		saveAccess,
-		saveMihomoProfile,
 		saveProfile,
 	} = useDemoUserDraftNavigation({
 		userId,
@@ -526,7 +563,10 @@ export function DemoUserDetailsPage() {
 			tier,
 			locale,
 			selectedIds,
-			mihomoMixinYaml,
+			mihomoMixinYaml: mihomoDraft.draft.mixin_yaml,
+			mihomoExtraProxiesYaml: mihomoDraft.draft.extra_proxies_yaml,
+			mihomoExtraProxyProvidersYaml:
+				mihomoDraft.draft.extra_proxy_providers_yaml,
 		},
 		setters: {
 			setDisplayName,
@@ -536,9 +576,12 @@ export function DemoUserDetailsPage() {
 			setTier,
 			setLocale,
 			setSelectedIds,
-			setMihomoMixinYaml,
-			setMihomoExtraProxiesYaml,
-			setMihomoExtraProxyProvidersYaml,
+		},
+		mihomoProfile: {
+			dirty: mihomoDraft.dirty,
+			isBusy: () => mihomoSavingRef.current,
+			save: mihomoDraft.save,
+			discard: mihomoDraft.discard,
 		},
 	});
 
@@ -703,6 +746,20 @@ export function DemoUserDetailsPage() {
 		pushToast({ variant: "success", message: "Subscription token reset." });
 	}
 
+	function requestDeleteUser() {
+		const targetUserId = currentUser?.id;
+		if (!targetUserId) return;
+		setDeleteOpen(false);
+		requestNavigation(() => {
+			deleteUser(targetUserId);
+			pushToast({
+				variant: "info",
+				message: "User deleted. Undo is available.",
+			});
+			navigate({ to: "/demo/users" });
+		});
+	}
+
 	return (
 		<div className="space-y-6">
 			<PageHeader
@@ -773,181 +830,154 @@ export function DemoUserDetailsPage() {
 				</div>
 			</div>
 
-			{tab === "user" ? (
-				<div className="space-y-6">
-					<div className="xp-card p-4 space-y-3">
-						<div className="xp-field-stack gap-2">
-							<span className="text-sm font-medium">Display name</span>
-							<Input
-								aria-label="Display name"
-								value={displayName}
-								onChange={(event) => setDisplayName(event.target.value)}
-							/>
-						</div>
-
-						<div className="grid gap-3 md:grid-cols-3">
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">Quota reset policy</span>
-								<Select
-									value={resetPolicy}
-									onValueChange={(value) =>
-										setResetPolicy(value as "monthly" | "unlimited")
-									}
-								>
-									<SelectTrigger aria-label="Quota reset policy">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="monthly">monthly</SelectItem>
-										<SelectItem value="unlimited">unlimited</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">Day of month</span>
-								<Input
-									type="number"
-									min={1}
-									max={31}
-									disabled={resetPolicy !== "monthly"}
-									value={resetDay}
-									onChange={(event) =>
-										setResetDay(Number(event.target.value || "1"))
-									}
-								/>
-							</div>
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">TZ offset (minutes)</span>
-								<Input
-									type="number"
-									value={resetTzOffsetMinutes}
-									onChange={(event) =>
-										setResetTzOffsetMinutes(Number(event.target.value || "0"))
-									}
-								/>
-							</div>
-						</div>
-
-						<div className="grid gap-3 md:grid-cols-2">
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">Tier</span>
-								<Select
-									value={tier}
-									onValueChange={(value) => setTier(value as DemoUser["tier"])}
-								>
-									<SelectTrigger aria-label="Tier">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="p1">p1</SelectItem>
-										<SelectItem value="p2">p2</SelectItem>
-										<SelectItem value="p3">p3</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">Locale</span>
-								<Input
-									aria-label="Locale"
-									value={locale}
-									onChange={(event) => setLocale(event.target.value)}
-								/>
-							</div>
-						</div>
-
-						<div className="flex items-center gap-3 text-sm">
-							<span className="font-medium">User ID:</span>
-							<span className="font-mono">{user.id}</span>
-						</div>
-						<div className="flex items-center gap-3 text-sm">
-							<span className="font-medium">Subscription token:</span>
-							<span className="font-mono break-all">
-								{user.subscriptionToken}
-							</span>
-						</div>
-
-						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
-							<div className="flex flex-wrap items-end gap-3">
-								<SubscriptionFormatSegmentedControl
-									className="w-full sm:w-auto"
-									onValueChange={setSubscriptionFormat}
-									testId="demo-subscription-format"
-									value={subscriptionFormat}
-								/>
-								<CopyButton
-									text={subscriptionUrl(user.subscriptionToken)}
-									label="Copy URL"
-									ariaLabel="Copy subscription URL"
-									className="self-end"
-								/>
-								<Button
-									className="self-end"
-									iconLeft={<Icon name="tabler:cloud-download" />}
-									loading={subscriptionLoading}
-									onClick={() => {
-										setSubscriptionOpen(true);
-										void fetchSubscriptionPreview(subscriptionFormat);
-									}}
-								>
-									Fetch
-								</Button>
-							</div>
-							<div className="text-xs text-muted-foreground">
-								Preview opens in a modal. The mock output follows the current
-								Demo seed and selected endpoint access.
-							</div>
-						</div>
-
-						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
-							<div className="font-medium text-sm">
-								Mihomo mixin config (per user)
-							</div>
-							<YamlCodeEditor
-								label="mixin_yaml"
-								value={mihomoMixinYaml}
-								onChange={setMihomoMixinYaml}
-								placeholder="Paste Mihomo mixin YAML"
-								minRows={10}
-								showShortcutHint
-							/>
-							<YamlCodeEditor
-								label="extra_proxies_yaml"
-								value={mihomoExtraProxiesYaml}
-								onChange={setMihomoExtraProxiesYaml}
-								placeholder="- name: custom-ss\n  type: ss\n  ..."
-								minRows={6}
-							/>
-							<YamlCodeEditor
-								label="extra_proxy_providers_yaml"
-								value={mihomoExtraProxyProvidersYaml}
-								onChange={setMihomoExtraProxyProvidersYaml}
-								placeholder="ProviderA:\n  type: http\n  ..."
-								minRows={6}
-							/>
-							{mihomoDirty ? (
-								<div className="xp-alert xp-alert-warning px-4 py-2">
-									Mihomo profile has unsaved changes.
-								</div>
-							) : null}
-							<div>
-								<Button
-									disabled={!canWrite || !mihomoDirty}
-									onClick={() => void saveMihomoProfile()}
-								>
-									Save mihomo mixin
-								</Button>
-							</div>
-						</div>
-
-						<Button
-							disabled={!canWrite || !profileDirty}
-							onClick={() => void saveProfile()}
-						>
-							Save user
-						</Button>
+			<div hidden={tab !== "user"} className="space-y-6">
+				<div className="xp-card p-4 space-y-3">
+					<div className="xp-field-stack gap-2">
+						<span className="text-sm font-medium">Display name</span>
+						<Input
+							aria-label="Display name"
+							value={displayName}
+							onChange={(event) => setDisplayName(event.target.value)}
+						/>
 					</div>
+
+					<div className="grid gap-3 md:grid-cols-3">
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">Quota reset policy</span>
+							<Select
+								value={resetPolicy}
+								onValueChange={(value) =>
+									setResetPolicy(value as "monthly" | "unlimited")
+								}
+							>
+								<SelectTrigger aria-label="Quota reset policy">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="monthly">monthly</SelectItem>
+									<SelectItem value="unlimited">unlimited</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">Day of month</span>
+							<Input
+								type="number"
+								min={1}
+								max={31}
+								disabled={resetPolicy !== "monthly"}
+								value={resetDay}
+								onChange={(event) =>
+									setResetDay(Number(event.target.value || "1"))
+								}
+							/>
+						</div>
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">TZ offset (minutes)</span>
+							<Input
+								type="number"
+								value={resetTzOffsetMinutes}
+								onChange={(event) =>
+									setResetTzOffsetMinutes(Number(event.target.value || "0"))
+								}
+							/>
+						</div>
+					</div>
+
+					<div className="grid gap-3 md:grid-cols-2">
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">Tier</span>
+							<Select
+								value={tier}
+								onValueChange={(value) => setTier(value as DemoUser["tier"])}
+							>
+								<SelectTrigger aria-label="Tier">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="p1">p1</SelectItem>
+									<SelectItem value="p2">p2</SelectItem>
+									<SelectItem value="p3">p3</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">Locale</span>
+							<Input
+								aria-label="Locale"
+								value={locale}
+								onChange={(event) => setLocale(event.target.value)}
+							/>
+						</div>
+					</div>
+
+					<div className="flex items-center gap-3 text-sm">
+						<span className="font-medium">User ID:</span>
+						<span className="font-mono">{user.id}</span>
+					</div>
+					<div className="flex items-center gap-3 text-sm">
+						<span className="font-medium">Subscription token:</span>
+						<span className="font-mono break-all">
+							{user.subscriptionToken}
+						</span>
+					</div>
+
+					<div className="rounded-2xl border border-border/70 p-3 space-y-3">
+						<div className="flex flex-wrap items-end gap-3">
+							<SubscriptionFormatSegmentedControl
+								className="w-full sm:w-auto"
+								onValueChange={setSubscriptionFormat}
+								testId="demo-subscription-format"
+								value={subscriptionFormat}
+							/>
+							<CopyButton
+								text={subscriptionUrl(user.subscriptionToken)}
+								label="Copy URL"
+								ariaLabel="Copy subscription URL"
+								className="self-end"
+							/>
+							<Button
+								className="self-end"
+								iconLeft={<Icon name="tabler:cloud-download" />}
+								loading={subscriptionLoading}
+								onClick={() => {
+									setSubscriptionOpen(true);
+									void fetchSubscriptionPreview(subscriptionFormat);
+								}}
+							>
+								Fetch
+							</Button>
+						</div>
+						<div className="text-xs text-muted-foreground">
+							Preview opens in a modal. The mock output follows the current Demo
+							seed and selected endpoint access.
+						</div>
+					</div>
+
+					<div className="rounded-2xl border border-border/70 p-3 space-y-3">
+						<MihomoProfileEditor
+							userName={currentUser.displayName}
+							userId={currentUser.id}
+							profile={mihomoDraft.baseline}
+							draft={mihomoDraft.draft}
+							dirty={mihomoDirty}
+							isSaving={mihomoDraft.isSaving}
+							readOnly={!canWrite}
+							error={mihomoDraft.error}
+							isLoaded={mihomoDraft.isLoaded}
+							onChange={mihomoDraft.setField}
+							onSave={mihomoDraft.save}
+						/>
+					</div>
+
+					<Button
+						disabled={!canWrite || !profileDirty}
+						onClick={() => void saveProfile()}
+					>
+						Save user
+					</Button>
 				</div>
-			) : null}
+			</div>
 
 			{tab === "access" ? (
 				<div className="space-y-4">
@@ -1170,15 +1200,7 @@ export function DemoUserDetailsPage() {
 				description="This removes the user from the mock state. You can undo from the users list."
 				confirmLabel="Delete user"
 				onCancel={() => setDeleteOpen(false)}
-				onConfirm={() => {
-					deleteUser(user.id);
-					setDeleteOpen(false);
-					pushToast({
-						variant: "info",
-						message: "User deleted. Undo is available.",
-					});
-					navigate({ to: "/demo/users" });
-				}}
+				onConfirm={requestDeleteUser}
 			/>
 
 			<SubscriptionPreviewDialog
@@ -1197,7 +1219,17 @@ export function DemoUserDetailsPage() {
 				user/node/endpoint mode.
 			</div>
 			<Button asChild variant="ghost" size="sm">
-				<Link to="/demo/users">Back to users</Link>
+				<Link
+					to="/demo/users"
+					onClick={(event) => {
+						event.preventDefault();
+						requestNavigation(() => {
+							void navigate({ to: "/demo/users" });
+						});
+					}}
+				>
+					Back to users
+				</Link>
 			</Button>
 		</div>
 	);

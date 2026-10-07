@@ -65,6 +65,270 @@ test("demo user details follow the production user-management layout", async ({
 	await expect(dialog).toContainText("vless://");
 });
 
+test("resets Demo user drafts when the detail route changes", async ({
+	page,
+}) => {
+	await page.goto("/demo/login");
+	await page.getByRole("button", { name: "Enter demo" }).click();
+	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+
+	await page
+		.getByRole("textbox", { name: "Display name" })
+		.fill("Draft from another user");
+	await page.getByRole("link", { name: "Back to users" }).click();
+	await page
+		.getByRole("alertdialog")
+		.getByRole("button", { name: "Discard and continue" })
+		.click();
+	await page.getByRole("link", { name: "Lin Chen", exact: true }).click();
+
+	await expect(
+		page.getByRole("heading", { name: "Lin Chen", exact: true }),
+	).toBeVisible();
+	await expect(page.getByRole("textbox", { name: "Display name" })).toHaveValue(
+		"Lin Chen",
+	);
+});
+
+test("expands the Mihomo editor into a persistent file workspace", async ({
+	page,
+}) => {
+	await page.goto("/demo/login");
+	await page.getByRole("button", { name: "Enter demo" }).click();
+	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+
+	const pageUrl = page.url();
+	await page.getByRole("button", { name: "Expand editor" }).click();
+	const workspace = page.getByRole("dialog");
+	await expect(workspace).toBeVisible();
+	await expect(workspace.locator("aside")).toBeVisible();
+	await expect(workspace.locator(".cm-editor")).toHaveCount(3);
+	for (let index = 0; index < 8; index += 1) {
+		await page.keyboard.press("Tab");
+		await expect
+			.poll(() =>
+				workspace.evaluate((element) =>
+					element.contains(document.activeElement),
+				),
+			)
+			.toBe(true);
+	}
+	await page.keyboard.press("Shift+Tab");
+	await expect
+		.poll(() =>
+			workspace.evaluate((element) => element.contains(document.activeElement)),
+		)
+		.toBe(true);
+
+	const mixinEditor = workspace.locator(
+		'[data-mihomo-document="mixin_yaml"] .cm-content',
+	);
+	const mixinScroller = workspace.locator(
+		'[data-mihomo-document="mixin_yaml"] .cm-scroller',
+	);
+	await mixinEditor.focus();
+	await page.keyboard.press("ControlOrMeta+End");
+	const longYaml = Array.from(
+		{ length: 80 },
+		(_, index) => `proxy-${index}: value`,
+	).join("\n");
+	await page.keyboard.insertText(`\n${longYaml}\n# workspace edit`);
+	await mixinScroller.evaluate((element) => {
+		element.scrollTop = element.scrollHeight;
+	});
+	const scrollBeforeSwitch = await mixinScroller.evaluate(
+		(element) => element.scrollTop,
+	);
+	expect(scrollBeforeSwitch).toBeGreaterThan(0);
+	await workspace.getByRole("button", { name: /extra_proxies_yaml/ }).click();
+	await workspace.getByRole("button", { name: /mixin_yaml/ }).click();
+	await expect(mixinEditor).toContainText("workspace edit");
+	await expect
+		.poll(() => mixinScroller.evaluate((element) => element.scrollTop))
+		.toBeGreaterThan(0);
+
+	const extraProxiesEditor = workspace.locator(
+		'[data-mihomo-document="extra_proxies_yaml"] .cm-content',
+	);
+	await workspace.getByRole("button", { name: /extra_proxies_yaml/ }).click();
+	await extraProxiesEditor.click();
+	await page.keyboard.press("ControlOrMeta+End");
+	await page.keyboard.insertText("\n- name: workspace-extra-proxy");
+
+	const extraProvidersEditor = workspace.locator(
+		'[data-mihomo-document="extra_proxy_providers_yaml"] .cm-content',
+	);
+	await workspace
+		.getByRole("button", { name: /extra_proxy_providers_yaml/ })
+		.click();
+	await extraProvidersEditor.click();
+	await page.keyboard.press("ControlOrMeta+End");
+	await page.keyboard.insertText("\n# workspace-extra-provider");
+
+	await page.keyboard.press("ControlOrMeta+z");
+	await expect(extraProvidersEditor).not.toContainText(
+		"workspace-extra-provider",
+	);
+	await page.keyboard.press("ControlOrMeta+Shift+z");
+	await expect(extraProvidersEditor).toContainText("workspace-extra-provider");
+	await workspace.getByRole("button", { name: /extra_proxies_yaml/ }).click();
+	await expect(extraProxiesEditor).toContainText("workspace-extra-proxy");
+	await workspace.getByRole("button", { name: /mixin_yaml/ }).click();
+	await expect(mixinEditor).toContainText("workspace edit");
+	await mixinEditor.focus();
+	await page.keyboard.press("Shift+ArrowLeft");
+	await expect
+		.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ""))
+		.toBe("t");
+
+	await page.keyboard.press("Escape");
+	await expect(workspace).toBeHidden();
+	await expect(page).toHaveURL(pageUrl);
+	await expect(
+		page.getByRole("button", { name: "Expand editor" }),
+	).toBeFocused();
+
+	await page.getByRole("button", { name: "Access" }).click();
+	await page.getByRole("button", { name: "User", exact: true }).click();
+	await page.getByRole("button", { name: "Expand editor" }).click();
+	const reopenedWorkspace = page.getByRole("dialog");
+	await expect(
+		reopenedWorkspace.locator(
+			'[data-mihomo-document="mixin_yaml"] .cm-content',
+		),
+	).toContainText("workspace edit");
+	await reopenedWorkspace
+		.getByRole("button", { name: "Exit expanded editor" })
+		.click();
+});
+
+test("uses the Files drawer at a narrow viewport", async ({ page }) => {
+	for (const viewport of [
+		{ width: 320, height: 852 },
+		{ width: 393, height: 852 },
+	]) {
+		await page.setViewportSize(viewport);
+		await page.goto("/demo/login");
+		await page.getByRole("button", { name: "Enter demo" }).click();
+		await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+
+		await page.getByRole("button", { name: "Expand editor" }).click();
+		const workspace = page.getByRole("dialog").first();
+		await expect(workspace.locator("aside")).toBeHidden();
+		const surface = workspace.getByTestId("mihomo-workspace-surface");
+		const visualHeightChanged = await page.evaluate(() => {
+			const viewport = window.visualViewport;
+			if (!viewport) return false;
+			try {
+				Object.defineProperty(viewport, "height", {
+					configurable: true,
+					value: 540,
+				});
+				Object.defineProperty(viewport, "offsetTop", {
+					configurable: true,
+					value: 24,
+				});
+			} catch {
+				return false;
+			}
+			viewport.dispatchEvent(new Event("resize"));
+			viewport.dispatchEvent(new Event("scroll"));
+			return viewport.height === 540 && viewport.offsetTop === 24;
+		});
+		expect(visualHeightChanged).toBe(true);
+		await expect(surface).toHaveCSS("height", "540px");
+		await expect(workspace).toHaveCSS("top", "24px");
+		await workspace.getByRole("button", { name: "Files" }).click();
+		const files = page.getByRole("heading", { name: "Files" }).last();
+		await expect(files).toBeVisible();
+		await page
+			.getByRole("button", { name: /extra_proxy_providers_yaml/ })
+			.last()
+			.click();
+		await expect(files).toBeHidden();
+		await expect(
+			workspace.getByRole("button", { name: "Files" }),
+		).toBeFocused();
+		await expect(workspace).toContainText("extra_proxy_providers_yaml");
+	}
+});
+
+test("keeps the file tree at the desktop breakpoint", async ({ page }) => {
+	for (const viewport of [
+		{ width: 768, height: 900 },
+		{ width: 1440, height: 900 },
+	]) {
+		await page.setViewportSize(viewport);
+		await page.goto("/demo/login");
+		await page.getByRole("button", { name: "Enter demo" }).click();
+		await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+		await page.getByRole("button", { name: "Expand editor" }).click();
+		const workspace = page.getByRole("dialog");
+		await expect(workspace.locator("aside")).toBeVisible();
+		await expect(workspace.getByRole("button", { name: "Files" })).toBeHidden();
+		await workspace
+			.getByRole("button", { name: "Exit expanded editor" })
+			.click();
+	}
+});
+
+test("keeps Mihomo profiles read-only for the viewer role", async ({
+	page,
+}) => {
+	await page.goto("/demo/login");
+	await page.getByRole("combobox", { name: "Role" }).click();
+	await page.getByRole("option", { name: "Viewer" }).click();
+	await page.getByRole("button", { name: "Enter demo" }).click();
+	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+
+	await expect(
+		page.getByRole("button", { name: "Save configuration" }).first(),
+	).toBeDisabled();
+	await page.getByRole("button", { name: "Expand editor" }).click();
+	const workspace = page.getByRole("dialog");
+	await expect(
+		workspace.getByRole("button", { name: "Save configuration" }).first(),
+	).toBeDisabled();
+	await expect(workspace.locator(".cm-content")).toHaveCount(3);
+	await expect(
+		workspace.locator('.cm-content[contenteditable="false"]'),
+	).toHaveCount(3);
+});
+
+test("protects dirty Mihomo drafts on direct user navigation", async ({
+	page,
+}) => {
+	await page.goto("/demo/login");
+	await page.getByRole("button", { name: "Enter demo" }).click();
+	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+
+	const editor = page.locator(
+		'[data-mihomo-document="mixin_yaml"] .cm-content',
+	);
+	await editor.click();
+	await page.keyboard.press("ControlOrMeta+End");
+	await page.keyboard.insertText("\n# dirty navigation");
+	await page.getByRole("link", { name: "Back to users" }).click();
+
+	const guard = page.getByRole("alertdialog");
+	await expect(
+		guard.getByRole("heading", {
+			name: "Unsaved Mihomo profile changes",
+		}),
+	).toBeVisible();
+	await guard.getByRole("button", { name: "Keep editing" }).click();
+	await expect(
+		page.getByRole("heading", { name: "佐藤 未来", exact: true }),
+	).toBeVisible();
+
+	await page.getByRole("link", { name: "Back to users" }).click();
+	await page
+		.getByRole("alertdialog")
+		.getByRole("button", { name: "Discard and continue" })
+		.click();
+	await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
+});
+
 for (const viewport of [
 	{ width: 320, height: 852 },
 	{ width: 360, height: 800 },

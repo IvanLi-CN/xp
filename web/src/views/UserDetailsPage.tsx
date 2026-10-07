@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import type {
@@ -16,6 +16,7 @@ import {
 import { fetchAdminUserNodeQuotaStatus } from "../api/adminUserNodeQuotaStatus";
 import { fetchAdminUserNodeQuotas } from "../api/adminUserNodeQuotas";
 import {
+	type AdminUserMihomoProfile,
 	type AdminUsersResponse,
 	deleteAdminUser,
 	fetchAdminUser,
@@ -41,12 +42,16 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyButton } from "../components/CopyButton";
 import { Icon } from "../components/Icon";
 import { IpUsageView } from "../components/IpUsageView";
+import { MihomoProfileEditor } from "../components/MihomoProfileEditor";
 import {
 	ModuleTabsLayout,
 	ModuleTabsPanel,
 } from "../components/ModuleTabsLayout";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
-import { useObjectNavigationDirtySections } from "../components/ObjectNavigationGuard";
+import {
+	useObjectNavigationDirtySections,
+	useObjectNavigationGuard,
+} from "../components/ObjectNavigationGuard";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
@@ -58,7 +63,6 @@ import { SubscriptionResourceMirrorToggle } from "../components/SubscriptionReso
 import { useToast } from "../components/Toast";
 import { TrafficView } from "../components/TrafficView";
 import { useUiPrefs } from "../components/UiPrefs";
-import { YamlCodeEditor } from "../components/YamlCodeEditor";
 import { readAdminToken } from "../components/auth";
 import {
 	inputClass as inputControlClass,
@@ -72,6 +76,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { useMihomoProfileDraft } from "../hooks/useMihomoProfileDraft";
 import { useUserTimeWindowReports } from "../hooks/useUserTimeWindowReports";
 import { useAppRuntime } from "../offline/appRuntime";
 import {
@@ -80,6 +85,7 @@ import {
 	latestQueryDataUpdatedAt,
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
+import * as mihomoSaveQueue from "../utils/mihomoSaveQueue";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
 import { USER_TAB_OPTIONS, type UserDetailsTab } from "./UserDetailsTabs";
@@ -119,6 +125,7 @@ export function UserDetailsPage() {
 	const queryClient = useQueryClient();
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
+	const { requestNavigation } = useObjectNavigationGuard();
 	const prefs = useUiPrefs();
 	const usersCapability = useApiCapability("admin.users");
 	const nodesCapability = useApiCapability("admin.nodes");
@@ -161,14 +168,6 @@ export function UserDetailsPage() {
 	);
 	const [useExternalResourceMirror, setUseExternalResourceMirror] =
 		useState(false);
-	const [mihomoMixinYaml, setMihomoMixinYaml] = useState("");
-	const [mihomoExtraProxiesYaml, setMihomoExtraProxiesYaml] = useState("");
-	const [mihomoExtraProxyProvidersYaml, setMihomoExtraProxyProvidersYaml] =
-		useState("");
-	const [isSavingMihomoProfile, setIsSavingMihomoProfile] = useState(false);
-	const [mihomoProfileSaveError, setMihomoProfileSaveError] = useState<
-		string | null
-	>(null);
 	const {
 		currentUserIdRef,
 		deleteOpen,
@@ -193,6 +192,16 @@ export function UserDetailsPage() {
 	} = useUserRouteTransientState(userId);
 	const inputClassName = inputControlClass(prefs.density);
 	const selectClassName = selectControlClass(prefs.density);
+	const mihomoRouteIdentity = `${adminToken}\u0000${userId}`;
+	const mihomoActiveIdentityRef = useRef<string | null>(null);
+	useEffect(() => {
+		mihomoActiveIdentityRef.current = mihomoRouteIdentity;
+		return () => {
+			if (mihomoActiveIdentityRef.current === mihomoRouteIdentity) {
+				mihomoActiveIdentityRef.current = null;
+			}
+		};
+	}, [mihomoRouteIdentity]);
 	const userQuery = useQuery({
 		queryKey: ["adminUser", adminToken, userId],
 		enabled: enabledFor(usersCapability),
@@ -202,7 +211,10 @@ export function UserDetailsPage() {
 		queryKey: ["adminUserMihomoProfile", adminToken, userId],
 		enabled: enabledFor(usersCapability),
 		queryFn: ({ signal }) =>
-			fetchAdminUserMihomoProfile(adminToken, userId, signal),
+			mihomoSaveQueue.fetchMihomoProfileWithSaveSnapshot(
+				`${adminToken}\u0000${userId}`,
+				() => fetchAdminUserMihomoProfile(adminToken, userId, signal),
+			),
 	});
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -369,15 +381,65 @@ export function UserDetailsPage() {
 		setUserSaveError(null);
 	}, [user]);
 
-	useEffect(() => {
-		if (!mihomoProfileQuery.data) return;
-		setMihomoMixinYaml(mihomoProfileQuery.data.mixin_yaml);
-		setMihomoExtraProxiesYaml(mihomoProfileQuery.data.extra_proxies_yaml);
-		setMihomoExtraProxyProvidersYaml(
-			mihomoProfileQuery.data.extra_proxy_providers_yaml,
-		);
-		setMihomoProfileSaveError(null);
-	}, [mihomoProfileQuery.data]);
+	const saveMihomoProfileRequest = useCallback(
+		async (draft: AdminUserMihomoProfile, baseline: AdminUserMihomoProfile) => {
+			if (!adminToken || !userId)
+				throw new Error("Admin session is unavailable.");
+			const saveKey = `${adminToken}\u0000${userId}`;
+			const queryKey = ["adminUserMihomoProfile", adminToken, userId] as const;
+			const saveGeneration = mihomoSaveQueue.nextMihomoSaveGeneration(saveKey);
+			return mihomoSaveQueue.enqueueMihomoSave(saveKey, userId, async () => {
+				await queryClient.cancelQueries({ queryKey });
+				await mihomoSaveQueue.ensureMihomoProfileBaseline(
+					baseline,
+					() => fetchAdminUserMihomoProfile(adminToken, userId),
+					(latestProfile) => queryClient.setQueryData(queryKey, latestProfile),
+				);
+				let saved: AdminUserMihomoProfile;
+				try {
+					saved = await putAdminUserMihomoProfile(adminToken, userId, draft);
+				} catch (error) {
+					if (
+						!isBackendApiError(error) ||
+						error.code !== "invalid_request" ||
+						!error.message.includes("cannot be combined with extra_")
+					) {
+						throw error;
+					}
+					const migratedDraft = normalizeMihomoProfileDraftForSave(draft);
+					if (migratedDraft === draft) throw error;
+					saved = await putAdminUserMihomoProfile(
+						adminToken,
+						userId,
+						migratedDraft,
+					);
+				}
+				if (
+					mihomoActiveIdentityRef.current !== saveKey ||
+					!mihomoSaveQueue.isCurrent(saveKey, saveGeneration)
+				) {
+					throw new Error(
+						"Mihomo profile changed while this save was pending. Review and retry.",
+					);
+				}
+				mihomoSaveQueue.recordMihomoProfileSave(saveKey, saved);
+				queryClient.setQueryData<AdminUserMihomoProfile>(queryKey, saved);
+				pushToast({ variant: "success", message: "Mihomo profile updated" });
+				return saved;
+			});
+		},
+		[adminToken, pushToast, queryClient, userId],
+	);
+	const mihomoDraft = useMihomoProfileDraft({
+		userId,
+		sessionKey: adminToken,
+		profile: mihomoProfileQuery.data,
+		readOnly: runtime.isReadOnly,
+		saveProfile: saveMihomoProfileRequest,
+		formatError,
+	});
+	const mihomoSavingRef = useRef(false);
+	mihomoSavingRef.current = mihomoDraft.isSaving;
 
 	const endpoints = endpointsQuery.data?.items ?? [];
 	const access = accessQuery.data?.items ?? [];
@@ -689,20 +751,7 @@ export function UserDetailsPage() {
 			.join("|");
 		return [...selectedEndpointIds].sort().join("|") !== currentIds;
 	}, [access, isAccessReady, selectedEndpointIds]);
-	const mihomoProfileDirty = useMemo(() => {
-		if (!mihomoProfileQuery.data) return false;
-		return (
-			mihomoMixinYaml !== mihomoProfileQuery.data.mixin_yaml ||
-			mihomoExtraProxiesYaml !== mihomoProfileQuery.data.extra_proxies_yaml ||
-			mihomoExtraProxyProvidersYaml !==
-				mihomoProfileQuery.data.extra_proxy_providers_yaml
-		);
-	}, [
-		mihomoExtraProxiesYaml,
-		mihomoExtraProxyProvidersYaml,
-		mihomoMixinYaml,
-		mihomoProfileQuery.data,
-	]);
+	const mihomoProfileDirty = mihomoDraft.dirty;
 
 	useObjectNavigationDirtySections(`user:${userId}`, [
 		{
@@ -723,13 +772,15 @@ export function UserDetailsPage() {
 			id: "mihomo-profile",
 			label: "Mihomo profile",
 			isDirty: () => mihomoProfileDirty,
-			save: saveUserMihomoProfile,
-			discard: discardMihomoProfileDraft,
+			isBusy: () => mihomoSavingRef.current,
+			save: mihomoDraft.save,
+			discard: mihomoDraft.discard,
 		},
 	]);
 
 	async function applyAccessMatrix(): Promise<boolean> {
-		if (!adminToken || !userId || !isAccessReady) return false;
+		if (runtime.isReadOnly || !adminToken || !userId || !isAccessReady)
+			return false;
 		setIsApplyingAccess(true);
 		setAccessError(null);
 		try {
@@ -776,7 +827,7 @@ export function UserDetailsPage() {
 	}
 
 	async function saveUserProfile(): Promise<boolean> {
-		if (!adminToken || !userId) return false;
+		if (runtime.isReadOnly || !adminToken || !userId) return false;
 		const normalizedDisplayName = displayName.trim();
 		if (normalizedDisplayName.length === 0) {
 			setUserSaveError("Display name is required.");
@@ -834,28 +885,6 @@ export function UserDetailsPage() {
 		}
 	}
 
-	async function saveUserMihomoProfile(): Promise<boolean> {
-		if (!adminToken || !userId) return false;
-		setIsSavingMihomoProfile(true);
-		setMihomoProfileSaveError(null);
-		try {
-			const profile = normalizeMihomoProfileDraftForSave({
-				mixin_yaml: mihomoMixinYaml,
-				extra_proxies_yaml: mihomoExtraProxiesYaml,
-				extra_proxy_providers_yaml: mihomoExtraProxyProvidersYaml,
-			});
-			await putAdminUserMihomoProfile(adminToken, userId, profile);
-			await mihomoProfileQuery.refetch();
-			pushToast({ variant: "success", message: "Mihomo mixin updated" });
-			return true;
-		} catch (error) {
-			setMihomoProfileSaveError(formatError(error));
-			return false;
-		} finally {
-			setIsSavingMihomoProfile(false);
-		}
-	}
-
 	function discardUserProfileDraft() {
 		if (!user) return;
 		setDisplayName(user.display_name);
@@ -873,15 +902,6 @@ export function UserDetailsPage() {
 	function discardAccessDraft() {
 		setAccessError(null);
 		setAccessInitForUserId(null);
-	}
-
-	function discardMihomoProfileDraft() {
-		const profile = mihomoProfileQuery.data;
-		if (!profile) return;
-		setMihomoMixinYaml(profile.mixin_yaml);
-		setMihomoExtraProxiesYaml(profile.extra_proxies_yaml);
-		setMihomoExtraProxyProvidersYaml(profile.extra_proxy_providers_yaml);
-		setMihomoProfileSaveError(null);
 	}
 
 	async function confirmResetToken() {
@@ -966,6 +986,13 @@ export function UserDetailsPage() {
 				setDeleteOpen(false);
 			}
 		}
+	}
+
+	function requestDeleteUser() {
+		setDeleteOpen(false);
+		requestNavigation(() => {
+			void confirmDeleteUser();
+		});
 	}
 
 	if (adminToken.length === 0) {
@@ -1110,7 +1137,7 @@ export function UserDetailsPage() {
 				onValueChange={(value) => setTab(value as UserDetailsTab)}
 				ariaLabel="User detail sections"
 			>
-				<ModuleTabsPanel value="user">
+				<ModuleTabsPanel value="user" keepMounted>
 					<div className="space-y-6">
 						<section
 							aria-labelledby="user-profile-heading"
@@ -1253,9 +1280,6 @@ export function UserDetailsPage() {
 								</div>
 							</div>
 							<div className="border-t border-border/70 pt-4 space-y-3">
-								<div className="font-medium text-sm">
-									Mihomo mixin config (per user)
-								</div>
 								{mihomoProfileQuery.isLoading ? (
 									<div className="text-xs text-muted-foreground">
 										Loading profile…
@@ -1266,45 +1290,19 @@ export function UserDetailsPage() {
 										{formatError(mihomoProfileQuery.error)}
 									</div>
 								) : null}
-								<YamlCodeEditor
-									label="mixin_yaml"
-									value={mihomoMixinYaml}
-									onChange={setMihomoMixinYaml}
-									placeholder="Paste Mihomo mixin YAML"
-									minRows={14}
+								<MihomoProfileEditor
+									userName={user.display_name}
+									userId={user.user_id}
+									profile={mihomoDraft.baseline}
+									draft={mihomoDraft.draft}
+									dirty={mihomoDraft.dirty}
+									isSaving={mihomoDraft.isSaving}
 									readOnly={runtime.isReadOnly}
-									showShortcutHint
+									error={mihomoDraft.error}
+									isLoaded={mihomoDraft.isLoaded}
+									onChange={mihomoDraft.setField}
+									onSave={mihomoDraft.save}
 								/>
-								<YamlCodeEditor
-									label="extra_proxies_yaml"
-									value={mihomoExtraProxiesYaml}
-									onChange={setMihomoExtraProxiesYaml}
-									placeholder="- name: custom-ss\n  type: ss\n  ..."
-									minRows={8}
-									readOnly={runtime.isReadOnly}
-								/>
-								<YamlCodeEditor
-									label="extra_proxy_providers_yaml"
-									value={mihomoExtraProxyProvidersYaml}
-									onChange={setMihomoExtraProxyProvidersYaml}
-									placeholder="ProviderA:\n  type: http\n  ..."
-									minRows={8}
-									readOnly={runtime.isReadOnly}
-								/>
-								{mihomoProfileSaveError ? (
-									<div className="xp-alert xp-alert-error px-4 py-2">
-										{mihomoProfileSaveError}
-									</div>
-								) : null}
-								<div>
-									<Button
-										loading={isSavingMihomoProfile}
-										disabled={runtime.isReadOnly}
-										onClick={saveUserMihomoProfile}
-									>
-										Save mihomo mixin
-									</Button>
-								</div>
 							</div>
 						</section>
 						<div className="xp-card p-4 space-y-3">
@@ -1758,7 +1756,7 @@ export function UserDetailsPage() {
 						<Button
 							variant="danger"
 							disabled={isDeleting || runtime.isReadOnly}
-							onClick={confirmDeleteUser}
+							onClick={requestDeleteUser}
 						>
 							{isDeleting ? "Deleting..." : "Delete"}
 						</Button>
@@ -1771,7 +1769,17 @@ export function UserDetailsPage() {
 				user/node/endpoint mode.
 			</div>
 			<Button asChild variant="ghost" size="sm">
-				<Link to="/users">Back to users</Link>
+				<Link
+					to="/users"
+					onClick={(event) => {
+						event.preventDefault();
+						requestNavigation(() => {
+							void navigate({ to: "/users" });
+						});
+					}}
+				>
+					Back to users
+				</Link>
 			</Button>
 		</div>
 	);

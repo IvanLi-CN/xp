@@ -5,6 +5,7 @@ import {
 	render,
 	screen,
 	waitFor,
+	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureCatalog } from "../fixture-policy/catalog";
@@ -33,6 +34,7 @@ import {
 	resetAdminUserCredentials,
 	resetAdminUserToken,
 } from "../api/adminUsers";
+import { BackendApiError } from "../api/backendError";
 import { fetchSubscription } from "../api/subscription";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
@@ -57,7 +59,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 			</a>
 		),
 		useNavigate: () => vi.fn(),
-		useParams: () => ({ userId: fixtureCatalog.identifier.userPrimary() }),
+		useParams: () => ({ userId: mockUserId() }),
 	};
 });
 
@@ -77,8 +79,9 @@ vi.mock("../api/subscription", async (importOriginal) => {
 	};
 });
 
-const { mockReadAdminToken } = vi.hoisted(() => ({
+const { mockReadAdminToken, mockUserId } = vi.hoisted(() => ({
 	mockReadAdminToken: vi.fn(() => "admintoken"),
+	mockUserId: vi.fn(),
 }));
 
 vi.mock("../components/auth", async (importOriginal) => {
@@ -89,9 +92,8 @@ vi.mock("../components/auth", async (importOriginal) => {
 	};
 });
 
-function renderPage() {
-	const queryClient = createQueryClient();
-	return render(
+function renderPage(queryClient = createQueryClient()) {
+	const view = render(
 		<QueryClientProvider client={queryClient}>
 			<UiPrefsProvider>
 				<ToastProvider>
@@ -100,6 +102,7 @@ function renderPage() {
 			</UiPrefsProvider>
 		</QueryClientProvider>,
 	);
+	return { ...view, queryClient };
 }
 
 function setupMocks(args?: {
@@ -314,6 +317,7 @@ describe("<UserDetailsPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
 		mockReadAdminToken.mockReturnValue("admintoken");
+		mockUserId.mockReturnValue(fixtureCatalog.identifier.userPrimary());
 	});
 
 	afterEach(() => {
@@ -353,7 +357,10 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(accessTab);
 
 		expect(await screenByText("Remaining: 0 MiB")).toBeTruthy();
-		expect(await queryByText(fixtureCatalog.nodeId.fixture134())).toBeNull();
+		const accessPanel = await screen.findByRole("tabpanel", { name: "Access" });
+		expect(
+			within(accessPanel).queryByText(fixtureCatalog.nodeId.fixture134()),
+		).toBeNull();
 	});
 
 	it("applies selected endpoints via putAdminUserAccess", async () => {
@@ -705,7 +712,7 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.change(await screenByLabel("mixin_yaml"), {
 			target: { value: "port: 0\nproxy-groups: []\n" },
 		});
-		fireEvent.click(await screenByRole("button", "Save mihomo mixin"));
+		fireEvent.click(await screenByRole("button", "Save configuration"));
 
 		await waitFor(() => {
 			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
@@ -721,48 +728,7 @@ describe("<UserDetailsPage />", () => {
 		expect(patchAdminUser).not.toHaveBeenCalled();
 	});
 
-	it("normalizes legacy mixed mihomo profile before save", async () => {
-		setupMocks({
-			mihomoProfile: {
-				mixin_yaml: `port: 0
-proxy-providers:
-  providerA:
-    type: http
-    path: ./provider-a-from-mixin.yaml
-    url: https://example.com/sub-a-from-mixin
-rules: []
-`,
-				extra_proxies_yaml: "",
-				extra_proxy_providers_yaml: "",
-			},
-		});
-		renderPage();
-
-		await waitFor(() => {
-			expect(fetchAdminUserMihomoProfile).toHaveBeenCalled();
-		});
-		fireEvent.click(await screenByRole("button", "Save mihomo mixin"));
-
-		await waitFor(() => {
-			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
-				"admintoken",
-				fixtureCatalog.identifier.userPrimary(),
-				{
-					mixin_yaml: `port: 0
-rules: []
-`,
-					extra_proxies_yaml: "",
-					extra_proxy_providers_yaml: `providerA:
-  type: http
-  path: ./provider-a-from-mixin.yaml
-  url: https://example.com/sub-a-from-mixin
-`,
-				},
-			);
-		});
-	});
-
-	it("keeps extra proxy-providers authoritative when normalizing legacy mixed save", async () => {
+	it("migrates a legacy mixed profile after the raw save is rejected", async () => {
 		setupMocks({
 			mihomoProfile: {
 				mixin_yaml: `port: 0
@@ -786,16 +752,59 @@ rules: []
 		await waitFor(() => {
 			expect(fetchAdminUserMihomoProfile).toHaveBeenCalled();
 		});
-		fireEvent.click(await screenByRole("button", "Save mihomo mixin"));
+		const mixinEditor = await screenByLabel("mixin_yaml");
+		fireEvent.change(mixinEditor, {
+			target: { value: `${(mixinEditor as HTMLTextAreaElement).value}\n` },
+		});
+		vi.mocked(putAdminUserMihomoProfile)
+			.mockRejectedValueOnce(
+				new BackendApiError({
+					status: 400,
+					code: "invalid_request",
+					message:
+						"mixin_yaml.proxy-providers cannot be combined with extra_proxy_providers_yaml",
+				}),
+			)
+			.mockResolvedValueOnce({
+				mixin_yaml: "port: 0\nrules: []\n",
+				extra_proxies_yaml: "",
+				extra_proxy_providers_yaml: `providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+`,
+			});
+		fireEvent.click(await screenByRole("button", "Save configuration"));
 
 		await waitFor(() => {
-			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
+			expect(putAdminUserMihomoProfile).toHaveBeenNthCalledWith(
+				1,
 				"admintoken",
 				fixtureCatalog.identifier.userPrimary(),
 				{
 					mixin_yaml: `port: 0
+proxy-providers:
+  providerA:
+    type: http
+    path: ./provider-a-from-mixin.yaml
+    url: https://example.com/sub-a-from-mixin
 rules: []
+
 `,
+					extra_proxies_yaml: "",
+					extra_proxy_providers_yaml: `providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+`,
+				},
+			);
+			expect(putAdminUserMihomoProfile).toHaveBeenNthCalledWith(
+				2,
+				"admintoken",
+				fixtureCatalog.identifier.userPrimary(),
+				{
+					mixin_yaml: "port: 0\nrules: []\n",
 					extra_proxies_yaml: "",
 					extra_proxy_providers_yaml: `providerA:
   type: http

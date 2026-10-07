@@ -158,12 +158,12 @@ export const UserAndMihomoSections: Story = {
 		).toBeInTheDocument();
 		await expect(
 			within(userProfile).queryByRole("button", {
-				name: "Save mihomo mixin",
+				name: "Save configuration",
 			}),
 		).not.toBeInTheDocument();
 		await expect(
 			within(mihomoConfig).getByRole("button", {
-				name: "Save mihomo mixin",
+				name: "Save configuration",
 			}),
 		).toBeInTheDocument();
 		await expect(

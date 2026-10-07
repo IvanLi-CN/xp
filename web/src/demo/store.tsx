@@ -53,6 +53,9 @@ type DemoUserInput = {
 	tier: DemoUser["tier"];
 	quotaLimitGb: number | null;
 	endpointIds: string[];
+	mihomoMixinYaml?: string;
+	mihomoExtraProxiesYaml?: string;
+	mihomoExtraProxyProvidersYaml?: string;
 };
 
 type DemoRealityDomainInput = {
@@ -100,6 +103,8 @@ type DemoAction =
 					| "quotaLimitGb"
 					| "endpointIds"
 					| "mihomoMixinYaml"
+					| "mihomoExtraProxiesYaml"
+					| "mihomoExtraProxyProvidersYaml"
 					| "subscriptionToken"
 				>
 			>;
@@ -160,6 +165,8 @@ type DemoContextValue = {
 				| "quotaLimitGb"
 				| "endpointIds"
 				| "mihomoMixinYaml"
+				| "mihomoExtraProxiesYaml"
+				| "mihomoExtraProxyProvidersYaml"
 				| "subscriptionToken"
 			>
 		>,
@@ -223,6 +230,8 @@ function normalizeState(value: DemoState): DemoState {
 		users: value.users.map((user) => ({
 			...user,
 			mihomoMixinYaml: user.mihomoMixinYaml ?? "",
+			mihomoExtraProxiesYaml: user.mihomoExtraProxiesYaml ?? "",
+			mihomoExtraProxyProvidersYaml: user.mihomoExtraProxyProvidersYaml ?? "",
 		})),
 		endpoints: value.endpoints.map((endpoint) => ({
 			...endpoint,
@@ -305,7 +314,9 @@ function buildUser(state: DemoState, input: DemoUserInput): DemoUser {
 		quotaUsedGb: 0,
 		endpointIds: input.endpointIds,
 		subscriptionToken: `sub_01HXPDEMO_CREATED_${String(state.nextUser).padStart(2, "0")}`,
-		mihomoMixinYaml: "",
+		mihomoMixinYaml: input.mihomoMixinYaml ?? "",
+		mihomoExtraProxiesYaml: input.mihomoExtraProxiesYaml ?? "",
+		mihomoExtraProxyProvidersYaml: input.mihomoExtraProxyProvidersYaml ?? "",
 		createdAt: nowIso(),
 	};
 }

@@ -1,7 +1,7 @@
 # XP Web Console Context
 
 This glossary defines the terms for the browser-based XP administration console.
-It describes trust and routing meaning, not React components or HTTP implementation.
+It describes console domain concepts, not React components or HTTP implementation.
 
 ## Static Delivery
 
@@ -110,3 +110,16 @@ _Avoid_: automatic replay, transparent failover
 The existing full-page jump from one node-hosted console origin to another using its
 separate login handoff. It is compatibility behaviour, not Backend Selection.
 _Avoid_: primary-backend switch, failover control
+
+## Mihomo Configuration
+
+**Mihomo Profile**:
+The user-owned configuration consisting of a mixin, additional proxies, and
+additional proxy providers that supplements XP's generated Mihomo subscription.
+_Avoid_: complete subscription, system provider, backend profile
+
+**Mihomo Profile Document**:
+One of the three named YAML parts of a Mihomo Profile: `mixin_yaml`,
+`extra_proxies_yaml`, or `extra_proxy_providers_yaml`. Its file-tree entry represents
+a configuration part rather than an independently managed filesystem file.
+_Avoid_: disk file, uploaded file, generated subscription
