@@ -48,7 +48,7 @@
 - `cd web && bun run build` passes.
 - Storybook Mihomo workspace interactions pass.
 - E2E covers 320/360/393/768/1440px, continuity, Viewer, Files focus, dirty navigation, and resize.
-- The full frontend suite passes with 108 test files and 519 tests.
+- The full frontend suite passes with 108 test files and 520 tests.
 - The Impeccable detector reports no findings for the polished workspace and navigation surfaces.
 
 ## Scope Notes
