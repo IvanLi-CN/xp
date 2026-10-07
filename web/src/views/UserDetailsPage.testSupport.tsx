@@ -111,6 +111,15 @@ export {
 };
 
 export function renderPage(queryClient = createQueryClient()) {
+	if (typeof navigator !== "undefined" && !navigator.locks) {
+		Object.defineProperty(navigator, "locks", {
+			configurable: true,
+			value: {
+				request: async (_name: string, operation: () => Promise<unknown>) =>
+					operation(),
+			},
+		});
+	}
 	const view = render(
 		<QueryClientProvider client={queryClient}>
 			<UiPrefsProvider>

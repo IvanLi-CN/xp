@@ -23,6 +23,7 @@ type UseMihomoProfileDraftProps = {
 	readOnly?: boolean;
 	saveProfile: (
 		profile: AdminUserMihomoProfile,
+		baseline: AdminUserMihomoProfile,
 	) => Promise<AdminUserMihomoProfile>;
 	formatError?: (error: unknown) => string;
 };
@@ -172,7 +173,7 @@ export function useMihomoProfileDraft({
 		const payload = cloneProfile(draft);
 		setIsSaving(true);
 		setError(null);
-		const request = saveProfile(payload)
+		const request = saveProfile(payload, baseline)
 			.then((saved) => {
 				if (
 					currentUserIdRef.current !== targetUserId ||
@@ -217,6 +218,7 @@ export function useMihomoProfileDraft({
 		readOnly,
 		saveProfile,
 		sessionIdentity,
+		baseline,
 		userId,
 	]);
 

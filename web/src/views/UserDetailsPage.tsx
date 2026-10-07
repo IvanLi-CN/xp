@@ -85,7 +85,7 @@ import {
 	latestQueryDataUpdatedAt,
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
-import { enqueueMihomoSave } from "../utils/mihomoSaveQueue";
+import * as mihomoSaveQueue from "../utils/mihomoSaveQueue";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
 import { USER_TAB_OPTIONS, type UserDetailsTab } from "./UserDetailsTabs";
@@ -97,13 +97,6 @@ const PROTOCOLS = [
 	{ protocolId: "vless_reality_vision_tcp", label: "VLESS" },
 	{ protocolId: "ss2022_2022_blake3_aes_128_gcm", label: "SS2022" },
 ] as const;
-const mihomoSaveGenerations = new Map<string, number>();
-function nextMihomoGeneration(saveKey: string): number {
-	const next = (mihomoSaveGenerations.get(saveKey) ?? 0) + 1;
-	mihomoSaveGenerations.set(saveKey, next);
-	return next;
-}
-
 type SupportedProtocolId = (typeof PROTOCOLS)[number]["protocolId"];
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
@@ -217,10 +210,11 @@ export function UserDetailsPage() {
 	const mihomoProfileQuery = useQuery({
 		queryKey: ["adminUserMihomoProfile", adminToken, userId],
 		enabled: enabledFor(usersCapability),
-		queryFn: ({ signal }) => {
-			nextMihomoGeneration(`${adminToken}\u0000${userId}`);
-			return fetchAdminUserMihomoProfile(adminToken, userId, signal);
-		},
+		queryFn: ({ signal }) =>
+			mihomoSaveQueue.fetchMihomoProfileWithSaveSnapshot(
+				`${adminToken}\u0000${userId}`,
+				() => fetchAdminUserMihomoProfile(adminToken, userId, signal),
+			),
 	});
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -388,15 +382,19 @@ export function UserDetailsPage() {
 	}, [user]);
 
 	const saveMihomoProfileRequest = useCallback(
-		async (draft: AdminUserMihomoProfile) => {
+		async (draft: AdminUserMihomoProfile, baseline: AdminUserMihomoProfile) => {
 			if (!adminToken || !userId)
 				throw new Error("Admin session is unavailable.");
-			const requestIdentity = `${adminToken}\u0000${userId}`;
+			const saveKey = `${adminToken}\u0000${userId}`;
 			const queryKey = ["adminUserMihomoProfile", adminToken, userId] as const;
-			const saveKey = requestIdentity;
-			const saveGeneration = nextMihomoGeneration(saveKey);
-			return enqueueMihomoSave(saveKey, userId, async () => {
+			const saveGeneration = mihomoSaveQueue.nextMihomoSaveGeneration(saveKey);
+			return mihomoSaveQueue.enqueueMihomoSave(saveKey, userId, async () => {
 				await queryClient.cancelQueries({ queryKey });
+				await mihomoSaveQueue.ensureMihomoProfileBaseline(
+					baseline,
+					() => fetchAdminUserMihomoProfile(adminToken, userId),
+					(latestProfile) => queryClient.setQueryData(queryKey, latestProfile),
+				);
 				let saved: AdminUserMihomoProfile;
 				try {
 					saved = await putAdminUserMihomoProfile(adminToken, userId, draft);
@@ -417,13 +415,14 @@ export function UserDetailsPage() {
 					);
 				}
 				if (
-					mihomoActiveIdentityRef.current !== requestIdentity ||
-					mihomoSaveGenerations.get(saveKey) !== saveGeneration
+					mihomoActiveIdentityRef.current !== saveKey ||
+					!mihomoSaveQueue.isCurrent(saveKey, saveGeneration)
 				) {
 					throw new Error(
 						"Mihomo profile changed while this save was pending. Review and retry.",
 					);
 				}
+				mihomoSaveQueue.recordMihomoProfileSave(saveKey, saved);
 				queryClient.setQueryData<AdminUserMihomoProfile>(queryKey, saved);
 				pushToast({ variant: "success", message: "Mihomo profile updated" });
 				return saved;

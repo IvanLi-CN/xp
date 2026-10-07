@@ -100,20 +100,31 @@ describe("<UserDetailsPage /> Mihomo cache", () => {
 		});
 	});
 
-	it("does not accept a save response after a newer profile refetch", async () => {
+	it("keeps a successful save ahead of an overlapping profile refetch", async () => {
 		const initialProfile: AdminUserMihomoProfile = {
 			mixin_yaml: "initial\n",
 			extra_proxies_yaml: "",
 			extra_proxy_providers_yaml: "",
 		};
-		const refreshedProfile: AdminUserMihomoProfile = {
+		const savedProfile: AdminUserMihomoProfile = {
 			...initialProfile,
-			mixin_yaml: "refreshed elsewhere\n",
+			mixin_yaml: "saved successfully\n",
+		};
+		const staleRefetchProfile: AdminUserMihomoProfile = {
+			...initialProfile,
+			mixin_yaml: "stale refetch\n",
 		};
 		setupMocks({ mihomoProfile: initialProfile });
+		let resolveRefetch: ((profile: AdminUserMihomoProfile) => void) | undefined;
 		mockFetchAdminUserMihomoProfile
 			.mockResolvedValueOnce(initialProfile)
-			.mockResolvedValueOnce(refreshedProfile);
+			.mockResolvedValueOnce(initialProfile)
+			.mockImplementationOnce(
+				async () =>
+					new Promise<AdminUserMihomoProfile>((resolve) => {
+						resolveRefetch = resolve;
+					}),
+			);
 		let resolveSave: ((profile: AdminUserMihomoProfile) => void) | undefined;
 		mockPutAdminUserMihomoProfile.mockImplementation(
 			async () =>
@@ -134,20 +145,31 @@ describe("<UserDetailsPage /> Mihomo cache", () => {
 			expect(mockPutAdminUserMihomoProfile).toHaveBeenCalledTimes(1),
 		);
 
+		const refetchPromise = page.queryClient.refetchQueries({
+			queryKey: [
+				"adminUserMihomoProfile",
+				"admintoken",
+				fixtureCatalog.identifier.userPrimary(),
+			],
+		});
+		await waitFor(() =>
+			expect(mockFetchAdminUserMihomoProfile).toHaveBeenCalledTimes(3),
+		);
 		await act(async () => {
-			await page.queryClient.refetchQueries({
-				queryKey: [
+			resolveSave?.(savedProfile);
+		});
+		await waitFor(() =>
+			expect(
+				page.queryClient.getQueryData<AdminUserMihomoProfile>([
 					"adminUserMihomoProfile",
 					"admintoken",
 					fixtureCatalog.identifier.userPrimary(),
-				],
-			});
-		});
+				]),
+			).toEqual(savedProfile),
+		);
 		await act(async () => {
-			resolveSave?.({
-				...initialProfile,
-				mixin_yaml: "stale save\n",
-			});
+			resolveRefetch?.(staleRefetchProfile);
+			await refetchPromise;
 		});
 
 		await waitFor(() =>
@@ -157,15 +179,51 @@ describe("<UserDetailsPage /> Mihomo cache", () => {
 					"admintoken",
 					fixtureCatalog.identifier.userPrimary(),
 				]),
-			).toEqual(refreshedProfile),
+			).toEqual(savedProfile),
 		);
-		expect(editor).toHaveTextContent("local save");
+		expect(editor).toHaveTextContent("saved successfully");
 		await waitFor(() =>
 			expect(
 				within(page.container).getByRole("button", {
 					name: "Save configuration",
 				}),
-			).toBeEnabled(),
+			).toBeDisabled(),
 		);
+	});
+
+	it("rejects a stale full-profile save after another tab changes the baseline", async () => {
+		const initialProfile: AdminUserMihomoProfile = {
+			mixin_yaml: "initial\n",
+			extra_proxies_yaml: "",
+			extra_proxy_providers_yaml: "",
+		};
+		const otherTabProfile: AdminUserMihomoProfile = {
+			...initialProfile,
+			extra_proxies_yaml: "- name: other-tab\n",
+		};
+		setupMocks({ mihomoProfile: initialProfile });
+		mockFetchAdminUserMihomoProfile
+			.mockResolvedValueOnce(initialProfile)
+			.mockResolvedValueOnce(otherTabProfile);
+
+		const page = renderPage();
+		const editor = await within(page.container).findByLabelText("mixin_yaml");
+		fireEvent.change(editor, { target: { value: "local draft\n" } });
+		fireEvent.click(
+			within(page.container).getByRole("button", {
+				name: "Save configuration",
+			}),
+		);
+
+		await waitFor(() =>
+			expect(mockFetchAdminUserMihomoProfile).toHaveBeenCalledTimes(2),
+		);
+		expect(mockPutAdminUserMihomoProfile).not.toHaveBeenCalled();
+		await waitFor(() =>
+			expect(
+				within(page.container).getByText(/changed elsewhere/),
+			).toBeInTheDocument(),
+		);
+		expect(editor).toHaveTextContent("local draft");
 	});
 });

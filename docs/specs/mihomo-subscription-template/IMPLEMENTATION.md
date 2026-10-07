@@ -33,7 +33,8 @@
 ## Validation Evidence
 
 - Hook tests cover dirty refresh, duplicate saves, session changes, and late responses.
-- Save/query generations reject stale PUT responses and preserve the current draft and cache.
+- Save generations reject late PUTs; fresh baselines reject stale drafts and protect cache.
+- Browser saves fail closed when same-origin Web Locks are unavailable.
 - Production/Demo links, list rows, app navigation, logout, and delete use the dirty guard.
 - The guard detects pending Mihomo saves, blocks discard, and reuses the request.
 - User Details preserves raw profiles and migrates legacy conflicts only after API rejection.
@@ -46,7 +47,7 @@
 - `cd web && bun run build` passes.
 - Storybook Mihomo workspace interactions pass.
 - E2E covers 320/360/393/768/1440px, continuity, Viewer, Files focus, dirty navigation, and resize.
-- The full frontend suite passes with 107 test files and 517 tests.
+- The full frontend suite passes with 107 test files and 519 tests.
 - The Impeccable detector reports no findings for the polished workspace and navigation surfaces.
 
 ## Scope Notes
