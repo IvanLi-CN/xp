@@ -61,7 +61,19 @@ function EditorStory({
 					error={error}
 					isLoaded
 					onChange={(documentId, value) => {
-						setDraft((current) => ({ ...current, [documentId]: value }));
+						setDraft((current) => {
+							switch (documentId) {
+								case "mixin_yaml":
+									return { ...current, mixin_yaml: value };
+								case "extra_proxies_yaml":
+									return { ...current, extra_proxies_yaml: value };
+								case "extra_proxy_providers_yaml":
+									return {
+										...current,
+										extra_proxy_providers_yaml: value,
+									};
+							}
+						});
 						setError(null);
 					}}
 					onSave={save}

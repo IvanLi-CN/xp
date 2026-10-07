@@ -63,11 +63,11 @@ describe("useMihomoProfileDraft", () => {
 	});
 
 	it("ignores a late save response after the user changes", async () => {
-		let resolveSave: ((profile: AdminUserMihomoProfile) => void) | undefined;
+		const saveResolvers: Array<(profile: AdminUserMihomoProfile) => void> = [];
 		const saveProfile = vi.fn(
 			() =>
 				new Promise<AdminUserMihomoProfile>((resolve) => {
-					resolveSave = resolve;
+					saveResolvers.push(resolve);
 				}),
 		);
 		const { result, rerender } = renderHook(
@@ -85,14 +85,33 @@ describe("useMihomoProfileDraft", () => {
 
 		rerender({ userId: "user-b", profile: PROFILE_B });
 		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		expect(result.current.isSaving).toBe(false);
+		act(() => result.current.setField("mixin_yaml", "new draft\n"));
+		let newSavePromise: Promise<boolean> | undefined;
 		act(() => {
-			resolveSave?.({ ...PROFILE_A, mixin_yaml: "stale response\n" });
+			newSavePromise = result.current.save();
+		});
+		expect(saveProfile).toHaveBeenCalledTimes(2);
+		if (!newSavePromise) throw new Error("new save request was not created");
+		await act(async () => {
+			saveResolvers[1]?.({ ...PROFILE_B, mixin_yaml: "new draft\n" });
+			expect(await newSavePromise).toBe(true);
+		});
+
+		act(() => {
+			saveResolvers[0]?.({ ...PROFILE_A, mixin_yaml: "stale response\n" });
 		});
 		if (!savePromise) throw new Error("save request was not created");
 		await savePromise;
 
-		expect(result.current.draft).toEqual(PROFILE_B);
-		expect(result.current.baseline).toEqual(PROFILE_B);
+		expect(result.current.draft).toEqual({
+			...PROFILE_B,
+			mixin_yaml: "new draft\n",
+		});
+		expect(result.current.baseline).toEqual({
+			...PROFILE_B,
+			mixin_yaml: "new draft\n",
+		});
 		expect(result.current.dirty).toBe(false);
 	});
 });

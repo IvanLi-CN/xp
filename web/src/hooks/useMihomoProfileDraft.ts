@@ -71,6 +71,8 @@ export function useMihomoProfileDraft({
 		if (resetUserIdRef.current === userId) return;
 		resetUserIdRef.current = userId;
 		currentUserIdRef.current = userId;
+		setIsSaving(false);
+		savePromiseRef.current = null;
 		setLoadedUserId(null);
 		setDraftState(cloneProfile(profile ?? EMPTY_MIHOMO_PROFILE));
 		setBaseline(cloneProfile(profile ?? EMPTY_MIHOMO_PROFILE));

@@ -795,156 +795,154 @@ export function DemoUserDetailsPage() {
 				</div>
 			</div>
 
-			{tab === "user" ? (
-				<div className="space-y-6">
-					<div className="xp-card p-4 space-y-3">
-						<div className="xp-field-stack gap-2">
-							<span className="text-sm font-medium">Display name</span>
-							<Input
-								aria-label="Display name"
-								value={displayName}
-								onChange={(event) => setDisplayName(event.target.value)}
-							/>
-						</div>
-
-						<div className="grid gap-3 md:grid-cols-3">
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">Quota reset policy</span>
-								<Select
-									value={resetPolicy}
-									onValueChange={(value) =>
-										setResetPolicy(value as "monthly" | "unlimited")
-									}
-								>
-									<SelectTrigger aria-label="Quota reset policy">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="monthly">monthly</SelectItem>
-										<SelectItem value="unlimited">unlimited</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">Day of month</span>
-								<Input
-									type="number"
-									min={1}
-									max={31}
-									disabled={resetPolicy !== "monthly"}
-									value={resetDay}
-									onChange={(event) =>
-										setResetDay(Number(event.target.value || "1"))
-									}
-								/>
-							</div>
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">TZ offset (minutes)</span>
-								<Input
-									type="number"
-									value={resetTzOffsetMinutes}
-									onChange={(event) =>
-										setResetTzOffsetMinutes(Number(event.target.value || "0"))
-									}
-								/>
-							</div>
-						</div>
-
-						<div className="grid gap-3 md:grid-cols-2">
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">Tier</span>
-								<Select
-									value={tier}
-									onValueChange={(value) => setTier(value as DemoUser["tier"])}
-								>
-									<SelectTrigger aria-label="Tier">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="p1">p1</SelectItem>
-										<SelectItem value="p2">p2</SelectItem>
-										<SelectItem value="p3">p3</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">Locale</span>
-								<Input
-									aria-label="Locale"
-									value={locale}
-									onChange={(event) => setLocale(event.target.value)}
-								/>
-							</div>
-						</div>
-
-						<div className="flex items-center gap-3 text-sm">
-							<span className="font-medium">User ID:</span>
-							<span className="font-mono">{user.id}</span>
-						</div>
-						<div className="flex items-center gap-3 text-sm">
-							<span className="font-medium">Subscription token:</span>
-							<span className="font-mono break-all">
-								{user.subscriptionToken}
-							</span>
-						</div>
-
-						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
-							<div className="flex flex-wrap items-end gap-3">
-								<SubscriptionFormatSegmentedControl
-									className="w-full sm:w-auto"
-									onValueChange={setSubscriptionFormat}
-									testId="demo-subscription-format"
-									value={subscriptionFormat}
-								/>
-								<CopyButton
-									text={subscriptionUrl(user.subscriptionToken)}
-									label="Copy URL"
-									ariaLabel="Copy subscription URL"
-									className="self-end"
-								/>
-								<Button
-									className="self-end"
-									iconLeft={<Icon name="tabler:cloud-download" />}
-									loading={subscriptionLoading}
-									onClick={() => {
-										setSubscriptionOpen(true);
-										void fetchSubscriptionPreview(subscriptionFormat);
-									}}
-								>
-									Fetch
-								</Button>
-							</div>
-							<div className="text-xs text-muted-foreground">
-								Preview opens in a modal. The mock output follows the current
-								Demo seed and selected endpoint access.
-							</div>
-						</div>
-
-						<div className="rounded-2xl border border-border/70 p-3 space-y-3">
-							<MihomoProfileEditor
-								userName={currentUser.displayName}
-								userId={currentUser.id}
-								profile={mihomoDraft.baseline}
-								draft={mihomoDraft.draft}
-								dirty={mihomoDirty}
-								isSaving={mihomoDraft.isSaving}
-								readOnly={!canWrite}
-								error={mihomoDraft.error}
-								isLoaded={mihomoDraft.isLoaded}
-								onChange={mihomoDraft.setField}
-								onSave={mihomoDraft.save}
-							/>
-						</div>
-
-						<Button
-							disabled={!canWrite || !profileDirty}
-							onClick={() => void saveProfile()}
-						>
-							Save user
-						</Button>
+			<div hidden={tab !== "user"} className="space-y-6">
+				<div className="xp-card p-4 space-y-3">
+					<div className="xp-field-stack gap-2">
+						<span className="text-sm font-medium">Display name</span>
+						<Input
+							aria-label="Display name"
+							value={displayName}
+							onChange={(event) => setDisplayName(event.target.value)}
+						/>
 					</div>
+
+					<div className="grid gap-3 md:grid-cols-3">
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">Quota reset policy</span>
+							<Select
+								value={resetPolicy}
+								onValueChange={(value) =>
+									setResetPolicy(value as "monthly" | "unlimited")
+								}
+							>
+								<SelectTrigger aria-label="Quota reset policy">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="monthly">monthly</SelectItem>
+									<SelectItem value="unlimited">unlimited</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">Day of month</span>
+							<Input
+								type="number"
+								min={1}
+								max={31}
+								disabled={resetPolicy !== "monthly"}
+								value={resetDay}
+								onChange={(event) =>
+									setResetDay(Number(event.target.value || "1"))
+								}
+							/>
+						</div>
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">TZ offset (minutes)</span>
+							<Input
+								type="number"
+								value={resetTzOffsetMinutes}
+								onChange={(event) =>
+									setResetTzOffsetMinutes(Number(event.target.value || "0"))
+								}
+							/>
+						</div>
+					</div>
+
+					<div className="grid gap-3 md:grid-cols-2">
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">Tier</span>
+							<Select
+								value={tier}
+								onValueChange={(value) => setTier(value as DemoUser["tier"])}
+							>
+								<SelectTrigger aria-label="Tier">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="p1">p1</SelectItem>
+									<SelectItem value="p2">p2</SelectItem>
+									<SelectItem value="p3">p3</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="xp-field-stack gap-2">
+							<span className="text-sm font-medium">Locale</span>
+							<Input
+								aria-label="Locale"
+								value={locale}
+								onChange={(event) => setLocale(event.target.value)}
+							/>
+						</div>
+					</div>
+
+					<div className="flex items-center gap-3 text-sm">
+						<span className="font-medium">User ID:</span>
+						<span className="font-mono">{user.id}</span>
+					</div>
+					<div className="flex items-center gap-3 text-sm">
+						<span className="font-medium">Subscription token:</span>
+						<span className="font-mono break-all">
+							{user.subscriptionToken}
+						</span>
+					</div>
+
+					<div className="rounded-2xl border border-border/70 p-3 space-y-3">
+						<div className="flex flex-wrap items-end gap-3">
+							<SubscriptionFormatSegmentedControl
+								className="w-full sm:w-auto"
+								onValueChange={setSubscriptionFormat}
+								testId="demo-subscription-format"
+								value={subscriptionFormat}
+							/>
+							<CopyButton
+								text={subscriptionUrl(user.subscriptionToken)}
+								label="Copy URL"
+								ariaLabel="Copy subscription URL"
+								className="self-end"
+							/>
+							<Button
+								className="self-end"
+								iconLeft={<Icon name="tabler:cloud-download" />}
+								loading={subscriptionLoading}
+								onClick={() => {
+									setSubscriptionOpen(true);
+									void fetchSubscriptionPreview(subscriptionFormat);
+								}}
+							>
+								Fetch
+							</Button>
+						</div>
+						<div className="text-xs text-muted-foreground">
+							Preview opens in a modal. The mock output follows the current Demo
+							seed and selected endpoint access.
+						</div>
+					</div>
+
+					<div className="rounded-2xl border border-border/70 p-3 space-y-3">
+						<MihomoProfileEditor
+							userName={currentUser.displayName}
+							userId={currentUser.id}
+							profile={mihomoDraft.baseline}
+							draft={mihomoDraft.draft}
+							dirty={mihomoDirty}
+							isSaving={mihomoDraft.isSaving}
+							readOnly={!canWrite}
+							error={mihomoDraft.error}
+							isLoaded={mihomoDraft.isLoaded}
+							onChange={mihomoDraft.setField}
+							onSave={mihomoDraft.save}
+						/>
+					</div>
+
+					<Button
+						disabled={!canWrite || !profileDirty}
+						onClick={() => void saveProfile()}
+					>
+						Save user
+					</Button>
 				</div>
-			) : null}
+			</div>
 
 			{tab === "access" ? (
 				<div className="space-y-4">

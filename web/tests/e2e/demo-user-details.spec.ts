@@ -95,6 +95,19 @@ test("expands the Mihomo editor into a persistent file workspace", async ({
 	await expect(
 		page.getByRole("button", { name: "Expand editor" }),
 	).toBeVisible();
+
+	await page.getByRole("button", { name: "Access" }).click();
+	await page.getByRole("button", { name: "User", exact: true }).click();
+	await page.getByRole("button", { name: "Expand editor" }).click();
+	const reopenedWorkspace = page.getByRole("dialog");
+	await expect(
+		reopenedWorkspace.locator(
+			'[data-mihomo-document="mixin_yaml"] .cm-content',
+		),
+	).toContainText("workspace edit");
+	await reopenedWorkspace
+		.getByRole("button", { name: "Exit expanded editor" })
+		.click();
 });
 
 test("uses the Files drawer at a narrow viewport", async ({ page }) => {
