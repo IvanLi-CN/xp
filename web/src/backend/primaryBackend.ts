@@ -207,6 +207,17 @@ function beginMutation() {
 	};
 }
 
+export async function withPrimaryBackendMutation<T>(
+	operation: () => Promise<T>,
+): Promise<T> {
+	const release = typeof window === "undefined" ? null : beginMutation();
+	try {
+		return await operation();
+	} finally {
+		release?.();
+	}
+}
+
 export function installPrimaryBackendTransport() {
 	if (installed || typeof window === "undefined") return;
 	installed = true;

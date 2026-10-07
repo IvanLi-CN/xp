@@ -1,4 +1,5 @@
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
+import { withPrimaryBackendMutation } from "../backend/primaryBackend";
 
 const mihomoSaveQueues = new Map<string, Promise<void>>();
 const mihomoSaveGenerations = new Map<string, number>();
@@ -88,13 +89,13 @@ export function enqueueMihomoSave<T>(
 		if (typeof navigator !== "undefined" && navigator.locks) {
 			return await navigator.locks.request<Promise<T>>(
 				`xp-mihomo-profile:${lockKey}`,
-				operation,
+				() => withPrimaryBackendMutation(operation),
 			);
 		}
 		if (typeof window !== "undefined") {
 			throw new Error(MIHOMO_LOCK_REQUIRED_ERROR);
 		}
-		return operation();
+		return withPrimaryBackendMutation(operation);
 	};
 	const current = previous.catch(() => undefined).then(run);
 	const settled = current.then(
