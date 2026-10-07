@@ -98,6 +98,11 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
             // filesystem state.
             Ok(())
         }
+        Command::Xp(XpCommand::HistoryRepositoryRecover(_)) => {
+            // Runtime command: it signs a local request and persists the recovery generation in
+            // the running XP control snapshot only after the fingerprint checks pass.
+            Ok(())
+        }
         Command::Xp(XpCommand::RecoverSingleNode(_args)) => {
             // Runtime command: it reads /etc/xp/xp.env and rewrites local Raft persistence.
             // Any actionable errors are surfaced by the command itself.

@@ -30,6 +30,7 @@ impl RepositoryReplicaRuntime {
             self.snapshot.partition_summary_cursor = None;
             self.snapshot.partition_summaries_complete = false;
             self.snapshot.deep_verified_peer_ids.clear();
+            self.snapshot.sequence_summary_blocks_complete = false;
         }
     }
 
@@ -40,6 +41,7 @@ impl RepositoryReplicaRuntime {
         if !self.uses_sqlite_history() {
             return Ok(());
         }
+        self.snapshot.sequence_summary_blocks_complete = false;
         let incoming = RepositoryHistoryCompactionCursor {
             observed_start_unix_seconds: record.observed_at_unix_seconds,
             source_node_id: record.source_node_id.clone(),
@@ -79,6 +81,58 @@ impl RepositoryReplicaRuntime {
         Ok(())
     }
 
+    pub(crate) fn advance_sequence_summary_block_rebuild_page(
+        &mut self,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        if !self.uses_sqlite_history() || self.snapshot.sequence_summary_blocks_complete {
+            return Ok(true);
+        }
+        let dirty = self
+            .storage
+            .repository_history_dirty_sequence_summary_blocks(4)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        if dirty.is_empty() {
+            self.snapshot.sequence_summary_blocks_complete = true;
+            self.persist_control_state()?;
+            return Ok(true);
+        }
+        for (source_node_id, source_epoch, stream, block_index) in dirty {
+            self.storage
+                .rebuild_repository_history_sequence_summary_block(
+                    &source_node_id,
+                    source_epoch,
+                    &stream,
+                    block_index,
+                )
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        }
+        self.persist_control_state()?;
+        Ok(false)
+    }
+
+    pub(crate) fn sequence_summary_blocks(
+        &self,
+    ) -> Result<Vec<super::RepositorySequenceBlockSummary>, RepositoryRuntimeError> {
+        if !self.uses_sqlite_history() {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .storage
+            .repository_history_sequence_summary_blocks()
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+            .into_iter()
+            .map(|block| super::RepositorySequenceBlockSummary {
+                source_node_id: block.source_node_id,
+                source_epoch: block.source_epoch,
+                stream: block.stream,
+                block_index: block.block_index,
+                first_sequence: block.first_sequence,
+                last_sequence: block.last_sequence,
+                hash: block.digest,
+                record_count: block.record_count,
+            })
+            .collect())
+    }
     /// Rebuild the retained partition summary from bounded SQLite pages. The HTTP summary path
     /// never calls this method, so a slow or malformed historical payload cannot block it.
     pub(crate) fn advance_partition_summary_rebuild_page(
@@ -217,6 +271,10 @@ impl RepositoryReplicaRuntime {
 
     pub(crate) fn partition_summaries_ready(&self) -> bool {
         !self.uses_sqlite_history() || self.snapshot.partition_summaries_complete
+    }
+
+    pub(crate) fn sequence_summary_blocks_ready(&self) -> bool {
+        !self.uses_sqlite_history() || self.snapshot.sequence_summary_blocks_complete
     }
 
     pub(super) fn finish_storage_write<T, E: std::fmt::Display>(

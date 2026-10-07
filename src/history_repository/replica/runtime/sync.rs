@@ -6,7 +6,8 @@ use crate::history_sync::{MAX_RESPONSE_WIRE_BYTES, SignedSegment, SyncRecord};
 
 use super::{
     RelaySegmentCursor, RepositoryPartitionSummary, RepositoryReplicaRuntime,
-    RepositoryRuntimeError, RepositoryTombstoneAcknowledgement, StoredGap,
+    RepositoryRuntimeError, RepositorySequenceBlockSummary, RepositoryTombstoneAcknowledgement,
+    StoredGap,
     repair_batch::{RepositoryRepairBatch, RepositoryReplicaSegment},
 };
 use crate::state::history_repository::replica::{
@@ -32,6 +33,10 @@ pub(crate) struct RepositoryReplicaSummary {
     pub(crate) next_segment_id: Option<String>,
     /// Daily verification is over signed source-stream ranges, not opaque segment ids.
     pub(crate) partitions: Vec<RepositoryPartitionSummary>,
+    #[serde(default)]
+    pub(crate) summary_version: u8,
+    #[serde(default)]
+    pub(crate) sequence_blocks: Vec<RepositorySequenceBlockSummary>,
     #[serde(default)]
     pub(crate) partitions_included: bool,
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
@@ -89,6 +94,7 @@ impl RepositoryReplicaRuntime {
         now_unix_seconds: u64,
     ) -> Result<(), RepositoryRuntimeError> {
         self.advance_partition_summary_rebuild_page()?;
+        self.advance_sequence_summary_block_rebuild_page()?;
         self.rebuild_if_stale(now_unix_seconds)?;
         self.prune_retention(now_unix_seconds)
     }
@@ -376,6 +382,24 @@ impl RepositoryReplicaRuntime {
             } else {
                 Vec::new()
             },
+            summary_version: if deep_verification
+                && after_segment_id.is_none()
+                && self.uses_sqlite_history()
+                && self.snapshot.sequence_summary_blocks_complete
+            {
+                2
+            } else {
+                1
+            },
+            sequence_blocks: if deep_verification
+                && after_segment_id.is_none()
+                && self.uses_sqlite_history()
+                && self.snapshot.sequence_summary_blocks_complete
+            {
+                self.sequence_summary_blocks()?
+            } else {
+                Vec::new()
+            },
             partitions_included: deep_verification
                 && after_segment_id.is_none()
                 && (!self.uses_sqlite_history() || self.snapshot.partition_summaries_complete),
@@ -416,10 +440,15 @@ impl RepositoryReplicaRuntime {
         let gaps_converged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary))
             == canonical_gaps(remote.gaps.iter().cloned());
         let truncation_converged = !self.snapshot.history_truncated && !remote.history_truncated;
-        let partitions_converged = !deep_verification
-            || !remote.partitions_included
-            || !self.partition_summaries_ready()
-            || self.retained_partition_summaries()? == remote.partitions;
+        let partitions_converged = if !deep_verification || !remote.partitions_included {
+            true
+        } else if remote.summary_version >= 2 && !remote.sequence_blocks.is_empty() {
+            !self.sequence_summary_blocks_ready()
+                || self.sequence_summary_blocks()? == remote.sequence_blocks
+        } else {
+            !self.partition_summaries_ready()
+                || self.retained_partition_summaries()? == remote.partitions
+        };
         // The remote summary is keyset-paged. Its page is complete only when every advertised
         // segment is present locally; peer-owned extra pages converge on the peer's next cycle.
         let segments_converged = self.missing_segment_ids(remote, false)?.is_empty();
@@ -432,11 +461,18 @@ impl RepositoryReplicaRuntime {
     ) -> Result<bool, RepositoryRuntimeError> {
         if remote.history_truncated
             || !remote.partitions_included
-            || !self.partition_summaries_ready()
+            || (remote.summary_version >= 2 && !self.sequence_summary_blocks_ready())
+            || (remote.summary_version < 2 && !self.partition_summaries_ready())
         {
             return Ok(true);
         }
-        Ok(self.retained_partition_summaries()? == remote.partitions)
+        Ok(
+            if remote.summary_version >= 2 && !remote.sequence_blocks.is_empty() {
+                self.sequence_summary_blocks()? == remote.sequence_blocks
+            } else {
+                self.retained_partition_summaries()? == remote.partitions
+            },
+        )
     }
 
     pub(crate) fn repair_batch(

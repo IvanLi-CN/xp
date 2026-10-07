@@ -43,8 +43,8 @@ pub(crate) use backfill::{
 };
 pub(crate) use error::RepositoryRuntimeError;
 pub(crate) use initial_peer::{
-    InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, InitialPeerTieredHandoff,
-    RetainedAnchorCheckpointUpdate,
+    InitialPeerBackfillCheckpoint, InitialPeerRecoveryPreview, InitialPeerRetainedAnchorStream,
+    InitialPeerTieredHandoff, RetainedAnchorCheckpointUpdate,
 };
 pub(crate) use receive::{PendingRepositoryMutation, source_stream_for_schema};
 pub(crate) use repair_batch::{RepositoryRepairBatch, RepositoryReplicaSegment};
@@ -193,6 +193,18 @@ pub(crate) struct RepositoryPartitionSummary {
     pub(crate) record_count: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RepositorySequenceBlockSummary {
+    pub(crate) source_node_id: String,
+    pub(crate) source_epoch: u64,
+    pub(crate) stream: String,
+    pub(crate) block_index: u64,
+    pub(crate) first_sequence: u64,
+    pub(crate) last_sequence: u64,
+    pub(crate) hash: [u8; 32],
+    pub(crate) record_count: u64,
+}
+
 impl LocalQueryMetadata {
     pub(crate) fn current_window(now_unix_seconds: u64) -> Self {
         Self {
@@ -274,6 +286,8 @@ pub(crate) struct RepositoryReplicaSnapshot {
     partition_summary_cursor: Option<RepositoryHistoryCompactionCursor>,
     #[serde(default)]
     partition_summaries_complete: bool,
+    #[serde(default)]
+    sequence_summary_blocks_complete: bool,
 }
 
 impl Default for RepositoryReplicaSnapshot {
@@ -311,6 +325,7 @@ impl Default for RepositoryReplicaSnapshot {
             partition_summaries: Vec::new(),
             partition_summary_cursor: None,
             partition_summaries_complete: false,
+            sequence_summary_blocks_complete: false,
         }
     }
 }

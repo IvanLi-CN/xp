@@ -921,6 +921,19 @@ Notes:
   the marker without advancing the watermark a second time.
   Live source delivery, ordinary anti-entropy, and later repair pages still reject sequence gaps;
   do not bypass that boundary by editing the checkpoint.
+  A stale retained-anchor marker is recovered in place through the signed local command during the
+  approved maintenance window:
+
+  ```text
+  xp-ops xp history-repository-recover --peer-node-id <ready-peer> --dry-run
+  xp-ops xp history-repository-recover --peer-node-id <ready-peer> --apply --yes \
+    --expected-recovery-fingerprint <fingerprint>
+  ```
+
+  The fingerprint binds the receiver watermark, prior handoff range, recovery generation, capacity
+  budget, and local state. Apply fails closed if any value changes. It never creates a second
+  history database, runs full `VACUUM`, changes quota, or deletes source outbox rows. Permanent gaps
+  remain visible and keep queries `partial` and `replica_converged=false`.
   XP binds an interrupted repair response to a digest of the actual returned batch. An older peer
   that omits the digest remains compatible because XP calculates it locally. If the serving batch
   changes while the same pending IDs are durable, XP clears only the stale response identity and

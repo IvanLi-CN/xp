@@ -1,6 +1,7 @@
 use super::{RepositoryReplicaRuntime, RepositoryRuntimeError};
 use crate::history_sync::Cursor;
 use serde::{Deserialize, Serialize};
+use sha2::Digest as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
@@ -45,6 +46,12 @@ pub(crate) struct InitialPeerBackfillCheckpoint {
     pub(crate) retained_anchor_handoffs: BTreeSet<InitialPeerTieredHandoff>,
     #[serde(default)]
     pub(crate) summary_tiered_handoff: Option<InitialPeerTieredHandoff>,
+    /// Explicit operator-authorized recovery generation. A generation may cross one retained
+    /// prefix only once; legacy completed handoffs never implicitly authorize another crossing.
+    #[serde(default)]
+    pub(crate) recovery_generation: u64,
+    #[serde(default)]
+    pub(crate) recovery_generation_consumed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -63,6 +70,18 @@ pub(crate) struct InitialPeerTieredHandoff {
     pub(crate) last_missing: u64,
     pub(crate) next_sequence: u64,
     pub(crate) end_unix_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct InitialPeerRecoveryPreview {
+    pub(crate) peer_node_id: String,
+    pub(crate) generation: u64,
+    pub(crate) receiver_watermark: Option<u64>,
+    pub(crate) previous_handoff: Option<InitialPeerTieredHandoff>,
+    pub(crate) capacity_quota_bytes: u64,
+    pub(crate) capacity_used_bytes: u64,
+    pub(crate) capacity_available_bytes: u64,
+    pub(crate) fingerprint: String,
 }
 
 impl RepositoryReplicaRuntime {
@@ -110,6 +129,8 @@ impl RepositoryReplicaRuntime {
                 retained_anchor_streams: checkpoint.retained_anchor_streams,
                 retained_anchor_handoffs: checkpoint.retained_anchor_handoffs,
                 summary_tiered_handoff: checkpoint.summary_tiered_handoff,
+                recovery_generation: checkpoint.recovery_generation,
+                recovery_generation_consumed: checkpoint.recovery_generation_consumed,
             },
         );
         if let Err(error) = self.persist_control_state() {
@@ -284,6 +305,8 @@ impl RepositoryReplicaRuntime {
                 retained_anchor_streams: prior.retained_anchor_streams,
                 retained_anchor_handoffs: prior.retained_anchor_handoffs,
                 summary_tiered_handoff: Some(handoff),
+                recovery_generation: prior.recovery_generation,
+                recovery_generation_consumed: prior.recovery_generation > 0,
             },
         );
         self.persist_control_state()
@@ -401,9 +424,132 @@ impl RepositoryReplicaRuntime {
                 retained_anchor_streams,
                 retained_anchor_handoffs: prior.retained_anchor_handoffs,
                 summary_tiered_handoff: prior.summary_tiered_handoff,
+                recovery_generation: prior.recovery_generation,
+                recovery_generation_consumed: prior.recovery_generation_consumed,
                 ..InitialPeerBackfillCheckpoint::default()
             },
         );
         self.persist_control_state()
+    }
+
+    pub(crate) fn preview_initial_peer_recovery(
+        &mut self,
+        peer_node_id: &str,
+    ) -> Result<InitialPeerRecoveryPreview, RepositoryRuntimeError> {
+        let checkpoint = self
+            .snapshot
+            .initial_peer_backfills
+            .get(peer_node_id)
+            .cloned()
+            .unwrap_or_default();
+        if checkpoint.summary_tiered_handoff.is_some() {
+            return Err(RepositoryRuntimeError::Storage(
+                "history recovery already has an active tiered handoff".to_owned(),
+            ));
+        }
+        if checkpoint.recovery_generation_consumed {
+            return Err(RepositoryRuntimeError::Storage(
+                "history recovery generation was already consumed".to_owned(),
+            ));
+        }
+        let previous_handoff = checkpoint.retained_anchor_handoffs.iter().max().cloned();
+        let Some(previous_handoff) = previous_handoff else {
+            return Err(RepositoryRuntimeError::Storage(
+                "history recovery requires a completed retained-anchor marker".to_owned(),
+            ));
+        };
+        let receiver_watermark = self.receiver.as_ref().and_then(|receiver| {
+            Cursor::new(
+                previous_handoff.source_node_id.clone(),
+                previous_handoff.source_epoch,
+                previous_handoff.stream.clone(),
+                previous_handoff.next_sequence,
+            )
+            .ok()
+            .and_then(|cursor| receiver.continuous_watermark(&cursor).ok().flatten())
+            .map(|cursor| cursor.sequence())
+        });
+        if receiver_watermark.is_none() {
+            return Err(RepositoryRuntimeError::Storage(
+                "history recovery requires a continuous receiver watermark".to_owned(),
+            ));
+        }
+        let capacity = self.runtime_capacity()?;
+        if !capacity
+            .history_write_availability()
+            .allows_history_writes()
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                "history recovery capacity preflight failed".to_owned(),
+            ));
+        }
+        let generation = if checkpoint.recovery_generation > 0 {
+            checkpoint.recovery_generation
+        } else {
+            1
+        };
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(b"xp-history-recovery-v1\0");
+        hasher.update(peer_node_id.as_bytes());
+        hasher.update(generation.to_be_bytes());
+        hasher.update(receiver_watermark.unwrap_or_default().to_be_bytes());
+        hasher.update(previous_handoff.source_node_id.as_bytes());
+        hasher.update(previous_handoff.source_epoch.to_be_bytes());
+        hasher.update(previous_handoff.stream.as_bytes());
+        hasher.update(previous_handoff.first_missing.to_be_bytes());
+        hasher.update(previous_handoff.last_missing.to_be_bytes());
+        hasher.update(previous_handoff.next_sequence.to_be_bytes());
+        hasher.update(capacity.quota_bytes().to_be_bytes());
+        hasher.update(capacity.used_bytes().to_be_bytes());
+        hasher.update(capacity.filesystem_available_bytes().to_be_bytes());
+        hasher.update(b"summary-v2 ");
+        Ok(InitialPeerRecoveryPreview {
+            peer_node_id: peer_node_id.to_owned(),
+            generation,
+            receiver_watermark,
+            previous_handoff: Some(previous_handoff),
+            capacity_quota_bytes: capacity.quota_bytes(),
+            capacity_used_bytes: capacity.used_bytes(),
+            capacity_available_bytes: capacity.filesystem_available_bytes(),
+            fingerprint: hex::encode(hasher.finalize()),
+        })
+    }
+
+    pub(crate) fn arm_initial_peer_recovery(
+        &mut self,
+        peer_node_id: &str,
+        expected_fingerprint: &str,
+    ) -> Result<InitialPeerRecoveryPreview, RepositoryRuntimeError> {
+        if self
+            .snapshot
+            .initial_peer_backfills
+            .get(peer_node_id)
+            .is_some_and(|checkpoint| {
+                checkpoint.recovery_generation > 0 && !checkpoint.recovery_generation_consumed
+            })
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                "history recovery generation is already armed".to_owned(),
+            ));
+        }
+        let preview = self.preview_initial_peer_recovery(peer_node_id)?;
+        if preview.fingerprint != expected_fingerprint {
+            return Err(RepositoryRuntimeError::Storage(
+                "history recovery fingerprint changed".to_owned(),
+            ));
+        }
+        let previous_snapshot = self.snapshot.clone();
+        let checkpoint = self
+            .snapshot
+            .initial_peer_backfills
+            .entry(peer_node_id.to_owned())
+            .or_default();
+        checkpoint.recovery_generation = preview.generation;
+        checkpoint.recovery_generation_consumed = false;
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
+        Ok(preview)
     }
 }

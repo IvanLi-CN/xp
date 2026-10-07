@@ -6,6 +6,7 @@ mod segments;
 mod summary;
 #[cfg(test)]
 pub(crate) use segments::segment_phase_sql;
+pub(crate) use summary::RepositoryHistorySequenceSummaryBlock;
 
 pub(super) const COVERAGE_SUBJECT_SQL: &str = "
     SELECT MIN(observed_start), MAX(observed_end), MIN(received_at), MAX(received_at)

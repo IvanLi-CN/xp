@@ -72,17 +72,23 @@ fn can_schedule_tiered_handoff(
     checkpoint: &InitialPeerBackfillCheckpoint,
     handoff: &InitialPeerTieredHandoff,
 ) -> bool {
-    // `retained_anchor_streams` and the legacy response-complete bit are historical response
-    // state, not per-stream completion evidence. An older release could persist either marker
-    // before losing a tiered handoff, and the same response may contain multiple streams. Current
-    // gap/watermark evidence is checked by `tiered_handoff_for_sequence_gap`; only an identical
-    // active handoff or a durably completed handoff is a duplicate here.
+    // A legacy completed handoff is never an implicit authorization for crossing retention a
+    // second time. The signed local recovery command arms exactly one new generation; consuming
+    // that generation is persisted before the bounded response is replayed.
     checkpoint.summary_tiered_handoff.as_ref() != Some(handoff)
         && !checkpoint.retained_anchor_handoffs.iter().any(|completed| {
             completed.source_node_id == handoff.source_node_id
                 && completed.source_epoch == handoff.source_epoch
                 && completed.stream == handoff.stream
         })
+        || (checkpoint.recovery_generation > 0
+            && !checkpoint.recovery_generation_consumed
+            && checkpoint.summary_tiered_handoff.is_none()
+            && checkpoint.retained_anchor_handoffs.iter().any(|completed| {
+                completed.source_node_id == handoff.source_node_id
+                    && completed.source_epoch == handoff.source_epoch
+                    && completed.stream == handoff.stream
+            }))
 }
 
 pub(crate) async fn catch_up_against_ready_repositories(
@@ -969,6 +975,24 @@ mod tests {
         };
         assert!(can_schedule_tiered_handoff(
             &legacy_response_completed,
+            &same_stream
+        ));
+
+        let armed_recovery = InitialPeerBackfillCheckpoint {
+            recovery_generation: 1,
+            recovery_generation_consumed: false,
+            retained_anchor_handoffs: BTreeSet::from([same_stream.clone()]),
+            ..InitialPeerBackfillCheckpoint::default()
+        };
+        assert!(can_schedule_tiered_handoff(&armed_recovery, &same_stream));
+        let consumed_recovery = InitialPeerBackfillCheckpoint {
+            recovery_generation: 1,
+            recovery_generation_consumed: true,
+            retained_anchor_handoffs: BTreeSet::from([same_stream.clone()]),
+            ..InitialPeerBackfillCheckpoint::default()
+        };
+        assert!(!can_schedule_tiered_handoff(
+            &consumed_recovery,
             &same_stream
         ));
     }

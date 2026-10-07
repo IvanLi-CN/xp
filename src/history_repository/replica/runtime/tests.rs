@@ -4,6 +4,8 @@ use crate::{
     state::history_repository::identity::{Ed25519PublicKey, RepositoryNodeId, X25519PublicKey},
 };
 use ed25519_dalek::SigningKey;
+#[path = "deep_summary_tests.rs"]
+mod deep_summary_tests;
 #[path = "tiered_handoff_recovery_tests.rs"]
 mod tiered_handoff_recovery_tests;
 #[path = "truncated_tail_tests.rs"]
@@ -601,45 +603,6 @@ fn replica_repair_propagates_canonical_gap_metadata() {
         !runtime
             .requires_repair(&remote, true)
             .expect("gap metadata converged")
-    );
-}
-
-#[test]
-fn deep_verification_compares_retained_record_partitions() {
-    let temporary = tempfile::tempdir().expect("temporary directory");
-    let key = signing_key();
-    let identity = identity(&key);
-    let segment = segment(&key, 0, vec![record(b"retained", false)], None);
-    let mut runtime = load(temporary.path());
-    runtime
-        .receive_wire(
-            "cluster-a",
-            &identity,
-            &segment.wire_bytes().expect("wire"),
-            11,
-        )
-        .expect("segment");
-    let remote = runtime.replication_summary().expect("summary");
-    let mut remote_json = serde_json::to_value(&remote).expect("summary JSON");
-    remote_json["partitions"][0]["hash"][0] = serde_json::json!(255);
-    let mut remote: super::sync::RepositoryReplicaSummary =
-        serde_json::from_value(remote_json).expect("changed remote summary");
-    remote.segment_ids.clear();
-
-    assert!(
-        runtime
-            .requires_repair(&remote, true)
-            .expect("retained partition mismatch needs repair")
-    );
-    assert!(
-        !runtime
-            .retained_partitions_converged(&remote)
-            .expect("retained partition mismatch is observable")
-    );
-    assert!(
-        !runtime
-            .requires_repair(&remote, false)
-            .expect("shallow verification ignores retained partition summaries")
     );
 }
 

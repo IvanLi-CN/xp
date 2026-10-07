@@ -72,3 +72,82 @@ fn tiered_handoff_completion_recovers_after_anchor_was_persisted_before_checkpoi
     assert!(checkpoint.summary_tiered_handoff.is_none());
     assert!(checkpoint.retained_anchor_handoffs.contains(&handoff));
 }
+
+#[test]
+fn history_recovery_fingerprint_is_signed_once_and_retries_fail_closed() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"first", false)], None);
+    let handoff = super::InitialPeerTieredHandoff {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        first_missing: 1,
+        last_missing: 2,
+        next_sequence: 3,
+        end_unix_seconds: 12,
+    };
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("first wire"),
+            11,
+        )
+        .expect("local progress");
+    runtime
+        .start_initial_peer_tiered_handoff("node-b", handoff.clone())
+        .expect("start tiered handoff");
+    runtime
+        .import_tiered_backfill_records(
+            (1..=2)
+                .map(|sequence| super::RepositoryTieredBackfillRecord {
+                    observed_at_unix_seconds: 12,
+                    source_node_id: "node-a".to_owned(),
+                    source_epoch: 7,
+                    stream: "runtime".to_owned(),
+                    sequence,
+                    subject_node_id: "subject-a".to_owned(),
+                    observer_node_id: "node-a".to_owned(),
+                    schema_id: "runtime.v1".to_owned(),
+                    schema_version: 1,
+                    record_key: format!("tiered-{sequence}").into_bytes(),
+                    payload: b"sample".to_vec(),
+                    tombstone: false,
+                })
+                .collect(),
+            12,
+            &["repository-a".to_owned()],
+            "repository-a",
+        )
+        .expect("import tiered records");
+    runtime
+        .update_initial_peer_backfill_checkpoint("node-b", None, BTreeMap::new(), true, true)
+        .expect("finish tiered export");
+    runtime
+        .complete_initial_peer_tiered_handoff("node-b", &handoff)
+        .expect("bridge tiered gap");
+
+    runtime
+        .force_capacity_for_test(0, 1)
+        .expect("set recovery capacity guard");
+    assert!(runtime.preview_initial_peer_recovery("node-b").is_err());
+    runtime
+        .force_capacity_for_test(0, u64::MAX)
+        .expect("restore recovery capacity");
+    let preview = runtime
+        .preview_initial_peer_recovery("node-b")
+        .expect("preview recovery");
+    assert_eq!(preview.generation, 1);
+    assert_eq!(preview.receiver_watermark, Some(2));
+    runtime
+        .arm_initial_peer_recovery("node-b", &preview.fingerprint)
+        .expect("arm recovery");
+    assert!(
+        runtime
+            .arm_initial_peer_recovery("node-b", &preview.fingerprint)
+            .is_err()
+    );
+}

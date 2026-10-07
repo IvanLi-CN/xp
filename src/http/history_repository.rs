@@ -24,9 +24,9 @@ use crate::{
         identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
         query::{HistoryQuery, QueryCandidate, QuerySelector},
         replica::{
-            LocalQueryMetadata, RepositoryHistoryQueryResponse, RepositoryRepairBatch,
-            RepositoryReplicaGap, RepositoryRuntimeError, RepositoryRuntimeStatus,
-            RepositorySyncReceipt, RepositoryTombstoneAcknowledgement,
+            InitialPeerRecoveryPreview, LocalQueryMetadata, RepositoryHistoryQueryResponse,
+            RepositoryRepairBatch, RepositoryReplicaGap, RepositoryRuntimeError,
+            RepositoryRuntimeStatus, RepositorySyncReceipt, RepositoryTombstoneAcknowledgement,
         },
     },
 };
@@ -35,6 +35,7 @@ const MAX_REPAIR_REQUEST_IDS: usize = 64;
 const REPOSITORY_ED25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-ed25519-v1\0";
 const REPOSITORY_X25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-x25519-v1\0";
 pub(super) mod gaps;
+pub(crate) mod recovery;
 mod worker;
 pub(crate) use worker::spawn_repository_replica_worker;
 
@@ -65,6 +66,7 @@ pub(super) struct RepositorySummaryQuery {
     #[serde(default)]
     deep_verification: bool,
 }
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ReplaceRepositoryMembershipRequest {
@@ -1114,7 +1116,5 @@ async fn ready_repository_ids(state: &AppState) -> Result<Vec<String>, ApiError>
     }
     Ok(ready)
 }
-
 #[cfg(test)]
-#[path = "history_repository/tests.rs"]
 mod tests;

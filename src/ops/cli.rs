@@ -2,6 +2,7 @@ use crate::ops::admin_token;
 use crate::ops::cloudflare;
 use crate::ops::container;
 use crate::ops::deploy;
+use crate::ops::history_recovery;
 use crate::ops::ingress_guard;
 use crate::ops::init;
 use crate::ops::install;
@@ -194,6 +195,7 @@ pub enum XpCommand {
     RestoreStaleLearner(XpRestoreStaleLearnerArgs),
     #[command(subcommand)]
     MembershipOperation(MembershipOperationCommand),
+    HistoryRepositoryRecover(XpHistoryRepositoryRecoverArgs),
     /// Disaster recovery: force this node to become the only Raft voter.
     ///
     /// This is only meant for cases where quorum is permanently lost (e.g. a voter node is wiped).
@@ -485,6 +487,29 @@ pub struct XpRecoverSingleNodeArgs {
 
     #[arg(long)]
     pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpHistoryRepositoryRecoverArgs {
+    /// Local xp API base URL.
+    #[arg(long, value_name = "ORIGIN", default_value = "http://127.0.0.1:62416")]
+    pub api_base_url: String,
+
+    /// Exact ready-peer node id whose retained-anchor checkpoint is stale.
+    #[arg(long, value_name = "NODE_ID")]
+    pub peer_node_id: String,
+
+    /// Apply the one-time recovery generation. Omit for a zero-write preview.
+    #[arg(long)]
+    pub apply: bool,
+
+    /// Confirm the in-place recovery mutation.
+    #[arg(long)]
+    pub yes: bool,
+
+    /// Fingerprint returned by the dry-run preview. Required with --apply.
+    #[arg(long, value_name = "FINGERPRINT")]
+    pub expected_recovery_fingerprint: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -814,6 +839,9 @@ pub async fn run() -> i32 {
             }
             XpCommand::MembershipOperation(MembershipOperationCommand::Status(args)) => {
                 membership_lifecycle::cmd_xp_membership_operation_status(paths, args).await
+            }
+            XpCommand::HistoryRepositoryRecover(args) => {
+                history_recovery::cmd_xp_history_repository_recover(paths, args).await
             }
             XpCommand::RecoverSingleNode(args) => xp::cmd_xp_recover_single_node(paths, args).await,
         },

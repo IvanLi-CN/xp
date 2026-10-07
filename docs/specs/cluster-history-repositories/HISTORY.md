@@ -4,6 +4,12 @@
 
 ## Decision Trace
 
+- Recovery of a stale retained-anchor checkpoint is an explicit one-time generation on the existing
+  `history.sqlite3`; it never creates a second database, changes quota, deletes source outbox rows,
+  or rewrites permanent gaps.
+- Deep verification uses additive SQLite 4096-sequence Merkle blocks with resumable dirty-block
+  rebuilding and v1 peer fallback.
+
 - 选择 SQLite 作为普通节点和仓库的统一本地存储；迁移必须可回退且不改变普通节点数据策略。
 - 选择 Zstandard level 1 作为新同步唯一压缩算法；小 payload 或压缩无收益时使用 identity。既有 GZIP 仅用于嵌入式 Web 静态资源。
 - 将目标节点注册的公网 HTTPS `api_base_url` 作为 History 同步唯一 direct path；公网失败时保留

@@ -603,6 +603,8 @@ fn peer_initial_backfill_checkpoint_survives_restart() {
             retained_anchor_streams: std::collections::BTreeSet::new(),
             retained_anchor_handoffs: std::collections::BTreeSet::new(),
             summary_tiered_handoff: None,
+            recovery_generation: 0,
+            recovery_generation_consumed: false,
         })
     );
 }
