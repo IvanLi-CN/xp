@@ -198,6 +198,7 @@ export function useObjectNavigationBrowserBlocker() {
 	const { getDirtySections, requestNavigation } = useObjectNavigationGuard();
 	const blocker = useBlocker({
 		shouldBlockFn: () => getDirtySections().length > 0,
+		enableBeforeUnload: () => getDirtySections().length > 0,
 		withResolver: true,
 	});
 

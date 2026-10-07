@@ -85,6 +85,7 @@ import {
 	latestQueryDataUpdatedAt,
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
+import { enqueueMihomoSave } from "../utils/mihomoSaveQueue";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
 import { USER_TAB_OPTIONS, type UserDetailsTab } from "./UserDetailsTabs";
@@ -97,7 +98,6 @@ const PROTOCOLS = [
 	{ protocolId: "ss2022_2022_blake3_aes_128_gcm", label: "SS2022" },
 ] as const;
 const mihomoSaveGenerations = new Map<string, number>();
-
 function nextMihomoGeneration(saveKey: string): number {
 	const next = (mihomoSaveGenerations.get(saveKey) ?? 0) + 1;
 	mihomoSaveGenerations.set(saveKey, next);
@@ -395,37 +395,39 @@ export function UserDetailsPage() {
 			const queryKey = ["adminUserMihomoProfile", adminToken, userId] as const;
 			const saveKey = requestIdentity;
 			const saveGeneration = nextMihomoGeneration(saveKey);
-			await queryClient.cancelQueries({ queryKey });
-			let saved: AdminUserMihomoProfile;
-			try {
-				saved = await putAdminUserMihomoProfile(adminToken, userId, draft);
-			} catch (error) {
-				if (
-					!isBackendApiError(error) ||
-					error.code !== "invalid_request" ||
-					!error.message.includes("cannot be combined with extra_")
-				) {
-					throw error;
+			return enqueueMihomoSave(saveKey, userId, async () => {
+				await queryClient.cancelQueries({ queryKey });
+				let saved: AdminUserMihomoProfile;
+				try {
+					saved = await putAdminUserMihomoProfile(adminToken, userId, draft);
+				} catch (error) {
+					if (
+						!isBackendApiError(error) ||
+						error.code !== "invalid_request" ||
+						!error.message.includes("cannot be combined with extra_")
+					) {
+						throw error;
+					}
+					const migratedDraft = normalizeMihomoProfileDraftForSave(draft);
+					if (migratedDraft === draft) throw error;
+					saved = await putAdminUserMihomoProfile(
+						adminToken,
+						userId,
+						migratedDraft,
+					);
 				}
-				const migratedDraft = normalizeMihomoProfileDraftForSave(draft);
-				if (migratedDraft === draft) throw error;
-				saved = await putAdminUserMihomoProfile(
-					adminToken,
-					userId,
-					migratedDraft,
-				);
-			}
-			if (
-				mihomoActiveIdentityRef.current !== requestIdentity ||
-				mihomoSaveGenerations.get(saveKey) !== saveGeneration
-			) {
-				throw new Error(
-					"Mihomo profile changed while this save was pending. Review and retry.",
-				);
-			}
-			queryClient.setQueryData<AdminUserMihomoProfile>(queryKey, saved);
-			pushToast({ variant: "success", message: "Mihomo profile updated" });
-			return saved;
+				if (
+					mihomoActiveIdentityRef.current !== requestIdentity ||
+					mihomoSaveGenerations.get(saveKey) !== saveGeneration
+				) {
+					throw new Error(
+						"Mihomo profile changed while this save was pending. Review and retry.",
+					);
+				}
+				queryClient.setQueryData<AdminUserMihomoProfile>(queryKey, saved);
+				pushToast({ variant: "success", message: "Mihomo profile updated" });
+				return saved;
+			});
 		},
 		[adminToken, pushToast, queryClient, userId],
 	);

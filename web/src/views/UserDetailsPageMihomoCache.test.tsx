@@ -26,7 +26,7 @@ describe("<UserDetailsPage /> Mihomo cache", () => {
 
 	afterEach(() => cleanup());
 
-	it("does not let an older Mihomo save response replace a newer cache entry", async () => {
+	it("serializes Mihomo saves before updating the cache", async () => {
 		setupMocks({
 			mihomoProfile: {
 				mixin_yaml: "initial\n",
@@ -67,18 +67,21 @@ describe("<UserDetailsPage /> Mihomo cache", () => {
 				name: "Save configuration",
 			}),
 		);
-		await waitFor(() =>
-			expect(mockPutAdminUserMihomoProfile).toHaveBeenCalledTimes(2),
-		);
+		expect(mockPutAdminUserMihomoProfile).toHaveBeenCalledTimes(1);
 
 		await act(async () => {
-			saveResolvers[1]?.({
-				mixin_yaml: "latest save\n",
+			saveResolvers[0]?.({
+				mixin_yaml: "first save\n",
 				extra_proxies_yaml: "",
 				extra_proxy_providers_yaml: "",
 			});
-			saveResolvers[0]?.({
-				mixin_yaml: "stale save\n",
+		});
+		await waitFor(() =>
+			expect(mockPutAdminUserMihomoProfile).toHaveBeenCalledTimes(2),
+		);
+		await act(async () => {
+			saveResolvers[1]?.({
+				mixin_yaml: "latest save\n",
 				extra_proxies_yaml: "",
 				extra_proxy_providers_yaml: "",
 			});
