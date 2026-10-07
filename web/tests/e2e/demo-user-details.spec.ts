@@ -72,13 +72,17 @@ test("resets Demo user drafts when the detail route changes", async ({
 	await page.getByRole("button", { name: "Enter demo" }).click();
 	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
 
-	await page.getByLabel("Display name").fill("Draft from another user");
+	await page
+		.getByRole("textbox", { name: "Display name" })
+		.fill("Draft from another user");
 	await page.goto(`/demo/users/${fixtureCatalog.identifier.userPrimary()}`);
 
 	await expect(
 		page.getByRole("heading", { name: "Lin Chen", exact: true }),
 	).toBeVisible();
-	await expect(page.getByLabel("Display name")).toHaveValue("Lin Chen");
+	await expect(page.getByRole("textbox", { name: "Display name" })).toHaveValue(
+		"Lin Chen",
+	);
 });
 
 test("expands the Mihomo editor into a persistent file workspace", async ({
