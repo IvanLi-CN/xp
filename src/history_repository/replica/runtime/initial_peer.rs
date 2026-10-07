@@ -411,6 +411,9 @@ impl RepositoryReplicaRuntime {
             .expect("handoff checkpoint checked above");
         checkpoint.summary_tiered_handoff = None;
         checkpoint.retained_anchor_handoffs.insert(handoff.clone());
+        if checkpoint.recovery_generation > 0 {
+            checkpoint.recovery_handoff = Some(handoff.clone());
+        }
         if let Err(error) = self.persist_control_state() {
             self.restore(&previous_receiver, previous_snapshot)?;
             return Err(error);
