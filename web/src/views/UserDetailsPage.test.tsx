@@ -34,6 +34,7 @@ import {
 	resetAdminUserCredentials,
 	resetAdminUserToken,
 } from "../api/adminUsers";
+import { BackendApiError } from "../api/backendError";
 import { fetchSubscription } from "../api/subscription";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
@@ -727,7 +728,7 @@ describe("<UserDetailsPage />", () => {
 		expect(patchAdminUser).not.toHaveBeenCalled();
 	});
 
-	it("preserves mixed mihomo profile fields when saving", async () => {
+	it("migrates a legacy mixed profile after the raw save is rejected", async () => {
 		setupMocks({
 			mihomoProfile: {
 				mixin_yaml: `port: 0
@@ -755,10 +756,29 @@ rules: []
 		fireEvent.change(mixinEditor, {
 			target: { value: `${(mixinEditor as HTMLTextAreaElement).value}\n` },
 		});
+		vi.mocked(putAdminUserMihomoProfile)
+			.mockRejectedValueOnce(
+				new BackendApiError({
+					status: 400,
+					code: "invalid_request",
+					message:
+						"mixin_yaml.proxy-providers cannot be combined with extra_proxy_providers_yaml",
+				}),
+			)
+			.mockResolvedValueOnce({
+				mixin_yaml: "port: 0\nrules: []\n",
+				extra_proxies_yaml: "",
+				extra_proxy_providers_yaml: `providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+`,
+			});
 		fireEvent.click(await screenByRole("button", "Save configuration"));
 
 		await waitFor(() => {
-			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
+			expect(putAdminUserMihomoProfile).toHaveBeenNthCalledWith(
+				1,
 				"admintoken",
 				fixtureCatalog.identifier.userPrimary(),
 				{
@@ -771,6 +791,20 @@ proxy-providers:
 rules: []
 
 `,
+					extra_proxies_yaml: "",
+					extra_proxy_providers_yaml: `providerA:
+  type: http
+  path: ./provider-a-from-extra.yaml
+  url: https://example.com/sub-a-from-extra
+`,
+				},
+			);
+			expect(putAdminUserMihomoProfile).toHaveBeenNthCalledWith(
+				2,
+				"admintoken",
+				fixtureCatalog.identifier.userPrimary(),
+				{
+					mixin_yaml: "port: 0\nrules: []\n",
 					extra_proxies_yaml: "",
 					extra_proxy_providers_yaml: `providerA:
   type: http

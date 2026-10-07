@@ -86,6 +86,7 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
+import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
 import { USER_TAB_OPTIONS, type UserDetailsTab } from "./UserDetailsTabs";
 import { removeAdminUser, replaceAdminUser } from "./adminUsersCache";
 import { useUserRouteTransientState } from "./useUserRouteTransientState";
@@ -395,7 +396,25 @@ export function UserDetailsPage() {
 			const saveKey = requestIdentity;
 			const saveGeneration = nextMihomoGeneration(saveKey);
 			await queryClient.cancelQueries({ queryKey });
-			const saved = await putAdminUserMihomoProfile(adminToken, userId, draft);
+			let saved: AdminUserMihomoProfile;
+			try {
+				saved = await putAdminUserMihomoProfile(adminToken, userId, draft);
+			} catch (error) {
+				if (
+					!isBackendApiError(error) ||
+					error.code !== "invalid_request" ||
+					!error.message.includes("cannot be combined with extra_")
+				) {
+					throw error;
+				}
+				const migratedDraft = normalizeMihomoProfileDraftForSave(draft);
+				if (migratedDraft === draft) throw error;
+				saved = await putAdminUserMihomoProfile(
+					adminToken,
+					userId,
+					migratedDraft,
+				);
+			}
 			if (
 				mihomoActiveIdentityRef.current !== requestIdentity ||
 				mihomoSaveGenerations.get(saveKey) !== saveGeneration
