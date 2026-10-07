@@ -118,6 +118,7 @@ export function MihomoProfileEditor({
 	const inlineMount = useRef<HTMLDivElement>(null);
 	const expandedMount = useRef<HTMLDivElement>(null);
 	const entryButton = useRef<HTMLDivElement>(null);
+	const filesTrigger = useRef<HTMLDivElement>(null);
 	const savedScrollY = useRef(0);
 	const views = useRef<Partial<Record<MihomoProfileDocumentId, EditorView>>>(
 		{},
@@ -185,6 +186,13 @@ export function MihomoProfileEditor({
 		});
 	}, []);
 
+	const closeFiles = useCallback(() => {
+		setFilesOpen(false);
+		requestAnimationFrame(() => {
+			filesTrigger.current?.querySelector<HTMLButtonElement>("button")?.focus();
+		});
+	}, []);
+
 	const handleEscape = useCallback(
 		(event: KeyboardEvent) => {
 			if (event.defaultPrevented || filesOpen) return;
@@ -241,7 +249,7 @@ export function MihomoProfileEditor({
 						)}
 						onClick={() => {
 							setSelectedDocument(documentId);
-							setFilesOpen(false);
+							closeFiles();
 						}}
 					>
 						<Icon
@@ -387,15 +395,16 @@ export function MihomoProfileEditor({
 								</div>
 							</div>
 							<div className="flex shrink-0 items-center gap-2">
-								<Button
-									className="md:hidden"
-									variant="outline"
-									size="sm"
-									iconLeft={<Icon name="tabler:files" />}
-									onClick={() => setFilesOpen(true)}
-								>
-									Files
-								</Button>
+								<div ref={filesTrigger} className="md:hidden">
+									<Button
+										variant="outline"
+										size="sm"
+										iconLeft={<Icon name="tabler:files" />}
+										onClick={() => setFilesOpen(true)}
+									>
+										Files
+									</Button>
+								</div>
 								<Button
 									className="hidden sm:inline-flex"
 									size="sm"
@@ -512,11 +521,22 @@ export function MihomoProfileEditor({
 				</DialogContent>
 			</Dialog>
 
-			<Sheet open={filesOpen} onOpenChange={setFilesOpen}>
+			<Sheet
+				open={filesOpen}
+				onOpenChange={(open) => (open ? setFilesOpen(true) : closeFiles())}
+			>
 				<SheetContent
 					side="left"
 					className="z-[60] w-[min(86vw,20rem)] border-r border-border bg-card p-0"
 					style={{ paddingTop: "env(safe-area-inset-top)" }}
+					onCloseAutoFocus={(event) => {
+						event.preventDefault();
+						requestAnimationFrame(() => {
+							filesTrigger.current
+								?.querySelector<HTMLButtonElement>("button")
+								?.focus();
+						});
+					}}
 				>
 					<div className="flex h-14 items-center border-b border-border px-4">
 						<div>

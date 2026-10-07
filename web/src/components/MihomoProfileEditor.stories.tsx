@@ -183,6 +183,12 @@ export const MobileFiles: Story = {
 			await expect(
 				within(document.body).getByRole("heading", { name: "Files" }),
 			).toBeInTheDocument();
+			await userEvent.click(
+				within(document.body).getByRole("button", {
+					name: /extra_proxies_yaml/,
+				}),
+			);
+			await expect(filesButton).toHaveFocus();
 		} else {
 			await expect(dialog).toHaveTextContent("mixin_yaml");
 		}

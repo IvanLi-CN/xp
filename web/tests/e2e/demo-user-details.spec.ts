@@ -147,6 +147,7 @@ test("uses the Files drawer at a narrow viewport", async ({ page }) => {
 		.last()
 		.click();
 	await expect(files).toBeHidden();
+	await expect(workspace.getByRole("button", { name: "Files" })).toBeFocused();
 	await expect(workspace).toContainText("extra_proxy_providers_yaml");
 });
 
