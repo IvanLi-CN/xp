@@ -114,4 +114,53 @@ describe("useMihomoProfileDraft", () => {
 		});
 		expect(result.current.dirty).toBe(false);
 	});
+
+	it("ignores an old response after returning to the same user", async () => {
+		const saveResolvers: Array<(profile: AdminUserMihomoProfile) => void> = [];
+		const saveProfile = vi.fn(
+			() =>
+				new Promise<AdminUserMihomoProfile>((resolve) => {
+					saveResolvers.push(resolve);
+				}),
+		);
+		const { result, rerender } = renderHook(
+			({ userId, profile }) =>
+				useMihomoProfileDraft({ userId, profile, saveProfile }),
+			{ initialProps: { userId: "user-a", profile: PROFILE_A } },
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "first draft\n"));
+		let firstSave: Promise<boolean> | undefined;
+		act(() => {
+			firstSave = result.current.save();
+		});
+
+		rerender({ userId: "user-b", profile: PROFILE_B });
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		rerender({ userId: "user-a", profile: PROFILE_A });
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "latest draft\n"));
+		let secondSave: Promise<boolean> | undefined;
+		act(() => {
+			secondSave = result.current.save();
+		});
+		expect(saveProfile).toHaveBeenCalledTimes(2);
+		if (!firstSave || !secondSave)
+			throw new Error("save request was not created");
+
+		await act(async () => {
+			saveResolvers[0]?.({ ...PROFILE_A, mixin_yaml: "stale response\n" });
+			expect(await firstSave).toBe(false);
+		});
+		expect(result.current.draft.mixin_yaml).toBe("latest draft\n");
+		expect(result.current.isSaving).toBe(true);
+
+		await act(async () => {
+			saveResolvers[1]?.({ ...PROFILE_A, mixin_yaml: "latest draft\n" });
+			expect(await secondSave).toBe(true);
+		});
+		expect(result.current.draft.mixin_yaml).toBe("latest draft\n");
+		expect(result.current.dirty).toBe(false);
+	});
 });

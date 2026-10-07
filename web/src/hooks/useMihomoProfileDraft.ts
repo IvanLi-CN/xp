@@ -55,6 +55,7 @@ export function useMihomoProfileDraft({
 	const [error, setError] = useState<string | null>(null);
 	const currentUserIdRef = useRef(userId);
 	const resetUserIdRef = useRef(userId);
+	const userSessionRef = useRef(0);
 	const savePromiseRef = useRef<Promise<boolean> | null>(null);
 	const acceptedProfileKeyRef = useRef(profileKey(profile));
 	const lastSavedProfileKeyRef = useRef<string | null>(null);
@@ -71,6 +72,7 @@ export function useMihomoProfileDraft({
 		if (resetUserIdRef.current === userId) return;
 		resetUserIdRef.current = userId;
 		currentUserIdRef.current = userId;
+		userSessionRef.current += 1;
 		setIsSaving(false);
 		savePromiseRef.current = null;
 		setLoadedUserId(null);
@@ -141,12 +143,17 @@ export function useMihomoProfileDraft({
 		if (savePromiseRef.current) return savePromiseRef.current;
 
 		const targetUserId = userId;
+		const targetSession = userSessionRef.current;
 		const payload = cloneProfile(draft);
 		setIsSaving(true);
 		setError(null);
 		const request = saveProfile(payload)
 			.then((saved) => {
-				if (currentUserIdRef.current !== targetUserId) return false;
+				if (
+					currentUserIdRef.current !== targetUserId ||
+					userSessionRef.current !== targetSession
+				)
+					return false;
 				const next = cloneProfile(saved);
 				setBaseline(next);
 				setDraftState(next);
@@ -156,13 +163,20 @@ export function useMihomoProfileDraft({
 				return true;
 			})
 			.catch((saveError: unknown) => {
-				if (currentUserIdRef.current === targetUserId) {
+				if (
+					currentUserIdRef.current === targetUserId &&
+					userSessionRef.current === targetSession
+				) {
 					setError(formatError(saveError));
 				}
 				return false;
 			})
 			.finally(() => {
-				if (currentUserIdRef.current === targetUserId) setIsSaving(false);
+				if (
+					currentUserIdRef.current === targetUserId &&
+					userSessionRef.current === targetSession
+				)
+					setIsSaving(false);
 				if (savePromiseRef.current === request) savePromiseRef.current = null;
 			});
 		savePromiseRef.current = request;
