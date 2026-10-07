@@ -26,7 +26,7 @@ None
 
 - 稳定 `format=mihomo` 输出，支持每用户 mixin、系统动态注入与用户扩展。
 - 保持 `raw/base64/clash` 现有行为不变。
-- 将管理 API 字段统一收敛为 `mixin_yaml`，移除旧字段 `template_yaml` 兼容层。
+- 管理 API 使用 `mixin_yaml` 与两个 `extra_*` 字段，拒绝旧字段 `template_yaml`。
 - 系统内置生成并覆盖 provider-only 模式下的动态地区组与落地组：
   - 可见地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
   - 兼容地区组：固定地区面对应的 `🔒/🤯` 隐藏 alias
@@ -68,8 +68,8 @@ None
 
 - **REQ-MIHOMO-SUB-001**: `GET /api/sub/{token}?format=mihomo` 支持完整输出。
 - **REQ-MIHOMO-SUB-002**: 用户 mixin 按 `user_id` 持久化存储。
-- **REQ-MIHOMO-SUB-003**: 管理 API 请求与响应统一使用 `mixin_yaml`。
-- **REQ-MIHOMO-SUB-004**: 对外只接受 `mixin_yaml`；内部状态/WAL/snapshot 兼容读写 `template_yaml`，并双写两字段。
+- **REQ-MIHOMO-SUB-003**: 管理 API 请求与响应统一使用三个 profile 字段：`mixin_yaml` 与两个 `extra_*`。
+- **REQ-MIHOMO-SUB-004**: 对外只接受三个 profile 字段；内部状态/WAL/snapshot 兼容 `template_yaml` 并双写。
 - **REQ-MIHOMO-SUB-005**: 支持 `extra_proxies_yaml` sequence 与可空 `extra_proxy_providers_yaml` mapping。
 - **REQ-MIHOMO-SUB-006**: 渲染时系统重建并覆盖 `proxies`、`proxy-providers` 与所有系统保留动态组。
 - **REQ-MIHOMO-SUB-007**: 系统保留地区组、`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择` 与 `🤯 All` 必须只从节点主动探测得到的订阅地区派生，不再使用 `node_name` slug 猜测。
