@@ -210,7 +210,7 @@ export function MihomoProfileEditor({
 				onChange={(value) => onChange(documentId, value)}
 				placeholder={DOCUMENT_PLACEHOLDERS[documentId]}
 				minRows={DOCUMENT_ROWS[documentId]}
-				readOnly={readOnly || isSaving}
+				readOnly={readOnly || isSaving || !isLoaded}
 				fillHeight={expanded}
 				preserveEditorStateOnValueChange
 				hideLabel={expanded}

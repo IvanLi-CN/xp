@@ -84,6 +84,7 @@ export function useMihomoProfileDraft({
 	}, [profile, userId]);
 
 	const incomingProfileKey = profileKey(profile);
+	const isLoaded = loadedUserId === userId && profile !== undefined;
 	useEffect(() => {
 		if (!profile || currentUserIdRef.current !== userId) return;
 		if (loadedUserId !== userId) {
@@ -118,11 +119,11 @@ export function useMihomoProfileDraft({
 
 	const setField = useCallback(
 		(documentId: MihomoProfileDocumentId, value: string) => {
-			if (readOnly || isSaving) return;
+			if (readOnly || isSaving || !isLoaded) return;
 			setDraftState((current) => ({ ...current, [documentId]: value }));
 			setError(null);
 		},
-		[isSaving, readOnly],
+		[isLoaded, isSaving, readOnly],
 	);
 
 	const discard = useCallback(() => {
@@ -137,7 +138,12 @@ export function useMihomoProfileDraft({
 	}, [baseline, isSaving, loadedUserId, profile, userId]);
 
 	const save = useCallback(async (): Promise<boolean> => {
-		if (readOnly || !dirty || currentUserIdRef.current !== userId) {
+		if (
+			readOnly ||
+			!isLoaded ||
+			!dirty ||
+			currentUserIdRef.current !== userId
+		) {
 			return false;
 		}
 		if (savePromiseRef.current) return savePromiseRef.current;
@@ -181,14 +187,14 @@ export function useMihomoProfileDraft({
 			});
 		savePromiseRef.current = request;
 		return request;
-	}, [dirty, draft, formatError, readOnly, saveProfile, userId]);
+	}, [dirty, draft, formatError, isLoaded, readOnly, saveProfile, userId]);
 
 	return {
 		baseline,
 		discard,
 		draft,
 		error,
-		isLoaded: loadedUserId === userId && profile !== undefined,
+		isLoaded,
 		isSaving,
 		save,
 		setField,

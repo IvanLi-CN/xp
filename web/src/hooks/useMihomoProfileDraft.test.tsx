@@ -17,6 +17,43 @@ const PROFILE_B: AdminUserMihomoProfile = {
 };
 
 describe("useMihomoProfileDraft", () => {
+	it("keeps an unloaded profile read-only until its data arrives", async () => {
+		const saveProfile = vi.fn(
+			async (profile: AdminUserMihomoProfile) => profile,
+		);
+		const { result, rerender } = renderHook(
+			({ profile }: { profile: AdminUserMihomoProfile | undefined }) =>
+				useMihomoProfileDraft({
+					userId: "user-a",
+					profile,
+					saveProfile,
+				}),
+			{
+				initialProps: {
+					profile: undefined as AdminUserMihomoProfile | undefined,
+				},
+			},
+		);
+
+		expect(result.current.isLoaded).toBe(false);
+		act(() => result.current.setField("mixin_yaml", "should not persist\n"));
+		expect(result.current.draft).toEqual({
+			mixin_yaml: "",
+			extra_proxies_yaml: "",
+			extra_proxy_providers_yaml: "",
+		});
+		expect(result.current.dirty).toBe(false);
+		await act(async () => {
+			expect(await result.current.save()).toBe(false);
+		});
+		expect(saveProfile).not.toHaveBeenCalled();
+
+		rerender({ profile: PROFILE_A });
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "loaded edit\n"));
+		expect(result.current.dirty).toBe(true);
+	});
+
 	it("keeps dirty drafts across refreshes and accepts a complete save response", async () => {
 		let resolveSave: ((profile: AdminUserMihomoProfile) => void) | undefined;
 		const saveProfile = vi.fn(
