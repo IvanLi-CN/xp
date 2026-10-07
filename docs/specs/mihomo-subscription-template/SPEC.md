@@ -163,7 +163,7 @@ None
 
 - `mixin_yaml` 非法或根类型错误：管理 API 返回 `400 invalid_request`。
 - extra YAML 根类型不符合约束：管理 API 返回 `400 invalid_request`。
-- 用户只传 `mixin_yaml`；旧字段 `template_yaml` 不再接受。
+- 用户可传三个 profile 字段；旧字段 `template_yaml` 不再接受。
 - 未配置 mixin：订阅接口回退 clash 输出。
 
 ## 接口契约（Interfaces & Contracts）
