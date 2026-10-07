@@ -217,6 +217,40 @@ export function useObjectNavigationDirtySections(
 	const { refresh, registerDirtySections } = useObjectNavigationGuard();
 	const sectionsRef = useRef(sections);
 	sectionsRef.current = sections;
+	const stableSectionsRef = useRef(
+		new Map<string, ObjectNavigationDirtySection>(),
+	);
+	const getSections = useCallback(() => {
+		return sectionsRef.current.map((section) => {
+			let stableSection = stableSectionsRef.current.get(section.id);
+			if (!stableSection) {
+				const sectionId = section.id;
+				stableSection = {
+					id: sectionId,
+					label: section.label,
+					isDirty: () =>
+						sectionsRef.current
+							.find((item) => item.id === sectionId)
+							?.isDirty() ?? false,
+					isBusy: () =>
+						sectionsRef.current
+							.find((item) => item.id === sectionId)
+							?.isBusy?.() ?? false,
+					save: () =>
+						sectionsRef.current.find((item) => item.id === sectionId)?.save() ??
+						Promise.resolve(false),
+					discard: () => {
+						sectionsRef.current
+							.find((item) => item.id === sectionId)
+							?.discard();
+					},
+				};
+				stableSectionsRef.current.set(sectionId, stableSection);
+			}
+			stableSection.label = section.label;
+			return stableSection;
+		});
+	}, []);
 	const sectionState = sections
 		.map(
 			(section) =>
@@ -225,8 +259,8 @@ export function useObjectNavigationDirtySections(
 		.join("|");
 
 	useEffect(
-		() => registerDirtySections(ownerId, () => sectionsRef.current),
-		[ownerId, registerDirtySections],
+		() => registerDirtySections(ownerId, getSections),
+		[getSections, ownerId, registerDirtySections],
 	);
 	const refreshSectionState = useCallback(() => {
 		void sectionState;

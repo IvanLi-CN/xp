@@ -69,6 +69,35 @@ function PendingSaveHarness({
 	);
 }
 
+function RenderCapturedPendingSaveHarness({
+	completeSave,
+	onNavigate,
+}: {
+	completeSave: Promise<void>;
+	onNavigate: () => void;
+}) {
+	const [state, setState] = useState({ busy: true, dirty: true });
+	useEffect(() => {
+		void completeSave.then(() => setState({ busy: false, dirty: false }));
+	}, [completeSave]);
+	const { requestNavigation } = useObjectNavigationGuard();
+	useObjectNavigationDirtySections("object", [
+		{
+			id: "mihomo",
+			label: "Mihomo profile",
+			isDirty: () => state.dirty,
+			isBusy: () => state.busy,
+			save: async () => false,
+			discard: vi.fn(),
+		},
+	]);
+	return (
+		<button type="button" onClick={() => requestNavigation(onNavigate)}>
+			Open next object
+		</button>
+	);
+}
+
 describe("<ObjectNavigationGuardProvider />", () => {
 	it("resolves dirty sections in registration order before navigating", async () => {
 		const saveMihomo = vi.fn(async () => true);
@@ -191,6 +220,32 @@ describe("<ObjectNavigationGuardProvider />", () => {
 		fireEvent.click(
 			screen.getByRole("button", { name: "Discard and continue" }),
 		);
+		await waitFor(() => expect(onNavigate).toHaveBeenCalledTimes(1));
+	});
+
+	it("uses current section actions after a direct save settles", async () => {
+		let resolveSave!: () => void;
+		const completeSave = new Promise<void>((resolve) => {
+			resolveSave = resolve;
+		});
+		const onNavigate = vi.fn();
+		render(
+			<ObjectNavigationGuardProvider>
+				<RenderCapturedPendingSaveHarness
+					completeSave={completeSave}
+					onNavigate={onNavigate}
+				/>
+			</ObjectNavigationGuardProvider>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Open next object" }));
+		resolveSave();
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Discard and continue" }),
+			).toBeEnabled(),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Save and continue" }));
 		await waitFor(() => expect(onNavigate).toHaveBeenCalledTimes(1));
 	});
 });
