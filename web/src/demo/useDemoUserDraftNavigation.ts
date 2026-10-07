@@ -52,6 +52,7 @@ type Props = {
 	};
 	mihomoProfile?: {
 		dirty: boolean;
+		isBusy?: () => boolean;
 		save: () => Promise<boolean>;
 		discard: () => void;
 	};
@@ -171,6 +172,7 @@ export function useDemoUserDraftNavigation({
 			id: "mihomo-profile",
 			label: "Mihomo profile",
 			isDirty: () => mihomoDirty,
+			isBusy: mihomoProfile?.isBusy,
 			save: saveMihomoProfile,
 			discard: discardMihomoProfile,
 		},

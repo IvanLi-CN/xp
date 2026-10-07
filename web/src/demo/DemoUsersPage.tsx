@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
 	DEFAULT_SUBSCRIPTION_FORMAT,
@@ -542,6 +542,8 @@ export function DemoUserDetailsPage() {
 		readOnly: !canWrite,
 		saveProfile: saveMihomoProfileRequest,
 	});
+	const mihomoSavingRef = useRef(false);
+	mihomoSavingRef.current = mihomoDraft.isSaving;
 	const {
 		accessDirty: dirty,
 		mihomoDirty,
@@ -577,6 +579,7 @@ export function DemoUserDetailsPage() {
 		},
 		mihomoProfile: {
 			dirty: mihomoDraft.dirty,
+			isBusy: () => mihomoSavingRef.current,
 			save: mihomoDraft.save,
 			discard: mihomoDraft.discard,
 		},
@@ -741,6 +744,20 @@ export function DemoUserDetailsPage() {
 		});
 		setResetTokenOpen(false);
 		pushToast({ variant: "success", message: "Subscription token reset." });
+	}
+
+	function requestDeleteUser() {
+		const targetUserId = currentUser?.id;
+		if (!targetUserId) return;
+		setDeleteOpen(false);
+		requestNavigation(() => {
+			deleteUser(targetUserId);
+			pushToast({
+				variant: "info",
+				message: "User deleted. Undo is available.",
+			});
+			navigate({ to: "/demo/users" });
+		});
 	}
 
 	return (
@@ -1183,15 +1200,7 @@ export function DemoUserDetailsPage() {
 				description="This removes the user from the mock state. You can undo from the users list."
 				confirmLabel="Delete user"
 				onCancel={() => setDeleteOpen(false)}
-				onConfirm={() => {
-					deleteUser(user.id);
-					setDeleteOpen(false);
-					pushToast({
-						variant: "info",
-						message: "User deleted. Undo is available.",
-					});
-					navigate({ to: "/demo/users" });
-				}}
+				onConfirm={requestDeleteUser}
 			/>
 
 			<SubscriptionPreviewDialog

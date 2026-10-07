@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, userEvent, within } from "@storybook/test";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
 import { MihomoProfileEditor } from "./MihomoProfileEditor";
@@ -18,6 +18,7 @@ type EditorStoryProps = {
 	readOnly?: boolean;
 	startWithError?: boolean;
 	startSaving?: boolean;
+	holdSave?: boolean;
 };
 
 function EditorStory({
@@ -25,23 +26,31 @@ function EditorStory({
 	readOnly = false,
 	startWithError = false,
 	startSaving = false,
+	holdSave = false,
 }: EditorStoryProps) {
-	const initialDraft = startWithError
-		? {
-				...initialProfile,
-				mixin_yaml: `${initialProfile.mixin_yaml}# retry me\n`,
-				extra_proxies_yaml: `${initialProfile.extra_proxies_yaml}# keep me\n`,
-				extra_proxy_providers_yaml: `${initialProfile.extra_proxy_providers_yaml}# keep me too\n`,
-			}
-		: initialProfile;
+	const initialDraft =
+		startWithError || holdSave
+			? {
+					...initialProfile,
+					mixin_yaml: `${initialProfile.mixin_yaml}# retry me\n`,
+					extra_proxies_yaml: `${initialProfile.extra_proxies_yaml}# keep me\n`,
+					extra_proxy_providers_yaml: `${initialProfile.extra_proxy_providers_yaml}# keep me too\n`,
+				}
+			: initialProfile;
 	const [draft, setDraft] = useState(initialDraft);
 	const [isSaving, setIsSaving] = useState(startSaving);
 	const [saveAttempts, setSaveAttempts] = useState(0);
 	const [error, setError] = useState<string | null>(null);
+	const pendingSaveResolve = useRef<(() => void) | null>(null);
 
 	const save = async () => {
 		setIsSaving(true);
 		setError(null);
+		if (holdSave) {
+			await new Promise<void>((resolve) => {
+				pendingSaveResolve.current = resolve;
+			});
+		}
 		setIsSaving(false);
 		if (startWithError && saveAttempts === 0) {
 			setSaveAttempts(1);
@@ -89,6 +98,16 @@ function EditorStory({
 					}}
 					onSave={save}
 				/>
+				{holdSave ? (
+					<button
+						type="button"
+						className="sr-only"
+						aria-label="Resolve pending save"
+						onClick={() => pendingSaveResolve.current?.()}
+					>
+						Resolve pending save
+					</button>
+				) : null}
 			</div>
 		</div>
 	);
@@ -187,9 +206,13 @@ export const SaveError: Story = {
 };
 
 export const Saving: Story = {
-	args: { startSaving: true },
+	args: { holdSave: true },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const inlineSave = canvas.getByRole("button", {
+			name: "Save configuration",
+		});
+		await userEvent.click(inlineSave);
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Expand editor" }),
 		);
@@ -202,6 +225,16 @@ export const Saving: Story = {
 		)) {
 			await expect(editor).toHaveAttribute("contenteditable", "false");
 		}
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Exit expanded editor" }),
+		);
+		await expect(
+			canvas.getByRole("button", { name: "Resolve pending save" }),
+		).toBeInTheDocument();
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Resolve pending save" }),
+		);
+		await expect(inlineSave).toBeEnabled();
 	},
 };
 

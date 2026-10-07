@@ -75,7 +75,12 @@ test("resets Demo user drafts when the detail route changes", async ({
 	await page
 		.getByRole("textbox", { name: "Display name" })
 		.fill("Draft from another user");
-	await page.goto(`/demo/users/${fixtureCatalog.identifier.userPrimary()}`);
+	await page.getByRole("link", { name: "Back to users" }).click();
+	await page
+		.getByRole("alertdialog")
+		.getByRole("button", { name: "Discard and continue" })
+		.click();
+	await page.getByRole("link", { name: "Lin Chen", exact: true }).click();
 
 	await expect(
 		page.getByRole("heading", { name: "Lin Chen", exact: true }),
@@ -125,21 +130,46 @@ test("expands the Mihomo editor into a persistent file workspace", async ({
 	await expect
 		.poll(() => mixinScroller.evaluate((element) => element.scrollTop))
 		.toBeGreaterThan(0);
+
+	const extraProxiesEditor = workspace.locator(
+		'[data-mihomo-document="extra_proxies_yaml"] .cm-content',
+	);
+	await workspace.getByRole("button", { name: /extra_proxies_yaml/ }).click();
+	await extraProxiesEditor.click();
+	await page.keyboard.press("ControlOrMeta+End");
+	await page.keyboard.insertText("\n- name: workspace-extra-proxy");
+
+	const extraProvidersEditor = workspace.locator(
+		'[data-mihomo-document="extra_proxy_providers_yaml"] .cm-content',
+	);
+	await workspace
+		.getByRole("button", { name: /extra_proxy_providers_yaml/ })
+		.click();
+	await extraProvidersEditor.click();
+	await page.keyboard.press("ControlOrMeta+End");
+	await page.keyboard.insertText("\n# workspace-extra-provider");
+
 	await page.keyboard.press("ControlOrMeta+z");
-	await expect(mixinEditor).not.toContainText("workspace edit");
+	await expect(extraProvidersEditor).not.toContainText(
+		"workspace-extra-provider",
+	);
 	await page.keyboard.press("ControlOrMeta+Shift+z");
+	await expect(extraProvidersEditor).toContainText("workspace-extra-provider");
+	await workspace.getByRole("button", { name: /extra_proxies_yaml/ }).click();
+	await expect(extraProxiesEditor).toContainText("workspace-extra-proxy");
+	await workspace.getByRole("button", { name: /mixin_yaml/ }).click();
 	await expect(mixinEditor).toContainText("workspace edit");
 	await page.keyboard.press("Shift+ArrowLeft");
 	await expect
 		.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ""))
 		.toBe("t");
 
-	await workspace.getByRole("button", { name: "Exit expanded editor" }).click();
+	await page.keyboard.press("Escape");
 	await expect(workspace).toBeHidden();
 	await expect(page).toHaveURL(pageUrl);
 	await expect(
 		page.getByRole("button", { name: "Expand editor" }),
-	).toBeVisible();
+	).toBeFocused();
 
 	await page.getByRole("button", { name: "Access" }).click();
 	await page.getByRole("button", { name: "User", exact: true }).click();

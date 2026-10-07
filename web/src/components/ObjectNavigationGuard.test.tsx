@@ -104,4 +104,30 @@ describe("<ObjectNavigationGuardProvider />", () => {
 		);
 		expect(onNavigate).not.toHaveBeenCalled();
 	});
+
+	it("does not offer discard while a section save is already pending", async () => {
+		let busy = true;
+		const save = vi.fn(async () => {
+			busy = false;
+			return true;
+		});
+		const onNavigate = renderGuard([
+			{
+				id: "mihomo",
+				label: "Mihomo profile",
+				isDirty: () => true,
+				isBusy: () => busy,
+				save,
+				discard: vi.fn(),
+			},
+		]);
+
+		fireEvent.click(screen.getByRole("button", { name: "Open next object" }));
+		expect(
+			screen.getByRole("button", { name: "Discard and continue" }),
+		).toBeDisabled();
+		fireEvent.click(screen.getByRole("button", { name: "Save and continue" }));
+		await waitFor(() => expect(onNavigate).toHaveBeenCalledTimes(1));
+		expect(save).toHaveBeenCalledTimes(1);
+	});
 });

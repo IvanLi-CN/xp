@@ -891,9 +891,8 @@ export async function setupApiMocks(
 					errorResponse(route, normalized.message, 400);
 					return;
 				}
-				const profile = catalogMihomoProfile();
-				state.userMihomoProfiles[userId] = profile;
-				jsonResponse(route, profile);
+				state.userMihomoProfiles[userId] = normalized.profile;
+				jsonResponse(route, normalized.profile);
 				return;
 			}
 

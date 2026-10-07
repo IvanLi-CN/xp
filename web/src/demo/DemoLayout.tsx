@@ -134,6 +134,13 @@ function DemoShell({ children }: { children: ReactNode }) {
 		degradedNodes.length +
 		state.endpoints.filter((endpoint) => endpoint.status !== "serving").length +
 		state.users.filter((user) => user.status === "quota_limited").length;
+	const navigateLink = (href: string) => {
+		setMobileOpen(false);
+		void navigate({ to: href as never });
+	};
+	const navigateResource = (href: string) => {
+		requestNavigation(() => navigateLink(href));
+	};
 
 	const statusBadges = useMemo(
 		() => (
@@ -321,16 +328,8 @@ function DemoShell({ children }: { children: ReactNode }) {
 			ariaLabel="Demo navigation"
 			groups={resourceNavigationGroups}
 			pathname={pathname}
-			onNavigate={(href) => {
-				setMobileOpen(false);
-				void navigate({ to: href as never });
-			}}
-			onResourceNavigate={(href) => {
-				requestNavigation(() => {
-					setMobileOpen(false);
-					void navigate({ to: href as never });
-				});
-			}}
+			onNavigate={navigateResource}
+			onResourceNavigate={navigateResource}
 		/>
 	);
 
@@ -350,7 +349,14 @@ function DemoShell({ children }: { children: ReactNode }) {
 								>
 									<Icon name="tabler:menu-2" ariaLabel="Menu" />
 								</Button>
-								<Link to="/demo" className="flex min-w-0 items-center gap-2">
+								<Link
+									to="/demo"
+									className="flex min-w-0 items-center gap-2"
+									onClick={(event) => {
+										event.preventDefault();
+										navigateResource("/demo");
+									}}
+								>
 									<XpBrandLogo kind="mark" alt="" className="size-7 shrink-0" />
 									<div className="min-w-0">
 										<p className="text-lg font-semibold leading-tight">
@@ -370,8 +376,10 @@ function DemoShell({ children }: { children: ReactNode }) {
 								<Select
 									value={state.scenarioId}
 									onValueChange={(value) => {
-										resetScenario(value as typeof state.scenarioId);
-										navigate({ to: "/demo" });
+										requestNavigation(() => {
+											resetScenario(value as typeof state.scenarioId);
+											navigateLink("/demo");
+										});
 									}}
 								>
 									<SelectTrigger
@@ -393,8 +401,10 @@ function DemoShell({ children }: { children: ReactNode }) {
 									variant="secondary"
 									size="sm"
 									onClick={() => {
-										logout();
-										navigate({ to: "/demo/login" });
+										requestNavigation(() => {
+											logout();
+											navigateLink("/demo/login");
+										});
 									}}
 								>
 									Logout

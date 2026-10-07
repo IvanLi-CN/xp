@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import type {
@@ -199,6 +199,16 @@ export function UserDetailsPage() {
 	} = useUserRouteTransientState(userId);
 	const inputClassName = inputControlClass(prefs.density);
 	const selectClassName = selectControlClass(prefs.density);
+	const mihomoRouteIdentity = `${adminToken}\u0000${userId}`;
+	const mihomoActiveIdentityRef = useRef<string | null>(null);
+	useEffect(() => {
+		mihomoActiveIdentityRef.current = mihomoRouteIdentity;
+		return () => {
+			if (mihomoActiveIdentityRef.current === mihomoRouteIdentity) {
+				mihomoActiveIdentityRef.current = null;
+			}
+		};
+	}, [mihomoRouteIdentity]);
 	const userQuery = useQuery({
 		queryKey: ["adminUser", adminToken, userId],
 		enabled: enabledFor(usersCapability),
@@ -381,8 +391,9 @@ export function UserDetailsPage() {
 		async (draft: AdminUserMihomoProfile) => {
 			if (!adminToken || !userId)
 				throw new Error("Admin session is unavailable.");
+			const requestIdentity = `${adminToken}\u0000${userId}`;
 			const queryKey = ["adminUserMihomoProfile", adminToken, userId] as const;
-			const saveKey = `${adminToken}\u0000${userId}`;
+			const saveKey = requestIdentity;
 			const saveGeneration = nextMihomoGeneration(saveKey);
 			await queryClient.cancelQueries({ queryKey });
 			const saved = await putAdminUserMihomoProfile(
@@ -390,7 +401,10 @@ export function UserDetailsPage() {
 				userId,
 				normalizeMihomoProfileDraftForSave(draft),
 			);
-			if (mihomoSaveGenerations.get(saveKey) !== saveGeneration) {
+			if (
+				mihomoActiveIdentityRef.current !== requestIdentity ||
+				mihomoSaveGenerations.get(saveKey) !== saveGeneration
+			) {
 				throw new Error(
 					"Mihomo profile changed while this save was pending. Review and retry.",
 				);
@@ -409,6 +423,8 @@ export function UserDetailsPage() {
 		saveProfile: saveMihomoProfileRequest,
 		formatError,
 	});
+	const mihomoSavingRef = useRef(false);
+	mihomoSavingRef.current = mihomoDraft.isSaving;
 
 	const endpoints = endpointsQuery.data?.items ?? [];
 	const access = accessQuery.data?.items ?? [];
@@ -741,6 +757,7 @@ export function UserDetailsPage() {
 			id: "mihomo-profile",
 			label: "Mihomo profile",
 			isDirty: () => mihomoProfileDirty,
+			isBusy: () => mihomoSavingRef.current,
 			save: mihomoDraft.save,
 			discard: mihomoDraft.discard,
 		},
@@ -953,6 +970,13 @@ export function UserDetailsPage() {
 				setDeleteOpen(false);
 			}
 		}
+	}
+
+	function requestDeleteUser() {
+		setDeleteOpen(false);
+		requestNavigation(() => {
+			void confirmDeleteUser();
+		});
 	}
 
 	if (adminToken.length === 0) {
@@ -1716,7 +1740,7 @@ export function UserDetailsPage() {
 						<Button
 							variant="danger"
 							disabled={isDeleting || runtime.isReadOnly}
-							onClick={confirmDeleteUser}
+							onClick={requestDeleteUser}
 						>
 							{isDeleting ? "Deleting..." : "Delete"}
 						</Button>

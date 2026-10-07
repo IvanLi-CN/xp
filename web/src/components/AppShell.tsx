@@ -518,22 +518,14 @@ export function AppShell({
 				]
 			: []);
 
-	const navigateLink = useCallback(
-		(href: string) => {
-			setMobileNavOpen(false);
-			void navigate({ to: href as never });
-		},
-		[navigate],
-	);
+	function navigateLink(href: string) {
+		setMobileNavOpen(false);
+		void navigate({ to: href as never });
+	}
 
-	const navigateResource = useCallback(
-		(href: string) => {
-			requestNavigation(() => {
-				navigateLink(href);
-			});
-		},
-		[navigateLink, requestNavigation],
-	);
+	function navigateResource(href: string) {
+		requestNavigation(() => navigateLink(href));
+	}
 
 	const navEntries = useMemo(
 		() =>
@@ -738,7 +730,7 @@ export function AppShell({
 			groups={effectiveNavGroups}
 			localNodeId={clusterInfo.data?.node_id ?? null}
 			pathname={pathname}
-			onNavigate={navigateLink}
+			onNavigate={navigateResource}
 			onResourceNavigate={navigateResource}
 			onRetryCompatibility={() => void apiCompatibility.refetch()}
 		/>
@@ -764,7 +756,14 @@ export function AppShell({
 								>
 									<Icon name="tabler:menu-2" ariaLabel="Menu" />
 								</Button>
-								<Link to="/" className="xp-brand-link">
+								<Link
+									to="/"
+									className="xp-brand-link"
+									onClick={(event) => {
+										event.preventDefault();
+										navigateResource("/");
+									}}
+								>
 									{brand.logo === "xp-lockup" ? (
 										<>
 											<XpBrandLogo kind="mark" className="size-10 lg:hidden" />
@@ -916,10 +915,12 @@ export function AppShell({
 										<DropdownMenuItem
 											className="text-destructive focus:text-destructive"
 											onSelect={() => {
-												clearServiceWorkerRuntimePolicy();
-												clearAppliedRuntimePolicyId();
-												clearAdminToken();
-												navigate({ to: "/login" });
+												requestNavigation(() => {
+													clearServiceWorkerRuntimePolicy();
+													clearAppliedRuntimePolicyId();
+													clearAdminToken();
+													void navigate({ to: "/login" });
+												});
 											}}
 										>
 											<Icon name="tabler:logout" ariaLabel="Logout" />
@@ -963,7 +964,7 @@ export function AppShell({
 								key={item.to}
 								onSelect={() => {
 									setCommandPaletteOpen(false);
-									navigate({ to: item.to as never });
+									navigateResource(item.to);
 								}}
 							>
 								<Icon

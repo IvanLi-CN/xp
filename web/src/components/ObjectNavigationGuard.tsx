@@ -16,6 +16,7 @@ export type ObjectNavigationDirtySection = {
 	id: string;
 	label: string;
 	isDirty: () => boolean;
+	isBusy?: () => boolean;
 	save: () => Promise<boolean>;
 	discard: () => void;
 };
@@ -86,6 +87,7 @@ export function ObjectNavigationGuardProvider({
 	);
 	const currentSection =
 		pendingNavigation?.sections[pendingNavigation.index] ?? null;
+	const currentSectionBusy = currentSection?.isBusy?.() ?? false;
 
 	function continueNavigation() {
 		if (!pendingNavigation) return;
@@ -130,7 +132,7 @@ export function ObjectNavigationGuardProvider({
 						<Button
 							type="button"
 							variant="ghost"
-							disabled={isSaving}
+							disabled={isSaving || currentSectionBusy}
 							onClick={() => setPendingNavigation(null)}
 						>
 							Keep editing
@@ -138,7 +140,7 @@ export function ObjectNavigationGuardProvider({
 						<Button
 							type="button"
 							variant="secondary"
-							disabled={isSaving}
+							disabled={isSaving || currentSectionBusy}
 							onClick={discardAndContinue}
 						>
 							Discard and continue
