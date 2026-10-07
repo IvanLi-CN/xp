@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
+	mockFetchAdminUserMihomoProfile,
 	mockPutAdminUserMihomoProfile,
 	mockReadAdminToken,
 	mockUserId,
@@ -94,5 +95,74 @@ describe("<UserDetailsPage /> Mihomo cache", () => {
 			extra_proxies_yaml: "",
 			extra_proxy_providers_yaml: "",
 		});
+	});
+
+	it("does not accept a save response after a newer profile refetch", async () => {
+		const initialProfile: AdminUserMihomoProfile = {
+			mixin_yaml: "initial\n",
+			extra_proxies_yaml: "",
+			extra_proxy_providers_yaml: "",
+		};
+		const refreshedProfile: AdminUserMihomoProfile = {
+			...initialProfile,
+			mixin_yaml: "refreshed elsewhere\n",
+		};
+		setupMocks({ mihomoProfile: initialProfile });
+		mockFetchAdminUserMihomoProfile
+			.mockResolvedValueOnce(initialProfile)
+			.mockResolvedValueOnce(refreshedProfile);
+		let resolveSave: ((profile: AdminUserMihomoProfile) => void) | undefined;
+		mockPutAdminUserMihomoProfile.mockImplementation(
+			async () =>
+				new Promise<AdminUserMihomoProfile>((resolve) => {
+					resolveSave = resolve;
+				}),
+		);
+
+		const page = renderPage();
+		const editor = await within(page.container).findByLabelText("mixin_yaml");
+		fireEvent.change(editor, { target: { value: "local save\n" } });
+		fireEvent.click(
+			within(page.container).getByRole("button", {
+				name: "Save configuration",
+			}),
+		);
+		await waitFor(() =>
+			expect(mockPutAdminUserMihomoProfile).toHaveBeenCalledTimes(1),
+		);
+
+		await act(async () => {
+			await page.queryClient.refetchQueries({
+				queryKey: [
+					"adminUserMihomoProfile",
+					"admintoken",
+					fixtureCatalog.identifier.userPrimary(),
+				],
+			});
+		});
+		await act(async () => {
+			resolveSave?.({
+				...initialProfile,
+				mixin_yaml: "stale save\n",
+			});
+		});
+
+		await waitFor(() =>
+			expect(
+				page.queryClient.getQueryData<AdminUserMihomoProfile>([
+					"adminUserMihomoProfile",
+					"admintoken",
+					fixtureCatalog.identifier.userPrimary(),
+				]),
+			).toEqual(refreshedProfile),
+		);
+		expect(editor).toHaveTextContent("local save");
+		await waitFor(() =>
+			expect(
+				within(page.container).getByRole("button", {
+					name: "Save configuration",
+				}),
+			).toBeEnabled(),
+		);
 	});
 });

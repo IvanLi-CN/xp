@@ -186,6 +186,43 @@ describe("useMihomoProfileDraft", () => {
 		expect(result.current.dirty).toBe(false);
 	});
 
+	it("ignores a late save response after the same user session changes", async () => {
+		let resolveSave: ((profile: AdminUserMihomoProfile) => void) | undefined;
+		const saveProfile = vi.fn(
+			() =>
+				new Promise<AdminUserMihomoProfile>((resolve) => {
+					resolveSave = resolve;
+				}),
+		);
+		const { result, rerender } = renderHook(
+			({ sessionKey, profile }) =>
+				useMihomoProfileDraft({
+					userId: "user-a",
+					sessionKey,
+					profile,
+					saveProfile,
+				}),
+			{
+				initialProps: { sessionKey: "token-a", profile: PROFILE_A },
+			},
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "pending\n"));
+		let savePromise: Promise<boolean> | undefined;
+		act(() => {
+			savePromise = result.current.save();
+		});
+
+		rerender({ sessionKey: "token-b", profile: PROFILE_B });
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => resolveSave?.({ ...PROFILE_A, mixin_yaml: "stale\n" }));
+		if (!savePromise) throw new Error("save request was not created");
+		expect(await savePromise).toBe(false);
+		expect(result.current.draft).toEqual(PROFILE_B);
+		expect(result.current.baseline).toEqual(PROFILE_B);
+	});
+
 	it("ignores an old response after returning to the same user", async () => {
 		const saveResolvers: Array<(profile: AdminUserMihomoProfile) => void> = [];
 		const saveProfile = vi.fn(

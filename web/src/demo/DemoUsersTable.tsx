@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import type { MouseEvent } from "react";
 
 import { Badge } from "@/components/ui/badge";
 
@@ -12,7 +13,22 @@ import {
 } from "./format";
 import type { DemoUser } from "./types";
 
-export function DemoUsersTable({ users }: { users: DemoUser[] }) {
+export function DemoUsersTable({
+	users,
+	onUserNavigate,
+}: {
+	users: DemoUser[];
+	onUserNavigate?: (userId: string) => void;
+}) {
+	function handleUserNavigate(
+		event: MouseEvent<HTMLAnchorElement>,
+		userId: string,
+	) {
+		if (!onUserNavigate) return;
+		event.preventDefault();
+		onUserNavigate(userId);
+	}
+
 	return (
 		<>
 			<div className="hidden sm:block">
@@ -36,6 +52,7 @@ export function DemoUsersTable({ users }: { users: DemoUser[] }) {
 											className="font-medium hover:underline"
 											to="/demo/users/$userId"
 											params={{ userId: user.id }}
+											onClick={(event) => handleUserNavigate(event, user.id)}
 										>
 											{user.displayName}
 										</Link>
@@ -90,6 +107,7 @@ export function DemoUsersTable({ users }: { users: DemoUser[] }) {
 									to="/demo/users/$userId"
 									params={{ userId: user.id }}
 									title={user.displayName}
+									onClick={(event) => handleUserNavigate(event, user.id)}
 								>
 									{user.displayName}
 								</Link>

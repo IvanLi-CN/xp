@@ -103,7 +103,12 @@ vi.mock("../components/auth", async (importOriginal) => {
 	return { ...actual, readAdminToken: mockReadAdminToken };
 });
 
-export { mockReadAdminToken, mockUserId, mockPutAdminUserMihomoProfile };
+export {
+	mockFetchAdminUserMihomoProfile,
+	mockPutAdminUserMihomoProfile,
+	mockReadAdminToken,
+	mockUserId,
+};
 
 export function renderPage(queryClient = createQueryClient()) {
 	const view = render(

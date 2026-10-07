@@ -48,7 +48,10 @@ import {
 	ModuleTabsPanel,
 } from "../components/ModuleTabsLayout";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
-import { useObjectNavigationDirtySections } from "../components/ObjectNavigationGuard";
+import {
+	useObjectNavigationDirtySections,
+	useObjectNavigationGuard,
+} from "../components/ObjectNavigationGuard";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
@@ -95,6 +98,12 @@ const PROTOCOLS = [
 ] as const;
 const mihomoSaveGenerations = new Map<string, number>();
 
+function nextMihomoGeneration(saveKey: string): number {
+	const next = (mihomoSaveGenerations.get(saveKey) ?? 0) + 1;
+	mihomoSaveGenerations.set(saveKey, next);
+	return next;
+}
+
 type SupportedProtocolId = (typeof PROTOCOLS)[number]["protocolId"];
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
@@ -123,6 +132,7 @@ export function UserDetailsPage() {
 	const queryClient = useQueryClient();
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
+	const { requestNavigation } = useObjectNavigationGuard();
 	const prefs = useUiPrefs();
 	const usersCapability = useApiCapability("admin.users");
 	const nodesCapability = useApiCapability("admin.nodes");
@@ -197,8 +207,10 @@ export function UserDetailsPage() {
 	const mihomoProfileQuery = useQuery({
 		queryKey: ["adminUserMihomoProfile", adminToken, userId],
 		enabled: enabledFor(usersCapability),
-		queryFn: ({ signal }) =>
-			fetchAdminUserMihomoProfile(adminToken, userId, signal),
+		queryFn: ({ signal }) => {
+			nextMihomoGeneration(`${adminToken}\u0000${userId}`);
+			return fetchAdminUserMihomoProfile(adminToken, userId, signal);
+		},
 	});
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -371,8 +383,7 @@ export function UserDetailsPage() {
 				throw new Error("Admin session is unavailable.");
 			const queryKey = ["adminUserMihomoProfile", adminToken, userId] as const;
 			const saveKey = `${adminToken}\u0000${userId}`;
-			const saveGeneration = (mihomoSaveGenerations.get(saveKey) ?? 0) + 1;
-			mihomoSaveGenerations.set(saveKey, saveGeneration);
+			const saveGeneration = nextMihomoGeneration(saveKey);
 			await queryClient.cancelQueries({ queryKey });
 			const saved = await putAdminUserMihomoProfile(
 				adminToken,
@@ -380,7 +391,9 @@ export function UserDetailsPage() {
 				normalizeMihomoProfileDraftForSave(draft),
 			);
 			if (mihomoSaveGenerations.get(saveKey) !== saveGeneration) {
-				return saved;
+				throw new Error(
+					"Mihomo profile changed while this save was pending. Review and retry.",
+				);
 			}
 			queryClient.setQueryData<AdminUserMihomoProfile>(queryKey, saved);
 			pushToast({ variant: "success", message: "Mihomo profile updated" });
@@ -390,6 +403,7 @@ export function UserDetailsPage() {
 	);
 	const mihomoDraft = useMihomoProfileDraft({
 		userId,
+		sessionKey: adminToken,
 		profile: mihomoProfileQuery.data,
 		readOnly: runtime.isReadOnly,
 		saveProfile: saveMihomoProfileRequest,
@@ -1715,7 +1729,17 @@ export function UserDetailsPage() {
 				user/node/endpoint mode.
 			</div>
 			<Button asChild variant="ghost" size="sm">
-				<Link to="/users">Back to users</Link>
+				<Link
+					to="/users"
+					onClick={(event) => {
+						event.preventDefault();
+						requestNavigation(() => {
+							void navigate({ to: "/users" });
+						});
+					}}
+				>
+					Back to users
+				</Link>
 			</Button>
 		</div>
 	);

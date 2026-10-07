@@ -17,6 +17,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyButton } from "../components/CopyButton";
 import { Icon } from "../components/Icon";
 import { MihomoProfileEditor } from "../components/MihomoProfileEditor";
+import { useObjectNavigationGuard } from "../components/ObjectNavigationGuard";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
@@ -59,6 +60,8 @@ function endpointProtocolId(endpoint: DemoEndpoint) {
 export function DemoUsersPage() {
 	const { state, undoDeleteUser } = useDemo();
 	const { pushToast } = useToast();
+	const navigate = useNavigate();
+	const { requestNavigation } = useObjectNavigationGuard();
 	const [query, setQuery] = useState("");
 	const [status, setStatus] = useState("all");
 	const [sort, setSort] = useState("name");
@@ -201,7 +204,17 @@ export function DemoUsersPage() {
 				/>
 			) : (
 				<>
-					<DemoUsersTable users={visible} />
+					<DemoUsersTable
+						users={visible}
+						onUserNavigate={(nextUserId) => {
+							requestNavigation(() => {
+								void navigate({
+									to: "/demo/users/$userId",
+									params: { userId: nextUserId },
+								});
+							});
+						}}
+					/>
 					<div className="flex items-center justify-between gap-3">
 						<p className="text-sm text-muted-foreground">
 							Page {safePage} of {pages}, {filtered.length} user(s)
@@ -453,6 +466,7 @@ export function DemoUserDetailsPage() {
 	const { state, updateUser, deleteUser } = useDemo();
 	const { pushToast } = useToast();
 	const navigate = useNavigate();
+	const { requestNavigation } = useObjectNavigationGuard();
 	const user = state.users.find((item) => item.id === userId);
 	const [tab, setTab] = useState<DemoUserTab>("user");
 	const [deleteOpen, setDeleteOpen] = useState(false);
@@ -1196,7 +1210,17 @@ export function DemoUserDetailsPage() {
 				user/node/endpoint mode.
 			</div>
 			<Button asChild variant="ghost" size="sm">
-				<Link to="/demo/users">Back to users</Link>
+				<Link
+					to="/demo/users"
+					onClick={(event) => {
+						event.preventDefault();
+						requestNavigation(() => {
+							void navigate({ to: "/demo/users" });
+						});
+					}}
+				>
+					Back to users
+				</Link>
 			</Button>
 		</div>
 	);

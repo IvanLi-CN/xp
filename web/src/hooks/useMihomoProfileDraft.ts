@@ -18,6 +18,7 @@ export const EMPTY_MIHOMO_PROFILE: AdminUserMihomoProfile = {
 
 type UseMihomoProfileDraftProps = {
 	userId: string;
+	sessionKey?: string;
 	profile: AdminUserMihomoProfile | undefined;
 	readOnly?: boolean;
 	saveProfile: (
@@ -36,6 +37,7 @@ function profileKey(profile: AdminUserMihomoProfile | undefined): string {
 
 export function useMihomoProfileDraft({
 	userId,
+	sessionKey,
 	profile,
 	readOnly = false,
 	saveProfile,
@@ -54,7 +56,9 @@ export function useMihomoProfileDraft({
 	const [isSaving, setIsSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const currentUserIdRef = useRef(userId);
-	const resetUserIdRef = useRef(userId);
+	const sessionIdentity = `${userId}\u0000${sessionKey ?? userId}`;
+	const currentSessionIdentityRef = useRef(sessionIdentity);
+	const resetSessionIdentityRef = useRef(sessionIdentity);
 	const userSessionRef = useRef(0);
 	const savePromiseRef = useRef<Promise<boolean> | null>(null);
 	const acceptedProfileKeyRef = useRef(profileKey(profile));
@@ -69,9 +73,10 @@ export function useMihomoProfileDraft({
 	);
 
 	useEffect(() => {
-		if (resetUserIdRef.current === userId) return;
-		resetUserIdRef.current = userId;
+		if (resetSessionIdentityRef.current === sessionIdentity) return;
+		resetSessionIdentityRef.current = sessionIdentity;
 		currentUserIdRef.current = userId;
+		currentSessionIdentityRef.current = sessionIdentity;
 		userSessionRef.current += 1;
 		setIsSaving(false);
 		savePromiseRef.current = null;
@@ -81,12 +86,17 @@ export function useMihomoProfileDraft({
 		acceptedProfileKeyRef.current = profileKey(profile);
 		lastSavedProfileKeyRef.current = null;
 		setError(null);
-	}, [profile, userId]);
+	}, [profile, sessionIdentity, userId]);
 
 	const incomingProfileKey = profileKey(profile);
 	const isLoaded = loadedUserId === userId && profile !== undefined;
 	useEffect(() => {
-		if (!profile || currentUserIdRef.current !== userId) return;
+		if (
+			!profile ||
+			currentUserIdRef.current !== userId ||
+			currentSessionIdentityRef.current !== sessionIdentity
+		)
+			return;
 		if (loadedUserId !== userId) {
 			setLoadedUserId(userId);
 			setDraftState(cloneProfile(profile));
@@ -115,7 +125,15 @@ export function useMihomoProfileDraft({
 		setBaseline(cloneProfile(profile));
 		acceptedProfileKeyRef.current = incomingProfileKey;
 		setError(null);
-	}, [dirty, incomingProfileKey, isSaving, loadedUserId, profile, userId]);
+	}, [
+		dirty,
+		incomingProfileKey,
+		isSaving,
+		loadedUserId,
+		profile,
+		sessionIdentity,
+		userId,
+	]);
 
 	const setField = useCallback(
 		(documentId: MihomoProfileDocumentId, value: string) => {
@@ -142,7 +160,8 @@ export function useMihomoProfileDraft({
 			readOnly ||
 			!isLoaded ||
 			!dirty ||
-			currentUserIdRef.current !== userId
+			currentUserIdRef.current !== userId ||
+			currentSessionIdentityRef.current !== sessionIdentity
 		) {
 			return false;
 		}
@@ -157,7 +176,8 @@ export function useMihomoProfileDraft({
 			.then((saved) => {
 				if (
 					currentUserIdRef.current !== targetUserId ||
-					userSessionRef.current !== targetSession
+					userSessionRef.current !== targetSession ||
+					currentSessionIdentityRef.current !== sessionIdentity
 				)
 					return false;
 				const next = cloneProfile(saved);
@@ -171,7 +191,8 @@ export function useMihomoProfileDraft({
 			.catch((saveError: unknown) => {
 				if (
 					currentUserIdRef.current === targetUserId &&
-					userSessionRef.current === targetSession
+					userSessionRef.current === targetSession &&
+					currentSessionIdentityRef.current === sessionIdentity
 				) {
 					setError(formatError(saveError));
 				}
@@ -180,14 +201,24 @@ export function useMihomoProfileDraft({
 			.finally(() => {
 				if (
 					currentUserIdRef.current === targetUserId &&
-					userSessionRef.current === targetSession
+					userSessionRef.current === targetSession &&
+					currentSessionIdentityRef.current === sessionIdentity
 				)
 					setIsSaving(false);
 				if (savePromiseRef.current === request) savePromiseRef.current = null;
 			});
 		savePromiseRef.current = request;
 		return request;
-	}, [dirty, draft, formatError, isLoaded, readOnly, saveProfile, userId]);
+	}, [
+		dirty,
+		draft,
+		formatError,
+		isLoaded,
+		readOnly,
+		saveProfile,
+		sessionIdentity,
+		userId,
+	]);
 
 	return {
 		baseline,

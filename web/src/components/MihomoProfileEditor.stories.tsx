@@ -17,21 +17,25 @@ type EditorStoryProps = {
 	initialProfile?: AdminUserMihomoProfile;
 	readOnly?: boolean;
 	startWithError?: boolean;
+	startSaving?: boolean;
 };
 
 function EditorStory({
 	initialProfile = INITIAL_PROFILE,
 	readOnly = false,
 	startWithError = false,
+	startSaving = false,
 }: EditorStoryProps) {
 	const initialDraft = startWithError
 		? {
 				...initialProfile,
 				mixin_yaml: `${initialProfile.mixin_yaml}# retry me\n`,
+				extra_proxies_yaml: `${initialProfile.extra_proxies_yaml}# keep me\n`,
+				extra_proxy_providers_yaml: `${initialProfile.extra_proxy_providers_yaml}# keep me too\n`,
 			}
 		: initialProfile;
 	const [draft, setDraft] = useState(initialDraft);
-	const [isSaving, setIsSaving] = useState(false);
+	const [isSaving, setIsSaving] = useState(startSaving);
 	const [saveAttempts, setSaveAttempts] = useState(0);
 	const [error, setError] = useState<string | null>(null);
 
@@ -132,6 +136,23 @@ export const Expanded: Story = {
 
 export const ReadOnly: Story = {
 	args: { readOnly: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Expand editor" }),
+		);
+		const dialog = await within(document.body).findByRole("dialog");
+		await expect(
+			within(dialog).getByRole("button", { name: "Save configuration" }),
+		).toBeDisabled();
+		const editors = Array.from(
+			dialog.querySelectorAll<HTMLElement>(".cm-content"),
+		);
+		await expect(editors).toHaveLength(3);
+		for (const editor of editors) {
+			await expect(editor).toHaveAttribute("contenteditable", "false");
+		}
+	},
 };
 
 export const SaveError: Story = {
@@ -150,8 +171,37 @@ export const SaveError: Story = {
 		await expect(within(dialog).getByRole("alert")).toHaveTextContent(
 			"The previous save failed",
 		);
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: /extra_proxies_yaml/ }),
+		);
+		await expect(dialog).toHaveTextContent("keep me");
+		await userEvent.click(
+			within(dialog).getByRole("button", {
+				name: /extra_proxy_providers_yaml/,
+			}),
+		);
+		await expect(dialog).toHaveTextContent("keep me too");
 		await userEvent.click(saveButton);
 		await expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+	},
+};
+
+export const Saving: Story = {
+	args: { startSaving: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Expand editor" }),
+		);
+		const dialog = await within(document.body).findByRole("dialog");
+		await expect(
+			within(dialog).getByRole("button", { name: "Save configuration" }),
+		).toBeDisabled();
+		for (const editor of Array.from(
+			dialog.querySelectorAll<HTMLElement>(".cm-content"),
+		)) {
+			await expect(editor).toHaveAttribute("contenteditable", "false");
+		}
 	},
 };
 
@@ -190,7 +240,7 @@ export const MobileFiles: Story = {
 			);
 			await expect(filesButton).toHaveFocus();
 		} else {
-			await expect(dialog).toHaveTextContent("mixin_yaml");
+			await expect(dialog.querySelector("aside")).not.toBeNull();
 		}
 	},
 };
