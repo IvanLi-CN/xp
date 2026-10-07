@@ -284,6 +284,7 @@ impl RepositoryReplicaRuntime {
         peer_node_id: &str,
         handoff: InitialPeerTieredHandoff,
     ) -> Result<(), RepositoryRuntimeError> {
+        let previous_snapshot = self.snapshot.clone();
         let prior = self
             .snapshot
             .initial_peer_backfills
@@ -313,7 +314,11 @@ impl RepositoryReplicaRuntime {
                 recovery_handoff: prior.recovery_handoff,
             },
         );
-        self.persist_control_state()
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub(crate) fn complete_initial_peer_tiered_handoff(
@@ -409,6 +414,7 @@ impl RepositoryReplicaRuntime {
         &mut self,
         peer_node_id: &str,
     ) -> Result<(), RepositoryRuntimeError> {
+        let previous_snapshot = self.snapshot.clone();
         let prior = self
             .snapshot
             .initial_peer_backfills
@@ -434,7 +440,11 @@ impl RepositoryReplicaRuntime {
                 ..InitialPeerBackfillCheckpoint::default()
             },
         );
-        self.persist_control_state()
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub(crate) fn preview_initial_peer_recovery(

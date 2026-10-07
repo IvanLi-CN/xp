@@ -181,3 +181,58 @@ fn history_recovery_fingerprint_is_signed_once_and_retries_fail_closed() {
             .is_err()
     );
 }
+
+#[test]
+fn tiered_handoff_start_rolls_back_memory_when_control_persist_fails() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let mut runtime = super::RepositoryReplicaRuntime::load(storage.clone()).expect("runtime");
+    storage
+        .set_query_only_for_test(true)
+        .expect("enable SQLite write failure");
+    let handoff = super::InitialPeerTieredHandoff {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        first_missing: 1,
+        last_missing: 2,
+        next_sequence: 3,
+        end_unix_seconds: 12,
+    };
+
+    assert!(
+        runtime
+            .start_initial_peer_tiered_handoff("node-b", handoff)
+            .is_err()
+    );
+    assert!(runtime.initial_peer_backfill_checkpoint("node-b").is_none());
+}
+
+#[test]
+fn peer_backfill_restart_rolls_back_memory_when_control_persist_fails() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let mut runtime = super::RepositoryReplicaRuntime::load(storage.clone()).expect("runtime");
+    runtime
+        .update_initial_peer_summary_checkpoint_with_retained_anchors(
+            "node-b",
+            Some("page-2".to_owned()),
+            vec!["segment-1".to_owned()],
+            Some("page-3".to_owned()),
+            false,
+            false,
+            true,
+            BTreeSet::new(),
+        )
+        .expect("persist checkpoint");
+    storage
+        .set_query_only_for_test(true)
+        .expect("enable SQLite write failure");
+
+    assert!(runtime.restart_initial_peer_backfill("node-b").is_err());
+    let checkpoint = runtime
+        .initial_peer_backfill_checkpoint("node-b")
+        .expect("checkpoint remains in memory");
+    assert_eq!(checkpoint.summary_cursor.as_deref(), Some("page-2"));
+    assert_eq!(checkpoint.summary_pending_segment_ids, ["segment-1"]);
+}
