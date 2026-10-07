@@ -130,6 +130,17 @@ fn history_recovery_fingerprint_is_signed_once_and_retries_fail_closed() {
         .complete_initial_peer_tiered_handoff("node-b", &handoff)
         .expect("bridge tiered gap");
 
+    let quota = runtime
+        .runtime_capacity()
+        .expect("read capacity")
+        .quota_bytes();
+    runtime
+        .force_capacity_for_test(quota - 1, 512 * 1024 * 1024)
+        .expect("set quota budget guard");
+    let capacity_error = runtime
+        .preview_initial_peer_recovery("node-b")
+        .expect_err("recovery budget must fail closed");
+    assert!(capacity_error.to_string().contains("quota_shortfall_bytes"));
     runtime
         .force_capacity_for_test(0, 1)
         .expect("set recovery capacity guard");

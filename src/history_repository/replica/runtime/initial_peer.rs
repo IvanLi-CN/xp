@@ -1,5 +1,9 @@
 use super::{RepositoryReplicaRuntime, RepositoryRuntimeError};
 use crate::history_sync::Cursor;
+use crate::state::history_repository::control::{
+    HISTORY_RECOVERY_METADATA_BUDGET_BYTES, HISTORY_RECOVERY_PAGE_BUDGET_BYTES,
+    HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES,
+};
 use serde::{Deserialize, Serialize};
 use sha2::Digest as _;
 use std::collections::{BTreeMap, BTreeSet};
@@ -83,6 +87,10 @@ pub(crate) struct InitialPeerRecoveryPreview {
     pub(crate) capacity_quota_bytes: u64,
     pub(crate) capacity_used_bytes: u64,
     pub(crate) capacity_available_bytes: u64,
+    pub(crate) capacity_required_bytes: u64,
+    pub(crate) capacity_filesystem_required_bytes: u64,
+    pub(crate) capacity_quota_shortfall_bytes: u64,
+    pub(crate) capacity_filesystem_shortfall_bytes: u64,
     pub(crate) fingerprint: String,
 }
 
@@ -488,13 +496,39 @@ impl RepositoryReplicaRuntime {
             ));
         }
         let capacity = self.runtime_capacity()?;
+        let capacity_required_bytes = HISTORY_RECOVERY_PAGE_BUDGET_BYTES
+            .saturating_add(HISTORY_RECOVERY_METADATA_BUDGET_BYTES);
+        let capacity_filesystem_required_bytes =
+            HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES.saturating_add(capacity_required_bytes);
+        let capacity_quota_available_bytes =
+            capacity.quota_bytes().saturating_sub(capacity.used_bytes());
+        let capacity_quota_shortfall_bytes =
+            capacity_required_bytes.saturating_sub(capacity_quota_available_bytes);
+        let capacity_filesystem_shortfall_bytes = capacity_filesystem_required_bytes
+            .saturating_sub(capacity.filesystem_available_bytes());
         if !capacity
             .history_write_availability()
             .allows_history_writes()
+            || capacity_quota_shortfall_bytes > 0
+            || capacity_filesystem_shortfall_bytes > 0
         {
-            return Err(RepositoryRuntimeError::Storage(
-                "history recovery capacity preflight failed".to_owned(),
-            ));
+            return Err(RepositoryRuntimeError::Storage(format!(
+                concat!(
+                    "history recovery capacity preflight failed: ",
+                    "required_bytes={}, ",
+                    "quota_available_bytes={}, ",
+                    "quota_shortfall_bytes={}, ",
+                    "filesystem_required_bytes={}, ",
+                    "filesystem_available_bytes={}, ",
+                    "filesystem_shortfall_bytes={}"
+                ),
+                capacity_required_bytes,
+                capacity_quota_available_bytes,
+                capacity_quota_shortfall_bytes,
+                capacity_filesystem_required_bytes,
+                capacity.filesystem_available_bytes(),
+                capacity_filesystem_shortfall_bytes
+            )));
         }
         let generation =
             if checkpoint.recovery_generation > 0 && !checkpoint.recovery_generation_consumed {
@@ -517,6 +551,10 @@ impl RepositoryReplicaRuntime {
         hasher.update(capacity.quota_bytes().to_be_bytes());
         hasher.update(capacity.used_bytes().to_be_bytes());
         hasher.update(capacity.filesystem_available_bytes().to_be_bytes());
+        hasher.update(capacity_required_bytes.to_be_bytes());
+        hasher.update(capacity_filesystem_required_bytes.to_be_bytes());
+        hasher.update(capacity_quota_shortfall_bytes.to_be_bytes());
+        hasher.update(capacity_filesystem_shortfall_bytes.to_be_bytes());
         hasher.update(b"summary-v2 ");
         Ok(InitialPeerRecoveryPreview {
             peer_node_id: peer_node_id.to_owned(),
@@ -526,6 +564,10 @@ impl RepositoryReplicaRuntime {
             capacity_quota_bytes: capacity.quota_bytes(),
             capacity_used_bytes: capacity.used_bytes(),
             capacity_available_bytes: capacity.filesystem_available_bytes(),
+            capacity_required_bytes,
+            capacity_filesystem_required_bytes,
+            capacity_quota_shortfall_bytes,
+            capacity_filesystem_shortfall_bytes,
             fingerprint: hex::encode(hasher.finalize()),
         })
     }
