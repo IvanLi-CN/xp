@@ -70,6 +70,7 @@ type MockApiOptions = {
 	users?: AdminUser[];
 	nodes?: AdminNode[];
 	endpoints?: AdminEndpoint[];
+	mihomoProfile?: MockMihomoProfile;
 	nodeQuotas?: AdminUserNodeQuota[];
 	healthStatus?: "ok" | "error";
 	mockStatusEvents?: boolean;
@@ -209,12 +210,17 @@ function sseResponse(route: Route, payload: string, status = 200): void {
 	});
 }
 
-function errorResponse(route: Route, message: string, status = 404): void {
+function errorResponse(
+	route: Route,
+	message: string,
+	status = 404,
+	code = "not_mocked",
+): void {
 	jsonResponse(
 		route,
 		{
 			error: {
-				code: "not_mocked",
+				code,
 				message,
 				details: {},
 			},
@@ -447,7 +453,8 @@ export async function setupApiMocks(
 		subscriptionContentRaw: fixtureCatalog.subscription.rawUri(),
 		subscriptionContentClash: defaultSubscriptionClash,
 		userMihomoProfiles: {
-			[fixtureCatalog.identifier.userPrimary()]: catalogMihomoProfile(),
+			[fixtureCatalog.identifier.userPrimary()]:
+				options.mihomoProfile ?? catalogMihomoProfile(),
 		},
 		nextEndpointId,
 		nextEndpointTag,
@@ -888,7 +895,7 @@ export async function setupApiMocks(
 				const payload = parseJsonBody(request);
 				const normalized = normalizeMockMihomoProfilePayload(payload);
 				if (!normalized.ok) {
-					errorResponse(route, normalized.message, 400);
+					errorResponse(route, normalized.message, 400, "invalid_request");
 					return;
 				}
 				state.userMihomoProfiles[userId] = normalized.profile;

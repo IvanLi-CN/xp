@@ -1,3 +1,4 @@
+import { useBlocker } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import {
 	createContext,
@@ -26,7 +27,9 @@ type ObjectNavigationGuardValue = {
 		ownerId: string,
 		getSections: () => ObjectNavigationDirtySection[],
 	) => () => void;
-	requestNavigation: (navigate: () => void) => void;
+	refresh: () => void;
+	getDirtySections: () => ObjectNavigationDirtySection[];
+	requestNavigation: (navigate: () => void, onCancel?: () => void) => void;
 };
 
 type RegisteredSections = {
@@ -35,6 +38,7 @@ type RegisteredSections = {
 
 type PendingNavigation = {
 	navigate: () => void;
+	onCancel?: () => void;
 	sections: ObjectNavigationDirtySection[];
 	index: number;
 };
@@ -44,6 +48,8 @@ const ObjectNavigationGuardContext =
 
 const fallbackGuard: ObjectNavigationGuardValue = {
 	registerDirtySections: () => () => undefined,
+	refresh: () => undefined,
+	getDirtySections: () => [],
 	requestNavigation: (navigate) => navigate(),
 };
 
@@ -56,6 +62,7 @@ export function ObjectNavigationGuardProvider({
 	const [pendingNavigation, setPendingNavigation] =
 		useState<PendingNavigation | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
+	const [, refresh] = useState(0);
 
 	const registerDirtySections = useCallback(
 		(ownerId: string, getSections: () => ObjectNavigationDirtySection[]) => {
@@ -70,20 +77,39 @@ export function ObjectNavigationGuardProvider({
 		[],
 	);
 
-	const requestNavigation = useCallback((navigate: () => void) => {
-		const dirtySections = Array.from(registeredSectionsRef.current.values())
-			.flatMap((registration) => registration.getSections())
-			.filter((section) => section.isDirty());
-		if (dirtySections.length === 0) {
-			navigate();
-			return;
-		}
-		setPendingNavigation({ navigate, sections: dirtySections, index: 0 });
-	}, []);
+	const getDirtySections = useCallback(
+		() =>
+			Array.from(registeredSectionsRef.current.values())
+				.flatMap((registration) => registration.getSections())
+				.filter((section) => section.isDirty()),
+		[],
+	);
+
+	const requestNavigation = useCallback(
+		(navigate: () => void, onCancel?: () => void) => {
+			const dirtySections = getDirtySections();
+			if (dirtySections.length === 0) {
+				navigate();
+				return;
+			}
+			setPendingNavigation({
+				navigate,
+				onCancel,
+				sections: dirtySections,
+				index: 0,
+			});
+		},
+		[getDirtySections],
+	);
 
 	const value = useMemo<ObjectNavigationGuardValue>(
-		() => ({ registerDirtySections, requestNavigation }),
-		[registerDirtySections, requestNavigation],
+		() => ({
+			getDirtySections,
+			registerDirtySections,
+			refresh: () => refresh((current) => current + 1),
+			requestNavigation,
+		}),
+		[getDirtySections, registerDirtySections, requestNavigation],
 	);
 	const currentSection =
 		pendingNavigation?.sections[pendingNavigation.index] ?? null;
@@ -105,7 +131,7 @@ export function ObjectNavigationGuardProvider({
 		if (!currentSection || isSaving) return;
 		setIsSaving(true);
 		try {
-			if (await currentSection.save()) {
+			if ((await currentSection.save()) || !currentSection.isDirty()) {
 				continueNavigation();
 			}
 		} finally {
@@ -119,6 +145,11 @@ export function ObjectNavigationGuardProvider({
 		continueNavigation();
 	}
 
+	function cancelNavigation() {
+		pendingNavigation?.onCancel?.();
+		setPendingNavigation(null);
+	}
+
 	return (
 		<ObjectNavigationGuardContext.Provider value={value}>
 			{children}
@@ -126,14 +157,14 @@ export function ObjectNavigationGuardProvider({
 				open={currentSection !== null}
 				title={`Unsaved ${currentSection?.label ?? ""} changes`}
 				description="Save or discard this section before opening another object."
-				onCancel={() => setPendingNavigation(null)}
+				onCancel={cancelNavigation}
 				footer={
 					<div className="flex flex-wrap justify-end gap-2">
 						<Button
 							type="button"
 							variant="ghost"
 							disabled={isSaving || currentSectionBusy}
-							onClick={() => setPendingNavigation(null)}
+							onClick={cancelNavigation}
 						>
 							Keep editing
 						</Button>
@@ -163,16 +194,43 @@ export function useObjectNavigationGuard() {
 	return useContext(ObjectNavigationGuardContext) ?? fallbackGuard;
 }
 
+export function useObjectNavigationBrowserBlocker() {
+	const { getDirtySections, requestNavigation } = useObjectNavigationGuard();
+	const blocker = useBlocker({
+		shouldBlockFn: () => getDirtySections().length > 0,
+		withResolver: true,
+	});
+
+	useEffect(() => {
+		if (blocker.status !== "blocked") return;
+		requestNavigation(
+			() => blocker.proceed?.(),
+			() => blocker.reset?.(),
+		);
+	}, [blocker, requestNavigation]);
+}
+
 export function useObjectNavigationDirtySections(
 	ownerId: string,
 	sections: ObjectNavigationDirtySection[],
 ) {
-	const { registerDirtySections } = useObjectNavigationGuard();
+	const { refresh, registerDirtySections } = useObjectNavigationGuard();
 	const sectionsRef = useRef(sections);
 	sectionsRef.current = sections;
+	const sectionState = sections
+		.map(
+			(section) =>
+				`${section.isDirty() ? "dirty" : "clean"}:${section.isBusy?.() ? "busy" : "idle"}`,
+		)
+		.join("|");
 
 	useEffect(
 		() => registerDirtySections(ownerId, () => sectionsRef.current),
 		[ownerId, registerDirtySections],
 	);
+	const refreshSectionState = useCallback(() => {
+		void sectionState;
+		refresh();
+	}, [refresh, sectionState]);
+	useEffect(() => refreshSectionState(), [refreshSectionState]);
 }

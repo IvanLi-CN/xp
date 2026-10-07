@@ -27,6 +27,7 @@ import { Button } from "../components/Button";
 import { Icon } from "../components/Icon";
 import {
 	ObjectNavigationGuardProvider,
+	useObjectNavigationBrowserBlocker,
 	useObjectNavigationGuard,
 } from "../components/ObjectNavigationGuard";
 import {
@@ -125,6 +126,7 @@ function DemoShell({ children }: { children: ReactNode }) {
 		select: (router) => router.location.pathname,
 	});
 	const { requestNavigation } = useObjectNavigationGuard();
+	useObjectNavigationBrowserBlocker();
 	const { state, logout, resetScenario } = useDemo();
 	const prefs = useUiPrefs();
 	const [mobileOpen, setMobileOpen] = useState(false);

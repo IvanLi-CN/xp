@@ -778,7 +778,8 @@ export function UserDetailsPage() {
 	]);
 
 	async function applyAccessMatrix(): Promise<boolean> {
-		if (!adminToken || !userId || !isAccessReady) return false;
+		if (runtime.isReadOnly || !adminToken || !userId || !isAccessReady)
+			return false;
 		setIsApplyingAccess(true);
 		setAccessError(null);
 		try {
@@ -825,7 +826,7 @@ export function UserDetailsPage() {
 	}
 
 	async function saveUserProfile(): Promise<boolean> {
-		if (!adminToken || !userId) return false;
+		if (runtime.isReadOnly || !adminToken || !userId) return false;
 		const normalizedDisplayName = displayName.trim();
 		if (normalizedDisplayName.length === 0) {
 			setUserSaveError("Display name is required.");

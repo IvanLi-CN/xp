@@ -83,7 +83,10 @@ import {
 } from "./AppResourceNavigation";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
-import { useObjectNavigationGuard } from "./ObjectNavigationGuard";
+import {
+	useObjectNavigationBrowserBlocker,
+	useObjectNavigationGuard,
+} from "./ObjectNavigationGuard";
 import { PrimaryBackendSwitcher } from "./PrimaryBackendSwitcher";
 import { ReadStateIndicator } from "./ReadStateIndicator";
 import { useUiPrefs } from "./UiPrefs";
@@ -149,6 +152,7 @@ export function AppShell({
 	const [adminToken] = useState(() => readAdminToken());
 	const apiCompatibility = useApiCompatibility(adminToken, runtime.isOnline);
 	const { requestNavigation } = useObjectNavigationGuard();
+	useObjectNavigationBrowserBlocker();
 	const compatibility = apiCompatibility.data ?? null;
 	const alertsCapabilityAvailable =
 		apiCompatibility.data?.kind === "compatible" &&
@@ -182,12 +186,10 @@ export function AppShell({
 		queryKey: ["health"],
 		queryFn: ({ signal }) => fetchHealth(signal),
 	});
-
 	const clusterInfo = useQuery({
 		queryKey: ["clusterInfo"],
 		queryFn: ({ signal }) => fetchClusterInfo(signal),
 	});
-
 	const runtimePolicy = useQuery({
 		queryKey: ["runtimePolicy", adminToken, primaryBackend.clusterId],
 		enabled:
@@ -201,7 +203,6 @@ export function AppShell({
 		refetchIntervalInBackground: true,
 		retry: false,
 	});
-
 	const compatibilityError =
 		staticConsole &&
 		adminToken.length > 0 &&

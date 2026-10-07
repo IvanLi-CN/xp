@@ -269,9 +269,6 @@ None
 
 ## Visual Evidence
 
-User Details sibling save regions after the layout split.
-![User Details sibling sections](./assets/user-mihomo-layout.png)
-
 Mihomo workspace visual proof: desktop tree/editor and narrow toolbar/drawer states.
 ![Mihomo workspace desktop](./assets/mihomo-workspace-dark-desktop.png)
 ![Mihomo workspace mobile editor](./assets/mihomo-workspace-dark-mobile.png)

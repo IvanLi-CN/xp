@@ -124,6 +124,36 @@ test("protects production Mihomo drafts before leaving or deleting a user", asyn
 	await expect(page).toHaveURL(/\/users$/);
 });
 
+test("protects production Mihomo drafts on browser back", async ({ page }) => {
+	await setAdminToken(page);
+	await setupApiMocks(page);
+
+	await page.goto("/users");
+	await page.getByRole("link", { name: "Demo user", exact: true }).click();
+	await expect(
+		page.getByRole("heading", { name: "Demo user", exact: true }),
+	).toBeVisible();
+	const editor = page.locator(
+		'[data-mihomo-document="mixin_yaml"] .cm-content',
+	);
+	await editor.click();
+	await page.keyboard.press("ControlOrMeta+End");
+	await page.keyboard.insertText("\n# browser back protection");
+
+	await page.goBack();
+	const guard = page.getByRole("alertdialog");
+	await expect(
+		guard.getByRole("heading", {
+			name: "Unsaved Mihomo profile changes",
+		}),
+	).toBeVisible();
+	await guard.getByRole("button", { name: "Keep editing" }).click();
+	await expect(page).toHaveURL(
+		new RegExp(`/users/${fixtureCatalog.identifier.userPrimary()}$`),
+	);
+	await expect(editor).toContainText("browser back protection");
+});
+
 test("persists all three Mihomo documents through the production save path", async ({
 	page,
 }) => {
@@ -152,6 +182,7 @@ test("persists all three Mihomo documents through the production save path", asy
 	await expect(
 		page.locator('[data-mihomo-document="mixin_yaml"] .cm-content'),
 	).toContainText("port: 7890");
+	await expect(page.getByText("Mihomo profile updated")).toBeVisible();
 
 	await page.getByRole("button", { name: "Expand editor" }).click();
 	const workspace = page.getByRole("dialog");
@@ -163,4 +194,55 @@ test("persists all three Mihomo documents through the production save path", asy
 			workspace.locator(`[data-mihomo-document="${documentId}"] .cm-content`),
 		).toContainText(value.trim().split("\n")[0]);
 	}
+
+	await page.reload();
+	for (const [documentId, value] of Object.entries(values)) {
+		await expect(
+			page.locator(`[data-mihomo-document="${documentId}"] .cm-content`),
+		).toContainText(value.trim().split("\n")[0]);
+	}
+});
+
+test("repairs legacy Mihomo provider fields after API rejection", async ({
+	page,
+}) => {
+	await setAdminToken(page);
+	await setupApiMocks(page, {
+		mihomoProfile: {
+			mixin_yaml:
+				"port: 7890\nproxy-providers:\n  LegacyProvider:\n    type: http\n",
+			extra_proxies_yaml: "",
+			extra_proxy_providers_yaml: "ExistingProvider:\n  type: file\n",
+		},
+	});
+
+	await page.goto(`/users/${fixtureCatalog.identifier.userPrimary()}`);
+	const mixinEditor = page.locator(
+		'[data-mihomo-document="mixin_yaml"] .cm-content',
+	);
+	await mixinEditor.click();
+	await page.keyboard.press("ControlOrMeta+End");
+	await page.keyboard.insertText("\n# preserve legacy profile");
+
+	const saveButton = page
+		.getByRole("button", { name: "Save configuration" })
+		.first();
+	await saveButton.click();
+	await expect(page.getByText("Mihomo profile updated")).toBeVisible();
+	await expect(mixinEditor).not.toContainText("proxy-providers:");
+	await expect(
+		page.locator(
+			'[data-mihomo-document="extra_proxy_providers_yaml"] .cm-content',
+		),
+	).toContainText("LegacyProvider:");
+
+	await page.reload();
+	await expect(
+		page.locator('[data-mihomo-document="mixin_yaml"] .cm-content'),
+	).not.toContainText("proxy-providers:");
+	await expect(
+		page.locator(
+			'[data-mihomo-document="extra_proxy_providers_yaml"] .cm-content',
+		),
+	).toContainText("LegacyProvider:");
 });
