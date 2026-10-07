@@ -939,6 +939,7 @@ impl RepositoryReplicaRuntime {
                             prefix: false,
                         });
                 self.finish_storage_write(result)?;
+                self.snapshot.sequence_summary_blocks_complete = false;
             }
         }
         Ok(removed_tombstones)

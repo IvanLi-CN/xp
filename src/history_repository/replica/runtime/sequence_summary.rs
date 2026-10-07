@@ -7,7 +7,17 @@ impl RepositoryReplicaRuntime {
         &mut self,
     ) -> Result<bool, RepositoryRuntimeError> {
         if !self.uses_sqlite_history() || self.snapshot.sequence_summary_blocks_complete {
-            return Ok(true);
+            if !self.uses_sqlite_history() {
+                return Ok(true);
+            }
+            let dirty = self
+                .storage
+                .repository_history_dirty_sequence_summary_blocks(1)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            if dirty.is_empty() {
+                return Ok(true);
+            }
+            self.snapshot.sequence_summary_blocks_complete = false;
         }
         if !self.snapshot.sequence_summary_migration_complete {
             let (blocks, cursor, complete) = self
@@ -64,6 +74,15 @@ impl RepositoryReplicaRuntime {
     ) -> Result<(Vec<super::RepositorySequenceBlockSummary>, bool), RepositoryRuntimeError> {
         if !self.uses_sqlite_history() {
             return Ok((Vec::new(), true));
+        }
+        if self.snapshot.sequence_summary_blocks_complete
+            && !self
+                .storage
+                .repository_history_dirty_sequence_summary_blocks(1)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+                .is_empty()
+        {
+            return Ok((Vec::new(), false));
         }
         let (blocks, complete) = self
             .storage

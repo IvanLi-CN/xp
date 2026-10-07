@@ -89,15 +89,15 @@ fn can_schedule_tiered_handoff(
                 && armed.source_epoch == handoff.source_epoch
                 && armed.stream == handoff.stream
         });
-    (checkpoint.recovery_generation == 0
+    let normal_match = (checkpoint.recovery_generation == 0
         || (checkpoint.recovery_generation_consumed && !consumed_recovery_stream))
         && checkpoint.summary_tiered_handoff.as_ref() != Some(handoff)
         && !checkpoint.retained_anchor_handoffs.iter().any(|completed| {
             completed.source_node_id == handoff.source_node_id
                 && completed.source_epoch == handoff.source_epoch
                 && completed.stream == handoff.stream
-        })
-        || recovery_matches
+        });
+    normal_match || recovery_matches
 }
 
 pub(crate) async fn catch_up_against_ready_repositories(

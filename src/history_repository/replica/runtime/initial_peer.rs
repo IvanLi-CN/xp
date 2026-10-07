@@ -412,6 +412,7 @@ impl RepositoryReplicaRuntime {
         checkpoint.summary_tiered_handoff = None;
         checkpoint.retained_anchor_handoffs.insert(handoff.clone());
         if checkpoint.recovery_generation > 0 {
+            checkpoint.recovery_generation_consumed = true;
             checkpoint.recovery_handoff = Some(handoff.clone());
         }
         if let Err(error) = self.persist_control_state() {
