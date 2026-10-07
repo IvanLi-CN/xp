@@ -110,7 +110,7 @@ test("expands the Mihomo editor into a persistent file workspace", async ({
 	const mixinScroller = workspace.locator(
 		'[data-mihomo-document="mixin_yaml"] .cm-scroller',
 	);
-	await mixinEditor.click();
+	await mixinEditor.focus();
 	await page.keyboard.press("ControlOrMeta+End");
 	const longYaml = Array.from(
 		{ length: 80 },
@@ -159,6 +159,7 @@ test("expands the Mihomo editor into a persistent file workspace", async ({
 	await expect(extraProxiesEditor).toContainText("workspace-extra-proxy");
 	await workspace.getByRole("button", { name: /mixin_yaml/ }).click();
 	await expect(mixinEditor).toContainText("workspace edit");
+	await mixinEditor.focus();
 	await page.keyboard.press("Shift+ArrowLeft");
 	await expect
 		.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ""))
