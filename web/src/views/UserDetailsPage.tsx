@@ -86,7 +86,6 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
-import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
 import { USER_TAB_OPTIONS, type UserDetailsTab } from "./UserDetailsTabs";
 import { removeAdminUser, replaceAdminUser } from "./adminUsersCache";
 import { useUserRouteTransientState } from "./useUserRouteTransientState";
@@ -396,11 +395,7 @@ export function UserDetailsPage() {
 			const saveKey = requestIdentity;
 			const saveGeneration = nextMihomoGeneration(saveKey);
 			await queryClient.cancelQueries({ queryKey });
-			const saved = await putAdminUserMihomoProfile(
-				adminToken,
-				userId,
-				normalizeMihomoProfileDraftForSave(draft),
-			);
+			const saved = await putAdminUserMihomoProfile(adminToken, userId, draft);
 			if (
 				mihomoActiveIdentityRef.current !== requestIdentity ||
 				mihomoSaveGenerations.get(saveKey) !== saveGeneration

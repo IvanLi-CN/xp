@@ -36,7 +36,7 @@
 - Save/query generations reject stale PUT responses and preserve the current draft and cache.
 - Production/Demo links, list rows, app navigation, logout, and delete use the dirty guard.
 - The guard detects pending Mihomo saves, blocks discard, and reuses the request.
-- User Details tests cover the Profile API payload and normalization behavior.
+- User Details tests cover the raw Profile API payload and preservation of mixed YAML fields.
 - Playwright covers Demo desktop/mobile and real CodeMirror state for all documents.
 - Playwright covers User Details expansion, dirty leave/delete, and three-field saves.
 - Storybook covers inline, expanded, saving, read-only, save-error, and mobile drawer states.
