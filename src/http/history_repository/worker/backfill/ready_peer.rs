@@ -91,7 +91,7 @@ fn can_schedule_tiered_handoff(
         });
     let normal_match = (checkpoint.recovery_generation == 0
         || (checkpoint.recovery_generation_consumed && !consumed_recovery_stream))
-        && checkpoint.summary_tiered_handoff.as_ref() != Some(handoff)
+        && checkpoint.summary_tiered_handoff.is_none()
         && !checkpoint.retained_anchor_handoffs.iter().any(|completed| {
             completed.source_node_id == handoff.source_node_id
                 && completed.source_epoch == handoff.source_epoch

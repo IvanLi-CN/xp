@@ -385,15 +385,18 @@ impl RepositoryReplicaRuntime {
                     && gap.last_sequence >= handoff.last_missing
             });
         if !handoff_already_bridged {
-            let advanced = self
+            let advanced = match self
                 .receiver
                 .as_mut()
                 .expect("receiver checked above")
-                .advance_declared_sequence_gap(
-                    &next,
-                    handoff.first_missing,
-                    handoff.last_missing,
-                )?;
+                .advance_declared_sequence_gap(&next, handoff.first_missing, handoff.last_missing)
+            {
+                Ok(advanced) => advanced,
+                Err(error) => {
+                    self.restore(&previous_receiver, previous_snapshot)?;
+                    return Err(error.into());
+                }
+            };
             if !advanced {
                 self.restore(&previous_receiver, previous_snapshot)?;
                 return Err(RepositoryRuntimeError::Protocol(
@@ -469,14 +472,10 @@ impl RepositoryReplicaRuntime {
             .get(peer_node_id)
             .cloned()
             .unwrap_or_default();
-        if checkpoint.summary_tiered_handoff.is_some() {
-            return Err(RepositoryRuntimeError::Storage(
-                "history recovery already has an active tiered handoff".to_owned(),
-            ));
-        }
         let previous_handoff = checkpoint
             .recovery_handoff
             .clone()
+            .or_else(|| checkpoint.summary_tiered_handoff.clone())
             .or_else(|| checkpoint.retained_anchor_handoffs.iter().max().cloned());
         let Some(previous_handoff) = previous_handoff else {
             return Err(RepositoryRuntimeError::Storage(
