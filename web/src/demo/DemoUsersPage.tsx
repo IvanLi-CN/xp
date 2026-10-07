@@ -481,10 +481,10 @@ export function DemoUserDetailsPage() {
 		null,
 	);
 	const canWrite = state.session?.role !== "viewer";
-	const loadedUserId = user?.id;
+	const currentUserId = user?.id;
 
 	useEffect(() => {
-		if (loadedUserId && loadedUserId !== userId) return;
+		if (currentUserId && currentUserId !== userId) return;
 		setDisplayName(user?.displayName ?? "");
 		setResetPolicy(user?.quotaLimitGb === null ? "unlimited" : "monthly");
 		setResetDay(1);
@@ -493,7 +493,7 @@ export function DemoUserDetailsPage() {
 		setLocale(user?.locale ?? "en-US");
 		setSelectedIds(user?.endpointIds ?? []);
 	}, [
-		loadedUserId,
+		currentUserId,
 		userId,
 		user?.displayName,
 		user?.endpointIds,

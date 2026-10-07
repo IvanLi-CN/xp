@@ -65,6 +65,22 @@ test("demo user details follow the production user-management layout", async ({
 	await expect(dialog).toContainText("vless://");
 });
 
+test("resets Demo user drafts when the detail route changes", async ({
+	page,
+}) => {
+	await page.goto("/demo/login");
+	await page.getByRole("button", { name: "Enter demo" }).click();
+	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+
+	await page.getByLabel("Display name").fill("Draft from another user");
+	await page.goto(`/demo/users/${fixtureCatalog.identifier.userPrimary()}`);
+
+	await expect(
+		page.getByRole("heading", { name: "Lin Chen", exact: true }),
+	).toBeVisible();
+	await expect(page.getByLabel("Display name")).toHaveValue("Lin Chen");
+});
+
 test("expands the Mihomo editor into a persistent file workspace", async ({
 	page,
 }) => {
