@@ -59,13 +59,24 @@ type MihomoProfileEditorProps = {
 	onExpandAvailabilityChange?: (available: boolean) => void;
 };
 
-function useVisualViewportHeight(enabled: boolean): string | undefined {
-	const [height, setHeight] = useState<number | null>(null);
+type VisualViewportMetrics = {
+	height: number;
+	offsetTop: number;
+};
+
+function useVisualViewportMetrics(
+	enabled: boolean,
+): VisualViewportMetrics | undefined {
+	const [metrics, setMetrics] = useState<VisualViewportMetrics | null>(null);
 
 	useEffect(() => {
 		if (!enabled || typeof window === "undefined") return;
 		const viewport = window.visualViewport;
-		const update = () => setHeight(viewport?.height ?? window.innerHeight);
+		const update = () =>
+			setMetrics({
+				height: viewport?.height ?? window.innerHeight,
+				offsetTop: viewport?.offsetTop ?? 0,
+			});
 		update();
 		viewport?.addEventListener("resize", update);
 		viewport?.addEventListener("scroll", update);
@@ -77,7 +88,7 @@ function useVisualViewportHeight(enabled: boolean): string | undefined {
 		};
 	}, [enabled]);
 
-	return height === null ? undefined : `${height}px`;
+	return metrics ?? undefined;
 }
 
 function documentIsDirty(
@@ -123,7 +134,7 @@ export function MihomoProfileEditor({
 	const views = useRef<Partial<Record<MihomoProfileDocumentId, EditorView>>>(
 		{},
 	);
-	const viewportHeight = useVisualViewportHeight(expanded);
+	const viewportMetrics = useVisualViewportMetrics(expanded);
 	const currentStatus = statusLabel(readOnly, dirty);
 
 	useEffect(() => {
@@ -345,11 +356,24 @@ export function MihomoProfileEditor({
 					onOpenAutoFocus={(event) => event.preventDefault()}
 					onPointerDownOutside={(event) => event.preventDefault()}
 					onInteractOutside={(event) => event.preventDefault()}
+					style={
+						viewportMetrics
+							? {
+									top: `${viewportMetrics.offsetTop}px`,
+									bottom: "auto",
+									height: `${viewportMetrics.height}px`,
+								}
+							: undefined
+					}
 				>
 					<div
 						data-testid="mihomo-workspace-surface"
 						className="flex min-h-0 flex-1 flex-col bg-background text-foreground"
-						style={{ height: viewportHeight ?? "100dvh" }}
+						style={{
+							height: viewportMetrics
+								? `${viewportMetrics.height}px`
+								: "100dvh",
+						}}
 					>
 						<div
 							className={cn(

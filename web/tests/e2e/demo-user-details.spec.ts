@@ -103,6 +103,22 @@ test("expands the Mihomo editor into a persistent file workspace", async ({
 	await expect(workspace).toBeVisible();
 	await expect(workspace.locator("aside")).toBeVisible();
 	await expect(workspace.locator(".cm-editor")).toHaveCount(3);
+	for (let index = 0; index < 8; index += 1) {
+		await page.keyboard.press("Tab");
+		await expect
+			.poll(() =>
+				workspace.evaluate((element) =>
+					element.contains(document.activeElement),
+				),
+			)
+			.toBe(true);
+	}
+	await page.keyboard.press("Shift+Tab");
+	await expect
+		.poll(() =>
+			workspace.evaluate((element) => element.contains(document.activeElement)),
+		)
+		.toBe(true);
 
 	const mixinEditor = workspace.locator(
 		'[data-mihomo-document="mixin_yaml"] .cm-content',
@@ -208,14 +224,20 @@ test("uses the Files drawer at a narrow viewport", async ({ page }) => {
 					configurable: true,
 					value: 540,
 				});
+				Object.defineProperty(viewport, "offsetTop", {
+					configurable: true,
+					value: 24,
+				});
 			} catch {
 				return false;
 			}
 			viewport.dispatchEvent(new Event("resize"));
-			return viewport.height === 540;
+			viewport.dispatchEvent(new Event("scroll"));
+			return viewport.height === 540 && viewport.offsetTop === 24;
 		});
 		expect(visualHeightChanged).toBe(true);
 		await expect(surface).toHaveCSS("height", "540px");
+		await expect(workspace).toHaveCSS("top", "24px");
 		await workspace.getByRole("button", { name: "Files" }).click();
 		const files = page.getByRole("heading", { name: "Files" }).last();
 		await expect(files).toBeVisible();
