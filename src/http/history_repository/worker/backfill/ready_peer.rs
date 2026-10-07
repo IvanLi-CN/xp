@@ -72,12 +72,15 @@ fn can_schedule_tiered_handoff(
     checkpoint: &InitialPeerBackfillCheckpoint,
     handoff: &InitialPeerTieredHandoff,
 ) -> bool {
-    // A legacy completed handoff is never an implicit authorization for crossing retention a
-    // second time. The signed local recovery command arms exactly one new generation; consuming
-    // that generation is persisted before the bounded response is replayed.
+    // Recovery arms one generation; consumption is persisted before replay.
     let recovery_matches = checkpoint.recovery_generation > 0
         && !checkpoint.recovery_generation_consumed
-        && checkpoint.recovery_handoff.as_ref() == Some(handoff);
+        && checkpoint.recovery_handoff.as_ref().is_some_and(|armed| {
+            armed.source_node_id == handoff.source_node_id
+                && armed.source_epoch == handoff.source_epoch
+                && armed.stream == handoff.stream
+                && armed.first_missing == handoff.first_missing
+        });
     (checkpoint.recovery_generation == 0 || checkpoint.recovery_generation_consumed)
         && checkpoint.summary_tiered_handoff.as_ref() != Some(handoff)
         && !checkpoint.retained_anchor_handoffs.iter().any(|completed| {
@@ -919,7 +922,6 @@ mod tests {
             &InitialPeerBackfillCheckpoint::default(),
             &handoff
         ));
-
         let mut stream_consumed = InitialPeerBackfillCheckpoint::default();
         stream_consumed
             .retained_anchor_streams
@@ -929,22 +931,17 @@ mod tests {
                 stream: "connections".to_owned(),
             });
         assert!(can_schedule_tiered_handoff(&stream_consumed, &handoff));
-
         let same_stream = InitialPeerTieredHandoff {
             stream: "connections".to_owned(),
             ..handoff.clone()
         };
-        // A retained-anchor marker alone is historical evidence. If the receiver still exposes
-        // an unbridged gap, the worker must be able to recreate the missing handoff.
         assert!(can_schedule_tiered_handoff(&stream_consumed, &same_stream));
-
         let active_handoff = InitialPeerBackfillCheckpoint {
             summary_tiered_handoff: Some(same_stream.clone()),
             retained_anchor_streams: stream_consumed.retained_anchor_streams.clone(),
             ..InitialPeerBackfillCheckpoint::default()
         };
         assert!(!can_schedule_tiered_handoff(&active_handoff, &same_stream));
-
         let completed_handoff = InitialPeerBackfillCheckpoint {
             retained_anchor_handoffs: BTreeSet::from([same_stream.clone()]),
             ..InitialPeerBackfillCheckpoint::default()
@@ -953,7 +950,6 @@ mod tests {
             &completed_handoff,
             &same_stream
         ));
-
         let later_page = InitialPeerBackfillCheckpoint {
             retained_anchor_repair_response_seen: true,
             retained_anchor_streams: stream_consumed.retained_anchor_streams,
@@ -982,7 +978,14 @@ mod tests {
             retained_anchor_handoffs: BTreeSet::from([same_stream.clone()]),
             ..InitialPeerBackfillCheckpoint::default()
         };
-        assert!(can_schedule_tiered_handoff(&armed_recovery, &same_stream));
+        let mut extended_recovery_handoff = same_stream.clone();
+        extended_recovery_handoff.last_missing += 10;
+        extended_recovery_handoff.next_sequence += 11;
+        extended_recovery_handoff.end_unix_seconds += 1;
+        assert!(can_schedule_tiered_handoff(
+            &armed_recovery,
+            &extended_recovery_handoff
+        ));
         let consumed_recovery = InitialPeerBackfillCheckpoint {
             recovery_generation: 1,
             recovery_generation_consumed: true,

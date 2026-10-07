@@ -24,7 +24,8 @@ END;
 CREATE TRIGGER IF NOT EXISTS repository_history_sequence_summary_update
 AFTER UPDATE OF source_node_id, source_epoch, stream, sequence, is_tombstone, subject_node_id,
     observer_node_id, schema_id, schema_version, record_key, observed_start, observed_end,
-    received_at, payload ON repository_history_records
+    received_at, aggregate_complete, aggregate_start, aggregate_end, payload
+    ON repository_history_records
 BEGIN
     UPDATE repository_history_sequence_summary_blocks SET dirty = 1
       WHERE source_node_id = OLD.source_node_id AND source_epoch = OLD.source_epoch

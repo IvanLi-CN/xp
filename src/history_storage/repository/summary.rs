@@ -28,33 +28,41 @@ impl HistoryStorage {
         let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok((Vec::new(), None, true));
         };
-        let after = after.cloned().unwrap_or(RepositoryHistoryCompactionCursor {
-            observed_start_unix_seconds: 0,
-            source_node_id: String::new(),
-            source_epoch: 0,
-            stream: String::new(),
-            sequence: 0,
-        });
         let mut statement = connection
-            .prepare(
+            .prepare(if after.is_some() {
                 "SELECT source_node_id, source_epoch, stream, sequence
-                   FROM repository_history_records
-                  WHERE is_tombstone = 0
-                    AND (source_node_id, source_epoch, stream, sequence)
-                        > (?1, ?2, ?3, ?4)
-                  ORDER BY source_node_id, source_epoch, stream, sequence
-                  LIMIT ?5",
-            )
+                       FROM repository_history_records
+                      WHERE is_tombstone = 0
+                        AND (source_node_id, source_epoch, stream, sequence)
+                            > (?1, ?2, ?3, ?4)
+                      ORDER BY source_node_id, source_epoch, stream, sequence
+                      LIMIT ?5"
+            } else {
+                "SELECT source_node_id, source_epoch, stream, sequence
+                       FROM repository_history_records
+                      WHERE is_tombstone = 0
+                      ORDER BY source_node_id, source_epoch, stream, sequence
+                      LIMIT ?1"
+            })
             .map_err(sqlite_error)?;
-        let mut rows = statement
-            .query(params![
-                after.source_node_id,
-                durable_i64(after.source_epoch, "summary migration epoch")?,
-                after.stream,
-                durable_i64(after.sequence, "summary migration sequence")?,
-                durable_i64(limit as u64, "summary migration limit")?
-            ])
-            .map_err(sqlite_error)?;
+        let mut rows = if let Some(after) = after {
+            statement
+                .query(params![
+                    after.source_node_id,
+                    durable_i64(after.source_epoch, "summary migration epoch")?,
+                    after.stream,
+                    durable_i64(after.sequence, "summary migration sequence")?,
+                    durable_i64(limit as u64, "summary migration limit")?
+                ])
+                .map_err(sqlite_error)?
+        } else {
+            statement
+                .query(params![durable_i64(
+                    limit as u64,
+                    "summary migration limit"
+                )?])
+                .map_err(sqlite_error)?
+        };
         let mut blocks = Vec::new();
         let mut row_count = 0usize;
         let mut last = None;

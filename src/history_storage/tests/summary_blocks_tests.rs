@@ -27,8 +27,13 @@ fn sequence_summary_block_rebuild_is_incremental_and_tombstone_safe() {
         payload: payload.to_vec(),
     };
     storage
-        .upsert_repository_history_records(&[row(1, b"one"), row(4096, b"two")])
+        .upsert_repository_history_records(&[row(0, b"zero"), row(1, b"one"), row(4096, b"two")])
         .unwrap();
+    let (migrated, _, complete) = storage
+        .repository_history_sequence_summary_migration_page(None, 16)
+        .unwrap();
+    assert!(complete);
+    assert!(migrated.contains(&("source".to_owned(), 1, "runtime".to_owned(), 0)));
     let dirty = storage
         .repository_history_dirty_sequence_summary_blocks(16)
         .unwrap();
@@ -42,7 +47,19 @@ fn sequence_summary_block_rebuild_is_incremental_and_tombstone_safe() {
         .repository_history_sequence_summary_blocks()
         .unwrap();
     assert_eq!(blocks.len(), 2);
-    assert_eq!(blocks[0].record_count, 1);
+    assert_eq!(blocks[0].record_count, 2);
+
+    let mut changed = row(0, b"zero");
+    changed.aggregate_start_unix_seconds = Some(99);
+    storage
+        .upsert_repository_history_records(&[changed])
+        .unwrap();
+    assert_eq!(
+        storage
+            .repository_history_dirty_sequence_summary_blocks(16)
+            .unwrap(),
+        vec![("source".to_owned(), 1, "runtime".to_owned(), 0)]
+    );
 
     storage
         .delete_repository_history_for_tombstone(&RepositoryHistoryTombstone {
