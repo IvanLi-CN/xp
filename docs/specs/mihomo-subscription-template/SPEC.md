@@ -271,6 +271,7 @@ Mihomo workspace visual proof: desktop tree/editor and narrow toolbar/drawer sta
 ![Mihomo workspace desktop](./assets/mihomo-workspace-dark-desktop.png)
 ![Mihomo workspace mobile editor](./assets/mihomo-workspace-dark-mobile.png)
 ![Mihomo workspace mobile Files drawer](./assets/mihomo-workspace-dark-files.png)
+Owner confirmation: 2026-10-07; approved for current-candidate reuse.
 
 ## 主题资产
 
