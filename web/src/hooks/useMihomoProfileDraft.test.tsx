@@ -54,6 +54,40 @@ describe("useMihomoProfileDraft", () => {
 		expect(result.current.dirty).toBe(true);
 	});
 
+	it("preserves a dirty draft after a failed save and allows retry", async () => {
+		const saveProfile = vi
+			.fn<
+				(profile: AdminUserMihomoProfile) => Promise<AdminUserMihomoProfile>
+			>()
+			.mockRejectedValueOnce(new Error("service unavailable"))
+			.mockResolvedValueOnce({ ...PROFILE_A, mixin_yaml: "retry draft\n" });
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "retry draft\n"));
+		await act(async () => {
+			expect(await result.current.save()).toBe(false);
+		});
+		await waitFor(() =>
+			expect(result.current.error).toBe("service unavailable"),
+		);
+		expect(result.current.draft.mixin_yaml).toBe("retry draft\n");
+		expect(result.current.dirty).toBe(true);
+
+		await act(async () => {
+			expect(await result.current.save()).toBe(true);
+		});
+		expect(saveProfile).toHaveBeenCalledTimes(2);
+		expect(result.current.dirty).toBe(false);
+		expect(result.current.error).toBeNull();
+	});
+
 	it("keeps dirty drafts across refreshes and accepts a complete save response", async () => {
 		let resolveSave: ((profile: AdminUserMihomoProfile) => void) | undefined;
 		const saveProfile = vi.fn(

@@ -24,19 +24,26 @@ function EditorStory({
 	readOnly = false,
 	startWithError = false,
 }: EditorStoryProps) {
-	const [draft, setDraft] = useState(initialProfile);
+	const initialDraft = startWithError
+		? {
+				...initialProfile,
+				mixin_yaml: `${initialProfile.mixin_yaml}# retry me\n`,
+			}
+		: initialProfile;
+	const [draft, setDraft] = useState(initialDraft);
 	const [isSaving, setIsSaving] = useState(false);
-	const [error, setError] = useState<string | null>(
-		startWithError
-			? "The previous save failed. Retry when the service is ready."
-			: null,
-	);
+	const [saveAttempts, setSaveAttempts] = useState(0);
+	const [error, setError] = useState<string | null>(null);
 
 	const save = async () => {
 		setIsSaving(true);
 		setError(null);
-		await new Promise((resolve) => window.setTimeout(resolve, 250));
 		setIsSaving(false);
+		if (startWithError && saveAttempts === 0) {
+			setSaveAttempts(1);
+			setError("The previous save failed. Retry when the service is ready.");
+			return false;
+		}
 		return true;
 	};
 
@@ -135,9 +142,16 @@ export const SaveError: Story = {
 			canvas.getByRole("button", { name: "Expand editor" }),
 		);
 		const dialog = await within(document.body).findByRole("dialog");
+		const saveButton = within(dialog).getByRole("button", {
+			name: "Save configuration",
+		});
+		expect(saveButton).toBeEnabled();
+		await userEvent.click(saveButton);
 		await expect(within(dialog).getByRole("alert")).toHaveTextContent(
 			"The previous save failed",
 		);
+		await userEvent.click(saveButton);
+		await expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
 	},
 };
 

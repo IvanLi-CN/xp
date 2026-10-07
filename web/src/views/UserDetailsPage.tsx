@@ -93,6 +93,8 @@ const PROTOCOLS = [
 	{ protocolId: "vless_reality_vision_tcp", label: "VLESS" },
 	{ protocolId: "ss2022_2022_blake3_aes_128_gcm", label: "SS2022" },
 ] as const;
+const mihomoSaveGenerations = new Map<string, number>();
+
 type SupportedProtocolId = (typeof PROTOCOLS)[number]["protocolId"];
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
@@ -368,12 +370,18 @@ export function UserDetailsPage() {
 			if (!adminToken || !userId)
 				throw new Error("Admin session is unavailable.");
 			const queryKey = ["adminUserMihomoProfile", adminToken, userId] as const;
+			const saveKey = `${adminToken}\u0000${userId}`;
+			const saveGeneration = (mihomoSaveGenerations.get(saveKey) ?? 0) + 1;
+			mihomoSaveGenerations.set(saveKey, saveGeneration);
 			await queryClient.cancelQueries({ queryKey });
 			const saved = await putAdminUserMihomoProfile(
 				adminToken,
 				userId,
 				normalizeMihomoProfileDraftForSave(draft),
 			);
+			if (mihomoSaveGenerations.get(saveKey) !== saveGeneration) {
+				return saved;
+			}
 			queryClient.setQueryData<AdminUserMihomoProfile>(queryKey, saved);
 			pushToast({ variant: "success", message: "Mihomo profile updated" });
 			return saved;

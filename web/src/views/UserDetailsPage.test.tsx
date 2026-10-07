@@ -58,7 +58,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 			</a>
 		),
 		useNavigate: () => vi.fn(),
-		useParams: () => ({ userId: fixtureCatalog.identifier.userPrimary() }),
+		useParams: () => ({ userId: mockUserId() }),
 	};
 });
 
@@ -78,8 +78,9 @@ vi.mock("../api/subscription", async (importOriginal) => {
 	};
 });
 
-const { mockReadAdminToken } = vi.hoisted(() => ({
+const { mockReadAdminToken, mockUserId } = vi.hoisted(() => ({
 	mockReadAdminToken: vi.fn(() => "admintoken"),
+	mockUserId: vi.fn(),
 }));
 
 vi.mock("../components/auth", async (importOriginal) => {
@@ -90,9 +91,8 @@ vi.mock("../components/auth", async (importOriginal) => {
 	};
 });
 
-function renderPage() {
-	const queryClient = createQueryClient();
-	return render(
+function renderPage(queryClient = createQueryClient()) {
+	const view = render(
 		<QueryClientProvider client={queryClient}>
 			<UiPrefsProvider>
 				<ToastProvider>
@@ -101,6 +101,7 @@ function renderPage() {
 			</UiPrefsProvider>
 		</QueryClientProvider>,
 	);
+	return { ...view, queryClient };
 }
 
 function setupMocks(args?: {
@@ -315,6 +316,7 @@ describe("<UserDetailsPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
 		mockReadAdminToken.mockReturnValue("admintoken");
+		mockUserId.mockReturnValue(fixtureCatalog.identifier.userPrimary());
 	});
 
 	afterEach(() => {
