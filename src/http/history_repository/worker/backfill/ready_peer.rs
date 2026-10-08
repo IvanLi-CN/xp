@@ -1,9 +1,12 @@
 use super::*;
+mod expired_repair;
 mod handoff_selection;
 use crate::state::history_repository::replica::{
     InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, InitialPeerTieredHandoff,
     RetainedAnchorCheckpointUpdate,
 };
+#[cfg(test)]
+use handoff_selection::can_schedule_tiered_handoff;
 use handoff_selection::select_tiered_handoff;
 use std::future::Future;
 use tokio::time::Instant;
@@ -55,7 +58,8 @@ fn completed_repair_response(
     let summary_cursor = page_complete
         .then(|| checkpoint.summary_pending_next_cursor.clone())
         .flatten();
-    let summary_complete = page_complete && summary_cursor.is_none();
+    let summary_complete =
+        page_complete && summary_cursor.is_none() && !checkpoint.summary_pending_revisit_cursor;
     CompletedRepairResponse {
         summary_cursor,
         pending_segment_ids: remaining.into_iter().collect(),
@@ -68,38 +72,6 @@ fn completed_repair_response(
         response_complete: true,
         allowance_complete: page_complete,
     }
-}
-
-fn can_schedule_tiered_handoff(
-    checkpoint: &InitialPeerBackfillCheckpoint,
-    handoff: &InitialPeerTieredHandoff,
-) -> bool {
-    // Recovery arms one generation for the next missing sequence. The retained anchor range is
-    // learned from the signed response and may extend once before the generation is consumed.
-    let recovery_matches = checkpoint.recovery_generation > 0
-        && !checkpoint.recovery_generation_consumed
-        && checkpoint.recovery_handoff.as_ref().is_some_and(|armed| {
-            armed.source_node_id == handoff.source_node_id
-                && armed.source_epoch == handoff.source_epoch
-                && armed.stream == handoff.stream
-                && armed.first_missing == handoff.first_missing
-        });
-    let consumed_recovery_stream = checkpoint.recovery_generation > 0
-        && checkpoint.recovery_generation_consumed
-        && checkpoint.recovery_handoff.as_ref().is_some_and(|armed| {
-            armed.source_node_id == handoff.source_node_id
-                && armed.source_epoch == handoff.source_epoch
-                && armed.stream == handoff.stream
-        });
-    let normal_match = (checkpoint.recovery_generation == 0
-        || (checkpoint.recovery_generation_consumed && !consumed_recovery_stream))
-        && checkpoint.summary_tiered_handoff.is_none()
-        && !checkpoint.retained_anchor_handoffs.iter().any(|completed| {
-            completed.source_node_id == handoff.source_node_id
-                && completed.source_epoch == handoff.source_epoch
-                && completed.stream == handoff.stream
-        });
-    normal_match || recovery_matches
 }
 
 pub(crate) async fn catch_up_against_ready_repositories(
@@ -373,7 +345,13 @@ async fn advance_ready_peer_catch_up_page(
     }
 
     let path = checkpoint.summary_cursor.as_ref().map_or_else(
-        || "/api/admin/_internal/history-repository/summary?deep_verification=true".to_owned(),
+        || {
+            concat!(
+                "/api/admin/_internal/history-repository/summary?",
+                "summary_version=3&deep_verification=true"
+            )
+            .to_owned()
+        },
         |cursor| {
             format!("/api/admin/_internal/history-repository/summary?after_segment_id={cursor}")
         },
@@ -608,6 +586,12 @@ async fn repair_ready_peer_catch_up_page(
                 "history repair page crossed retention boundary; tiered backfill scheduled"
             );
             return Ok(InitialBackfillProgress::InProgress);
+        }
+        if checkpoint.recovery_generation > 0
+            && !checkpoint.recovery_generation_consumed
+            && !repair.unavailable_segment_ids.is_empty()
+        {
+            return expired_repair::refresh(state, peer, &checkpoint, &repair).await;
         }
     }
     if repair.segments.is_empty() && !repair.gaps.is_empty() {
@@ -886,6 +870,19 @@ mod tests {
             ),
             InitialBackfillProgress::Complete
         );
+    }
+
+    #[test]
+    fn refreshed_first_summary_page_is_revisited_after_bounded_repair() {
+        let checkpoint = InitialPeerBackfillCheckpoint {
+            summary_pending_revisit_cursor: true,
+            ..Default::default()
+        };
+        let response = completed_repair_response(&checkpoint, BTreeSet::new());
+        assert!(response.summary_cursor.is_none());
+        assert!(response.pending_segment_ids.is_empty());
+        assert!(!response.summary_complete);
+        assert!(response.response_complete);
     }
 
     #[test]

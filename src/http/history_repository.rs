@@ -1,3 +1,4 @@
+mod summary;
 use axum::body::Body;
 use axum::http::{StatusCode, header};
 use axum::{
@@ -11,6 +12,7 @@ use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
+use summary::RepositorySummaryQuery;
 use x25519_dalek::{PublicKey as X25519DalekPublicKey, StaticSecret};
 
 use super::resource_history_capacity;
@@ -59,14 +61,6 @@ pub(super) struct RepositoryInitialBackfillQuery {
     #[serde(default)]
     page_size: Option<usize>,
 }
-#[derive(Debug, Deserialize)]
-pub(super) struct RepositorySummaryQuery {
-    #[serde(default)]
-    after_segment_id: Option<String>,
-    #[serde(default)]
-    deep_verification: bool,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ReplaceRepositoryMembershipRequest {
@@ -376,7 +370,11 @@ pub(super) async fn admin_internal_history_repository_summary(
         .repository_replica
         .lock()
         .await
-        .replication_summary_after(query.after_segment_id.as_deref(), query.deep_verification)
+        .replication_summary_for_version(
+            query.after_segment_id.as_deref(),
+            query.deep_verification,
+            query.summary_version,
+        )
         .map_err(repository_error)?;
     // Encode while the permit is held; Axum's Json response defers serialization until body poll.
     let payload = serde_json::to_vec(&summary)

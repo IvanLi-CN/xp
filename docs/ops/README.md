@@ -969,6 +969,15 @@ Notes:
   before retrying.
   Do not manually rebuild indexes as a substitute for the release, because summary
   continuation also requires the release's direct five-column keyset seek.
+  History summary maintenance uses canonical v3 metadata in the existing database.
+
+  - V3 peers explicitly request `summary_version=3`; predecessors keep v1 fallback.
+  - The five-second worker rebuilds bounded pages without copying history or resetting progress.
+  - Accept retained deep checks only with `partitions_included=true` and `summary_version=3`.
+  - Permanent gaps still require `partial` and `replica_converged=false`.
+  - Predecessor rollback cannot read v3-prefixed metadata; its deep checks must fail closed.
+  - Redeploy the newer binary for in-place metadata rebuilding.
+
   The operator-run source/release-candidate validation path
   `XP_MESH_RESOURCE_SUMMARY_ONLY=1 XP_RUN_MESH_RESOURCE=1` runs the signed summary endpoint against
   257 near-limit segments and the 20,000-row source journal benchmark in 128 MiB/no-swap cgroups;

@@ -135,9 +135,19 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - SQLite-backed repository additionally maintains sequence-block Merkle metadata in the existing
   `history.sqlite3`. Each block covers 4096 source-stream sequence positions. Rebuild is resumable
   and bounded; inserts, late rows, tombstones, retention deletes, and restart invalidate only
-  affected blocks. The v2 digest is published only after its metadata transaction commits. The
-  capability is additive: an older peer continues with the existing partition summary and is not
-  held to a v2 readiness requirement.
+  affected blocks without rewinding the migration cursor. A five-second blocking worker seeds at
+  most 4096 keys or rebuilds at most 16 blocks per tick, independently of network replication.
+  The v3 digest excludes replica-local arrival time and is published only after its metadata
+  transaction commits. Existing v2 metadata is rebuilt in place using an additive format marker.
+  Requests explicitly opt into `summary_version=3`; absent/older/unknown requests receive v1
+  partition summaries, and v2 digests are never compared with v3. Retained-data deep verification
+  may complete with permanent gaps, but `history_truncated`, query `partial`, and
+  `replica_converged=false` remain unchanged. Unknown remote formats cannot complete verification.
+- An armed, unconsumed recovery whose requested anchor expires may refresh a bounded repair page.
+  Still-retained pending IDs are preserved before adding current missing IDs (at most 64 total).
+  The same summary cursor is re-read after draining; omitted current IDs are never skipped.
+  Gap merge, response-identity reset and checkpoint replacement commit atomically. Generation,
+  source binding and receiver watermark remain unchanged; stale checkpoint refresh fails closed.
 - An initial-peer retained-anchor handoff is one-time per source/epoch/stream and recovery
   generation. A historical handoff marker does not authorize a second retention crossing. The
   signed local `xp-ops xp history-repository-recover` command provides a zero-write dry-run

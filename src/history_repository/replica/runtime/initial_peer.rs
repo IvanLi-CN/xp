@@ -36,6 +36,8 @@ pub(crate) struct InitialPeerBackfillCheckpoint {
     #[serde(default)]
     pub(crate) summary_pending_next_cursor: Option<String>,
     #[serde(default)]
+    pub(crate) summary_pending_revisit_cursor: bool,
+    #[serde(default)]
     pub(crate) summary_complete: bool,
     #[serde(default)]
     pub(crate) summary_requires_tiered_backfill: bool,
@@ -131,6 +133,7 @@ impl RepositoryReplicaRuntime {
                 summary_cursor: checkpoint.summary_cursor,
                 summary_pending_segment_ids: checkpoint.summary_pending_segment_ids,
                 summary_pending_next_cursor: checkpoint.summary_pending_next_cursor,
+                summary_pending_revisit_cursor: checkpoint.summary_pending_revisit_cursor,
                 summary_complete: checkpoint.summary_complete,
                 summary_requires_tiered_backfill: checkpoint.summary_requires_tiered_backfill,
                 retained_anchor_repair_response_seen: checkpoint
@@ -167,6 +170,9 @@ impl RepositoryReplicaRuntime {
             .entry(peer_node_id.to_owned())
             .or_default();
         checkpoint.summary_cursor = summary_cursor;
+        if pending_segment_ids.is_empty() {
+            checkpoint.summary_pending_revisit_cursor = false;
+        }
         checkpoint.summary_pending_segment_ids = pending_segment_ids;
         checkpoint.summary_pending_next_cursor = pending_next_cursor;
         checkpoint.summary_complete = summary_complete;
@@ -266,6 +272,9 @@ impl RepositoryReplicaRuntime {
             _ => {}
         }
         checkpoint.summary_cursor = summary_cursor;
+        if pending_segment_ids.is_empty() {
+            checkpoint.summary_pending_revisit_cursor = false;
+        }
         checkpoint.summary_pending_segment_ids = pending_segment_ids;
         checkpoint.summary_pending_next_cursor = pending_next_cursor;
         checkpoint.summary_complete = summary_complete;
@@ -321,6 +330,7 @@ impl RepositoryReplicaRuntime {
                 summary_cursor: prior.summary_cursor,
                 summary_pending_segment_ids: prior.summary_pending_segment_ids,
                 summary_pending_next_cursor: prior.summary_pending_next_cursor,
+                summary_pending_revisit_cursor: prior.summary_pending_revisit_cursor,
                 summary_complete: false,
                 summary_requires_tiered_backfill: true,
                 retained_anchor_repair_response_seen: prior.retained_anchor_repair_response_seen,

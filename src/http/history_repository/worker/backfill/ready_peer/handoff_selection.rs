@@ -1,5 +1,37 @@
-use super::{InitialPeerBackfillCheckpoint, InitialPeerTieredHandoff, can_schedule_tiered_handoff};
+use super::{InitialPeerBackfillCheckpoint, InitialPeerTieredHandoff};
 use crate::state::history_repository::replica::RepositoryRuntimeError;
+
+pub(super) fn can_schedule_tiered_handoff(
+    checkpoint: &InitialPeerBackfillCheckpoint,
+    handoff: &InitialPeerTieredHandoff,
+) -> bool {
+    // Recovery arms one generation for the next missing sequence. The retained anchor range is
+    // learned from the signed response and may extend once before the generation is consumed.
+    let recovery_matches = checkpoint.recovery_generation > 0
+        && !checkpoint.recovery_generation_consumed
+        && checkpoint.recovery_handoff.as_ref().is_some_and(|armed| {
+            armed.source_node_id == handoff.source_node_id
+                && armed.source_epoch == handoff.source_epoch
+                && armed.stream == handoff.stream
+                && armed.first_missing == handoff.first_missing
+        });
+    let consumed_recovery_stream = checkpoint.recovery_generation > 0
+        && checkpoint.recovery_generation_consumed
+        && checkpoint.recovery_handoff.as_ref().is_some_and(|armed| {
+            armed.source_node_id == handoff.source_node_id
+                && armed.source_epoch == handoff.source_epoch
+                && armed.stream == handoff.stream
+        });
+    let normal_match = (checkpoint.recovery_generation == 0
+        || (checkpoint.recovery_generation_consumed && !consumed_recovery_stream))
+        && checkpoint.summary_tiered_handoff.is_none()
+        && !checkpoint.retained_anchor_handoffs.iter().any(|completed| {
+            completed.source_node_id == handoff.source_node_id
+                && completed.source_epoch == handoff.source_epoch
+                && completed.stream == handoff.stream
+        });
+    normal_match || recovery_matches
+}
 
 pub(super) fn select_tiered_handoff(
     checkpoint: &InitialPeerBackfillCheckpoint,

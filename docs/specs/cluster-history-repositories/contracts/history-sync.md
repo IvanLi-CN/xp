@@ -50,12 +50,34 @@ affected records and remain until every current ready repository acknowledges
 them plus the tombstone horizon. Anti-entropy exchanges partition summaries,
 repairs ranges first, then drills down.
 
-SQLite repositories additionally maintain a v2 sequence-block summary in the same
-`history.sqlite3`. A block covers 4096 sequence positions and is rebuilt through bounded dirty
-block pages. Record mutations, tombstones, retention deletes, and restart invalidate affected
-blocks; a v2 digest is published only after its metadata transaction commits. The v2 fields and
-`admin.repository-history-summary-v2` capability are additive, so a peer that lacks the capability
-continues with the v1 partition summary and bounded readiness rules.
+SQLite repositories maintain v3 summaries in the existing `history.sqlite3`.
+
+- A block covers 4096 sequence positions; its canonical leaf excludes local `received_at`.
+- `summary_version=3` explicitly selects this format.
+- `admin.repository-history-summary-v3` is advertised only when metadata is ready.
+- Missing, older, or unknown requested versions return the v1 partition path.
+- Older peers' v2 responses use legacy partitions, never a v2/v3 sequence-digest comparison.
+- SQLite adds `digest_version` with a v2 default; v3 digests have a one-byte format prefix.
+- No historical row is rewritten. Old or unprefixed metadata is rebuilt before publication.
+- The prefix also detects a predecessor rewriting digests without updating the new column.
+- Predecessor binaries cannot consume prefixed metadata; rollback deep checks fail closed.
+- Forward deployment repairs metadata in place, without an extra database.
+- Mutation triggers mark affected blocks without resetting the durable migration cursor.
+- A five-second blocking worker seeds at most 4096 keys or rebuilds at most 16 blocks.
+
+Deep verification compares retained metadata even when a permanent gap exists.
+
+- Matching retained records and gap ledgers may complete the verification cycle.
+- `history_truncated` and query `partial` persist; Raft `replica_converged` stays false.
+- Missing, incomplete or unknown metadata cannot count as verified.
+- Metadata rebuilding alone does not restart historical backfill.
+
+An unconsumed recovery may refresh a repair page after its retained anchor expires.
+
+- Keep still-retained pending IDs first; fill up to 64 IDs from the current summary page.
+- Re-read the same cursor after draining; do not skip omitted current IDs.
+- Gap merge and checkpoint/response-identity replacement commit atomically.
+- Preserve generation, its source binding and receiver watermark; reject stale refresh state.
 
 The bounded repair response contains `segments`, `gaps`, and the additive
 `unavailable_segment_ids` field. The latter lists only requested 64-character
@@ -172,3 +194,7 @@ bounded by the repository query limit; a response supplies `next_page_cursor`
 only when another bounded page is available.
 Binary `record_key` and `payload` fields are unpadded base64url so actual JSON
 response bytes remain within the query response budget.
+
+A refreshed first summary page persists an explicit revisit marker, so its absent cursor is not
+interpreted as end-of-export after one bounded repair. An all-expired page with no missing current
+IDs persists gaps and the serving page continuation atomically without consuming its generation.

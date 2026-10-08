@@ -1,6 +1,29 @@
 use super::*;
 use sha2::Digest as _;
 
+pub(in crate::state::history_storage) fn ensure_sequence_summary_digest_version(
+    connection: &Connection,
+) -> Result<()> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(repository_history_sequence_summary_blocks)")
+        .map_err(sqlite_error)?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sqlite_error)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(sqlite_error)?;
+    if !columns.iter().any(|column| column == "digest_version") {
+        connection
+            .execute(
+                "ALTER TABLE repository_history_sequence_summary_blocks
+                 ADD COLUMN digest_version INTEGER NOT NULL DEFAULT 2",
+                [],
+            )
+            .map_err(sqlite_error)?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RepositoryHistorySequenceSummaryBlock {
     pub(crate) source_node_id: String,
@@ -132,7 +155,7 @@ impl HistoryStorage {
             .prepare(
                 "SELECT source_node_id, source_epoch, stream, block_index
                    FROM repository_history_sequence_summary_blocks
-                  WHERE dirty = 1
+                  WHERE dirty = 1 OR digest_version != 3 OR length(digest) != 33
                   ORDER BY source_node_id, source_epoch, stream, block_index
                   LIMIT ?1",
             )
@@ -217,8 +240,6 @@ impl HistoryStorage {
                 .map_err(sqlite_error)?;
             let observed_end = checked_u64(row.get::<_, i64>(10).map_err(sqlite_error)?, 10)
                 .map_err(sqlite_error)?;
-            let received_at = checked_u64(row.get::<_, i64>(11).map_err(sqlite_error)?, 11)
-                .map_err(sqlite_error)?;
             let aggregate_complete = row
                 .get::<_, Option<i64>>(12)
                 .map_err(sqlite_error)?
@@ -237,7 +258,7 @@ impl HistoryStorage {
                 .map_err(sqlite_error)?;
             let payload = row.get::<_, Vec<u8>>(15).map_err(sqlite_error)?;
             let mut leaf = sha2::Sha256::new();
-            leaf.update(b"xp-history-repository-sequence-leaf-v2\0");
+            leaf.update(b"xp-history-repository-sequence-leaf-v3\0");
             hash_field(&mut leaf, source.as_bytes());
             leaf.update(epoch.to_be_bytes());
             hash_field(&mut leaf, stream_name.as_bytes());
@@ -249,14 +270,13 @@ impl HistoryStorage {
             hash_field(&mut leaf, &key);
             leaf.update(observed.to_be_bytes());
             leaf.update(observed_end.to_be_bytes());
-            leaf.update(received_at.to_be_bytes());
             hash_optional_bool(&mut leaf, aggregate_complete);
             hash_optional_u64(&mut leaf, aggregate_start);
             hash_optional_u64(&mut leaf, aggregate_end);
             hash_field(&mut leaf, &payload);
             let leaf: [u8; 32] = leaf.finalize().into();
             let mut node = sha2::Sha256::new();
-            node.update(b"xp-history-repository-sequence-node-v2\0");
+            node.update(b"xp-history-repository-sequence-node-v3\0");
             node.update(root);
             node.update(leaf);
             root = node.finalize().into();
@@ -280,12 +300,12 @@ impl HistoryStorage {
                 .execute(
                     "INSERT INTO repository_history_sequence_summary_blocks
                        (source_node_id, source_epoch, stream, block_index, first_sequence,
-                        last_sequence, record_count, digest, dirty)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0)
+                        last_sequence, record_count, digest, dirty, digest_version)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, 3)
                      ON CONFLICT(source_node_id, source_epoch, stream, block_index)
                      DO UPDATE SET first_sequence = excluded.first_sequence,
                        last_sequence = excluded.last_sequence, record_count = excluded.record_count,
-                       digest = excluded.digest, dirty = 0",
+                       digest = excluded.digest, dirty = 0, digest_version = 3",
                     params![
                         source_node_id,
                         source_epoch_i64,
@@ -294,7 +314,7 @@ impl HistoryStorage {
                         durable_i64(first_sequence.unwrap_or(first), "summary first")?,
                         durable_i64(last_sequence.unwrap_or(last), "summary last")?,
                         i64::try_from(record_count).unwrap_or(i64::MAX),
-                        root.to_vec(),
+                        std::iter::once(3).chain(root).collect::<Vec<u8>>(),
                     ],
                 )
                 .map_err(sqlite_error)?;
@@ -315,20 +335,24 @@ impl HistoryStorage {
                 "SELECT source_node_id, source_epoch, stream, block_index, first_sequence,
                         last_sequence, record_count, digest
                    FROM repository_history_sequence_summary_blocks
-                  WHERE dirty = 0
+                  WHERE dirty = 0 AND digest_version = 3 AND length(digest) = 33
                   ORDER BY source_node_id, source_epoch, stream, block_index",
             )
             .map_err(sqlite_error)?;
         statement
             .query_map([], |row| {
                 let digest = row.get::<_, Vec<u8>>(7)?;
-                let digest: [u8; 32] = digest.try_into().map_err(|_| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        7,
-                        rusqlite::types::Type::Blob,
-                        "summary digest must be 32 bytes".into(),
-                    )
-                })?;
+                let digest: [u8; 32] = digest
+                    .strip_prefix(&[3])
+                    .unwrap_or(&[])
+                    .try_into()
+                    .map_err(|_| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            7,
+                            rusqlite::types::Type::Blob,
+                            "summary digest must have the v3 format prefix".into(),
+                        )
+                    })?;
                 Ok(RepositoryHistorySequenceSummaryBlock {
                     source_node_id: row.get(0)?,
                     source_epoch: checked_u64(row.get::<_, i64>(1)?, 1)?,
@@ -358,7 +382,7 @@ impl HistoryStorage {
                 "SELECT source_node_id, source_epoch, stream, block_index, first_sequence,
                         last_sequence, record_count, digest
                    FROM repository_history_sequence_summary_blocks
-                  WHERE dirty = 0
+                  WHERE dirty = 0 AND digest_version = 3 AND length(digest) = 33
                   ORDER BY source_node_id, source_epoch, stream, block_index
                   LIMIT ?1",
             )
@@ -366,13 +390,17 @@ impl HistoryStorage {
         let rows = statement
             .query_map([i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
                 let digest = row.get::<_, Vec<u8>>(7)?;
-                let digest: [u8; 32] = digest.try_into().map_err(|_| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        7,
-                        rusqlite::types::Type::Blob,
-                        "summary digest must be 32 bytes".into(),
-                    )
-                })?;
+                let digest: [u8; 32] = digest
+                    .strip_prefix(&[3])
+                    .unwrap_or(&[])
+                    .try_into()
+                    .map_err(|_| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            7,
+                            rusqlite::types::Type::Blob,
+                            "summary digest must have the v3 format prefix".into(),
+                        )
+                    })?;
                 Ok(RepositoryHistorySequenceSummaryBlock {
                     source_node_id: row.get(0)?,
                     source_epoch: checked_u64(row.get::<_, i64>(1)?, 1)?,

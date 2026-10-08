@@ -212,7 +212,7 @@ impl RepositoryReplicaRuntime {
         if !work.is_deep_verification() {
             return Ok(false);
         }
-        if !self.partition_summaries_ready() {
+        if !self.partition_summaries_ready() && !self.sequence_summary_blocks_ready() {
             self.clear_direct_peer_deep_verification(peer_repository_id)?;
             return Ok(false);
         }
@@ -375,7 +375,7 @@ impl RepositoryReplicaRuntime {
         let (sequence_blocks, sequence_blocks_complete) = if deep_verification
             && after_segment_id.is_none()
             && self.uses_sqlite_history()
-            && self.snapshot.sequence_summary_blocks_complete
+            && self.sequence_summary_blocks_ready()
         {
             self.sequence_summary_blocks()?
         } else {
@@ -391,11 +391,11 @@ impl RepositoryReplicaRuntime {
             } else {
                 Vec::new()
             },
-            summary_version: if sequence_blocks_complete { 2 } else { 1 },
+            summary_version: if sequence_blocks_complete { 3 } else { 1 },
             sequence_blocks,
             partitions_included: deep_verification
                 && after_segment_id.is_none()
-                && (!self.uses_sqlite_history() || self.snapshot.partition_summaries_complete),
+                && (sequence_blocks_complete || self.partition_summaries_ready()),
             gaps: self.snapshot.gaps.iter().map(gap_summary).collect(),
             last_verified_unix_seconds: self.snapshot.last_verified_unix_seconds,
             history_truncated: self.snapshot.history_truncated,
@@ -435,7 +435,7 @@ impl RepositoryReplicaRuntime {
         let truncation_converged = !self.snapshot.history_truncated && !remote.history_truncated;
         let partitions_converged = if !deep_verification || !remote.partitions_included {
             true
-        } else if remote.summary_version >= 2 && !remote.sequence_blocks.is_empty() {
+        } else if remote.summary_version == 3 {
             !self.sequence_summary_blocks_ready()
                 || self.sequence_summary_blocks()?.0 == remote.sequence_blocks
         } else {
@@ -452,20 +452,39 @@ impl RepositoryReplicaRuntime {
         &self,
         remote: &RepositoryReplicaSummary,
     ) -> Result<bool, RepositoryRuntimeError> {
-        if remote.history_truncated
-            || !remote.partitions_included
-            || (remote.summary_version >= 2 && !self.sequence_summary_blocks_ready())
-            || (remote.summary_version < 2 && !self.partition_summaries_ready())
-        {
+        if !self.retained_summary_available(remote) {
             return Ok(true);
         }
-        Ok(
-            if remote.summary_version >= 2 && !remote.sequence_blocks.is_empty() {
-                self.sequence_summary_blocks()?.0 == remote.sequence_blocks
+        Ok(if remote.summary_version == 3 {
+            self.sequence_summary_blocks()?.0 == remote.sequence_blocks
+        } else {
+            self.retained_partition_summaries()? == remote.partitions
+        })
+    }
+
+    pub(crate) fn requires_retained_repair(
+        &self,
+        remote: &RepositoryReplicaSummary,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        let metadata_available = self.retained_summary_available(remote);
+        Ok(!self.missing_segment_ids(remote, false)?.is_empty()
+            || canonical_gaps(self.snapshot.gaps.iter().map(gap_summary))
+                != canonical_gaps(remote.gaps.iter().cloned())
+            || (metadata_available && !self.retained_partitions_converged(remote)?))
+    }
+
+    pub(crate) fn retained_summary_available(&self, remote: &RepositoryReplicaSummary) -> bool {
+        remote.partitions_included
+            && matches!(remote.summary_version, 1..=3)
+            && if remote.summary_version == 3 {
+                self.sequence_summary_blocks_ready()
             } else {
-                self.retained_partition_summaries()? == remote.partitions
-            },
-        )
+                self.partition_summaries_ready()
+            }
+    }
+
+    pub(crate) fn history_is_truncated(&self) -> bool {
+        self.snapshot.history_truncated || !self.snapshot.gaps.is_empty()
     }
 
     pub(crate) fn repair_batch(

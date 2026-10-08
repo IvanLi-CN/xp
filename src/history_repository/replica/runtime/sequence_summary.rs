@@ -2,10 +2,35 @@ use super::{RepositoryReplicaRuntime, RepositoryRuntimeError};
 
 pub(crate) const MAX_SEQUENCE_SUMMARY_BLOCKS: usize = 1024;
 
+#[cfg(test)]
+mod tests;
+
 impl RepositoryReplicaRuntime {
+    pub(crate) fn replication_summary_for_version(
+        &self,
+        after_segment_id: Option<&str>,
+        deep_verification: bool,
+        requested_version: Option<u8>,
+    ) -> Result<super::RepositoryReplicaSummary, RepositoryRuntimeError> {
+        let mut summary = self.replication_summary_after(after_segment_id, deep_verification)?;
+        if requested_version != Some(3) {
+            summary.summary_version = 1;
+            summary.sequence_blocks.clear();
+            summary.partitions_included =
+                deep_verification && after_segment_id.is_none() && self.partition_summaries_ready();
+        }
+        Ok(summary)
+    }
+
     pub(crate) fn advance_sequence_summary_block_rebuild_page(
         &mut self,
     ) -> Result<bool, RepositoryRuntimeError> {
+        if self.uses_sqlite_history() && self.snapshot.sequence_summary_version != 3 {
+            self.snapshot.sequence_summary_blocks_complete = false;
+            self.snapshot.sequence_summary_version = 3;
+            self.snapshot.deep_verified_peer_ids.clear();
+            self.persist_control_state()?;
+        }
         if !self.uses_sqlite_history() || self.snapshot.sequence_summary_blocks_complete {
             if !self.uses_sqlite_history() {
                 return Ok(true);
@@ -24,7 +49,7 @@ impl RepositoryReplicaRuntime {
                 .storage
                 .repository_history_sequence_summary_migration_page(
                     self.snapshot.sequence_summary_migration_cursor.as_ref(),
-                    256,
+                    4096,
                 )
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
             self.storage
@@ -37,7 +62,7 @@ impl RepositoryReplicaRuntime {
         }
         let dirty = self
             .storage
-            .repository_history_dirty_sequence_summary_blocks(4)
+            .repository_history_dirty_sequence_summary_blocks(16)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         if dirty.is_empty() {
             self.snapshot.sequence_summary_blocks_complete = true;

@@ -596,6 +596,7 @@ fn peer_initial_backfill_checkpoint_survives_restart() {
             summary_cursor: Some("segment-1".to_owned()),
             summary_pending_segment_ids: vec!["segment-2".to_owned()],
             summary_pending_next_cursor: Some("segment-3".to_owned()),
+            summary_pending_revisit_cursor: false,
             summary_complete: false,
             summary_requires_tiered_backfill: true,
             retained_anchor_repair_response_seen: false,

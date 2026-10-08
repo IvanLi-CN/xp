@@ -1918,7 +1918,7 @@ async fn admin_internal_capabilities(
     if summary_v2_ready {
         response
             .capabilities
-            .push("admin.repository-history-summary-v2");
+            .push("admin.repository-history-summary-v3");
     }
     let managed_vless_endpoint = {
         let store = state.store.lock().await;

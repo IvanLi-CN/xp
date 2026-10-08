@@ -289,6 +289,8 @@ pub(crate) struct RepositoryReplicaSnapshot {
     #[serde(default)]
     sequence_summary_blocks_complete: bool,
     #[serde(default)]
+    sequence_summary_version: u8,
+    #[serde(default)]
     sequence_summary_migration_cursor: Option<RepositoryHistoryCompactionCursor>,
     #[serde(default)]
     sequence_summary_migration_complete: bool,
@@ -330,6 +332,7 @@ impl Default for RepositoryReplicaSnapshot {
             partition_summary_cursor: None,
             partition_summaries_complete: false,
             sequence_summary_blocks_complete: false,
+            sequence_summary_version: 0,
             sequence_summary_migration_cursor: None,
             sequence_summary_migration_complete: false,
         }
@@ -890,6 +893,7 @@ mod legacy_relay_tests;
 mod paths;
 mod query;
 mod receive;
+mod recovery_refresh;
 mod repair_batch;
 mod retention;
 mod sequence_summary;

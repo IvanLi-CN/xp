@@ -19,8 +19,14 @@
   Legacy completed handoffs remain historical evidence and cannot authorize a second crossing.
 - SQLite repositories maintain 4096-sequence summary-block metadata with dirty-block triggers and
   bounded rebuild pages. Record upserts, tombstones, retention deletes, and restart invalidate
-  affected blocks; v2 summaries are published only after clean metadata commits. Older peers keep
-  the v1 partition summary path through additive fields and capability negotiation.
+  affected blocks without resetting migration. A five-second blocking worker advances bounded
+  pages. Canonical v3 hashes exclude local receive time; a version column and prefix rebuild old
+  metadata in place. Explicit v3 query negotiation preserves the v1 path for older peers.
+  Retained verification with permanent gaps never sets complete-history convergence.
+
+- Expired armed-recovery repair pages retain existing IDs and add bounded current IDs.
+  Refresh commits gaps and checkpoint atomically, preserves generation, and re-reads the same
+  summary cursor after draining so a partial refresh cannot skip current segments.
 
 ## Coverage / rollout summary
 
@@ -283,3 +289,7 @@
 
 - `./SPEC.md`
 - `./HISTORY.md`
+
+A refreshed first summary page persists an explicit revisit marker, so its absent cursor is not
+interpreted as end-of-export after one bounded repair. An all-expired page with no missing current
+IDs persists gaps and the serving page continuation atomically without consuming its generation.

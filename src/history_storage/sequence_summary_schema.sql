@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS repository_history_sequence_summary_blocks (
     record_count INTEGER NOT NULL,
     digest BLOB NOT NULL,
     dirty INTEGER NOT NULL DEFAULT 1,
+    digest_version INTEGER NOT NULL DEFAULT 2,
     PRIMARY KEY (source_node_id, source_epoch, stream, block_index)
 );
 CREATE INDEX IF NOT EXISTS repository_history_sequence_summary_blocks_dirty

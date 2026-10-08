@@ -60,6 +60,11 @@
   creates that index idempotently at startup without replacing the legacy index or signed payloads.
   An external-history database whose startup index creation fails preserves its durable rows on
   disk and returns a storage failure; it never falls back to a potentially stale JSON snapshot.
+  Canonical v3 sequence-block summaries exclude local receive time and require explicit
+  `summary_version=3`; older requests retain v1 fallback. A five-second blocking worker advances
+  bounded metadata pages without resetting migration on late writes. Old metadata is rebuilt
+  in place; predecessor rollback cannot consume v3-prefixed digests. Permanent gaps keep
+  queries partial and replica convergence false even after retained-data verification.
   Repository runtime status reads exact record and segment counts from a durable singleton updated
   by insert/delete triggers in each history transaction; existing databases backfill it once at
   startup. Status requests do not traverse retained history tables and run off Tokio workers.
