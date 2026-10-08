@@ -1,6 +1,8 @@
 use super::*;
+use crate::ops::cli::{Cli, Command, XpCommand};
 use crate::{cluster_metadata::ClusterMetadata, internal_auth::verify_request_v2};
 use axum::{Json, Router, body::to_bytes, extract::Request, routing::post};
+use clap::Parser;
 
 #[tokio::test]
 async fn recovery_explicit_data_dir_signs_without_host_env() {
@@ -39,26 +41,30 @@ async fn recovery_explicit_data_dir_signs_without_host_env() {
             assert_eq!(verified.context.sender_id, metadata.node_id);
             let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(body["apply"], false);
-            assert_eq!(body["peer_node_id"], "ready-peer");
+            assert_eq!(body["peer_node_id"], xp_test_fixtures::secondary_node_id());
             Json(serde_json::json!({"applied": false}))
         }),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let result = cmd_xp_history_repository_recover(
-        paths,
-        XpHistoryRepositoryRecoverArgs {
-            data_dir: Some("/var/lib/xp/data".into()),
-            api_base_url: origin,
-            peer_node_id: "ready-peer".to_owned(),
-            apply: false,
-            dry_run: true,
-            yes: false,
-            expected_recovery_fingerprint: None,
-        },
-    )
-    .await;
+    let cli = Cli::try_parse_from([
+        "xp-ops",
+        "xp",
+        "history-repository-recover",
+        "--data-dir",
+        "/var/lib/xp/data",
+        "--api-base-url",
+        &origin,
+        "--peer-node-id",
+        xp_test_fixtures::secondary_node_id(),
+        "--dry-run",
+    ])
+    .expect("parse container recovery command");
+    let Some(Command::Xp(XpCommand::HistoryRepositoryRecover(args))) = cli.command else {
+        panic!("expected recovery command");
+    };
+    let result = cmd_xp_history_repository_recover(paths, args).await;
     server.abort();
     result.expect("container recovery preview without xp.env");
     assert!(!root.path().join("etc/xp/xp.env").exists());
