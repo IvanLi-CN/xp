@@ -6,7 +6,8 @@ mod lifecycle;
 
 #[allow(unused_imports)]
 pub(crate) use capacity::{
-    DEFAULT_HISTORY_REPOSITORY_QUOTA_BYTES, HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES,
+    DEFAULT_HISTORY_REPOSITORY_QUOTA_BYTES, HISTORY_RECOVERY_METADATA_BUDGET_BYTES,
+    HISTORY_RECOVERY_PAGE_BUDGET_BYTES, HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES,
     HistoryWriteAvailability, RepositoryCapacity,
 };
 #[allow(unused_imports)]

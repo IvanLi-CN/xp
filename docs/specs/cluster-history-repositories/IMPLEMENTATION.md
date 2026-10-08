@@ -8,6 +8,17 @@
 - Lifecycle: active
 - Catalog note: Initiative #248
 
+### Recovery generation and sequence-block summaries
+
+- Initial peer checkpoints now persist an operator-armed recovery generation. The local signed
+  `xp-ops xp history-repository-recover` endpoint returns a zero-write fingerprint and requires
+  `--apply --yes --expected-recovery-fingerprint` before arming one in-place retention crossing.
+  Legacy completed handoffs remain historical evidence and cannot authorize a second crossing.
+- SQLite repositories maintain 4096-sequence summary-block metadata with dirty-block triggers and
+  bounded rebuild pages. Record upserts, tombstones, retention deletes, and restart invalidate
+  affected blocks; v2 summaries are published only after clean metadata commits. Older peers keep
+  the v1 partition summary path through additive fields and capability negotiation.
+
 ## Coverage / rollout summary
 
 - SQLite storage and JSON migration: provided by the prior Waves.

@@ -2,6 +2,8 @@ use std::{fs, time::Duration};
 
 use super::*;
 
+mod summary_blocks_tests;
+
 #[test]
 fn migrates_legacy_snapshots_into_sqlite_without_rewriting_json() {
     let temporary = tempfile::tempdir().unwrap();

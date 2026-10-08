@@ -196,7 +196,7 @@ pub async fn cmd_xp_restart(paths: Paths, args: XpRestartArgs) -> Result<(), Exi
     ))
 }
 
-pub(super) fn local_internal_ops_client(
+pub(crate) fn local_internal_ops_client(
     paths: &Paths,
     api_base_url: &str,
 ) -> Result<(reqwest::Client, InternalOpsAuth), ExitError> {
@@ -230,7 +230,7 @@ pub(super) fn local_internal_ops_client(
     Ok((client, auth))
 }
 
-pub(super) async fn internal_json_request<T: DeserializeOwned>(
+pub(crate) async fn internal_json_request<T: DeserializeOwned>(
     client: &reqwest::Client,
     base_url: &str,
     auth: &InternalOpsAuth,
@@ -1040,7 +1040,7 @@ fn validate_https_origin_xp_env(origin: &str, key: &str) -> Result<(), ExitError
     Ok(())
 }
 
-fn validate_origin(origin: &str) -> Result<(), ExitError> {
+pub(crate) fn validate_origin(origin: &str) -> Result<(), ExitError> {
     let url = reqwest::Url::parse(origin)
         .map_err(|_| ExitError::new(2, "invalid_args: --xp-base-url must be a valid URL"))?;
     if url.scheme() != "http" && url.scheme() != "https" {

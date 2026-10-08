@@ -33,8 +33,8 @@ use repository::segment_phase_sql;
 #[allow(unused_imports)]
 pub(crate) use repository::{
     RepositoryHistoryCompactionCursor, RepositoryHistoryCoverage, RepositoryHistoryRecordRow,
-    RepositoryHistorySegmentMetadataRow, RepositoryHistorySegmentRow, RepositoryHistoryTombstone,
-    RepositoryReplicaMutation,
+    RepositoryHistorySegmentMetadataRow, RepositoryHistorySegmentRow,
+    RepositoryHistorySequenceSummaryBlock, RepositoryHistoryTombstone, RepositoryReplicaMutation,
 };
 #[allow(unused_imports)]
 pub(crate) use source_journal::{
@@ -57,6 +57,7 @@ const JSON_FALLBACK_FILE: &str = "history.sqlite3.json-fallback";
 const BACKUP_RETENTION: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const CHECKPOINT_PAGES: u32 = 64;
 const VACUUM_PAGES: u32 = 64;
+const SEQUENCE_SUMMARY_SCHEMA: &str = include_str!("sequence_summary_schema.sql");
 
 mod diagnostics;
 #[cfg(test)]
@@ -521,6 +522,9 @@ fn ensure_schema(connection: &mut Connection) -> Result<()> {
                ON repository_history_records
                   (subject_node_id, is_tombstone, observed_start, observed_end, received_at);",
         )
+        .map_err(sqlite_error)?;
+    connection
+        .execute_batch(SEQUENCE_SUMMARY_SCHEMA)
         .map_err(sqlite_error)?;
     counts::ensure_repository_history_counts(connection)
 }

@@ -2,6 +2,8 @@ use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 
 pub(crate) const DEFAULT_HISTORY_REPOSITORY_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 pub(crate) const HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES: u64 = 256 * 1024 * 1024;
+pub(crate) const HISTORY_RECOVERY_PAGE_BUDGET_BYTES: u64 = 192 * 1024;
+pub(crate) const HISTORY_RECOVERY_METADATA_BUDGET_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RepositoryCapacityError {

@@ -132,6 +132,18 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   peer 判定为 deep-verification 成功。缓存完成后才恢复原有 partition JSON；有序新记录可增量
   更新，迟到记录、tombstone 或 retention 改写会使缓存失效并从磁盘重新建立，不删除或改写历史行。
   单行 payload 损坏只会延后该缓存重建，不能阻塞 segment/gap 同步或使历史服务停止。
+- SQLite-backed repository additionally maintains sequence-block Merkle metadata in the existing
+  `history.sqlite3`. Each block covers 4096 source-stream sequence positions. Rebuild is resumable
+  and bounded; inserts, late rows, tombstones, retention deletes, and restart invalidate only
+  affected blocks. The v2 digest is published only after its metadata transaction commits. The
+  capability is additive: an older peer continues with the existing partition summary and is not
+  held to a v2 readiness requirement.
+- An initial-peer retained-anchor handoff is one-time per source/epoch/stream and recovery
+  generation. A historical handoff marker does not authorize a second retention crossing. The
+  signed local `xp-ops xp history-repository-recover` command provides a zero-write dry-run
+  fingerprint; apply requires `--yes` and the expected fingerprint and arms the generation in the
+  existing control snapshot before replay. Recovery is in-place and never creates a second history
+  database, copies the database, changes quota, deletes source outbox rows, or runs full `VACUUM`.
 - segment summary 使用 `repository_history_segments_sync_order_v2` 覆盖索引
   `(contains_tombstone, source_node_id, source_epoch, stream, first_sequence, id)`；既有库只
   幂等新增该索引，保留旧索引和所有 signed segment payload。

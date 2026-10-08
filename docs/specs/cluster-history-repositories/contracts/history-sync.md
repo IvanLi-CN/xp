@@ -50,6 +50,13 @@ affected records and remain until every current ready repository acknowledges
 them plus the tombstone horizon. Anti-entropy exchanges partition summaries,
 repairs ranges first, then drills down.
 
+SQLite repositories additionally maintain a v2 sequence-block summary in the same
+`history.sqlite3`. A block covers 4096 sequence positions and is rebuilt through bounded dirty
+block pages. Record mutations, tombstones, retention deletes, and restart invalidate affected
+blocks; a v2 digest is published only after its metadata transaction commits. The v2 fields and
+`admin.repository-history-summary-v2` capability are additive, so a peer that lacks the capability
+continues with the v1 partition summary and bounded readiness rules.
+
 The bounded repair response contains `segments`, `gaps`, and the additive
 `unavailable_segment_ids` field. The latter lists only requested 64-character
 hex segment IDs that the serving repository no longer retains under the
@@ -119,6 +126,13 @@ after its permanent gap and receiver watermark were already persisted, completio
 XP clears the marker and records the completed range without advancing the watermark twice.
 Ordinary source delivery and anti-entropy
 continue to require exact sequence continuity.
+
+A stale retained-anchor checkpoint may be advanced only by the signed local
+`xp-ops xp history-repository-recover` command. Dry-run returns a fingerprint without writing;
+apply requires `--yes` and the expected fingerprint. The armed recovery generation crosses one
+retention boundary once, updates the existing database and control snapshot in place, and is
+idempotent across retry. It never creates a database copy, changes quota, deletes source outbox
+rows, or converts a permanent gap into complete history.
 
 An exact persisted segment replay remains an idempotent ACK after the receiving
 runtime restarts; the durable segment identity and watermark are the authority,
