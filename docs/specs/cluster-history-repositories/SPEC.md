@@ -144,6 +144,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   fingerprint; apply requires `--yes` and the expected fingerprint and arms the generation in the
   existing control snapshot before replay. Recovery is in-place and never creates a second history
   database, copies the database, changes quota, deletes source outbox rows, or runs full `VACUUM`.
+- A bounded mixed-stream repair page selects the first eligible handoff, skipping gaps outside an
+  armed recovery binding. Completing an independent source/epoch/stream handoff preserves the
+  generation's original binding; it cannot grant that bound stream a second crossing.
 - Docker/Compose recovery accepts absolute `--data-dir` with existing identity, without `xp.env`.
 - Missing identity fails closed; omission retains host-managed configuration discovery.
 - segment summary 使用 `repository_history_segments_sync_order_v2` 覆盖索引
@@ -293,6 +296,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - VER-JOURNAL-COLLECTOR covers: REQ-JOURNAL-COLLECTOR.
   An unreachable Collector preserves backlog without unbounded retries; after recovery, valid ACKs
   continue fixed-page drain and expose the actual path and time.
+- VER-JOURNAL-GAP-ORDER covers: REQ-JOURNAL-GAP-ORDER.
+  Backpressure tests preserve the first pending segment's predecessor gap at the 64-gap limit;
+  failed delivery leaves the durable gap cursor unchanged.
 
 ### Verification commands
 
@@ -356,6 +362,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 ## Related ADRs
 
 - [ADR 0002](../../adr/0002-history-synchronization-recovery-order.md)
+- [ADR 0018](../../adr/0018-history-repository-recovery-generation.md)
 
 ## Failure Model and Assumptions
 

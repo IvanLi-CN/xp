@@ -146,6 +146,10 @@ beneficial and is released incrementally after acknowledgement. Below the
 existing 256 MiB filesystem safety guard, a Source enters explicit capture
 suspension rather than creating a cursor, acknowledgement, or permanent gap.
 
+- Mixed-stream repair pages select the first handoff allowed by the durable checkpoint. A
+  preceding unrelated gap cannot preempt the armed source/epoch/stream. Completion on another
+  stream preserves the generation binding and its consumed state.
+
 ## Query result
 
 History responses include repository identity, observed and received coverage,

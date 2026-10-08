@@ -4,6 +4,10 @@
 
 ## Decision Trace
 
+- Production v3.43.1 recovery exposed a tombstone-first page that preempted the armed connections
+  gap. The follow-up corrects eligible handoff selection and preserves recovery binding when a
+  different stream finishes.
+
 - Container recovery reads existing identity through explicit `--data-dir`, without `xp.env`.
 
 - Recovery of a stale retained-anchor checkpoint is an explicit one-time generation on the existing
