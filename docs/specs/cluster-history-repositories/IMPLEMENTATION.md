@@ -10,6 +10,10 @@
 
 ### Recovery generation and sequence-block summaries
 
+- Recovery refresh validates repair and summary gaps as two independently bounded wire pages.
+- Both gap merges and the checkpoint commit together.
+- Oversized or malformed pages preserve the prior durable state.
+
 - Mixed-stream repair selection skips ineligible tombstone gaps before an armed connections
   anchor. Independent handoff completion preserves the consumed generation binding across restart.
 

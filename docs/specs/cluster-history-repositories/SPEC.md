@@ -148,6 +148,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   The same summary cursor is re-read after draining; omitted current IDs are never skipped.
   Gap merge, response-identity reset and checkpoint replacement commit atomically. Generation,
   source binding and receiver watermark remain unchanged; stale checkpoint refresh fails closed.
+  Each repair or refreshed-summary gap page retains its existing 64-gap wire limit.
+
+  Both valid pages merge with the checkpoint atomically without increasing that limit.
 - An initial-peer retained-anchor handoff is one-time per source/epoch/stream and recovery
   generation. A historical handoff marker does not authorize a second retention crossing. The
   signed local `xp-ops xp history-repository-recover` command provides a zero-write dry-run

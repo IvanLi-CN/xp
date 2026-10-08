@@ -4,6 +4,9 @@
 
 ## Decision Trace
 
+- Live recovery exposed a refresh failure after concatenating two valid 64-gap responses.
+- Preserve each wire page's bound and merge both inside the atomic checkpoint transaction.
+
 - Production writes exposed migration rewind; two-store tests proved arrival-time hash drift.
 - Canonical v3 negotiation and prefixed metadata preserve mixed-version safety.
 - An independent bounded worker preserves migration progress across late writes.
