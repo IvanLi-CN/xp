@@ -7,14 +7,16 @@ pub(super) fn select_tiered_handoff(
         Item = Result<Option<InitialPeerTieredHandoff>, RepositoryRuntimeError>,
     >,
 ) -> Result<Option<InitialPeerTieredHandoff>, RepositoryRuntimeError> {
+    let mut selected = None;
     for candidate in candidates {
         if let Some(handoff) = candidate?
+            && selected.is_none()
             && can_schedule_tiered_handoff(checkpoint, &handoff)
         {
-            return Ok(Some(handoff));
+            selected = Some(handoff);
         }
     }
-    Ok(None)
+    Ok(selected)
 }
 
 #[cfg(test)]
@@ -78,6 +80,27 @@ mod tests {
             [Err(RepositoryRuntimeError::Storage(
                 "invalid wire".to_owned(),
             ))],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn mixed_stream_repair_rejects_malformed_tail_after_an_eligible_anchor() {
+        let eligible = InitialPeerTieredHandoff {
+            source_node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            source_epoch: 7,
+            stream: "connections".to_owned(),
+            first_missing: 19793,
+            last_missing: 50227,
+            next_sequence: 50228,
+            end_unix_seconds: 12,
+        };
+        let result = select_tiered_handoff(
+            &InitialPeerBackfillCheckpoint::default(),
+            [
+                Ok(Some(eligible)),
+                Err(RepositoryRuntimeError::Storage("invalid wire".to_owned())),
+            ],
         );
         assert!(result.is_err());
     }
