@@ -299,6 +299,17 @@ impl RepositoryReplicaRuntime {
             .get(peer_node_id)
             .cloned()
             .unwrap_or_default();
+        let recovery_matches = prior.recovery_handoff.as_ref().is_some_and(|armed| {
+            armed.source_node_id == handoff.source_node_id
+                && armed.source_epoch == handoff.source_epoch
+                && armed.stream == handoff.stream
+        });
+        if prior.recovery_generation > 0 && !prior.recovery_generation_consumed && !recovery_matches
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                "tiered handoff does not match the armed recovery stream".to_owned(),
+            ));
+        }
         self.snapshot.initial_peer_backfills.insert(
             peer_node_id.to_owned(),
             InitialPeerBackfillCheckpoint {
@@ -318,7 +329,8 @@ impl RepositoryReplicaRuntime {
                 retained_anchor_handoffs: prior.retained_anchor_handoffs,
                 summary_tiered_handoff: Some(handoff),
                 recovery_generation: prior.recovery_generation,
-                recovery_generation_consumed: prior.recovery_generation > 0,
+                recovery_generation_consumed: prior.recovery_generation_consumed
+                    || (prior.recovery_generation > 0 && recovery_matches),
                 recovery_handoff: prior.recovery_handoff,
             },
         );
@@ -414,7 +426,13 @@ impl RepositoryReplicaRuntime {
             .expect("handoff checkpoint checked above");
         checkpoint.summary_tiered_handoff = None;
         checkpoint.retained_anchor_handoffs.insert(handoff.clone());
-        if checkpoint.recovery_generation > 0 {
+        if checkpoint.recovery_generation > 0
+            && checkpoint.recovery_handoff.as_ref().is_some_and(|armed| {
+                armed.source_node_id == handoff.source_node_id
+                    && armed.source_epoch == handoff.source_epoch
+                    && armed.stream == handoff.stream
+            })
+        {
             checkpoint.recovery_generation_consumed = true;
             checkpoint.recovery_handoff = Some(handoff.clone());
         }

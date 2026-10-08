@@ -1,8 +1,10 @@
 use super::*;
+mod handoff_selection;
 use crate::state::history_repository::replica::{
     InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, InitialPeerTieredHandoff,
     RetainedAnchorCheckpointUpdate,
 };
+use handoff_selection::select_tiered_handoff;
 use std::future::Future;
 use tokio::time::Instant;
 
@@ -566,19 +568,15 @@ async fn repair_ready_peer_catch_up_page(
     if repair.history_truncated {
         let tiered_handoff = {
             let runtime = state.repository_replica.lock().await;
-            repair
-                .segments
-                .iter()
-                .find_map(|segment| {
-                    runtime
-                        .tiered_handoff_for_sequence_gap(&segment.wire)
-                        .transpose()
-                })
-                .transpose()?
+            select_tiered_handoff(
+                &checkpoint,
+                repair
+                    .segments
+                    .iter()
+                    .map(|segment| runtime.tiered_handoff_for_sequence_gap(&segment.wire)),
+            )?
         };
-        if let Some(tiered_handoff) =
-            tiered_handoff.filter(|handoff| can_schedule_tiered_handoff(&checkpoint, handoff))
-        {
+        if let Some(tiered_handoff) = tiered_handoff {
             // Do not remove any segment from the original request yet. The bounded response has
             // not been received while the predecessor gap is bridged; retrying the same request
             // keeps its response identity stable and lets the anchor be applied afterwards.

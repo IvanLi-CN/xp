@@ -10,6 +10,9 @@
 
 ### Recovery generation and sequence-block summaries
 
+- Mixed-stream repair selection skips ineligible tombstone gaps before an armed connections
+  anchor. Independent handoff completion preserves the consumed generation binding across restart.
+
 - Initial peer checkpoints now persist an operator-armed recovery generation. The local signed
   `xp-ops xp history-repository-recover` endpoint returns a zero-write fingerprint and requires
   `--apply --yes --expected-recovery-fingerprint` before arming one in-place retention crossing.
