@@ -362,6 +362,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 ## Related ADRs
 
 - [ADR 0002](../../adr/0002-history-synchronization-recovery-order.md)
+- [ADR 0018](../../adr/0018-history-repository-recovery-generation.md)
 
 ## Failure Model and Assumptions
 
