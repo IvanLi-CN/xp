@@ -77,6 +77,9 @@
   serving batch changes during an interrupted pending page, XP clears only the stale response
   identity and retries the same durable segment set; malformed or non-advancing responses fail
   closed.
+  Recovery refresh validates each gap page at the existing 64-gap limit.
+
+  Both pages merge with the checkpoint atomically without rearming the generation.
   Initial backfill receivers cap the JSON response body at four times the semantic page budget,
   reject record-count overflow before typed decoding, then enforce the 128-record / 192 KiB page
   bound. They validate both historical-source and Ready-tiered opaque cursor formats for length,

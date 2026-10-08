@@ -20,17 +20,11 @@ pub(super) async fn refresh(
     if pending == checkpoint.summary_pending_segment_ids {
         return Ok(InitialBackfillProgress::Unavailable);
     }
-    let gaps = repair
-        .gaps
-        .iter()
-        .chain(&summary.gaps)
-        .cloned()
-        .collect::<Vec<_>>();
     runtime.refresh_initial_peer_recovery_pending(
         checkpoint,
         &peer.node_id,
         pending,
-        &gaps,
+        [&repair.gaps, &summary.gaps],
         summary.next_segment_id,
     )?;
     tracing::warn!(peer = %peer.node_id, "expired recovery repair page refreshed without rearming");

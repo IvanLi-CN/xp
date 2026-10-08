@@ -945,6 +945,9 @@ Notes:
   budget, and local state. Apply fails closed if any value changes. It never creates a second
   history database, runs full `VACUUM`, changes quota, or deletes source outbox rows. Permanent gaps
   remain visible and keep queries `partial` and `replica_converged=false`.
+  Recovery refresh validates each gap page at the unchanged 64-gap limit.
+
+  Both pages merge atomically with the checkpoint without rearming the generation.
   XP binds an interrupted repair response to a digest of the actual returned batch. An older peer
   that omits the digest remains compatible because XP calculates it locally. If the serving batch
   changes while the same pending IDs are durable, XP clears only the stale response identity and

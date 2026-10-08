@@ -77,6 +77,9 @@ An unconsumed recovery may refresh a repair page after its retained anchor expir
 - Keep still-retained pending IDs first; fill up to 64 IDs from the current summary page.
 - Re-read the same cursor after draining; do not skip omitted current IDs.
 - Gap merge and checkpoint/response-identity replacement commit atomically.
+- Validate repair and refreshed-summary gap pages separately at the unchanged 64-gap limit.
+- Merge both pages within that atomic refresh.
+- An invalid second page rolls back the first merge and checkpoint.
 - Preserve generation, its source binding and receiver watermark; reject stale refresh state.
 
 The bounded repair response contains `segments`, `gaps`, and the additive
