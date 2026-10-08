@@ -210,14 +210,21 @@ pub(crate) fn local_internal_ops_client(
         return Err(ExitError::new(2, "invalid_input: XP_DATA_DIR is empty"));
     }
     let abs_data_dir = paths.map_abs(Path::new(&data_dir));
-    let metadata = crate::cluster_metadata::ClusterMetadata::load(&abs_data_dir)
+    internal_ops_client_for_data_dir(&abs_data_dir, api_base_url)
+}
+
+pub(crate) fn internal_ops_client_for_data_dir(
+    abs_data_dir: &Path,
+    api_base_url: &str,
+) -> Result<(reqwest::Client, InternalOpsAuth), ExitError> {
+    let metadata = crate::cluster_metadata::ClusterMetadata::load(abs_data_dir)
         .map_err(|error| ExitError::new(5, format!("cluster_metadata_error: {error}")))?;
     let cluster_ca_key_pem = metadata
-        .read_cluster_ca_key_pem(&abs_data_dir)
+        .read_cluster_ca_key_pem(abs_data_dir)
         .map_err(|error| ExitError::new(5, format!("cluster_ca_key_error: {error}")))?
         .ok_or_else(|| ExitError::new(5, "cluster_ca_key_missing"))?;
     let cluster_ca_pem = metadata
-        .read_cluster_ca_pem(&abs_data_dir)
+        .read_cluster_ca_pem(abs_data_dir)
         .map_err(|error| ExitError::new(5, format!("cluster_ca_error: {error}")))?;
     let client = build_xp_ops_http_client(api_base_url, &cluster_ca_pem)?;
     let auth = InternalOpsAuth::new(
@@ -229,7 +236,6 @@ pub(crate) fn local_internal_ops_client(
     );
     Ok((client, auth))
 }
-
 pub(crate) async fn internal_json_request<T: DeserializeOwned>(
     client: &reqwest::Client,
     base_url: &str,

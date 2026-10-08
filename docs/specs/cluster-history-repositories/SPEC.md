@@ -144,6 +144,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   fingerprint; apply requires `--yes` and the expected fingerprint and arms the generation in the
   existing control snapshot before replay. Recovery is in-place and never creates a second history
   database, copies the database, changes quota, deletes source outbox rows, or runs full `VACUUM`.
+- Docker/Compose recovery accepts absolute `--data-dir` with existing identity, without `xp.env`.
+- Missing identity fails closed; omission retains host-managed configuration discovery.
 - segment summary 使用 `repository_history_segments_sync_order_v2` 覆盖索引
   `(contains_tombstone, source_node_id, source_epoch, stream, first_sequence, id)`；既有库只
   幂等新增该索引，保留旧索引和所有 signed segment payload。

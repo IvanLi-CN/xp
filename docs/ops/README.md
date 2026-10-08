@@ -930,6 +930,17 @@ Notes:
     --expected-recovery-fingerprint <fingerprint>
   ```
 
+  Official Docker/Compose containers omit `xp.env`. Add the existing data directory in both modes:
+
+  ```text
+  docker exec <container> xp-ops xp history-repository-recover \
+    --data-dir /var/lib/xp/data --peer-node-id <ready-peer> --dry-run
+  ```
+
+  The directory must already contain the local cluster identity. Missing identity fails closed.
+
+  Host-managed nodes may omit `--data-dir` to use their configured `xp.env` directory.
+
   The fingerprint binds the receiver watermark, prior handoff range, recovery generation, capacity
   budget, and local state. Apply fails closed if any value changes. It never creates a second
   history database, runs full `VACUUM`, changes quota, or deletes source outbox rows. Permanent gaps

@@ -21,6 +21,8 @@
 
 ## Coverage / rollout summary
 
+- Signed container recovery preview is tested with explicit `--data-dir` and absent `xp.env`.
+
 - SQLite storage and JSON migration: provided by the prior Waves.
 - Repository control plane and node identity: persisted with the Raft desired state.
 - Repository administration and observability: `PUT` / `GET /api/admin/history-repositories`

@@ -491,6 +491,10 @@ pub struct XpRecoverSingleNodeArgs {
 
 #[derive(Args, Debug, Clone)]
 pub struct XpHistoryRepositoryRecoverArgs {
+    /// Existing local XP data directory (required for containers without xp.env).
+    #[arg(long, value_name = "PATH")]
+    pub data_dir: Option<PathBuf>,
+
     /// Local xp API base URL.
     #[arg(long, value_name = "ORIGIN", default_value = "http://127.0.0.1:62416")]
     pub api_base_url: String,
