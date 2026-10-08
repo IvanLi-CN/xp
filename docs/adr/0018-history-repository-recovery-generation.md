@@ -24,11 +24,16 @@ Recovery updates the existing `${XP_DATA_DIR}/history.sqlite3` and control snaps
 never creates a second history database, copies the database, deletes source outbox rows, expands
 quota, or runs full `VACUUM`. Capacity and free-space checks fail closed before history writes.
 
-Deep verification uses additive SQLite sequence-block Merkle metadata with a fixed 4096-sequence
-block. Block metadata is rebuilt in resumable bounded pages and invalidated by record, tombstone,
-and retention mutations. A v2 capability is advertised only after metadata is complete. Peers
-without the capability continue using the existing partition summary and never receive a v2-only
-readiness requirement.
+Deep verification uses canonical v3 metadata in the existing SQLite database.
+
+- Fixed blocks cover 4096 sequence positions; hashes exclude replica-local receive time.
+- Explicit `summary_version=3` separates v3 from predecessor v2 hashes.
+- Requests without that opt-in retain v1 partition summaries.
+- An additive version column and prefixed digest identify old metadata for rebuilding.
+- The five-second blocking worker advances at most 4096 keys or 16 blocks per tick.
+- Late mutations invalidate affected blocks without resetting the migration cursor.
+- Capability advertisement waits for complete metadata.
+- Retained-data verification may succeed with gaps; complete-history convergence stays false.
 
 Permanent gaps remain durable evidence. Ready status may complete bounded catch-up, but
 `replica_converged` remains false and queries remain `partial` while a permanent gap or incomplete

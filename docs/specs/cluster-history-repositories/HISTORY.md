@@ -4,6 +4,11 @@
 
 ## Decision Trace
 
+- Production writes exposed migration rewind; two-store tests proved arrival-time hash drift.
+- Canonical v3 negotiation and prefixed metadata preserve mixed-version safety.
+- An independent bounded worker preserves migration progress across late writes.
+- Retained-data verification is distinct from complete-history convergence.
+
 - Production v3.43.1 recovery exposed a tombstone-first page that preempted the armed connections
   gap. The follow-up corrects eligible handoff selection and preserves recovery binding when a
   different stream finishes.
@@ -24,6 +29,10 @@
   cursor 范围时才定义为永久 gap。
 - 选择 eventual consistency、source/observer 双身份、tombstone 和 anti-entropy，而不是 quorum 或 last-write-wins。
 - 将 raw IP 限制为短期细节并长期匿名聚合，避免仓库无限膨胀和不必要的隐私暴露。
+
+- Expired armed-recovery repair pages retain existing IDs and add bounded current IDs.
+  Refresh commits gaps and checkpoint atomically, preserves generation, and re-reads the same
+  summary cursor after draining so a partial refresh cannot skip current segments.
 
 ## Key Reasons / Replacements
 

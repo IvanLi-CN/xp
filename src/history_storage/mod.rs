@@ -526,6 +526,7 @@ fn ensure_schema(connection: &mut Connection) -> Result<()> {
     connection
         .execute_batch(SEQUENCE_SUMMARY_SCHEMA)
         .map_err(sqlite_error)?;
+    repository::ensure_sequence_summary_digest_version(connection)?;
     counts::ensure_repository_history_counts(connection)
 }
 

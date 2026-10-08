@@ -31,8 +31,6 @@ impl RepositoryReplicaRuntime {
             self.snapshot.partition_summaries_complete = false;
             self.snapshot.deep_verified_peer_ids.clear();
             self.snapshot.sequence_summary_blocks_complete = false;
-            self.snapshot.sequence_summary_migration_cursor = None;
-            self.snapshot.sequence_summary_migration_complete = false;
         }
     }
 
@@ -224,7 +222,9 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(crate) fn sequence_summary_blocks_ready(&self) -> bool {
-        self.uses_sqlite_history() && self.snapshot.sequence_summary_blocks_complete
+        self.uses_sqlite_history()
+            && self.snapshot.sequence_summary_version == 3
+            && self.snapshot.sequence_summary_blocks_complete
     }
 
     pub(super) fn finish_storage_write<T, E: std::fmt::Display>(

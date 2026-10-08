@@ -32,11 +32,13 @@ const READY_STABILITY_WINDOW: Duration = Duration::from_secs(5 * 60);
 const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0";
 mod backfill;
 mod blocking;
+mod convergence;
 mod deep_repair;
 mod direct;
 mod legacy_segment_index;
 mod ready_peers;
 mod repair;
+mod sequence_summary;
 mod source;
 mod source_records;
 #[cfg(test)]
@@ -52,6 +54,7 @@ use backfill::{
     pull_peer_initial_history,
 };
 use blocking::{repository_blocking, repository_op};
+use convergence::update_local_replica_convergence;
 #[cfg(test)]
 use deep_repair::deep_repair_requires_tiered_backfill;
 use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
@@ -74,6 +77,7 @@ use source::{
 use source_records::{SourceRecordBatch, source_records, source_records_with_deletions};
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
     legacy_segment_index::spawn(state.clone());
+    sequence_summary::spawn(state.clone());
     source::spawn_local_source_worker(state.clone());
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(REPOSITORY_REPLICATION_INTERVAL);
@@ -658,39 +662,6 @@ async fn apply_local_catch_up_result(
     .map_err(|_| anyhow::anyhow!("write local history repository lifecycle to Raft"))?;
     Ok(())
 }
-async fn update_local_replica_convergence(
-    state: &AppState,
-    replica_converged: bool,
-) -> anyhow::Result<()> {
-    let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
-    let update_needed = {
-        let store = state.store.lock().await;
-        store
-            .state()
-            .repository_membership
-            .as_ref()
-            .and_then(|membership| membership.repository(&node_id))
-            .is_some_and(|member| {
-                member.lifecycle() == &RepositoryLifecycle::Ready
-                    && member.replica_converged() != replica_converged
-            })
-    };
-    if !update_needed {
-        return Ok(());
-    }
-    super::super::raft_write(
-        state,
-        crate::state::DesiredStateCommand::UpdateRepositoryMemberRuntime(
-            RepositoryMemberRuntimePatch {
-                node_id: node_id.as_str().to_owned(),
-                update: RepositoryMemberRuntimeUpdate::ReplicaConverged { replica_converged },
-            },
-        ),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("write local history repository convergence to Raft"))?;
-    Ok(())
-}
 async fn known_history_source_node_ids(state: &AppState) -> Vec<String> {
     const MAX_KNOWN_HISTORY_SOURCES: usize = 4_096;
     let store = state.store.lock().await;
@@ -773,7 +744,10 @@ async fn replicate_peer(
         let path = after_segment_id.as_ref().map_or_else(
             || {
                 format!(
-                    "/api/admin/_internal/history-repository/summary?deep_verification={}",
+                    concat!(
+                        "/api/admin/_internal/history-repository/summary?",
+                        "summary_version=3&deep_verification={}"
+                    ),
                     work.is_deep_verification()
                 )
             },
@@ -907,7 +881,11 @@ async fn replicate_peer(
                         !runtime
                             .missing_segment_ids(&remote_summary, work.is_deep_verification())?
                             .is_empty(),
-                        runtime.requires_repair(&remote_summary, work.is_deep_verification())?,
+                        if work.is_deep_verification() {
+                            runtime.requires_retained_repair(&remote_summary)?
+                        } else {
+                            runtime.requires_repair(&remote_summary, false)?
+                        },
                     ))
                 })
                 .await?
@@ -930,6 +908,15 @@ async fn replicate_peer(
                 }
                 return Ok(false);
             }
+        }
+        if work.is_deep_verification() && after_segment_id.is_none() {
+            deep_verification_available &= repository_op(&state.repository_replica, |runtime| {
+                Ok::<_, RepositoryRuntimeError>(
+                    runtime.retained_summary_available(&remote_summary)
+                        && runtime.retained_partitions_converged(&remote_summary)?,
+                )
+            })
+            .await?;
         }
         let Some(next) = remote_summary.next_segment_id else {
             break;
