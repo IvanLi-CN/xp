@@ -194,3 +194,7 @@ bounded by the repository query limit; a response supplies `next_page_cursor`
 only when another bounded page is available.
 Binary `record_key` and `payload` fields are unpadded base64url so actual JSON
 response bytes remain within the query response budget.
+
+A refreshed first summary page persists an explicit revisit marker, so its absent cursor is not
+interpreted as end-of-export after one bounded repair. An all-expired page with no missing current
+IDs persists gaps and the serving page continuation atomically without consuming its generation.

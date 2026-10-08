@@ -17,14 +17,21 @@ pub(super) async fn refresh(
     let mut runtime = state.repository_replica.lock().await;
     let fresh = runtime.missing_segment_ids(&summary, false)?;
     let pending = refreshed_pending(checkpoint, &repair.unavailable_segment_ids, &fresh);
-    if pending == checkpoint.summary_pending_segment_ids || pending.is_empty() {
+    if pending == checkpoint.summary_pending_segment_ids {
         return Ok(InitialBackfillProgress::Unavailable);
     }
+    let gaps = repair
+        .gaps
+        .iter()
+        .chain(&summary.gaps)
+        .cloned()
+        .collect::<Vec<_>>();
     runtime.refresh_initial_peer_recovery_pending(
         checkpoint,
         &peer.node_id,
         pending,
-        &repair.gaps,
+        &gaps,
+        summary.next_segment_id,
     )?;
     tracing::warn!(peer = %peer.node_id, "expired recovery repair page refreshed without rearming");
     Ok(InitialBackfillProgress::InProgress)

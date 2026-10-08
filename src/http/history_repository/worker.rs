@@ -168,11 +168,8 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     let mut synchronized = false;
     let mut deep_verification_succeeded =
         if work.is_deep_verification() && selected_peer_ids.is_empty() {
-            state
-                .repository_replica
-                .lock()
-                .await
-                .partition_summaries_ready()
+            let runtime = state.repository_replica.lock().await;
+            runtime.partition_summaries_ready() || runtime.sequence_summary_blocks_ready()
         } else {
             false
         };

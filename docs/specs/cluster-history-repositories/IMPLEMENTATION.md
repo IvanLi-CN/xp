@@ -289,3 +289,7 @@
 
 - `./SPEC.md`
 - `./HISTORY.md`
+
+A refreshed first summary page persists an explicit revisit marker, so its absent cursor is not
+interpreted as end-of-export after one bounded repair. An all-expired page with no missing current
+IDs persists gaps and the serving page continuation atomically without consuming its generation.

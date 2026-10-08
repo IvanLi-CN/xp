@@ -58,7 +58,8 @@ fn completed_repair_response(
     let summary_cursor = page_complete
         .then(|| checkpoint.summary_pending_next_cursor.clone())
         .flatten();
-    let summary_complete = page_complete && summary_cursor.is_none();
+    let summary_complete =
+        page_complete && summary_cursor.is_none() && !checkpoint.summary_pending_revisit_cursor;
     CompletedRepairResponse {
         summary_cursor,
         pending_segment_ids: remaining.into_iter().collect(),
@@ -869,6 +870,19 @@ mod tests {
             ),
             InitialBackfillProgress::Complete
         );
+    }
+
+    #[test]
+    fn refreshed_first_summary_page_is_revisited_after_bounded_repair() {
+        let checkpoint = InitialPeerBackfillCheckpoint {
+            summary_pending_revisit_cursor: true,
+            ..Default::default()
+        };
+        let response = completed_repair_response(&checkpoint, BTreeSet::new());
+        assert!(response.summary_cursor.is_none());
+        assert!(response.pending_segment_ids.is_empty());
+        assert!(!response.summary_complete);
+        assert!(response.response_complete);
     }
 
     #[test]
