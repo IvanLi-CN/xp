@@ -1,7 +1,14 @@
 use crate::ops::cli::{ExitError, XpHistoryRepositoryRecoverArgs};
 use crate::ops::paths::Paths;
-use crate::ops::xp::{internal_json_request, local_internal_ops_client, validate_origin};
+use crate::ops::xp::{
+    internal_json_request, internal_ops_client_for_data_dir, local_internal_ops_client,
+    validate_origin,
+};
 use axum::http::Method;
+
+#[cfg(test)]
+#[path = "history_recovery_tests.rs"]
+mod tests;
 
 pub(crate) async fn cmd_xp_history_repository_recover(
     paths: Paths,
@@ -26,7 +33,18 @@ pub(crate) async fn cmd_xp_history_repository_recover(
     if args.peer_node_id.trim().is_empty() {
         return Err(ExitError::new(2, "invalid_args: --peer-node-id is empty"));
     }
-    let (client, auth) = local_internal_ops_client(&paths, &args.api_base_url)?;
+    let (client, auth) = match args.data_dir.as_deref() {
+        Some(data_dir) => {
+            if !data_dir.is_absolute() {
+                return Err(ExitError::new(
+                    2,
+                    "invalid_args: --data-dir must be absolute",
+                ));
+            }
+            internal_ops_client_for_data_dir(&paths.map_abs(data_dir), &args.api_base_url)?
+        }
+        None => local_internal_ops_client(&paths, &args.api_base_url)?,
+    };
     let body = serde_json::to_vec(&serde_json::json!({
         "peer_node_id": args.peer_node_id,
         "apply": args.apply,

@@ -82,6 +82,7 @@
   SHA. GitHub CI and release publication do not provide or replace shared-testbox capacity evidence.
   Reverse uses XP-owned loopback `127.0.0.1:10086` with authenticated TCP-only SOCKS and does
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
+- Container history recovery requires `--data-dir /var/lib/xp/data` when `xp.env` is absent.
 - Service Monitoring persists each node's bounded capture journal in
   `${XP_DATA_DIR}/uptime.sqlite3` and delivers observations through the existing signed History
   Repository path. systemd, OpenRC, and Docker/Compose upgrades must preserve that file together

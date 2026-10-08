@@ -4,6 +4,8 @@
 
 ## Decision Trace
 
+- Container recovery reads existing identity through explicit `--data-dir`, without `xp.env`.
+
 - Recovery of a stale retained-anchor checkpoint is an explicit one-time generation on the existing
   `history.sqlite3`; it never creates a second database, changes quota, deletes source outbox rows,
   or rewrites permanent gaps.
