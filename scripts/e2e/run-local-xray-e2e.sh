@@ -91,11 +91,84 @@ done
 export XP_E2E_VLESS_PORT
 
 cleanup() {
-  compose down
+  if [ "${XP_E2E_COMPOSE_STARTED:-0}" -eq 1 ]; then
+    compose down
+  fi
+  if [ -n "${XP_E2E_BINARY_DIR:-}" ]; then
+    rm -rf "$XP_E2E_BINARY_DIR"
+  fi
 }
 trap cleanup EXIT INT TERM
 
+XP_E2E_BINARY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/xp-xray-e2e-binaries.XXXXXX")"
+XP_E2E_COMPOSE_STARTED=0
+
+echo "building Xray E2E test binaries once..."
+XP_E2E_MANIFEST="$XP_E2E_BINARY_DIR/cargo.json"
+XP_E2E_BUILD_LOG="$XP_E2E_BINARY_DIR/cargo-build.log"
+cargo test \
+  --locked \
+  --test xray_e2e \
+  --test xray_mesh_transport_e2e \
+  --test xray_vless_xhttp_e2e \
+  --test shared_quota_xray_e2e \
+  --no-run \
+  --message-format=json >"$XP_E2E_MANIFEST" 2>"$XP_E2E_BUILD_LOG" || {
+  cat "$XP_E2E_BUILD_LOG" >&2
+  exit 1
+}
+
+python3 - "$XP_E2E_MANIFEST" "$XP_E2E_BINARY_DIR" <<'PY'
+import json
+import pathlib
+import sys
+
+manifest = pathlib.Path(sys.argv[1])
+output_dir = pathlib.Path(sys.argv[2])
+wanted = {
+    "xray_e2e",
+    "xray_mesh_transport_e2e",
+    "xray_vless_xhttp_e2e",
+    "shared_quota_xray_e2e",
+}
+paths = {}
+for line in manifest.read_text().splitlines():
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if record.get("reason") != "compiler-artifact":
+        continue
+    target = record.get("target", {})
+    name = target.get("name")
+    executable = record.get("executable")
+    if name in wanted and "test" in target.get("kind", []) and executable:
+        paths[name] = executable
+
+missing = sorted(wanted - paths.keys())
+if missing:
+    raise SystemExit(f"missing compiled Xray E2E test binaries: {', '.join(missing)}")
+for name, executable in paths.items():
+    (output_dir / name).write_text(executable)
+PY
+
+XRAY_E2E_BIN="$(cat "$XP_E2E_BINARY_DIR/xray_e2e")"
+XRAY_MESH_BIN="$(cat "$XP_E2E_BINARY_DIR/xray_mesh_transport_e2e")"
+XRAY_VLESS_BIN="$(cat "$XP_E2E_BINARY_DIR/xray_vless_xhttp_e2e")"
+SHARED_QUOTA_BIN="$(cat "$XP_E2E_BINARY_DIR/shared_quota_xray_e2e")"
+
+run_suite() {
+  suite="$1"
+  shift
+  started_at="$(date +%s)"
+  echo "running ${suite}..."
+  "$@"
+  finished_at="$(date +%s)"
+  echo "completed ${suite} in $((finished_at - started_at))s"
+}
+
 compose up -d
+XP_E2E_COMPOSE_STARTED=1
 
 port_open() {
   python3 - "$XP_E2E_XRAY_API_PORT" <<'PY'
@@ -132,30 +205,35 @@ done
 # These ignored suites share one external Xray instance and forwarded ports.
 export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
 
-XP_E2E_XRAY_MODE=external \
-XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
-cargo test --test xray_e2e -- --ignored
+run_suite xray_e2e env \
+  XP_E2E_XRAY_MODE=external \
+  XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
+  "$XRAY_E2E_BIN" --ignored
 
-XP_E2E_XRAY_MODE=external \
-XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
-XP_E2E_VLESS_PORT="${XP_E2E_VLESS_PORT}" \
-cargo test --test xray_mesh_transport_e2e -- --ignored --exact \
+run_suite mesh-reality-fallback env \
+  XP_E2E_XRAY_MODE=external \
+  XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
+  XP_E2E_VLESS_PORT="${XP_E2E_VLESS_PORT}" \
+  "$XRAY_MESH_BIN" --ignored --exact \
   reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect \
   --test-threads=1
 
-XP_E2E_XRAY_MODE=external \
-XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
-XP_E2E_VLESS_PORT="${XP_E2E_VLESS_PORT}" \
-cargo test --test xray_mesh_transport_e2e -- --ignored --exact \
+run_suite mesh-xhttp-fallback env \
+  XP_E2E_XRAY_MODE=external \
+  XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
+  XP_E2E_VLESS_PORT="${XP_E2E_VLESS_PORT}" \
+  "$XRAY_MESH_BIN" --ignored --exact \
   xhttp_endpoint_reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect \
   --test-threads=1
 
-XP_E2E_XRAY_MODE=external \
-XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
-XP_E2E_VLESS_PORT="${XP_E2E_VLESS_PORT}" \
-XP_E2E_MIHOMO_BIN="${XP_E2E_MIHOMO_BIN}" \
-cargo test --test xray_vless_xhttp_e2e -- --ignored
+run_suite vless-xhttp env \
+  XP_E2E_XRAY_MODE=external \
+  XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
+  XP_E2E_VLESS_PORT="${XP_E2E_VLESS_PORT}" \
+  XP_E2E_MIHOMO_BIN="${XP_E2E_MIHOMO_BIN}" \
+  "$XRAY_VLESS_BIN" --ignored
 
-XP_E2E_XRAY_MODE=external \
-XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
-cargo test --test shared_quota_xray_e2e -- --ignored
+run_suite shared-quota env \
+  XP_E2E_XRAY_MODE=external \
+  XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
+  "$SHARED_QUOTA_BIN" --ignored
