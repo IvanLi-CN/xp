@@ -670,7 +670,7 @@ async fn mihomo_xhttp_xmux_reuses_one_connection_and_recovers_after_disconnect()
 }
 #[tokio::test]
 #[ignore]
-async fn mihomo_provider_chain_has_no_direct_fallback() {
+async fn mihomo_provider_chain_fails_closed_without_other_subscribed_reality() {
     let mihomo_binary = std::env::var("XP_E2E_MIHOMO_BIN")
         .expect("XP_E2E_MIHOMO_BIN for the real Mihomo provider smoke");
     let user = User {
@@ -784,29 +784,16 @@ proxies:
             .get("proxies")
             .and_then(Value::as_sequence)
             .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        None,
-        "external relay groups must let provider candidates seed url-test"
+        Some(vec!["REJECT"]),
+        "a relay without another subscribed Reality must fail closed"
     );
     assert_eq!(
         relay_group.get("empty-fallback").and_then(Value::as_str),
         Some("REJECT"),
         "external relay groups must override Mihomo's COMPATIBLE empty fallback"
     );
-    let relay_provider_names = relay_group
-        .get("use")
-        .and_then(Value::as_sequence)
-        .expect("external relay group provider wiring")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
-    assert_eq!(relay_provider_names, vec!["providerA"]);
-    let relay_filter = relay_group
-        .get("filter")
-        .and_then(Value::as_str)
-        .expect("external relay group filter");
-    assert!(relay_filter.contains("Japan"));
-    assert!(relay_filter.contains("Singapore"));
-    assert!(!relay_filter.contains("Germany"));
+    assert!(relay_group.get("use").is_none());
+    assert!(relay_group.get("filter").is_none());
     let system_root: Value = serde_yaml::from_str(&system_yaml).expect("system provider YAML");
     let direct_name = system_root
         .get("proxies")
@@ -905,7 +892,7 @@ proxies:
         controller_addr,
         &relay_group_name,
         &mihomo,
-        |value| mihomo_proxy_is_selected(value, "Japan smoke"),
+        |value| mihomo_proxy_is_selected(value, "REJECT"),
     )
     .await;
     let relay_candidates = relay
@@ -917,12 +904,12 @@ proxies:
             .iter()
             .filter_map(serde_json::Value::as_str)
             .collect::<Vec<_>>(),
-        vec!["Japan smoke"],
-        "a matching provider candidate must remain selectable without a static REJECT"
+        vec!["REJECT"],
+        "an external provider must not bypass an empty system candidate set"
     );
     assert_eq!(
         relay.get("now").and_then(serde_json::Value::as_str),
-        Some("Japan smoke")
+        Some("REJECT")
     );
     let empty_filter_relay = wait_for_mihomo_proxy_api(
         &client,
