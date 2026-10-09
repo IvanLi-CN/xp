@@ -49,6 +49,7 @@ fn tiered_backfill_record(sequence: u64) -> RepositoryInitialBackfillRecord {
 fn tiered_cursor(phase: &str, sequence: Option<u64>) -> String {
     URL_SAFE_NO_PAD.encode(
         serde_json::to_vec(&json!({
+            "keyset_version": 2,
             "repair_cache_cutoff_unix_seconds": 10,
             "received_at_cutoff_unix_seconds": 20,
             "tombstone_high_watermark": null,
@@ -446,4 +447,60 @@ fn initial_backfill_page_response_keeps_the_frozen_snapshot_tail() {
     let cursor = HistoricalBackfillPageCursor::decode(&cursor).expect("page cursor decoding");
 
     assert_eq!(cursor.snapshot_end_unix_seconds, Some(100));
+}
+
+#[test]
+fn peer_backfill_uses_aggregate_bucket_key_without_rewriting_observation_time() {
+    let records =
+        (0..2)
+            .map(|sequence| {
+                let mut record = tiered_backfill_record(sequence);
+                record.observed_at_unix_seconds = 150 - sequence * 10;
+                record.payload_base64 = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&json!({
+            "algorithm": "sha256", "resolution": "5m",
+            "bucket_start_unix_seconds": 100, "bucket_end_unix_seconds": 199,
+            "record_count": 2, "first_sequence": sequence, "last_sequence": sequence + 1,
+            "payload_sha256": "abc", "complete": true
+        })).expect("aggregate payload"));
+                record
+            })
+            .collect::<Vec<_>>();
+    let mut value: serde_json::Value = serde_json::from_slice(
+        &URL_SAFE_NO_PAD
+            .decode(tiered_cursor("records", Some(1)))
+            .expect("cursor bytes"),
+    )
+    .expect("cursor JSON");
+    value["after"]["observed_start_unix_seconds"] = json!(100);
+    let next = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&value).expect("cursor"));
+    let mut page = RepositoryInitialBackfillPage {
+        records,
+        next_page_cursor: Some(next),
+    };
+    validate_peer_backfill_page(&page, None, "cluster-a").expect("canonical bucket order");
+    assert_eq!(page.records[0].observed_at_unix_seconds, 150);
+    page.records.reverse();
+    assert!(
+        validate_peer_backfill_page(&page, None, "cluster-a").is_err(),
+        "descending canonical keys must still fail closed"
+    );
+}
+
+#[test]
+fn peer_backfill_rejects_keyset_version_downgrade() {
+    let previous = tiered_cursor("records", Some(0));
+    let mut next: serde_json::Value = serde_json::from_slice(
+        &URL_SAFE_NO_PAD
+            .decode(tiered_cursor("records", Some(1)))
+            .expect("cursor bytes"),
+    )
+    .expect("cursor JSON");
+    next.as_object_mut()
+        .expect("object")
+        .remove("keyset_version");
+    let page = RepositoryInitialBackfillPage {
+        records: vec![tiered_backfill_record(1)],
+        next_page_cursor: Some(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&next).expect("cursor"))),
+    };
+    assert!(validate_peer_backfill_page(&page, Some(&previous), "cluster-a").is_err());
 }

@@ -870,6 +870,7 @@ Notes:
   bound. It validates historical-source and Ready-tiered opaque cursors for length, format,
   forward progress, page-tail binding and stable snapshot/export state; tiered pages use the
   sender's canonical segment-byte budget.
+  Tiered keyset recovery follows `contracts/history-sync.md`; never reapply a consumed generation.
   Malformed or regressing pages remain retryable failures and are never checkpointed.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.

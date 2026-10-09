@@ -27,6 +27,17 @@ pub(crate) struct RepositoryTieredBackfillRecord {
     pub(crate) tombstone: bool,
 }
 
+impl RepositoryTieredBackfillRecord {
+    pub(crate) fn observed_start_unix_seconds(&self) -> u64 {
+        retention::backfill_record_time_range(
+            &self.schema_id,
+            &self.payload,
+            self.observed_at_unix_seconds,
+        )
+        .0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct RepositoryTieredBackfillPage {
     pub(crate) records: Vec<RepositoryTieredBackfillRecord>,
@@ -35,6 +46,9 @@ pub(crate) struct RepositoryTieredBackfillPage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RepositoryTieredBackfillCursor {
+    /// Version 2 binds `after` to SQLite's canonical retention start, not raw sample time.
+    #[serde(default)]
+    keyset_version: u8,
     repair_cache_cutoff_unix_seconds: u64,
     received_at_cutoff_unix_seconds: u64,
     tombstone_high_watermark: Option<RepositoryHistoryCompactionCursor>,
@@ -66,12 +80,14 @@ fn decode_tiered_backfill_cursor(
         anyhow::bail!("initial history backfill cursor exceeds limit");
     }
     let bytes = URL_SAFE_NO_PAD.decode(encoded)?;
-    serde_json::from_slice::<RepositoryTieredBackfillCursor>(&bytes)
-        .map(RepositoryTieredBackfillCursorState::Current)
-        .or_else(|_| {
-            serde_json::from_slice::<RepositoryHistoryCompactionCursor>(&bytes)
-                .map(RepositoryTieredBackfillCursorState::Legacy)
-        })
+    if let Ok(cursor) = serde_json::from_slice::<RepositoryTieredBackfillCursor>(&bytes) {
+        if !matches!(cursor.keyset_version, 0 | 2) {
+            anyhow::bail!("unsupported tiered keyset version");
+        }
+        return Ok(RepositoryTieredBackfillCursorState::Current(cursor));
+    }
+    serde_json::from_slice::<RepositoryHistoryCompactionCursor>(&bytes)
+        .map(RepositoryTieredBackfillCursorState::Legacy)
         .map_err(Into::into)
 }
 
@@ -115,6 +131,9 @@ pub(crate) fn validate_tiered_backfill_cursor(
         }
         return Ok(());
     };
+    if next.keyset_version < previous.keyset_version {
+        anyhow::bail!("peer tiered backfill keyset version regressed");
+    }
     if previous.repair_cache_cutoff_unix_seconds != next.repair_cache_cutoff_unix_seconds
         || previous.received_at_cutoff_unix_seconds != next.received_at_cutoff_unix_seconds
         || previous
@@ -188,6 +207,12 @@ impl RepositoryReplicaRuntime {
             export_session_id,
         ) = match cursor {
             Some(RepositoryTieredBackfillCursorState::Current(cursor)) => {
+                // Old continuations used raw observation time. Seeking with them can silently
+                // skip aggregates. Use the existing application-error restart path instead;
+                // imported rows replay idempotently and the recovery generation is untouched.
+                if cursor.keyset_version == 0 && cursor.after.is_some() {
+                    return Err(RepositoryRuntimeError::StateLimitExceeded);
+                }
                 if !self
                     .storage
                     .has_repository_history_export_session(
@@ -351,7 +376,7 @@ impl RepositoryReplicaRuntime {
                 selected_records
                     .last()
                     .map(|record| RepositoryHistoryCompactionCursor {
-                        observed_start_unix_seconds: record.observed_at_unix_seconds,
+                        observed_start_unix_seconds: record.observed_start_unix_seconds(),
                         source_node_id: record.source_node_id.clone(),
                         source_epoch: record.source_epoch,
                         stream: record.stream.clone(),
@@ -362,6 +387,7 @@ impl RepositoryReplicaRuntime {
             };
             URL_SAFE_NO_PAD.encode(
                 serde_json::to_vec(&RepositoryTieredBackfillCursor {
+                    keyset_version: 2,
                     repair_cache_cutoff_unix_seconds,
                     received_at_cutoff_unix_seconds,
                     tombstone_high_watermark,

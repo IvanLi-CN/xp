@@ -111,8 +111,12 @@ fn tiered_record_sort_key(
     ) else {
         anyhow::bail!("tiered backfill record has an incomplete source cursor");
     };
+    let tiered = record
+        .clone()
+        .into_tiered_backfill_record()?
+        .ok_or_else(|| anyhow::anyhow!("tiered backfill record is incomplete"))?;
     Ok((
-        record.observed_at_unix_seconds,
+        tiered.observed_start_unix_seconds(),
         source_node_id,
         source_epoch,
         stream,

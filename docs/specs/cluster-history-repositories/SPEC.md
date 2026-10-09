@@ -82,6 +82,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   使用 JSON 记录预算，Ready repository tiered 页使用发送方的 canonical segment 字节预算。接收方
   必须分别校验两种 opaque cursor 的长度、格式、单调前进和稳定 snapshot/export 状态；非法、回退
   或循环 cursor 不得写入 durable checkpoint。
+- Ready-tiered 排序、续页和接收校验统一使用 SQLite retention-start 五列 keyset。
+- 聚合桶起点不得被原始采样时间替代；wire 时间、payload 和 source 身份保持不变。
+- 新游标使用 `keyset_version=2`；带 after 的旧游标在查询前拒绝并通过既有有界幂等重启恢复。
+- 未开始的旧游标可原地升级；未知版本和降级 fail closed，重启不得重新激活 recovery generation。
 - ready 表示仓库已完成完整已知并集的追赶并通过稳定窗口；若所有 ready 仓库一致保有真正永久
   gap，新仓库可进入 ready 以提供同一完整已知并集，但必须保持 `replica_converged=false`，相关
   查询必须为 `partial`。

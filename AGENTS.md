@@ -78,6 +78,10 @@
   identity and retries the same durable segment set; malformed or non-advancing responses fail
   closed.
   Recovery refresh validates each gap page at the existing 64-gap limit.
+  Tiered backfill uses the canonical retention-start five-column SQLite key for ordering and
+  continuation while preserving original wire observation times. Version-2 keyset cursors reject
+  predecessor continuations before seeking and use bounded idempotent export restart; this does
+  not rearm recovery generations.
 
   Both pages merge with the checkpoint atomically without rearming the generation.
   Initial backfill receivers cap the JSON response body at four times the semantic page budget,

@@ -37,6 +37,10 @@
   Refresh commits gaps and checkpoint atomically, preserves generation, and re-reads the same
   summary cursor after draining so a partial refresh cannot skip current segments.
 
+- Tiered exports now use canonical SQLite retention-start ordering and continuation.
+- Old raw-time continuations use bounded idempotent restart to prevent skipped rows.
+- Original observation time, source identity and recovery generation remain unchanged.
+
 ## Key Reasons / Replacements
 
 - 本主题新增一个长期数据边界，不 supersede 既有 node history、traffic 或 Mesh Spec；它们作为输入和兼容约束继续有效。

@@ -42,6 +42,16 @@ records and validate the applicable opaque cursor family for length, format,
 forward progress, and stable snapshot/export state before persisting the next
 checkpoint. Malformed, regressing, or cycling cursors remain retryable failures.
 
+Tiered exports use canonical retention-start keys; raw sample timestamps remain unchanged.
+
+- Order and continuation: `(observed_start, source_node_id, source_epoch, stream, sequence)`.
+- Storage, sender and receiver share one aggregate/uptime/resource retention-range decoder.
+- New opaque cursors declare `keyset_version=2`; payload and source identities remain unchanged.
+- Reject predecessor cursors with an `after` key before seeking; restart the bounded export.
+- Restart uses existing idempotent imports and never rearms the recovery generation.
+- An unstarted predecessor cursor can upgrade in place without changing its fixed export state.
+- Unknown versions and version regressions fail closed; source delivery stays sequence-strict.
+
 ## Acknowledgement and repair
 
 An acknowledgement advances only a continuous watermark. Expired cursors return
