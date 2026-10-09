@@ -9,7 +9,7 @@
 
 - Status: 已完成
 - Created: 2026-04-17
-- Last: 2026-08-04
+- Last: 2026-10-09
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
@@ -20,3 +20,14 @@
 - [x] M5: Web 设置页与订阅 URL provider-only UI + Storybook
 - [x] M6: 回归测试、视觉证据、共享测试机 Mihomo 验证
 - [x] M7: PR / review / merge / cleanup
+
+## Follow-up Requirements
+
+The following rendering requirements were clarified after delivery and are now implemented.
+
+- [x] Put every generated `🛬 {base}` Landing Group before the regional candidates in `🤯 All`.
+- [x] Add other Subscription Nodes' `*-reality` Access Points to each system `🛣️` group.
+      Exclude the Target Node, `DIRECT`, and unsubscribed nodes; use `REJECT` when none qualify.
+
+- Provider rendering tests cover landing ordering, system-provider Reality filters,
+  external provider additions, shared access-host exclusion, and fail-closed `REJECT` behavior.

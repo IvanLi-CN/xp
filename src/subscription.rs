@@ -21,6 +21,11 @@ use clash_proxy::{
     ClashProxy, ClashRealityOpts, ClashSsProxy, ClashVlessProxy, mihomo_smux_config,
     mihomo_vless_transport_config, mihomo_xhttp_share_extra_json,
 };
+mod mihomo_relay;
+use mihomo_relay::{
+    MihomoRelayGroup, attach_mihomo_relay_candidates, build_mihomo_relay_groups,
+    inject_mihomo_relay_groups,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubscriptionError {
@@ -342,7 +347,8 @@ pub fn build_mihomo_yaml_with_node_probes(
 ) -> Result<String, SubscriptionError> {
     let mut rng = rand::thread_rng();
     let relay_node_ids = build_mihomo_subscribed_node_ids(user, memberships, endpoints, nodes)?;
-    let relay_groups = build_mihomo_relay_groups(memberships, endpoints, nodes, &relay_node_ids);
+    let mut relay_groups =
+        build_mihomo_relay_groups(memberships, endpoints, nodes, &relay_node_ids);
     let relay_group_names = collect_mihomo_relay_group_names(&relay_groups);
     let relay_group_by_node_id =
         build_mihomo_relay_group_name_by_node_id(memberships, endpoints, nodes, &relay_node_ids);
@@ -357,6 +363,7 @@ pub fn build_mihomo_yaml_with_node_probes(
         &relay_group_by_node_id,
         &mut rng,
     )?;
+    attach_mihomo_relay_candidates(&mut relay_groups, &generated, nodes, &relay_node_ids);
     let mut root = parse_mixin_mapping(&profile.mixin_yaml)?;
     let mixin_proxies = take_mihomo_proxies_field(&mut root)?;
     let mixin_proxy_providers = take_mihomo_proxy_providers_field(&mut root)?;
@@ -550,7 +557,8 @@ fn build_mihomo_provider_roots_with_node_probes(
 ) -> Result<(serde_yaml::Mapping, serde_yaml::Mapping), SubscriptionError> {
     let mut rng = rand::thread_rng();
     let relay_node_ids = build_mihomo_subscribed_node_ids(user, memberships, endpoints, nodes)?;
-    let relay_groups = build_mihomo_relay_groups(memberships, endpoints, nodes, &relay_node_ids);
+    let mut relay_groups =
+        build_mihomo_relay_groups(memberships, endpoints, nodes, &relay_node_ids);
     let relay_group_names = collect_mihomo_relay_group_names(&relay_groups);
     let relay_group_by_node_id =
         build_mihomo_relay_group_name_by_node_id(memberships, endpoints, nodes, &relay_node_ids);
@@ -563,6 +571,7 @@ fn build_mihomo_provider_roots_with_node_probes(
         &relay_group_by_node_id,
         &mut rng,
     )?;
+    attach_mihomo_relay_candidates(&mut relay_groups, &generated, nodes, &relay_node_ids);
     let generated_proxy_name_set = collect_top_level_proxy_names(&generated);
     let generated_system_provider_name_set = collect_top_level_proxy_names(&generated);
     let reserved_proxy_names =
@@ -942,13 +951,6 @@ fn remap_provider_only_proxy_refs_to_landing_groups(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct MihomoRelayGroup {
-    access_host: String,
-    name: String,
-    url: String,
-}
-
 fn mihomo_relay_group_name(base: &str) -> String {
     format!(
         "{MIHOMO_RELAY_GROUP_PREFIX}{}",
@@ -1108,96 +1110,6 @@ fn build_mihomo_subscribed_node_ids(
     }
 
     Ok(node_ids)
-}
-
-fn build_mihomo_relay_groups(
-    _memberships: &[NodeUserEndpointMembership],
-    endpoints: &[Endpoint],
-    nodes: &[Node],
-    relay_node_ids: &std::collections::BTreeSet<String>,
-) -> Vec<MihomoRelayGroup> {
-    let mut managed_vless_ports_by_access_host =
-        std::collections::BTreeMap::<String, std::collections::BTreeSet<u16>>::new();
-    let mut api_bases_by_access_host =
-        std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
-
-    for node in nodes {
-        if !relay_node_ids.contains(&node.node_id) {
-            continue;
-        }
-        let access_host = node.access_host.trim();
-        if access_host.is_empty() {
-            continue;
-        }
-        api_bases_by_access_host
-            .entry(access_host.to_string())
-            .or_default()
-            .insert(node.api_base_url.trim().to_string());
-    }
-
-    for node in nodes {
-        if !relay_node_ids.contains(&node.node_id) {
-            continue;
-        }
-        let access_host = node.access_host.trim();
-        if access_host.is_empty() {
-            continue;
-        }
-        for endpoint in endpoints
-            .iter()
-            .filter(|endpoint| endpoint.node_id == node.node_id)
-        {
-            if managed_default_vless_endpoint(endpoint).is_none() {
-                continue;
-            }
-            managed_vless_ports_by_access_host
-                .entry(access_host.to_string())
-                .or_default()
-                .insert(endpoint.port);
-        }
-    }
-
-    let base_by_access_host = api_bases_by_access_host
-        .keys()
-        .map(|access_host| {
-            (
-                access_host.clone(),
-                mihomo_relay_group_base_from_access_host(access_host),
-            )
-        })
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let mut base_counts = std::collections::BTreeMap::<String, usize>::new();
-    for relay_base in base_by_access_host.values() {
-        *base_counts.entry(relay_base.clone()).or_insert(0) += 1;
-    }
-
-    api_bases_by_access_host
-        .into_iter()
-        .map(|(access_host, api_base_urls)| {
-            let relay_base = base_by_access_host
-                .get(&access_host)
-                .expect("relay base should be precomputed")
-                .clone();
-            let unique_base = if base_counts.get(&relay_base).copied().unwrap_or(0) <= 1 {
-                relay_base
-            } else {
-                format!("{relay_base}-{}", stable_short_hash(&access_host))
-            };
-            let url = select_relay_health_url(
-                &access_host,
-                managed_vless_ports_by_access_host
-                    .get(&access_host)
-                    .cloned()
-                    .unwrap_or_default(),
-                api_base_urls,
-            );
-            MihomoRelayGroup {
-                url,
-                access_host,
-                name: format!("{MIHOMO_RELAY_GROUP_PREFIX}{unique_base}"),
-            }
-        })
-        .collect()
 }
 
 fn select_relay_health_url(
@@ -1624,6 +1536,7 @@ fn inject_mihomo_proxy_groups(
         &mut groups,
         &outer_provider_values,
         relay_context.relay_groups,
+        None,
     );
     node_selector::inject_mihomo_default(&mut groups, &landing_groups, &direct_reality_names);
     inject_mihomo_region_groups(
@@ -1722,6 +1635,7 @@ fn inject_mihomo_provider_proxy_groups(
         &mut groups,
         &outer_provider_values,
         relay_context.relay_groups,
+        Some(MIHOMO_SYSTEM_PROVIDER_NAME),
     );
     node_selector::inject_mihomo_provider(
         &mut groups,
@@ -1852,84 +1766,6 @@ fn collect_custom_relay_group_names(
     }
 
     out
-}
-
-fn inject_mihomo_relay_groups(
-    groups: &mut Vec<serde_yaml::Value>,
-    provider_values: &[serde_yaml::Value],
-    relay_groups: &[MihomoRelayGroup],
-) {
-    for relay_group in relay_groups {
-        groups.push(serde_yaml::Value::Mapping(build_mihomo_relay_group(
-            relay_group,
-            provider_values,
-        )));
-    }
-}
-
-fn build_mihomo_relay_group(
-    relay_group: &MihomoRelayGroup,
-    provider_values: &[serde_yaml::Value],
-) -> serde_yaml::Mapping {
-    let mut map = serde_yaml::Mapping::new();
-    map.insert(
-        serde_yaml::Value::String("name".to_string()),
-        serde_yaml::Value::String(relay_group.name.clone()),
-    );
-    map.insert(
-        serde_yaml::Value::String("type".to_string()),
-        serde_yaml::Value::String("url-test".to_string()),
-    );
-    map.insert(
-        serde_yaml::Value::String("url".to_string()),
-        serde_yaml::Value::String(relay_group.url.clone()),
-    );
-    map.insert(
-        serde_yaml::Value::String("interval".to_string()),
-        serde_yaml::Value::Number(serde_yaml::Number::from(30)),
-    );
-    map.insert(
-        serde_yaml::Value::String("timeout".to_string()),
-        serde_yaml::Value::Number(serde_yaml::Number::from(1000)),
-    );
-    map.insert(
-        serde_yaml::Value::String("max-failed-times".to_string()),
-        serde_yaml::Value::Number(serde_yaml::Number::from(1)),
-    );
-    map.insert(
-        serde_yaml::Value::String("lazy".to_string()),
-        serde_yaml::Value::Bool(false),
-    );
-    map.insert(
-        serde_yaml::Value::String("tolerance".to_string()),
-        serde_yaml::Value::Number(serde_yaml::Number::from(MIHOMO_OUTER_URL_TEST_TOLERANCE)),
-    );
-    map.insert(
-        serde_yaml::Value::String("hidden".to_string()),
-        serde_yaml::Value::Bool(true),
-    );
-    map.insert(
-        serde_yaml::Value::String("empty-fallback".to_string()),
-        serde_yaml::Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()),
-    );
-    if provider_values.is_empty() {
-        map.insert(
-            serde_yaml::Value::String("proxies".to_string()),
-            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
-                MIHOMO_RELAY_REJECT_FALLBACK.to_string(),
-            )]),
-        );
-    } else {
-        map.insert(
-            serde_yaml::Value::String("filter".to_string()),
-            serde_yaml::Value::String(MIHOMO_OUTER_FILTER.to_string()),
-        );
-        map.insert(
-            serde_yaml::Value::String("use".to_string()),
-            serde_yaml::Value::Sequence(provider_values.to_vec()),
-        );
-    }
-    map
 }
 
 fn known_non_other_region_filter() -> String {
@@ -2550,6 +2386,21 @@ fn default_all_region_group_names() -> impl Iterator<Item = String> {
         .map(|region| format!("🤯 {}", region.name))
 }
 
+fn default_all_group_names(landing_groups: &[String]) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut seen = std::collections::BTreeSet::<String>::new();
+    for name in landing_groups
+        .iter()
+        .cloned()
+        .chain(default_all_region_group_names())
+    {
+        if seen.insert(name.clone()) {
+            names.push(name);
+        }
+    }
+    names
+}
+
 fn mihomo_fallback_group(
     name: &str,
     hidden: bool,
@@ -2681,7 +2532,7 @@ fn inject_mihomo_default_aggregate_groups(
             true,
             ["🔒 高质量".to_string(), "🤯 All".to_string()],
         ),
-        mihomo_url_test_group("🤯 All", true, default_all_region_group_names()),
+        mihomo_url_test_group("🤯 All", true, default_all_group_names(landing_groups)),
     ];
     let insert_at = insert_at.unwrap_or(remaining.len());
     remaining.splice(insert_at..insert_at, generated);
@@ -5382,6 +5233,8 @@ struct ClashConfig {
     proxies: Vec<ClashProxy>,
 }
 
+#[cfg(test)]
+mod mihomo_relay_tests;
 mod node_selector;
 #[cfg(test)]
 mod reality_tests;

@@ -6336,8 +6336,10 @@ rules: []
         .expect("relay group missing");
     assert_eq!(
         relay_group.get("proxies"),
-        None,
-        "provider-backed relay groups must let provider candidates seed url-test"
+        Some(&YamlValue::Sequence(vec![YamlValue::String(
+            "REJECT".to_string()
+        )])),
+        "relay groups without another subscribed Reality node must fail closed"
     );
     assert_eq!(
         relay_group.get("empty-fallback"),
@@ -6347,21 +6349,13 @@ rules: []
         relay_group.get("url").and_then(YamlValue::as_str),
         Some("https://www.gstatic.com/generate_204")
     );
-    assert_eq!(
-        relay_group.get("filter").and_then(YamlValue::as_str),
-        Some("(?i)(日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|新加坡|🇸🇬|Singapore|SG)")
-    );
-    let relay_use = relay_group
-        .get("use")
-        .and_then(YamlValue::as_sequence)
-        .expect("relay group provider use missing")
-        .iter()
-        .filter_map(YamlValue::as_str)
-        .collect::<Vec<_>>();
-    assert_eq!(relay_use, vec!["providerA"]);
     assert!(
-        !relay_use.contains(&crate::subscription::MIHOMO_SYSTEM_PROVIDER_NAME),
-        "outer relay should only test outer providers, not the system provider"
+        relay_group.get("use").is_none(),
+        "closed relay groups must not expose external providers"
+    );
+    assert!(
+        relay_group.get("filter").is_none(),
+        "closed relay groups must not expose an external provider filter"
     );
 
     for expected in ["🌟 Japan", "🔒 Japan", "🤯 Japan"] {

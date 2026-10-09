@@ -19,7 +19,8 @@ None
   - `GET /api/sub/{token}/mihomo/provider`
   - `GET /api/sub/{token}/mihomo/provider/system`
 - provider 方案采用单一系统 provider `xp-system-generated`，将系统直连节点与链式节点都移入 provider payload。
-- 链式节点命名为 `{base}-ss-chain` / `{base}-reality-chain`，`dialer-proxy` 指向按 `Node.access_host` 聚合生成的 per-base relay 组 `🛣️ {relay-base}`。
+- 链式节点命名为 `{base}-ss-chain` / `{base}-reality-chain`，`dialer-proxy` 指向
+  `Node.access_host` 聚合的 `🛣️ {relay-base}`；该组必须含其他已订阅节点的 Reality。
 - provider 主配置中的地区组、`💎 高质量`、`🚀 节点选择` 与 `🤯 All` 改为基于节点主动探测得到的订阅地区自动生成，并固定暴露 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other`。
 - 管理端只展示 provider-only 状态；用户详情页复制/预览 canonical Mihomo URL。
 - 冻结部署无关的 relay 健康检查合同：只要节点以“托管默认 VLESS endpoint”身份存在，host-managed 与 container-managed 都必须用同一合同决定 `reality.dest` 改写与 Mihomo relay `url-test` URL 选择。
@@ -74,6 +75,8 @@ None
 - `🚀 节点选择` 在全部 `🛬 {base}` 后通过同一 system provider 的精确 Reality filter，按稳定
   base 顺序直接列出 `{base}-reality`，而不暴露 `{base}-ss`。
 - provider 方案下 `🔒 高质量` 与 `🔒 {Region}` 必须能通过 `xp-system-generated` 动态消费 `{base}-reality` 直连接入点；`{base}-ss` 仍只作为 provider payload 原料，不作为本次接入点目标。
+- `🤯 All` 必须含当前输出的 `🛬 {base}`，并先于所有 `🤯 {Region}`。
+  Landing Group 按稳定 base 顺序去重，随后保持既有 canonical region order。
 - `💎 高质量` 作为 owner-facing 高质量入口必须保留兜底层：无论用户 mixin 是否显式声明，它都必须至少包含 `🔒 高质量`，并且在最终输出中还必须提供一个非地区直连接入面的兜底聚合入口；当前命名族中该兜底入口为 `🤯 All`。若未来重命名或替换聚合组，仍必须保留“高质量入口之上存在全局兜底层”的语义，不能让 `💎 高质量` 退化成仅剩单一路径且无兜底的壳组。
 - 最终 Mihomo 配置图的强约束由 [contracts/final-mihomo-config.md](./contracts/final-mihomo-config.md) 定义：
   - `🔒 {Region}` 是 visible `select` 叶子组，只承载直连 reality 候选
@@ -83,10 +86,10 @@ None
   - `💎 高质量` 是 hidden `fallback`
   - `🤯 All` 是 hidden `url-test`
   - `💎 节点选择` 是 hidden `fallback`
-- per-base relay 组不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身。
-  有外部 provider 时使用日本/香港/新加坡 filter 做 `url-test`，不得设置静态 `proxies` 或 `REJECT` 候选，只设置
-  `empty-fallback: REJECT` 覆盖过滤为空或初始化状态，绝不得保留 `DIRECT` 兜底；无外部 provider 时静态
-  `proxies` 只能为 `[REJECT]`，provider 候选被 filter 筛空时不得回落直连；健康检查 URL 选择顺序必须是：
+- 每个系统 `🛣️ {relay-base}` 必须包含当前用户其他节点的 `*-reality`。
+  排除目标、`*-chain`、`DIRECT` 和未订阅节点；provider 可追加但不能独占。
+  无候选用 `[REJECT]` 与 `empty-fallback: REJECT`；不得直连或暴露 `COMPATIBLE`。
+  健康检查 URL 选择顺序必须是：
   - 同一 `access_host` 下存在至少一个托管 VLESS endpoint 时，使用最小 VLESS 端口对应的 `https://<access_host[:port]>/generate_204`
   - 否则当同一 `access_host` 下只有一个公开 `api_base_url` 时，使用该 API health URL
   - 否则回退到 `https://www.gstatic.com/generate_204`
@@ -170,7 +173,15 @@ None
   `🚀 节点选择` 保留该 Reality 直连候选，但不生成 `🛬 {base}`。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🔒 高质量`，Then 该组能动态包含 `{base}-reality` 接入点，且不会把 `{base}-ss` 作为系统直连接入候选。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🔒 {Region}`，Then 对应地区组能动态包含 `{base}-reality` 接入点。
-- Given 两个落地节点共享同一 `Node.access_host`，When 请求 provider 主配置与 system payload，Then 只生成一个 per-base relay 组，且两个节点的 `*-chain.dialer-proxy` 都指向该组。
+- Given 用户订阅 A、B，When 检查 A 的 `🛣️`，Then 含 B 的 `*-reality`，不含 A、
+  `*-chain` 或 `DIRECT`。
+- Given 单节点，When 检查其 `🛣️`，Then 候选为 `REJECT`，provider 也不得绕过。
+- Given 节点 C 没有用户 membership，When 渲染输出，Then C 不生成于系统 provider，
+  也不能成为任何 `🛣️` 的中转候选。
+- Given `🤯 All` 有 Landing Group，When 检查顺序，Then `🛬 {base}` 先于七个
+  canonical `🤯 {Region}` 组。
+- Given 两节点共享 host，When 请求 provider，Then relay 只生成一个且两条 chain
+  指向它；共用 host 属于部署缺陷，不新增兼容语义。
 - Given 两个落地节点使用不同 `Node.access_host`，When 请求 provider 主配置与 system payload，Then 生成不同 per-base relay 组，且链式节点不会合并到共享 `🛣️ JP/HK/SG`。
 - Given 同一 `access_host` 下存在托管 VLESS endpoint，When 请求 provider 主配置，Then 对应 relay 组 `url` 必须使用最小托管 VLESS 端口对应的 `https://<access_host[:port]>/generate_204`。
 - Given host-managed node upgrades from a legacy single-endpoint VLESS deployment, When the new `xp` version starts or `xp-ops xp sync-node-meta` runs, Then that lone VLESS endpoint is auto-adopted into the managed-default contract only when its metadata still predates the `managed_default` flag, but `reality.dest` is only rewritten after the loopback canary is ready; if canary preparation fails, the existing endpoint stays untouched and the blocker is exposed through `vless_https_canary_status.last_error`.
@@ -179,10 +190,10 @@ None
   节点到权威 DNS 的 UDP/TCP 53 不可达不得阻断签发或续期。
 - Given 同一 `access_host` 下不存在托管 VLESS endpoint，When 请求 provider 主配置，Then relay 组必须回退到“唯一公开 `api_base_url` 的 `/api/health`”，若仍不能唯一确定，则回退到 `https://www.gstatic.com/generate_204`。
 - Given 落地节点基名恰好是 `Japan` / `HongKong` / `Singapore` 等历史地区名，When 请求 provider 主配置与 system payload，Then per-base relay 组必须消歧为内部 relay 名，不得重新输出 `🛣️ {Region}`。
-- Given per-base relay 组存在外部第三方 provider，When 渲染链式节点，Then relay 组只能通过外部 provider 的 filter/use 候选转发，且不得设置静态 `proxies` 或 `REJECT` 候选；
-  只设置 `empty-fallback: REJECT` 覆盖 filter 为空或初始化状态，不得包含 `DIRECT` 兜底或暴露 `COMPATIBLE`。
-- Given per-base relay 组不存在外部第三方 provider，When 渲染 Mihomo 配置，Then relay 组静态 `proxies` 只能为 `[REJECT]`，并设置 `empty-fallback: REJECT`；
-  所有 `*-chain` 路径保持不可用，且对应 `{base}-reality` 直连入口仍然可用。
+- Given relay 有 provider，When 渲染，Then 保留其他 Reality，可追加 provider。
+  不含目标、`DIRECT` 或 `COMPATIBLE`。
+- Given relay 无 Reality，When 渲染，Then 只用 `[REJECT]` 与 `empty-fallback: REJECT`；
+  chain 不可用，`{base}-reality` 直连仍可用。
 - Given provider 主配置，When 检查顶层 `proxies`，Then 不包含系统生成的 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`。
 - Given provider 主配置，When 检查 `proxy-groups` 与用户组引用，Then 不再出现 `🛣️ {Region}` 兼容地区别名，也不再出现共享 `🛣️ JP/HK/SG` 主路径。
 - Given 任何 Mihomo profile，When 最终 provider 主配置或 system payload 中存在未定义引用，Then `PUT` 必须返回 `400 invalid_request`，并指出未定义引用所在字段/组名。

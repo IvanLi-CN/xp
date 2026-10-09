@@ -62,6 +62,10 @@ Errors:
 - 对非系统、显式声明 `proxies` 的用户 `select` 组，若其 `proxies` 引用了系统地区/聚合别名，则渲染结果会优先按模板 helper block（`proxy-group` / `proxy-group_with_relay` / `app-proxy-group`）的 `proxies` 顺序重放选项，并把系统管理地区名折叠为 owner-facing 的 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、`🔒 高质量`、`💎 节点选择`；`🔒/🤯 {Region}` 与 hidden alias 不直接暴露为这些用户组选项。
 - `proxy-providers` 可为空；为空时仍需输出可加载配置。
 - `extra_proxies_yaml` 中的节点会并入最终 `proxies`。
+- 系统 `🛣️ {relay-base}` 必须含其他已订阅节点 `*-reality`；外部 provider 只能追加，
+  不能独占。无候选时使用 `proxies: [REJECT]` 与 `empty-fallback: REJECT`，
+  不得使用当前节点、`DIRECT` 或未订阅节点。
+- `🤯 All` 先含实际 `🛬 {base}`，再含七个 `🤯 {Region}`，按稳定顺序去重。
 - 当用户未配置 Mihomo profile：回退到 clash 输出。
 
 Response:

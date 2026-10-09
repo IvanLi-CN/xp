@@ -43,7 +43,8 @@ The generated system aggregate groups must obey these contracts:
 - `💎 高质量` must contain exactly `["🔒 高质量", "🤯 All"]` in that order.
 - `🤯 All` is hidden.
 - `🤯 All` must be `type: url-test`.
-- `🤯 All` must reference only hidden per-region probe groups `🤯 {Region}`.
+- `🤯 All` must reference each generated `🛬 {base}` first in deterministic base order, followed
+  by hidden per-region probe groups `🤯 {Region}` in canonical region order.
 - `🚀 节点选择` is the visible owner-facing node selector.
 - `🚀 节点选择` must be `type: select`.
 - `🚀 节点选择` must contain hidden region wrapper groups `🌟 {Region}`.
@@ -89,15 +90,17 @@ Required constraints:
 
 Per-base relay groups are transit-only groups for generated `*-chain` proxies.
 
-- With external third-party providers, a relay group consumes only the provider candidates
-  selected by `use` and its region filter. It must omit a static `proxies` fallback, set
-  `empty-fallback: REJECT` for the empty or initializing filtered state, and never add `DIRECT`
-  as a candidate. The explicit empty fallback overrides Mihomo's default `COMPATIBLE` value.
-- With no external third-party provider, the relay group must contain only static `REJECT` and
-  set `empty-fallback: REJECT`. The chain proxy remains fail-closed and cannot become equivalent
-  to its direct Reality proxy.
-- If the external provider filter yields no candidates, the relay group must resolve only to
-  `REJECT`; it must not expose Mihomo's `COMPATIBLE` placeholder or use `DIRECT`.
+- A relay group must include the exact `*-reality` Access Point candidates for every other
+  Subscription Node in the current user's output. It must exclude the Target Node's own Access
+  Point, every `*-chain`, `DIRECT`, and any node absent from that user's endpoint memberships.
+- On the provider route, the main config may consume these system candidates through
+  `use: [xp-system-generated]` and an exact filter; external third-party providers may add
+  candidates but cannot be the only source satisfying the other-node requirement.
+- If no other Subscription Node has a qualifying Reality Access Point, the relay group must
+  contain only static `REJECT` and set `empty-fallback: REJECT`, regardless of external provider
+  availability. The chain proxy remains fail-closed and cannot become equivalent to its direct
+  Reality proxy.
+- A relay group must never expose Mihomo's `COMPATIBLE` placeholder or use `DIRECT` as a fallback.
 - The explicit `{base}-reality` direct proxy remains available independently of relay-group
   candidates.
 

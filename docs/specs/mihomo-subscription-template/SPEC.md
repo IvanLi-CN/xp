@@ -75,15 +75,21 @@ None
 - **REQ-MIHOMO-SUB-006**: 渲染时系统重建并覆盖 `proxies`、`proxy-providers` 与所有系统保留动态组。
 - **REQ-MIHOMO-SUB-007**: 系统保留地区组、`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择` 与 `🤯 All` 必须只从节点主动探测得到的订阅地区派生，不再使用 `node_name` slug 猜测。
 - **REQ-MIHOMO-SUB-008**: 地区面固定为 `Japan / HongKong / Taiwan / Korea / Singapore / US / Other`；首次成功探测前，为避免滚动升级时既有地区组瞬间清空，历史节点继续沿用 legacy slug fallback（JP/HK/TW/KR）归类；一旦存在成功探测结果，则优先使用 `subscription_region`，但仅在 probe 未 stale 时视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
-- **REQ-MIHOMO-SUB-009**: `proxy-providers` 视为一个整体普通节点池；provider-only 模式下系统按 `Node.access_host` 聚合 relay，relay 组只消费外部 provider，并在 provider 为空时仍必须生成可加载配置。
+- **REQ-MIHOMO-SUB-009**: `proxy-providers` 视为整体节点池；provider-only 模式按
+  `Node.access_host` 聚合 relay。系统 relay 必须含其他已订阅节点 `*-reality`，外部 provider
+  只能追加；无接入点时用 `REJECT`，provider 为空时仍生成可加载配置。
 - **REQ-MIHOMO-SUB-010**: `extra_proxies_yaml` 中的节点会并入最终 `proxies`。
 - **REQ-MIHOMO-SUB-011**: 落地组生成遵循 provider filter 合同：`🛬 {base}` 通过 system provider payload 稳定消费 `{base}-ss-chain` / `{base}-reality-chain`，并保持 ss-chain 在前、reality-chain 在后。
 - **REQ-MIHOMO-SUB-012**: 节点名冲突自动稳定重命名并记录告警日志。
 - **REQ-MIHOMO-SUB-013**: mixin 缺失时 `format=mihomo` 回退 clash。
 - **REQ-MIHOMO-SUB-014**: `GET/PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 返回与存储原样一致的 profile；服务端不自动抽取、不自动规范化，也不隐式剥离系统托管引用。
-
 - **REQ-MIHOMO-SUB-018**: 用户资料保存区与 Mihomo 配置保存区 MUST 以同级区域呈现，各自的保存按钮只属于对应区域。
 - **REQ-MIHOMO-SUB-019**: `raw/clash/base64` 的输出语义与 content-type MUST 保持兼容。
+- **REQ-MIHOMO-SUB-020**: `🤯 All` 必须含当前输出的 `🛬 {base}`，并先于所有
+  `🤯 {Region}`；落地组按稳定 base 顺序去重。
+- **REQ-MIHOMO-SUB-021**: 系统 `🛣️` 必须用其他已订阅节点 `*-reality` 作为中转，
+  排除目标、`*-chain`、`DIRECT` 和未订阅节点。无候选时用 `REJECT`；
+  用户自定义 `🛣️` 组不受此系统规则改写。
 
 ### SHOULD
 
@@ -186,8 +192,12 @@ None
 ## Verification
 
 - **VER-MIHOMO-SUB-001** (covers: `REQ-MIHOMO-SUB-001`, `REQ-MIHOMO-SUB-006`): Given 用户已配置 mixin，When 拉取 `format=mihomo`，Then 返回 YAML 包含系统生成的 `-reality`、`-ss`、`-chain` 节点。
-- **VER-MIHOMO-SUB-002** (covers: `REQ-MIHOMO-SUB-009`): Given 用户配置了多个 `proxy-providers`，When 拉取 `format=mihomo`，Then per-access-host relay 组只消费这些外部 provider，并带有 `url-test` 高可用探测参数。
-- **VER-MIHOMO-SUB-003** (covers: `REQ-MIHOMO-SUB-009`): Given `proxy-providers` 为空，When 拉取 `format=mihomo`，Then relay 组仍存在、订阅仍可加载，且不出现不存在的 proxy/provider/group 引用。
+- **VER-MIHOMO-SUB-002** (covers: `REQ-MIHOMO-SUB-009`): Given 用户订阅多个节点且有外部
+  `proxy-providers`，When 拉取 `format=mihomo`，Then 系统 relay 含其他节点的 `*-reality`
+  且可追加 provider，不含目标节点或 `DIRECT`。
+- **VER-MIHOMO-SUB-003** (covers: `REQ-MIHOMO-SUB-009`): Given 用户只订阅一个节点或没有
+  其他合格 Reality，When 拉取 `format=mihomo`，Then relay 只用 `REJECT`，即使有
+  外部 provider 也不得绕过该结果。
 - **VER-MIHOMO-SUB-004** (covers: `REQ-MIHOMO-SUB-007`, `REQ-MIHOMO-SUB-008`): Given 新增节点已拥有 membership 与系统 provider 入口，When 该节点完成首次主动探测并映射到 `Taiwan`，Then 无需修改任何用户模板，`🌟 Taiwan` 与 `🚀 节点选择` 都会自动包含 `🛬 {base}`，且 `🔒 高质量` 会稳定暴露该地区入口。
 - **VER-MIHOMO-SUB-005** (covers: `REQ-MIHOMO-SUB-008`): Given 旧集群升级后某历史节点暂时还没有成功探测记录，When 其旧节点名 slug 原本会命中 `Japan/HongKong/Taiwan/Korea`，Then 订阅渲染仍保持该 legacy 地区归类，直到首次成功探测结果落盘。
 - **VER-MIHOMO-SUB-006** (covers: `REQ-MIHOMO-SUB-008`): Given 某节点主动探测暂时失败，When 该节点存在最近一次成功归类且该结果仍在 stale 窗口内，Then 订阅仍保留其上一轮地区归类，不会立即从系统托管分组中消失；一旦 probe 进入 stale，渲染回退到 legacy slug fallback / `Other`。
@@ -224,6 +234,21 @@ None
 - covers: `REQ-MIHOMO-SUB-011`, `REQ-MIHOMO-SUB-012`, `REQ-MIHOMO-SUB-013`, `REQ-MIHOMO-SUB-016`
 - Pass condition: 节点名冲突被稳定重命名并记录告警；未配置 mixin 时回退 clash；mixin 与 extra 字段重复提供同类动态段时返回 `invalid_request`。
   落地组按 system provider filter 合同消费 ss-chain 与 reality-chain，保持要求的顺序。
+
+### VER-MIHOMO-SUB-021 — `🤯 All` 落地组顺序
+
+- Method: 订阅渲染输出检查。
+- covers: `REQ-MIHOMO-SUB-020`
+- Pass condition: `🤯 All` 先按稳定 base 顺序包含实际 `🛬 {base}`，再包含七个
+  canonical `🤯 {Region}`，且没有重复或悬挂引用。
+
+### VER-MIHOMO-SUB-022 — Relay 候选范围与 fail-closed
+
+- Method: 两节点、单节点、外部 provider 和自定义 relay 组的渲染验证。
+- covers: `REQ-MIHOMO-SUB-021`
+- Pass condition: 系统 relay 只含其他 Reality。
+  排除目标、`*-chain`、`DIRECT`、未订阅节点；无候选时只保留 `REJECT`。
+  自定义组保持原样。
 
 ### VER-MIHOMO-WORKSPACE-001 — 放大入口与范围
 
