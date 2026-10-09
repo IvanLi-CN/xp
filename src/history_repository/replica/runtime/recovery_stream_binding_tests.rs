@@ -55,6 +55,18 @@ fn recovery_stream_binding_survives_an_independent_handoff_and_restart() {
         .expect("complete independent stream");
     drop(runtime);
     let runtime = load(temporary.path());
+    assert_eq!(
+        runtime
+            .receiver
+            .as_ref()
+            .expect("receiver survives restart")
+            .continuous_watermark(cursor)
+            .expect("watermark")
+            .expect("stream progress")
+            .sequence(),
+        handoff.last_missing,
+        "handoff completion must commit its receiver watermark with the checkpoint"
+    );
     let checkpoint = runtime
         .initial_peer_backfill_checkpoint(peer)
         .expect("checkpoint");

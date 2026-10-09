@@ -1,5 +1,7 @@
 # ADR 0018: History Repository Recovery Generations
 
+Status: superseded by [ADR 0019](0019-history-handoff-completion-and-recovery-preflight.md).
+
 ## Context
 
 An initial peer backfill can retain a completed tiered handoff after the bounded gap ledger rotates.

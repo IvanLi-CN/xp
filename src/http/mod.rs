@@ -1154,6 +1154,10 @@ pub fn build_router_with_mesh_telemetry(
             post(history_repository::recovery::admin_internal_history_repository_recovery),
         )
         .route(
+            "/_internal/history-repository/recovery-preflight",
+            get(history_repository::recovery_preflight::admin_internal_recovery_preflight),
+        )
+        .route(
             "/_internal/history-repository/repair",
             post(history_repository::admin_internal_history_repository_repair),
         )

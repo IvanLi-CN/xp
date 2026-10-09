@@ -247,3 +247,85 @@ fn peer_backfill_restart_rolls_back_memory_when_control_persist_fails() {
     assert_eq!(checkpoint.summary_cursor.as_deref(), Some("page-2"));
     assert_eq!(checkpoint.summary_pending_segment_ids, ["segment-1"]);
 }
+
+#[test]
+fn tiered_handoff_completion_rolls_back_watermark_and_consumption_on_write_failure() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let mut runtime = super::RepositoryReplicaRuntime::load(storage.clone()).expect("runtime");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"first", false)], None);
+    let cursor = first.canonical().first_cursor();
+    runtime
+        .receive_wire("cluster-a", &identity, &first.wire_bytes().unwrap(), 11)
+        .expect("initial watermark");
+    let handoff = super::InitialPeerTieredHandoff {
+        source_node_id: cursor.source_node_id().to_owned(),
+        source_epoch: cursor.source_epoch(),
+        stream: cursor.stream().to_owned(),
+        first_missing: 1,
+        last_missing: 2,
+        next_sequence: 3,
+        end_unix_seconds: 12,
+    };
+    runtime.snapshot.initial_peer_backfills.insert(
+        "node-b".to_owned(),
+        super::InitialPeerBackfillCheckpoint {
+            recovery_generation: 1,
+            recovery_handoff: Some(handoff.clone()),
+            ..Default::default()
+        },
+    );
+    runtime
+        .start_initial_peer_tiered_handoff("node-b", handoff.clone())
+        .expect("start handoff");
+    runtime
+        .update_initial_peer_backfill_checkpoint("node-b", None, BTreeMap::new(), true, true)
+        .expect("completed export");
+    let previous = runtime.initial_peer_backfill_checkpoint("node-b");
+    storage.set_query_only_for_test(true).unwrap();
+    assert!(
+        runtime
+            .complete_initial_peer_tiered_handoff("node-b", &handoff)
+            .is_err()
+    );
+    assert_eq!(runtime.initial_peer_backfill_checkpoint("node-b"), previous);
+    assert_eq!(
+        runtime
+            .receiver
+            .as_ref()
+            .unwrap()
+            .continuous_watermark(cursor)
+            .unwrap()
+            .unwrap()
+            .sequence(),
+        0
+    );
+    storage.set_query_only_for_test(false).unwrap();
+    runtime
+        .complete_initial_peer_tiered_handoff("node-b", &handoff)
+        .expect("retry handoff commit");
+    drop(runtime);
+    let mut runtime = load(temporary.path());
+    assert_eq!(
+        runtime
+            .receiver
+            .as_ref()
+            .unwrap()
+            .continuous_watermark(cursor)
+            .unwrap()
+            .unwrap()
+            .sequence(),
+        2
+    );
+    let checkpoint = runtime.initial_peer_backfill_checkpoint("node-b").unwrap();
+    assert!(checkpoint.recovery_generation_consumed);
+    assert!(checkpoint.summary_tiered_handoff.is_none());
+    assert!(checkpoint.retained_anchor_handoffs.contains(&handoff));
+    assert!(
+        runtime
+            .complete_initial_peer_tiered_handoff("node-b", &handoff)
+            .is_err()
+    );
+}

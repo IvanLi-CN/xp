@@ -21,6 +21,14 @@
 
 - Mixed-stream repair selection skips ineligible tombstone gaps before an armed connections
   anchor. Independent handoff completion preserves the consumed generation binding across restart.
+- Handoff completion uses the existing history mutation transaction to snapshot the receiver
+  watermark with gap evidence and consumption. Injected storage failure restores the previous
+  receiver and checkpoint before retry; restart coverage verifies the committed watermark.
+- Signed recovery classifies predecessor partial commits with exact completed audit evidence.
+  Preview exposes actual watermark and its bounded proposed repair without writing. Apply commits
+  the declared watermark and the new generation together and binds the complete peer checkpoint.
+- Final tiered export pages retain the existing bounded lease rather than releasing repair anchors
+  before the receiver consumes them. Exact expiry restores normal retention.
 
 - Initial peer checkpoints now persist an operator-armed recovery generation. The local signed
   `xp-ops xp history-repository-recover` endpoint returns a zero-write fingerprint and requires
@@ -302,6 +310,10 @@
 ## Related Changes
 
 - Issue #248: https://github.com/IvanLi-CN/xp/issues/248
+
+Recovery 入口新增只读 signed voter preflight，经注册公网 HTTPS 校验版本与 membership 一致性及 leader quorum。
+
+完整 checkpoint 绑定 fingerprint，提交前复核 Ready peer。缺少新路由的旧 voter fail closed，须完成滚动升级后操作。
 
 ## References
 

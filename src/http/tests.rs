@@ -26,6 +26,8 @@ mod admin_auth_tests;
 mod browser_cors_routes;
 #[path = "tests/follower_draft.rs"]
 mod follower_draft;
+#[path = "tests/history_recovery_preflight.rs"]
+mod history_recovery_preflight;
 #[path = "tests/history_repository.rs"]
 mod history_repository;
 mod managed_vless_create;

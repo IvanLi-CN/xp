@@ -164,6 +164,18 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - A bounded mixed-stream repair page selects the first eligible handoff, skipping gaps outside an
   armed recovery binding. Completing an independent source/epoch/stream handoff preserves the
   generation's original binding; it cannot grant that bound stream a second crossing.
+- Handoff completion commits the receiver watermark, permanent gap, completed handoff and
+  generation consumption in one history transaction. A failed commit restores all in-memory
+  state; restart observes the same watermark as the committed checkpoint.
+- A consumed generation with a completed export, its exact completed audit range and the exact
+  predecessor watermark may be classified as an uncommitted-watermark handoff. Signed recovery
+  dry-run remains read-only and exposes `receiver_watermark_repair` separately from the actual
+  watermark. Apply verifies the fingerprint against the entire peer checkpoint and commits only
+  that previously declared range while arming a new generation. Incomplete or mismatched audit
+  evidence fails closed; the consumed generation is never rearmed.
+- The final tiered export page retains its existing 15-minute export lease until natural expiry.
+  This bounded handoff grace protects pending repair anchors from retention after export finishes.
+  Finalization never creates or extends a lease; ordinary retention resumes when all leases expire.
 - Docker/Compose recovery accepts absolute `--data-dir` with existing identity, without `xp.env`.
 - History SQLite connections set `journal_size_limit=1048576` in every deployment mode.
 - Safe WAL reset releases idle allocation; active transactions and pinned readers may exceed it.
@@ -384,7 +396,25 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 ## Related ADRs
 
 - [ADR 0002](../../adr/0002-history-synchronization-recovery-order.md)
-- [ADR 0018](../../adr/0018-history-repository-recovery-generation.md)
+- [ADR 0019](../../adr/0019-history-handoff-completion-and-recovery-preflight.md)
+
+## Recovery cluster preflight
+
+恢复 dry-run 与 apply 均通过注册公网 HTTPS 对全部当前 voter 查询签名 preflight。
+
+路由为 `GET /api/admin/_internal/history-repository/recovery-preflight`。
+
+要求版本、term、leader、membership revision 一致且 leader 通过 linearizable quorum 检查。
+
+缺失路由或旧 peer 均 fail closed。
+
+预览返回 `cluster_preflight`，fingerprint 绑定此视图、repository membership 与完整 checkpoint。
+
+提交前复核本地视图及 Ready peer。
+
+只读查询不得持久化 transport 状态。
+
+无关 learner 不参与 voter gate。
 
 ## Failure Model and Assumptions
 

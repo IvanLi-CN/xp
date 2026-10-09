@@ -85,6 +85,8 @@ pub(crate) struct InitialPeerRecoveryPreview {
     pub(crate) peer_node_id: String,
     pub(crate) generation: u64,
     pub(crate) receiver_watermark: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) receiver_watermark_repair: Option<InitialPeerTieredHandoff>,
     pub(crate) previous_handoff: Option<InitialPeerTieredHandoff>,
     pub(crate) capacity_quota_bytes: u64,
     pub(crate) capacity_used_bytes: u64,
@@ -446,7 +448,7 @@ impl RepositoryReplicaRuntime {
             checkpoint.recovery_generation_consumed = true;
             checkpoint.recovery_handoff = Some(handoff.clone());
         }
-        if let Err(error) = self.persist_control_state() {
+        if let Err(error) = self.persist_or_restore(&previous_receiver, &previous_snapshot) {
             self.restore(&previous_receiver, previous_snapshot)?;
             return Err(error);
         }
@@ -526,15 +528,30 @@ impl RepositoryReplicaRuntime {
                 "history recovery requires a continuous receiver watermark".to_owned(),
             ));
         }
-        if checkpoint.recovery_generation_consumed
+        let receiver_watermark_repair = if checkpoint.recovery_generation_consumed
             && checkpoint.recovery_handoff.as_ref().is_some_and(|handoff| {
                 receiver_watermark == Some(handoff.first_missing.saturating_sub(1))
-            })
-        {
-            return Err(RepositoryRuntimeError::Storage(
-                "history recovery requires receiver watermark progress".to_owned(),
-            ));
-        }
+            }) {
+            if checkpoint.recovery_generation == 0
+                || !checkpoint.completed
+                || checkpoint.summary_tiered_handoff.is_some()
+                || checkpoint.recovery_handoff.as_ref() != Some(&previous_handoff)
+                || !checkpoint
+                    .retained_anchor_handoffs
+                    .contains(&previous_handoff)
+                || previous_handoff.first_missing == 0
+                || previous_handoff.last_missing < previous_handoff.first_missing
+                || previous_handoff.last_missing.checked_add(1)
+                    != Some(previous_handoff.next_sequence)
+            {
+                return Err(RepositoryRuntimeError::Storage(
+                    "history recovery requires verified completed handoff evidence".to_owned(),
+                ));
+            }
+            Some(previous_handoff.clone())
+        } else {
+            None
+        };
         let capacity = self.runtime_capacity()?;
         if self.storage_degraded {
             return Err(RepositoryRuntimeError::Storage(
@@ -594,6 +611,11 @@ impl RepositoryReplicaRuntime {
         hasher.update(previous_handoff.last_missing.to_be_bytes());
         hasher.update(previous_handoff.next_sequence.to_be_bytes());
         hasher.update(previous_handoff.end_unix_seconds.to_be_bytes());
+        hasher.update(
+            serde_json::to_vec(&checkpoint)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?,
+        );
+        hasher.update([u8::from(receiver_watermark_repair.is_some())]);
         hasher.update(capacity.quota_bytes().to_be_bytes());
         hasher.update(capacity.used_bytes().to_be_bytes());
         hasher.update(capacity.filesystem_available_bytes().to_be_bytes());
@@ -601,11 +623,12 @@ impl RepositoryReplicaRuntime {
         hasher.update(capacity_filesystem_required_bytes.to_be_bytes());
         hasher.update(capacity_quota_shortfall_bytes.to_be_bytes());
         hasher.update(capacity_filesystem_shortfall_bytes.to_be_bytes());
-        hasher.update(b"summary-v2 ");
+        hasher.update(b"summary-v2\0");
         Ok(InitialPeerRecoveryPreview {
             peer_node_id: peer_node_id.to_owned(),
             generation,
             receiver_watermark,
+            receiver_watermark_repair,
             previous_handoff: Some(previous_handoff),
             capacity_quota_bytes: capacity.quota_bytes(),
             capacity_used_bytes: capacity.used_bytes(),
@@ -642,6 +665,57 @@ impl RepositoryReplicaRuntime {
             ));
         }
         let previous_snapshot = self.snapshot.clone();
+        let previous_receiver = self
+            .receiver
+            .as_ref()
+            .ok_or(RepositoryRuntimeError::ClusterBindingMismatch)?
+            .checkpoint()?;
+        if let Some(handoff) = &preview.receiver_watermark_repair {
+            let gap = super::RepositoryReplicaGap {
+                source_node_id: handoff.source_node_id.clone(),
+                source_epoch: handoff.source_epoch,
+                stream: handoff.stream.clone(),
+                first_sequence: handoff.first_missing,
+                last_sequence: handoff.last_missing,
+                start_unix_seconds: 0,
+                end_unix_seconds: handoff.end_unix_seconds,
+                permanent: true,
+                reason: Some("source_retention_expired".to_owned()),
+            };
+            if let Err(error) = self.merge_replica_gaps_in_memory(&[gap]) {
+                self.restore(&previous_receiver, previous_snapshot)?;
+                return Err(error);
+            }
+            let advance = (|| {
+                let next = Cursor::new(
+                    handoff.source_node_id.clone(),
+                    handoff.source_epoch,
+                    handoff.stream.clone(),
+                    handoff.next_sequence,
+                )?;
+                self.receiver
+                    .as_mut()
+                    .expect("receiver checked")
+                    .advance_declared_sequence_gap(
+                        &next,
+                        handoff.first_missing,
+                        handoff.last_missing,
+                    )
+            })();
+            let advanced = match advance {
+                Ok(advanced) => advanced,
+                Err(error) => {
+                    self.restore(&previous_receiver, previous_snapshot)?;
+                    return Err(error.into());
+                }
+            };
+            if !advanced {
+                self.restore(&previous_receiver, previous_snapshot)?;
+                return Err(RepositoryRuntimeError::Storage(
+                    "history recovery completed handoff watermark changed".to_owned(),
+                ));
+            }
+        }
         let checkpoint = self
             .snapshot
             .initial_peer_backfills
@@ -659,7 +733,10 @@ impl RepositoryReplicaRuntime {
         // the response may extend the missing tail up to its retained anchor exactly once.
         checkpoint.recovery_handoff = preview.previous_handoff.clone().map(|mut handoff| {
             let first_missing = preview
-                .receiver_watermark
+                .receiver_watermark_repair
+                .as_ref()
+                .map(|repair| repair.last_missing)
+                .or(preview.receiver_watermark)
                 .expect("recovery preview has a receiver watermark")
                 .saturating_add(1);
             handoff.first_missing = first_missing;
@@ -668,8 +745,8 @@ impl RepositoryReplicaRuntime {
             handoff.end_unix_seconds = 0;
             handoff
         });
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
+        if let Err(error) = self.persist_or_restore(&previous_receiver, &previous_snapshot) {
+            self.restore(&previous_receiver, previous_snapshot)?;
             return Err(error);
         }
         Ok(preview)

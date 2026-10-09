@@ -61,7 +61,7 @@ use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
 use direct::clear_peer_deep_verification;
 pub(super) use direct::{
     RepositoryDirectError, preserve_history_truncated, repository_direct_request,
-    repository_direct_request_body,
+    repository_direct_request_body, repository_read_only_direct_request,
 };
 pub(super) use ready_peers::{
     available_ready_repository_ids, ready_repository_peers, ready_repository_peers_for_catch_up,
