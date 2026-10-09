@@ -285,6 +285,15 @@
 
 - Aggregate acceptance must bind the final integration SHA after all serialized Wave PRs land.
 
+## Tiered keyset recovery
+
+- Storage, sender and receiver share the canonical retention-start decoder.
+- Wire sample timestamps, payloads and source identities remain unchanged.
+- Version-2 cursors reject started predecessor exports before seeking.
+- Existing bounded application-error restart replays imports without rearming recovery.
+- Regressions cover descending raw times, complete multi-page exports and strict ordering.
+- Compatibility tests cover unknown cursor versions and version downgrade rejection.
+
 ## Related Changes
 
 - Issue #248: https://github.com/IvanLi-CN/xp/issues/248

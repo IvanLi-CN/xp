@@ -124,8 +124,20 @@ impl RetentionBucket {
 }
 
 pub(super) fn record_time_range(record: &StoredRecord) -> (u64, u64) {
-    if record.schema_id == RESOURCE_HISTORY_SCHEMA
-        && let Some(payload) = resource_payload(record)
+    backfill_record_time_range(
+        &record.schema_id,
+        &record.payload,
+        record.observed_at_unix_seconds,
+    )
+}
+
+pub(crate) fn backfill_record_time_range(
+    schema_id: &str,
+    payload: &[u8],
+    observed_at: u64,
+) -> (u64, u64) {
+    if schema_id == RESOURCE_HISTORY_SCHEMA
+        && let Ok(payload) = serde_json::from_slice::<ResourceHistoryPayload>(payload)
     {
         return match payload {
             ResourceHistoryPayload::Rollup { rollup, resolution } => {
@@ -143,17 +155,14 @@ pub(super) fn record_time_range(record: &StoredRecord) -> (u64, u64) {
             ),
         };
     }
-    aggregate_payload(record)
+    aggregate_payload_bytes(schema_id, payload)
         .and_then(|payload| {
             payload
                 .bucket_start_unix_seconds
                 .zip(payload.bucket_end_unix_seconds)
                 .filter(|(start, end)| start <= end)
         })
-        .unwrap_or((
-            record.observed_at_unix_seconds,
-            record.observed_at_unix_seconds,
-        ))
+        .unwrap_or((observed_at, observed_at))
 }
 
 /// An aggregate bucket may only be compacted once its end is before the page boundary. This
@@ -485,8 +494,12 @@ fn aggregate_contribution(record: &StoredRecord) -> AggregateContribution {
 }
 
 fn aggregate_payload(record: &StoredRecord) -> Option<RetentionAggregatePayload> {
-    if record.schema_id == UPTIME_HISTORY_SCHEMA {
-        let payload = uptime_payload(record)?;
+    aggregate_payload_bytes(&record.schema_id, &record.payload)
+}
+
+fn aggregate_payload_bytes(schema_id: &str, payload: &[u8]) -> Option<RetentionAggregatePayload> {
+    if schema_id == UPTIME_HISTORY_SCHEMA {
+        let payload = serde_json::from_slice::<UptimeHistoryPayload>(payload).ok()?;
         if payload.is_aggregate()
             && payload.record_count > 0
             && payload.first_sequence <= payload.last_sequence
@@ -505,7 +518,7 @@ fn aggregate_payload(record: &StoredRecord) -> Option<RetentionAggregatePayload>
             });
         }
     }
-    let payload = serde_json::from_slice::<RetentionAggregatePayload>(&record.payload).ok()?;
+    let payload = serde_json::from_slice::<RetentionAggregatePayload>(payload).ok()?;
     (payload.algorithm == "sha256"
         && payload.record_count > 0
         && payload.first_sequence <= payload.last_sequence)
