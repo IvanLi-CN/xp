@@ -210,8 +210,8 @@ mod tests {
         Vec<RecoveryPreflightView>,
     ) {
         let nodes = vec![
-            ulid::Ulid::from(1_u128).to_string(),
-            ulid::Ulid::from(2_u128).to_string(),
+            xp_test_fixtures::identifier_ulid_a().to_owned(),
+            xp_test_fixtures::identifier_ulid_b().to_owned(),
         ];
         let binding = RecoveryClusterBinding {
             term: 42,
@@ -220,18 +220,20 @@ mod tests {
             repository_revision: "repositories".to_owned(),
             version: "3.43.fixture".to_owned(),
         };
-        let views = nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| RecoveryPreflightView {
-                node_id: node.clone(),
-                version: binding.version.clone(),
-                term: binding.term,
-                leader: binding.leader,
-                membership_revision: binding.membership_revision.clone(),
-                quorum_verified: index == 0,
-            })
-            .collect();
+        let leader_view = RecoveryPreflightView {
+            node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+            version: binding.version.clone(),
+            term: binding.term,
+            leader: binding.leader,
+            membership_revision: binding.membership_revision.clone(),
+            quorum_verified: true,
+        };
+        let follower_view = RecoveryPreflightView {
+            node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+            quorum_verified: false,
+            ..leader_view.clone()
+        };
+        let views = vec![leader_view, follower_view];
         (binding, nodes, views)
     }
 
@@ -252,7 +254,7 @@ mod tests {
                 0 => views[1].version = "predecessor".to_owned(),
                 1 => views[1].term += 1,
                 2 => views[1].membership_revision = "changed".to_owned(),
-                3 => views[1].node_id = views[0].node_id.clone(),
+                3 => views[1].node_id = xp_test_fixtures::identifier_ulid_a().to_owned(),
                 _ => views[1].quorum_verified = true,
             }
             assert!(validate_views(&binding, &nodes, &views).is_err());
