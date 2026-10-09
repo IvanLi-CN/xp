@@ -34,6 +34,10 @@ That combination makes the real-Xray harness look flaky even though the product 
 - Mesh resource builds use the generic Cargo cache wrapper. Share only the compatible Cargo
   download cache, keep candidate and baseline targets in the owning Agent Directory, and copy
   resolved binaries into the disposable run before sampling.
+- The GitHub real-Xray runner compiles all four integration-test binaries in one Cargo invocation,
+  then executes those binaries directly against the one external Xray container. This avoids
+  paying the XP library compile cost once per `cargo test --test` process while preserving the
+  existing suite order, exact mesh filters, serialized test threads, and per-suite duration logs.
 
 ## References
 
