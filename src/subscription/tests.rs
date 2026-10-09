@@ -13,17 +13,15 @@ use xp_test_fixtures::{
     label_node_beta as fixture_label_node_beta,
     label_node1_variant2 as fixture_label_node1_variant2, label_only_us as fixture_label_only_us,
     label_osaka_a as fixture_label_osaka_a, label_osaka_b as fixture_label_osaka_b,
-    label_relay_japan as fixture_label_relay_japan, label_seoul_a as fixture_label_seoul_a,
-    label_singapore_a as fixture_label_singapore_a,
+    label_relay_japan as fixture_label_relay_japan, label_singapore_a as fixture_label_singapore_a,
     label_singapore_avariant2 as fixture_label_singapore_avariant2,
     label_tokyo_a as fixture_label_tokyo_a, label_tokyo_avariant2 as fixture_label_tokyo_avariant2,
     label_tokyo_avariant3 as fixture_label_tokyo_avariant3, label_tokyo_b as fixture_label_tokyo_b,
     subscription_api_aardvark as fixture_api_aardvark, subscription_api_dash as fixture_api_dash,
     subscription_api_dot as fixture_api_dot,
     subscription_api_loopback_https as fixture_api_loopback_https,
-    subscription_api_seoul_a as fixture_api_seoul_a, subscription_api_shared as fixture_api_shared,
+    subscription_api_shared as fixture_api_shared,
     subscription_api_subscribed as fixture_api_subscribed,
-    subscription_api_tokyo_a as fixture_api_tokyo_a,
     subscription_api_tokyo_b as fixture_api_tokyo_b,
     subscription_api_unsubscribed as fixture_api_unsubscribed,
     subscription_api_xp_node as fixture_api_xp_node, subscription_host_alpha as fixture_host_alpha,
@@ -36,7 +34,7 @@ use xp_test_fixtures::{
     subscription_host_relay_a as fixture_host_relay_a,
     subscription_host_relay_b as fixture_host_relay_b,
     subscription_host_relay_jp as fixture_host_relay_jp,
-    subscription_host_seoul as fixture_host_seoul, subscription_host_shared as fixture_host_shared,
+    subscription_host_shared as fixture_host_shared,
     subscription_host_singapore as fixture_host_singapore,
     subscription_host_tokyo_a as fixture_host_tokyo_a, subscription_host_us as fixture_host_us,
     subscription_node_n1 as fixture_node_n1, subscription_node_n2 as fixture_node_n2,
@@ -541,25 +539,16 @@ providerB:
             .any(|g| { g.get("name").and_then(Value::as_str) == Some(MIHOMO_LEGACY_OUTER_GROUP) }),
         "legacy outer group should be removed from rendered output"
     );
-    let use_names = relay_group
-        .get("use")
-        .and_then(Value::as_sequence)
-        .expect("use must be sequence")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(
-        use_names,
-        std::collections::BTreeSet::from(["providerA", "providerB"])
-    );
     assert_eq!(
         relay_group
             .get("proxies")
             .and_then(Value::as_sequence)
             .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        None,
-        "provider-backed relay groups must let provider candidates seed url-test"
+        Some(vec![MIHOMO_RELAY_REJECT_FALLBACK]),
+        "a relay without another subscribed Reality must fail closed"
     );
+    assert!(relay_group.get("use").is_none());
+    assert!(relay_group.get("filter").is_none());
     assert_eq!(
         relay_group.get("empty-fallback"),
         Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()))
@@ -567,6 +556,29 @@ providerB:
     assert_eq!(
         relay_group.get("url").and_then(Value::as_str),
         Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)
+    );
+    let all_group = proxy_groups
+        .iter()
+        .find(|g| g.get("name").and_then(Value::as_str) == Some("🤯 All"))
+        .expect("All group should exist");
+    assert_eq!(
+        all_group
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("All group should expose candidates")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>(),
+        vec![
+            "🛬 Tokyo-A",
+            "🤯 Japan",
+            "🤯 HongKong",
+            "🤯 Taiwan",
+            "🤯 Korea",
+            "🤯 Singapore",
+            "🤯 US",
+            "🤯 Other",
+        ]
     );
     let japan_group = proxy_groups
         .iter()
@@ -832,145 +844,6 @@ providerA:
 }
 
 #[test]
-fn build_mihomo_provider_yaml_groups_relay_by_access_host() {
-    let u = user("alice");
-    let n1 = node_with_api_base(
-        fixture_node_n1(),
-        fixture_label_tokyo_a,
-        fixture_host_shared(),
-        fixture_api_tokyo_a(),
-    );
-    let n2 = node_with_api_base(
-        fixture_node_n2(),
-        fixture_label_tokyo_b,
-        fixture_host_shared(),
-        fixture_api_tokyo_b(),
-    );
-    let n3 = node_with_api_base(
-        fixture_node_n3(),
-        fixture_label_seoul_a,
-        fixture_host_seoul(),
-        fixture_api_seoul_a(),
-    );
-    let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
-        endpoint_ss("e2", "n2", "ss", 443, endpoint_server_psk_b64()),
-        endpoint_ss("e3", "n3", "ss", 443, endpoint_server_psk_b64()),
-    ];
-    let memberships = vec![
-        membership("n1", "e1"),
-        membership("n2", "e2"),
-        membership("n3", "e3"),
-    ];
-    let profile = UserMihomoProfile {
-        mixin_yaml: "port: 0\nrules: []\n".to_string(),
-        extra_proxies_yaml: "".to_string(),
-        extra_proxy_providers_yaml: r#"
-providerA:
-  type: http
-  path: ./provider-a.yaml
-  url: https://example.com/a
-"#
-        .to_string(),
-    };
-
-    let yaml = build_mihomo_provider_yaml(
-        SEED,
-        &u,
-        &memberships,
-        &endpoints,
-        &[n1, n2, n3],
-        &profile,
-        xp_test_fixtures::subscription_provider_system_url(),
-    )
-    .unwrap();
-    let root: Value = serde_yaml::from_str(&yaml).unwrap();
-    let groups = root
-        .get("proxy-groups")
-        .and_then(Value::as_sequence)
-        .expect("proxy-groups must exist");
-    let relay_names = groups
-        .iter()
-        .filter_map(|group| group.get("name").and_then(Value::as_str))
-        .filter(|name| name.starts_with(MIHOMO_RELAY_GROUP_PREFIX))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        relay_names,
-        vec!["🛣️ seoul-fixture-test", "🛣️ shared-fixture-test"]
-    );
-    let relay_url = |name: &str| {
-        groups
-            .iter()
-            .find(|group| group.get("name").and_then(Value::as_str) == Some(name))
-            .and_then(|group| group.get("url"))
-            .and_then(Value::as_str)
-    };
-    assert_eq!(
-        relay_url("🛣️ shared-fixture-test"),
-        Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)
-    );
-    assert_eq!(
-        relay_url("🛣️ seoul-fixture-test"),
-        Some(xp_test_fixtures::subscription_health_seoul_a())
-    );
-
-    let system_yaml = build_mihomo_provider_system_yaml(
-        SEED,
-        &u,
-        &memberships,
-        &endpoints,
-        &[
-            node_with_api_base(
-                fixture_node_n1(),
-                fixture_label_tokyo_a,
-                fixture_host_shared(),
-                fixture_api_tokyo_a(),
-            ),
-            node_with_api_base(
-                fixture_node_n2(),
-                fixture_label_tokyo_b,
-                fixture_host_shared(),
-                fixture_api_tokyo_b(),
-            ),
-            node_with_api_base(
-                fixture_node_n3(),
-                fixture_label_seoul_a,
-                fixture_host_seoul(),
-                fixture_api_seoul_a(),
-            ),
-        ],
-    )
-    .unwrap();
-    let system_root: Value = serde_yaml::from_str(&system_yaml).unwrap();
-    let proxy_dialer = |name: &str| {
-        system_root
-            .get("proxies")
-            .and_then(Value::as_sequence)
-            .and_then(|proxies| {
-                proxies
-                    .iter()
-                    .find(|proxy| proxy.get("name").and_then(Value::as_str) == Some(name))
-            })
-            .and_then(|proxy| proxy.get("dialer-proxy"))
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    };
-
-    assert_eq!(
-        proxy_dialer("Tokyo-A-ss-chain").as_deref(),
-        Some("🛣️ shared-fixture-test")
-    );
-    assert_eq!(
-        proxy_dialer("Tokyo-B-ss-chain").as_deref(),
-        Some("🛣️ shared-fixture-test")
-    );
-    assert_eq!(
-        proxy_dialer("Seoul-A-ss-chain").as_deref(),
-        Some("🛣️ seoul-fixture-test")
-    );
-}
-
-#[test]
 fn build_mihomo_provider_yaml_uses_default_health_when_api_base_is_loopback() {
     let u = user("alice");
     let n = node_with_api_base(
@@ -1023,6 +896,7 @@ providerA:
         relay.get("url").and_then(Value::as_str),
         Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)
     );
+
     assert!(!yaml.contains("127.0.0.1"));
 }
 
@@ -2180,6 +2054,35 @@ providerA:
             "Custom Select"
         ]
     );
+    let all_group = root
+        .get("proxy-groups")
+        .and_then(Value::as_sequence)
+        .and_then(|groups| {
+            groups
+                .iter()
+                .find(|group| group.get("name").and_then(Value::as_str) == Some("🤯 All"))
+        })
+        .expect("All group should exist");
+    assert_eq!(
+        all_group
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .expect("All group should expose candidates")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>(),
+        vec![
+            "🛬 Osaka-B",
+            "🛬 Tokyo-A",
+            "🤯 Japan",
+            "🤯 HongKong",
+            "🤯 Taiwan",
+            "🤯 Korea",
+            "🤯 Singapore",
+            "🤯 US",
+            "🤯 Other",
+        ]
+    );
     assert!(
         names.ends_with(&[
             "🛣️ relay-dash-a-fixture-test",
@@ -2529,22 +2432,16 @@ providerA:
             MIHOMO_OUTER_URL_TEST_TOLERANCE
         )))
     );
-    let use_values = relay
-        .get("use")
-        .and_then(Value::as_sequence)
-        .expect("relay group must include use list")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
-    assert_eq!(use_values, vec!["providerA"]);
     assert_eq!(
         relay
             .get("proxies")
             .and_then(Value::as_sequence)
             .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        None,
-        "external relay groups must let provider candidates seed url-test"
+        Some(vec![MIHOMO_RELAY_REJECT_FALLBACK]),
+        "relay groups without Reality candidates must fail closed"
     );
+    assert!(relay.get("use").is_none());
+    assert!(relay.get("filter").is_none());
     assert_eq!(
         relay.get("empty-fallback"),
         Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string())),
@@ -2557,7 +2454,7 @@ providerA:
 }
 
 #[test]
-fn build_mihomo_yaml_injects_relay_filter() {
+fn build_mihomo_yaml_rejects_relay_without_reality_candidate() {
     let u = user("alice");
     let n = node(
         fixture_node_n1(),
@@ -2609,18 +2506,17 @@ providerA:
         .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-fixture-test"))
         .expect("relay group should exist");
     assert_eq!(
-        relay.get("filter").and_then(Value::as_str),
-        Some(MIHOMO_OUTER_FILTER)
+        relay
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>(),
+        vec![MIHOMO_RELAY_REJECT_FALLBACK]
     );
-    let filter = relay
-        .get("filter")
-        .and_then(Value::as_str)
-        .expect("relay group should have a filter");
-    assert!(filter.contains("Singapore|SG"));
-    assert!(!filter.contains("Taiwan"));
-    assert!(!filter.contains("台湾"));
-    assert!(!filter.contains("台灣"));
-    assert!(!filter.contains("🇹🇼"));
+    assert!(relay.get("use").is_none());
+    assert!(relay.get("filter").is_none());
 }
 
 #[test]

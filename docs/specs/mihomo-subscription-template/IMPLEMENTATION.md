@@ -10,7 +10,7 @@
 
 - Status: complete for the Mihomo profile workspace scope
 - Created: 2026-03-04
-- Last: 2026-10-07
+- Last: 2026-10-09
 
 ## Implementation Milestones
 
@@ -20,6 +20,17 @@
 - [x] M4: Add the shared User Details and Demo workspace.
 - [x] M5: Preserve drafts, editor state, permissions, and save protection.
 - [x] M6: Add Storybook states and real CodeMirror browser coverage.
+
+## Follow-up Requirements
+
+The following rendering requirements were clarified after delivery and are now implemented.
+
+- [x] Put every generated `🛬 {base}` Landing Group before the regional candidates in `🤯 All`.
+- [x] Add other subscribed nodes' `*-reality` Access Points to each system `🛣️` group.
+      Exclude the Target Node, `DIRECT`, and unsubscribed nodes; use `REJECT` when none qualify.
+
+- Subscription rendering tests cover landing ordering, subscribed Reality candidates,
+  provider additions, shared access-host exclusion, and fail-closed `REJECT` behavior.
 
 ## Workspace Coverage
 

@@ -5,6 +5,8 @@
 
 ## 变更记录（Change log）
 
+- 2026-10-09: `🤯 All` 先列实际 `🛬 {base}`；系统 `🛣️` 使用其他已订阅节点
+  的 `*-reality`，排除目标、未订阅节点和 `DIRECT`；无候选时 `REJECT`。
 - 2026-04-17: 创建规格并冻结双轨 URL、provider 保留名与双轨 admin 设置语义。
 - 2026-04-17: 完成全局 `mihomo_delivery_mode`、显式 dual-track 路由、Storybook/真实 Mihomo provider 验证与文档同步。
 - 2026-04-24: provider 主配置的系统地区组切换为 probe-derived 固定地区面，并补充 `🌟 Other`、`💎 高质量` / `🚀 节点选择` 自动补点语义。
