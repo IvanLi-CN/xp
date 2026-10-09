@@ -56,6 +56,7 @@ const SQLITE_STAGING_FILE: &str = "history.sqlite3.migrating";
 const JSON_FALLBACK_FILE: &str = "history.sqlite3.json-fallback";
 const BACKUP_RETENTION: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const CHECKPOINT_PAGES: u32 = 64;
+const RETAINED_JOURNAL_BYTES: i64 = 1024 * 1024;
 const VACUUM_PAGES: u32 = 64;
 const SEQUENCE_SUMMARY_SCHEMA: &str = include_str!("sequence_summary_schema.sql");
 
@@ -416,19 +417,6 @@ fn migrate_json_snapshots(data_dir: &Path, db_path: &Path) -> Result<()> {
         let _ = fs::remove_file(&staging_path);
     }
     result
-}
-
-fn configure_runtime(connection: &Connection) -> Result<()> {
-    connection
-        .pragma_update(None, "journal_mode", "WAL")
-        .map_err(sqlite_error)?;
-    connection
-        .pragma_update(None, "wal_autocheckpoint", CHECKPOINT_PAGES)
-        .map_err(sqlite_error)?;
-    connection
-        .pragma_update(None, "cache_size", -1024_i64)
-        .map_err(sqlite_error)?;
-    Ok(())
 }
 
 fn ensure_schema(connection: &mut Connection) -> Result<()> {

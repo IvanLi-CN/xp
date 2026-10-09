@@ -165,6 +165,11 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   armed recovery binding. Completing an independent source/epoch/stream handoff preserves the
   generation's original binding; it cannot grant that bound stream a second crossing.
 - Docker/Compose recovery accepts absolute `--data-dir` with existing identity, without `xp.env`.
+- History SQLite connections set `journal_size_limit=1048576` in every deployment mode.
+- Safe WAL reset releases idle allocation; active transactions and pinned readers may exceed it.
+- Physical database-plus-WAL accounting and fail-closed capacity admission remain unchanged.
+- No manual checkpoint, file removal, extra database, quota change or full `VACUUM` is permitted.
+- Existing and new databases use the same connection setting without a schema migration.
 - Missing identity fails closed; omission retains host-managed configuration discovery.
 - segment summary 使用 `repository_history_segments_sync_order_v2` 覆盖索引
   `(contains_tombstone, source_node_id, source_epoch, stream, first_sequence, id)`；既有库只

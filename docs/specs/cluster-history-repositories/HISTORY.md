@@ -4,6 +4,10 @@
 
 ## Decision Trace
 
+- Production sampling showed a reused 1.36 GiB WAL with only 22 current frames.
+- Automatic checkpointing alone retains peak allocation; a retained-journal limit releases it.
+- Safe reset preserves active frames, physical quota accounting and durable payloads.
+
 - Live recovery exposed a refresh failure after concatenating two valid 64-gap responses.
 - Preserve each wire page's bound and merge both inside the atomic checkpoint transaction.
 

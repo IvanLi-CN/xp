@@ -55,6 +55,13 @@
   public HTTPS `api_base_url` only and do not select or probe Mesh or Reverse Mesh. Source delivery
   also uses only that public HTTPS path; a transport failure leaves the durable outbox pending for
   the next bounded retry and never opens a history Mesh relay.
+
+  SQLite releases idle WAL at normal reset with a 1 MiB retained-journal limit.
+
+  Active frames and readers remain safe; capacity admission still counts the full WAL.
+
+  systemd, OpenRC and Docker/Compose share this setting; manual checkpointing stays prohibited.
+
   Summary continuation resolves its opaque segment ID to the durable five-column keyset and seeks
   the additive `repository_history_segments_sync_order_v2` SQLite index; an existing database
   creates that index idempotently at startup without replacing the legacy index or signed payloads.
