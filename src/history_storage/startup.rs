@@ -4,6 +4,24 @@ use std::os::fd::AsRawFd;
 pub(super) const EXTERNAL_REPOSITORY_STARTUP_FAILURE: &str =
     "external repository history startup preparation failed: ";
 
+fn configure_runtime(connection: &Connection) -> Result<()> {
+    connection
+        .pragma_update(None, "journal_mode", "WAL")
+        .map_err(sqlite_error)?;
+    connection
+        .pragma_update(None, "wal_autocheckpoint", CHECKPOINT_PAGES)
+        .map_err(sqlite_error)?;
+    // SQLite truncates only safely reusable allocation at WAL reset, preserving
+    // active frames and pinned readers. Autocheckpoint alone retains the peak size.
+    connection
+        .pragma_update(None, "journal_size_limit", RETAINED_JOURNAL_BYTES)
+        .map_err(sqlite_error)?;
+    connection
+        .pragma_update(None, "cache_size", -1024_i64)
+        .map_err(sqlite_error)?;
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum HistoryStorageMode {
     Sqlite,

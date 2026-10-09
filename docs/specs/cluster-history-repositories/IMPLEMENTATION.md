@@ -8,6 +8,11 @@
 - Lifecycle: active
 - Catalog note: Initiative #248
 
+- Normal history connections release idle WAL at safe reset with a 1 MiB retained-journal limit.
+- Active transactions and pinned readers preserve their required frames.
+- Physical capacity accounting, source outbox and recovery generation remain unchanged.
+- Regression coverage exercises large transactions, reader pinning, small commits and restart.
+
 ### Recovery generation and sequence-block summaries
 
 - Recovery refresh validates repair and summary gaps as two independently bounded wire pages.

@@ -849,6 +849,10 @@ Notes:
   coverage, watermarks, gaps, clock skew and `complete` / `partial` / `local_only` query quality
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
+- Normal history connections use a 1 MiB retained-journal limit in every deployment mode.
+- A safe WAL reset releases idle allocation; active transactions and readers may exceed the limit.
+- Capacity still counts the physical database plus WAL and stops history writes when insufficient.
+- Do not delete WAL, manually checkpoint, run full `VACUUM`, or raise quota to bypass the guard.
 - `history.sqlite3.diagnostics.json` is a private, bounded operational record for investigating
   slow local repository reads and maintenance. It is atomically replaced by a bounded, coalescing
   writer outside SQLite/backend locks with mode `0600`, capped at 16 KiB, and contains only stable
