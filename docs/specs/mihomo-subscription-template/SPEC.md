@@ -2,7 +2,7 @@
 
 ## Related ADRs
 
-None
+- [ADR 0001](../../adr/0001-mihomo-landing-and-relay-group-contract.md)
 
 ## Context and Scope
 

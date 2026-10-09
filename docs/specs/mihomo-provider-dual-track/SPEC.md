@@ -2,9 +2,11 @@
 
 ## Related ADRs
 
-None
+- [ADR 0001](../../adr/0001-mihomo-landing-and-relay-group-contract.md)
 
-## 背景 / 问题陈述
+## Context and Scope
+
+### 背景 / 问题陈述
 
 - 当前 `format=mihomo` 已支持系统动态节点 + 用户 mixin，但系统节点仍直接写入最终 `proxies`，一旦项目自己的入口地址、端口或节点集合变化，就需要整体刷新主配置。
 - 这对真实客户端并不友好：用户导入的是完整配置而不是独立 provider，入口池变化无法通过 Mihomo 自身的 `proxy-provider` 拉取机制独立更新。
@@ -53,10 +55,15 @@ None
 - 不改 `raw` / `base64` / `clash` 输出。
 - 不把 host-managed 限缩成“仅兼容运行、不给升级语义”；部署/升级合同必须覆盖既有 host-managed 节点与单镜像容器节点两条 owner-facing 路径。
 
-## 需求（Requirements）
+## Requirements
 
 ### MUST
 
+- **REQ-MIHOMO-PROVIDER-001**: `🤯 All` 必须先列出所有实际生成的 `🛬 {base}`，再按既有顺序列出
+  canonical `🤯 {Region}` 组；候选名称必须稳定去重。
+- **REQ-MIHOMO-PROVIDER-002**: 每个系统 `🛣️ {relay-base}` 必须只使用其他已订阅节点实际生成的
+  `*-reality` 代理作为系统候选；排除组内目标节点、`*-chain`、SS、`DIRECT` 与未生成代理，
+  无合格候选时必须使用 `[REJECT]` 与 `empty-fallback: REJECT`，外部 provider 不得绕过该闭锁。
 - `GET /api/sub/{token}?format=mihomo` 必须输出 provider 主配置。
 - `GET /api/sub/{token}/mihomo/legacy` 不再是可用订阅路径。
 - `GET /api/sub/{token}/mihomo/provider` 必须输出 provider 主配置。
@@ -157,7 +164,15 @@ None
 
 - [contracts/http-apis.md](./contracts/http-apis.md)
 
-## 验收标准（Acceptance Criteria）
+## Verification
+
+- **VER-MIHOMO-PROVIDER-001** (covers: `REQ-MIHOMO-PROVIDER-001`): Given the rendered system groups,
+  When inspecting `🤯 All`, Then every generated `🛬 {base}` appears first without duplicates, followed
+  by the canonical regional groups in their existing order.
+- **VER-MIHOMO-PROVIDER-002** (covers: `REQ-MIHOMO-PROVIDER-002`): Given subscribed nodes and a system
+  relay group, When rendering the provider and system payload, Then only other subscribed nodes' generated
+  `*-reality` proxies are candidates, and an empty candidate set emits only `REJECT` with no provider
+  `use`/`filter` escape path.
 
 - Given 请求 `GET /api/sub/{token}?format=mihomo`，Then 返回 provider 主配置，且 `proxy-providers.xp-system-generated.url` 指向同一外部 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
 - Given 请求 `GET /api/sub/{token}/mihomo/legacy`，Then 不再返回 legacy Mihomo 主配置。
