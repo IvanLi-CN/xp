@@ -40,6 +40,7 @@ The following rendering requirements were clarified after delivery and are now i
 - `REQ-MIHOMO-WORKSPACE-004`: One save submits all fields and keeps retryable errors.
 - `REQ-MIHOMO-WORKSPACE-005`: Desktop tree, mobile drawer, dynamic viewport, and scrolling.
 - `REQ-MIHOMO-WORKSPACE-006`: Theme, labels, focus restoration, keyboard, and read-only mode.
+- `REQ-MIHOMO-WORKSPACE-007`: Recursive folds keep descendants after parent expansion.
 
 ## Validation Evidence
 
@@ -79,3 +80,4 @@ submission_gate=approved-by-owner
 ![Mihomo workspace desktop](./assets/mihomo-workspace-dark-desktop.png)
 ![Mihomo workspace mobile editor](./assets/mihomo-workspace-dark-mobile.png)
 ![Mihomo workspace mobile Files drawer](./assets/mihomo-workspace-dark-files.png)
+![Mihomo recursive folding preview](./assets/mihomo-recursive-folding-preview.png)

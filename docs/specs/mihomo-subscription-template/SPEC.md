@@ -153,6 +153,10 @@
 - 工作区打开时焦点进入工作区，Tab 导航不得进入被覆盖的背景页面；窄屏文件抽屉关闭后焦点返回编辑区或触发控件。
 - 工作区不能截断现有 CodeMirror 搜索与折叠操作；未保存状态须提供文字或可访问说明，不能仅以颜色区分。
 
+### REQ-MIHOMO-WORKSPACE-007 — 递归折叠状态
+
+- Mihomo 与通用 YAML 编辑器的“全部折叠”快捷键 MUST 为语法树中每个可折叠对象建立独立折叠范围；展开任一父对象后，其子对象仍 MUST 保持折叠，直到用户显式展开子对象。
+
 ## 功能与行为规格（Functional/Behavior Spec）
 
 ### Core flows
@@ -295,12 +299,19 @@
 - Pass condition: 两种主题下文件选中、未保存状态、焦点和代码均可读，控件保持项目风格。
   使用键盘可以完成打开、文件切换、保存、抽屉关闭与缩回；工作区活动期间焦点不落到背景，搜索/折叠快捷键仍可用。
 
+### VER-MIHOMO-WORKSPACE-007 — 递归折叠状态
+
+- Method: 使用真实 Demo Mihomo 多层 YAML，执行“全部折叠”快捷键，展开 `proxies` 父对象并检查 `reality-opts`、`proxy-groups`、`rules` 子对象。
+- covers: `REQ-MIHOMO-WORKSPACE-007`
+- Pass condition: 展开父对象后，子对象仍显示折叠占位符，必须再次显式展开子对象才能显示内容。
+
 ## Visual Evidence
 
 Mihomo workspace visual proof: desktop tree/editor and narrow toolbar/drawer states.
 ![Mihomo workspace desktop](./assets/mihomo-workspace-dark-desktop.png)
 ![Mihomo workspace mobile editor](./assets/mihomo-workspace-dark-mobile.png)
 ![Mihomo workspace mobile Files drawer](./assets/mihomo-workspace-dark-files.png)
+![Mihomo recursive folding preview](./assets/mihomo-recursive-folding-preview.png)
 Owner confirmation: 2026-10-07; approved for current-candidate reuse.
 
 ## 主题资产
