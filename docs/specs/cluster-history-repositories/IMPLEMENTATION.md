@@ -297,6 +297,13 @@
 ## Remaining Gaps
 
 - Aggregate acceptance must bind the final integration SHA after all serialized Wave PRs land.
+- Production recovery still requires signed next-generation apply and five minutes of stable Ready.
+- Fixed retained-range deep verification under writes remains a delivery gate after CI and release.
+
+## Recovery validation
+
+- Signed preflight tests use catalog node IDs and reject auth, quorum or cluster-binding drift.
+- SQLite tests cover handoff rollback/restart, audited recovery, fingerprints and lease expiry.
 
 ## Tiered keyset recovery
 
