@@ -47,6 +47,9 @@ describe("demo mock API", () => {
 		await vi.advanceTimersByTimeAsync(240);
 
 		await expect(pending).resolves.toContain("# provider mode preview");
+		await expect(pending).resolves.toContain("reality-opts:");
+		await expect(pending).resolves.toContain("proxy-groups:");
+		await expect(pending).resolves.toContain("patterns:");
 		vi.useRealTimers();
 	});
 });

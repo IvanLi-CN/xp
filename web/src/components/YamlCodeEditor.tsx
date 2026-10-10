@@ -9,6 +9,7 @@ import { type ReactNode, useId, useLayoutEffect, useMemo, useRef } from "react";
 
 import { cn } from "@/lib/utils";
 
+import { recursiveFoldKeymap } from "../lib/codemirror-folding";
 import { EditorShortcutHint } from "./EditorShortcutHint";
 import { useUiPrefsOptional } from "./UiPrefs";
 import { textareaClass } from "./ui-helpers";
@@ -66,7 +67,7 @@ export function YamlCodeEditor({
 	const labelId = useId();
 	const resolvedHelperText = helperText ?? null;
 	const editorHeight = `${Math.max(minRows, 4) * 24}px`;
-	const extensions = useMemo(() => [yaml()], []);
+	const extensions = useMemo(() => [yaml(), recursiveFoldKeymap], []);
 	const editorViewRef = useRef<EditorView | null>(null);
 	const editorTheme =
 		prefs?.resolvedTheme === "dark" ? githubDark : githubLight;

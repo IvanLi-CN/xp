@@ -5,6 +5,7 @@ import { useMemo } from "react";
 
 import { cn } from "@/lib/utils";
 import type { SubscriptionFormat } from "../api/subscription";
+import { recursiveFoldKeymap } from "../lib/codemirror-folding";
 import { EditorShortcutHint } from "./EditorShortcutHint";
 import { Icon } from "./Icon";
 import { SubscriptionFormatSegmentedControl } from "./SubscriptionFormatSegmentedControl";
@@ -147,7 +148,10 @@ function SubscriptionContentEditor({
 	const editorTheme =
 		prefs?.resolvedTheme === "dark" ? githubDark : githubLight;
 	const extensions = useMemo(
-		() => (format === "clash" || format === "mihomo" ? [yaml()] : []),
+		() =>
+			format === "clash" || format === "mihomo"
+				? [yaml(), recursiveFoldKeymap]
+				: [recursiveFoldKeymap],
 		[format],
 	);
 	const height = fillHeight ? "508px" : "min(56vh, 520px)";

@@ -30,6 +30,46 @@ export async function fetchDemoSubscription(
 			format === "mihomo"
 				? "# provider mode preview"
 				: "# clash-compatible preview";
+		if (format === "mihomo") {
+			const proxyLines = assignedEndpoints.flatMap((endpoint) => {
+				const lines = [
+					`  - name: ${endpoint.name}`,
+					`    type: ${endpointType(endpoint)}`,
+					`    server: ${endpointHost(endpoint, state.nodes)}`,
+					`    port: ${endpoint.port}`,
+				];
+				if (endpointType(endpoint) === "vless") {
+					lines.push(
+						"    tls: true",
+						"    reality-opts:",
+						"      public-key: fixture-public-key",
+						"      short-id: fixture-short-id",
+					);
+				} else {
+					lines.push("    udp: true");
+				}
+				return lines;
+			});
+			return [
+				header,
+				"proxies:",
+				...proxyLines,
+				"proxy-groups:",
+				"  - name: Auto",
+				"    type: select",
+				"    proxies:",
+				...assignedEndpoints.map((endpoint) => `      - ${endpoint.name}`),
+				"      - DIRECT",
+				"    filter:",
+				"      include: true",
+				"      patterns:",
+				"        - HK",
+				"        - JP",
+				user.mihomoMixinYaml.trim()
+					? `# user mixin\n${user.mihomoMixinYaml.trim()}`
+					: "# no user mixin",
+			].join("\n");
+		}
 		return [
 			header,
 			"proxies:",
