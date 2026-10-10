@@ -134,7 +134,7 @@ fn tiered_sqlite_backfill_uses_a_stable_received_watermark_across_pages() {
 }
 
 #[test]
-fn active_tiered_export_defers_representation_rewrites_until_the_final_page() {
+fn tiered_export_retains_a_bounded_repair_grace_after_the_final_page() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let policy = super::super::RepositoryRetentionPolicy::default();
     let now = 20_000_u64
@@ -188,7 +188,17 @@ fn active_tiered_export_defers_representation_rewrites_until_the_final_page() {
         .expect("final export page");
     runtime
         .prepare_for_replication(now)
-        .expect("compact after export finishes");
+        .expect("defer compaction until the receiver can drain its repair anchor");
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_record_count()
+            .expect("record count during repair grace"),
+        2
+    );
+    runtime
+        .prepare_for_replication(now + 15 * 60)
+        .expect("compact after the bounded export lease expires");
     assert_eq!(
         runtime
             .storage

@@ -38,6 +38,7 @@ const REPOSITORY_ED25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-ed25519-v1
 const REPOSITORY_X25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-x25519-v1\0";
 pub(super) mod gaps;
 pub(crate) mod recovery;
+pub(crate) mod recovery_preflight;
 mod worker;
 pub(crate) use worker::spawn_repository_replica_worker;
 

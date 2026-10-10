@@ -84,6 +84,10 @@
   serving batch changes during an interrupted pending page, XP clears only the stale response
   identity and retries the same durable segment set; malformed or non-advancing responses fail
   closed.
+  History recovery checks signed public-HTTPS voter preflight, equal versions and leader quorum.
+
+  Missing or changed cluster facts fail closed before recovery apply.
+
   Recovery refresh validates each gap page at the existing 64-gap limit.
   Tiered backfill uses the canonical retention-start five-column SQLite key for ordering and
   continuation while preserving original wire observation times. Version-2 keyset cursors reject
@@ -91,6 +95,11 @@
   not rearm recovery generations.
 
   Both pages merge with the checkpoint atomically without rearming the generation.
+  Tiered handoff completion snapshots the receiver watermark in the same history transaction as
+  its permanent gap, completed range and generation consumption; failed commits restore all state.
+  Signed recovery may finish an exactly audited predecessor partial commit while arming a new
+  generation; dry-run exposes the proposed watermark repair and remains read-only. Final export
+  pages retain the existing 15-minute lease until natural expiry to protect the repair handoff.
   Initial backfill receivers cap the JSON response body at four times the semantic page budget,
   reject record-count overflow before typed decoding, then enforce the 128-record / 192 KiB page
   bound. They validate both historical-source and Ready-tiered opaque cursor formats for length,

@@ -142,6 +142,28 @@ where
     serde_json::from_slice(&body).map_err(|error| RepositoryDirectError::Application(error.into()))
 }
 
+pub(crate) async fn repository_read_only_direct_request<T>(
+    state: &AppState,
+    peer: &MeshPeerTarget,
+    path: &str,
+) -> Result<T, RepositoryDirectError>
+where
+    T: DeserializeOwned,
+{
+    let body = send_repository_request_on_path_body(
+        state,
+        peer,
+        repository_direct_path(),
+        Method::GET,
+        path,
+        Vec::new(),
+        false,
+        16 * 1024,
+    )
+    .await?;
+    serde_json::from_slice(&body).map_err(|error| RepositoryDirectError::Application(error.into()))
+}
+
 pub(crate) async fn repository_direct_request_body(
     state: &AppState,
     peer: &MeshPeerTarget,

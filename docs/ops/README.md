@@ -924,6 +924,11 @@ Notes:
   edit the checkpoint or clear the backlog manually. If the gap and watermark are already durable
   but the active handoff marker remains after a restart, XP completes it idempotently and clears
   the marker without advancing the watermark a second time.
+  Completion commits the receiver watermark, permanent gap, completed handoff and generation
+  consumption together. A storage failure restores the previous receiver and checkpoint for retry.
+  Final tiered export pages retain their existing 15-minute export lease until natural expiry so
+  retention cannot remove the pending repair anchor during the handoff. No lease is extended by
+  finalization; normal retention resumes after all bounded leases expire.
   Live source delivery, ordinary anti-entropy, and later repair pages still reject sequence gaps;
   do not bypass that boundary by editing the checkpoint.
   A stale retained-anchor marker is recovered in place through the signed local command during the
@@ -943,8 +948,24 @@ Notes:
   ```
 
   The directory must already contain the local cluster identity. Missing identity fails closed.
+  A predecessor partial commit may show `receiver_watermark_repair` in signed dry-run output.
+  Inspect its exact completed audit range and the actual `receiver_watermark`: apply finishes only
+  that already-declared range and arms a new generation atomically. Missing or mismatched evidence,
+  changed checkpoint, fingerprint or capacity remains a rejection; never edit the database or
+  rearm a consumed generation manually. Use matching released `xp` and `xp-ops` binaries after
+  completing the rolling voter upgrade before applying this recovery.
 
   Host-managed nodes may omit `--data-dir` to use their configured `xp.env` directory.
+
+  恢复前逐节点完成滚动升级并维持 quorum。
+
+  signed dry-run 的 `cluster_preflight` 包含版本、term、leader 和 membership revision。
+
+  全部 voter 必须返回一致签名视图且 leader 通过 quorum 检查。
+
+  旧节点缺少 preflight 路由时不可 apply。
+
+  状态、容量、版本或 quorum 变化须重新 dry-run，不绕过 fingerprint。
 
   The fingerprint binds the receiver watermark, prior handoff range, recovery generation, capacity
   budget, and local state. Apply fails closed if any value changes. It never creates a second

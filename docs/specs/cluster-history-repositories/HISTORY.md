@@ -4,6 +4,13 @@
 
 ## Decision Trace
 
+- A restart regression reproduced a completed handoff with its predecessor receiver watermark.
+- Handoff completion now snapshots the receiver in the same transaction as gap and consumption.
+- Storage-failure coverage verifies rollback and a successful retry without another crossing.
+- Production repair returned expired original IDs immediately after the final export page.
+- Keep the existing bounded export lease during the handoff and let it expire naturally.
+- Signed recovery may finish an exactly audited predecessor partial commit before a new generation.
+
 - Production sampling showed a reused 1.36 GiB WAL with only 22 current frames.
 - Automatic checkpointing alone retains peak allocation; a retained-journal limit releases it.
 - Safe reset preserves active frames, physical quota accounting and durable payloads.
@@ -49,6 +56,10 @@
 
 - 本主题新增一个长期数据边界，不 supersede 既有 node history、traffic 或 Mesh Spec；它们作为输入和兼容约束继续有效。
 - Issue #248 的多 Ticket Initiative 采用 SQLite 基座、控制面、传输、复制和管理集成五个顺序 Wave，以降低跨模块公共契约变更风险。
+
+[ADR 0019](../../adr/0019-history-handoff-completion-and-recovery-preflight.md) 继承 ADR 0018。
+
+它明确旧版部分提交的审计修复、最终页有界 repair grace 和 signed voter/version/quorum preflight。生产验收不以单元测试替代。
 
 ## References
 

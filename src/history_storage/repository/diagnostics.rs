@@ -438,7 +438,11 @@ impl HistoryStorage {
         Ok(())
     }
 
-    pub(crate) fn finish_repository_history_export(&self, session_id: &str) -> Result<()> {
+    pub(crate) fn finish_repository_history_export(
+        &self,
+        session_id: &str,
+        now_unix_seconds: u64,
+    ) -> Result<()> {
         let diagnostic = self.begin_diagnostic(
             HistoryStorageDiagnosticOperation::TieredBackfillExportFinish,
             "history_storage.tiered_backfill",
@@ -448,12 +452,26 @@ impl HistoryStorage {
             diagnostic.finish();
             return Ok(());
         };
-        connection
+        // The final page has not yet been acknowledged by its receiver. Preserve the existing
+        // bounded lease so retention cannot remove its repair anchor during that handoff.
+        let updated = connection
             .execute(
-                "DELETE FROM repository_history_export_leases WHERE session_id = ?1",
-                [session_id],
+                "UPDATE repository_history_export_leases
+                 SET expires_at = MIN(expires_at, ?2) WHERE session_id = ?1",
+                params![
+                    session_id,
+                    i64::try_from(
+                        now_unix_seconds.saturating_add(REPOSITORY_HISTORY_EXPORT_LEASE_SECONDS)
+                    )
+                    .unwrap_or(i64::MAX),
+                ],
             )
             .map_err(sqlite_error)?;
+        if updated != 1 {
+            return Err(HistoryStorageError(
+                "history export lease is missing".to_owned(),
+            ));
+        }
         diagnostic.finish();
         Ok(())
     }

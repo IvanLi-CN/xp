@@ -6,8 +6,12 @@ use crate::{
 use ed25519_dalek::SigningKey;
 #[path = "deep_summary_tests.rs"]
 mod deep_summary_tests;
+#[path = "recovery_partial_commit_tests.rs"]
+mod recovery_partial_commit_tests;
 #[path = "recovery_stream_binding_tests.rs"]
 mod recovery_stream_binding_tests;
+#[path = "repair_handoff_grace_tests.rs"]
+mod repair_handoff_grace_tests;
 #[path = "tiered_handoff_recovery_tests.rs"]
 mod tiered_handoff_recovery_tests;
 #[path = "truncated_tail_tests.rs"]

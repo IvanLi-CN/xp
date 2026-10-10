@@ -368,7 +368,7 @@ impl RepositoryReplicaRuntime {
         };
         if next_phase.is_none() {
             self.storage
-                .finish_repository_history_export(&export_session_id)
+                .finish_repository_history_export(&export_session_id, now_unix_seconds)
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         }
         let next_cursor = next_phase.map(|next_phase| {

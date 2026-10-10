@@ -137,7 +137,8 @@ impl HistoryStorageDiagnosticOperation {
             Self::TieredBackfillPage => "composite tiered history backfill page",
             Self::TieredBackfillExportRefresh => "composite tiered backfill export refresh",
             Self::TieredBackfillExportFinish => {
-                "DELETE FROM repository_history_export_leases WHERE session_id = ?1"
+                "UPDATE repository_history_export_leases \
+                 SET expires_at = MIN(expires_at, ?2) WHERE session_id = ?1"
             }
             Self::TieredBackfillExportActiveCount => {
                 "SELECT COUNT(*) FROM repository_history_export_leases"
