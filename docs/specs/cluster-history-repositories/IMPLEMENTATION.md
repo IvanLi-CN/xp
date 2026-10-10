@@ -33,6 +33,8 @@
 - Initial peer checkpoints now persist an operator-armed recovery generation. The local signed
   `xp-ops xp history-repository-recover` endpoint returns a zero-write fingerprint and requires
   `--apply --yes --expected-recovery-fingerprint` before arming one in-place retention crossing.
+- Recovery fingerprints bind stable repository membership and the configured capacity budget.
+- Apply rechecks live capacity without fingerprinting it, so continuous writes remain admissible.
   Legacy completed handoffs remain historical evidence and cannot authorize a second crossing.
 - SQLite repositories maintain 4096-sequence summary-block metadata with dirty-block triggers and
   bounded rebuild pages. Record upserts, tombstones, retention deletes, and restart invalidate

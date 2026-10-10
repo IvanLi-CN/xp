@@ -616,13 +616,12 @@ impl RepositoryReplicaRuntime {
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?,
         );
         hasher.update([u8::from(receiver_watermark_repair.is_some())]);
+        // Used and available bytes are live telemetry. The admission check above
+        // is repeated during apply, so binding them here would make recovery
+        // impossible while the repository continues to receive writes.
         hasher.update(capacity.quota_bytes().to_be_bytes());
-        hasher.update(capacity.used_bytes().to_be_bytes());
-        hasher.update(capacity.filesystem_available_bytes().to_be_bytes());
         hasher.update(capacity_required_bytes.to_be_bytes());
         hasher.update(capacity_filesystem_required_bytes.to_be_bytes());
-        hasher.update(capacity_quota_shortfall_bytes.to_be_bytes());
-        hasher.update(capacity_filesystem_shortfall_bytes.to_be_bytes());
         hasher.update(b"summary-v2\0");
         Ok(InitialPeerRecoveryPreview {
             peer_node_id: peer_node_id.to_owned(),

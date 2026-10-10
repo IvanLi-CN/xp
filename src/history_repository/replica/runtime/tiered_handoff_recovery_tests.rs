@@ -151,6 +151,14 @@ fn history_recovery_fingerprint_is_signed_once_and_retries_fail_closed() {
     let preview = runtime
         .preview_initial_peer_recovery("node-b")
         .expect("preview recovery");
+    let fingerprint = preview.fingerprint.clone();
+    runtime
+        .force_capacity_for_test(1, u64::MAX - 1)
+        .expect("refresh live capacity telemetry");
+    let telemetry_changed_preview = runtime
+        .preview_initial_peer_recovery("node-b")
+        .expect("preview remains admitted while telemetry changes");
+    assert_eq!(telemetry_changed_preview.fingerprint, fingerprint);
     assert_eq!(preview.generation, 1);
     assert_eq!(preview.receiver_watermark, Some(2));
     let checkpoint = runtime

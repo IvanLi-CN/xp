@@ -10,6 +10,7 @@
 - Production repair returned expired original IDs immediately after the final export page.
 - Keep the existing bounded export lease during the handoff and let it expire naturally.
 - Signed recovery may finish an exactly audited predecessor partial commit before a new generation.
+- Recovery apply tolerates live capacity telemetry changes and keeps the admission guard.
 
 - Production sampling showed a reused 1.36 GiB WAL with only 22 current frames.
 - Automatic checkpointing alone retains peak allocation; a retained-journal limit releases it.
