@@ -48,7 +48,25 @@ pub(crate) fn binding_for_repository(
         .ok_or_else(|| ApiError::conflict("history recovery leader is unavailable"))?;
     let membership_revision = crate::raft_membership_guard::membership_revision(&metrics)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    let repository_bytes = serde_json::to_vec(repository_membership)
+    // Capacity telemetry is refreshed during normal history writes. Bind only the
+    // membership identity and lifecycle facts here; the apply path still reruns
+    // the local capacity admission before mutating the checkpoint.
+    let repository_binding = repository_membership.as_ref().map(|membership| {
+        membership
+            .members()
+            .iter()
+            .map(|member| {
+                (
+                    member.identity(),
+                    member.lifecycle(),
+                    member.catch_up_completed_at(),
+                    member.ready_at(),
+                    member.replica_converged(),
+                )
+            })
+            .collect::<Vec<_>>()
+    });
+    let repository_bytes = serde_json::to_vec(&repository_binding)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     Ok(RecoveryClusterBinding {
         term: metrics.current_term,
