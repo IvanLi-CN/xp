@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 import { useMemo } from "react";
 import CodeMirrorMerge from "react-codemirror-merge";
 
+import { recursiveFoldKeymap } from "../lib/codemirror-folding";
 import { useUiPrefsOptional } from "./UiPrefs";
 import { YamlCodeEditor } from "./YamlCodeEditor";
 
@@ -57,7 +58,10 @@ export function MihomoSplitEditor({
 	minRows = 18,
 }: MihomoSplitEditorProps) {
 	const prefs = useUiPrefsOptional();
-	const extensions = useMemo(() => [yaml(), EditorView.lineWrapping], []);
+	const extensions = useMemo(
+		() => [yaml(), EditorView.lineWrapping, recursiveFoldKeymap],
+		[],
+	);
 	const editorTheme =
 		prefs?.resolvedTheme === "dark" ? githubDark : githubLight;
 	const editorHeight = `${Math.max(minRows, 8) * 24}px`;
