@@ -79,6 +79,7 @@ None
 - 管理员进入节点列表：前端并行拉取静态节点信息 + 运行态摘要，渲染摘要与趋势条。
 - 管理员进入节点详情：拉取运行态详情并建立 SSE 流，实时更新组件状态与事件列表。
 - 管理员切到节点详情 metadata 页：读取节点静态字段与最新 `egress_probe` 摘要；需要时点击刷新按钮触发单节点立即重探。
+- 管理员在节点详情切换任一 tab 时，当前 tab 标识必须写入该节点详情 URL；刷新或直接打开相同 URL 时恢复该 tab，缺失或非法 tab 回退到 Service runtime。
 - leader 节点调用 runtime 聚合接口时，使用 internal signature 并发请求其他节点 local runtime。
 
 ### Edge cases / errors
@@ -115,6 +116,7 @@ None
 - Given 集群包含本地+远端节点，When 打开节点列表，Then 每个节点都显示 `summary` 与 7 天状态指示器。
 - Given 打开节点详情，When 组件状态变化，Then 页面通过 SSE 自动更新组件卡片和事件列表。
 - Given 打开节点详情 metadata 页，When 节点存在最近一次主动探测结果，Then 页面显示出口 IP、Geo、订阅地区与 stale 状态，并允许手动刷新。
+- Given 当前节点详情 URL 带有合法 tab 参数，When 刷新或直接打开该 URL，Then 页面恢复对应 tab；缺失或非法 tab 时默认显示 Service runtime。
 - Given cloudflared 未启用，When 打开详情，Then cloudflared 状态为 `disabled` 且无重启事件。
 - Given cloudflared 已启用并故障，When 连续失败达到阈值，Then 记录重启请求与结果事件。
 - Given 节点只有 IPv4 公网出口且无 IPv6 route，When DDNS IPv6 探测失败但 IPv4 探测成功，Then DDNS 不记录 `ddns ipv6 probe` 异常，DNS 仅保持 `A` 记录且节点运行态不因此降级。

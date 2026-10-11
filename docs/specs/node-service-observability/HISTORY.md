@@ -9,3 +9,4 @@
 - 2026-02-26: 完成后端运行态聚合/持久化、前端 Nodes/NodeDetails 改造、cloudflared 运维配置与文档同步。
 - 2026-04-24: 在节点 metadata API 与 `NodeDetailsPage` 补充主动探测 egress probe 摘要、单节点刷新入口与 Storybook 视觉证据。
 - 2026-05-16: 明确 DDNS 地址族缺失不等同于探测异常，无 IPv6 出口节点不应仅因 IPv6 probe 失败进入 degraded。
+- 2026-10-11: 修复 `NodeDetailsPage` tab 选择刷新后重置的问题，将合法 tab 持久化到节点详情 URL 并补充恢复与导航测试。

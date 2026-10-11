@@ -6,6 +6,7 @@ import {
 	lazyRouteComponent,
 	redirect,
 } from "@tanstack/react-router";
+import { z } from "zod";
 
 import { AppLayout } from "./components/AppLayout";
 import { AuthGate } from "./components/AuthGate";
@@ -22,7 +23,10 @@ import { EndpointProbeStatsPage } from "./views/EndpointProbeStatsPage";
 import { EndpointsPage } from "./views/EndpointsPage";
 import { HomePage } from "./views/HomePage";
 import { LoginPage } from "./views/LoginPage";
-import { NodeDetailsPage } from "./views/NodeDetailsPage";
+import {
+	NODE_DETAILS_TAB_VALUES,
+	NodeDetailsPage,
+} from "./views/NodeDetailsPage";
 import { NodesPage } from "./views/NodesPage";
 import { QuotaPolicyPage } from "./views/QuotaPolicyPage";
 import { ServiceConfigPage } from "./views/ServiceConfigPage";
@@ -203,6 +207,12 @@ const nodesRepositoriesRoute = createRoute({
 const nodeDetailsRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/nodes/$nodeId",
+	validateSearch: z
+		.object({
+			tab: z.enum(NODE_DETAILS_TAB_VALUES).optional(),
+		})
+		.passthrough()
+		.catch({}),
 	component: NodeDetailsPage,
 });
 

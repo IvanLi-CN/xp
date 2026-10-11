@@ -3,13 +3,15 @@
 ## Current State
 
 - The node-service observability behavior described in `SPEC.md` is implemented.
+- `NodeDetailsPage` stores the selected tab in the route search and restores it on refresh.
+- Missing or invalid tab values default to Service runtime.
 - Runtime aggregation, persistent status, and Web presentation remain maintained in their sources.
 
 ## Recorded Delivery State
 
 - Status: 已完成
 - Created: 2026-02-26
-- Last: 2026-05-16
+- Last: 2026-10-11
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
