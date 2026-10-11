@@ -169,6 +169,11 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   fingerprint; apply requires `--yes` and the expected fingerprint and arms the generation in the
   existing control snapshot before replay. Recovery is in-place and never creates a second history
   database, copies the database, changes quota, deletes source outbox rows, or runs full `VACUUM`.
+- When a consumed generation retry has already recorded the exact sequence gap for its bound stream,
+  a later repair response with `history_truncated=true` may seal that same observed range as the
+  permanent `source_retention_expired` gap and accept the retained anchor in the same transaction.
+  This continuation does not arm a generation, schedule a second handoff, or authorize another
+  retention crossing; a different or unobserved range remains fail-closed and pending.
 - A bounded mixed-stream repair page selects the first eligible handoff, skipping gaps outside an
   armed recovery binding. Completing an independent source/epoch/stream handoff preserves the
   generation's original binding; it cannot grant that bound stream a second crossing.

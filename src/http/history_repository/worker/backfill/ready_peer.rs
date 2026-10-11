@@ -872,12 +872,19 @@ async fn repair_ready_peer_catch_up_page(
             first_cursor.source_epoch(),
             first_cursor.stream().to_owned(),
         );
-        let allow_retained_sequence_gap = if repair.history_truncated
-            && !retained_anchor_streams.iter().any(|key| {
-                key.source_node_id == stream_key.0
-                    && key.source_epoch == stream_key.1
-                    && key.stream == stream_key.2
-            }) {
+        let stream_has_retained_anchor = retained_anchor_streams.iter().any(|key| {
+            key.source_node_id == stream_key.0
+                && key.source_epoch == stream_key.1
+                && key.stream == stream_key.2
+        });
+        let same_consumed_recovery_stream = checkpoint.recovery_generation_consumed
+            && checkpoint.recovery_handoff.as_ref().is_some_and(|handoff| {
+                handoff.source_node_id == stream_key.0
+                    && handoff.source_epoch == stream_key.1
+                    && handoff.stream == stream_key.2
+            });
+        let allow_retained_sequence_gap = if repair.history_truncated && !stream_has_retained_anchor
+        {
             let runtime = state.repository_replica.lock().await;
             match runtime.can_accept_retained_sequence_gap(&segment.wire, false) {
                 Ok(allowed) => allowed,
@@ -889,6 +896,15 @@ async fn repair_ready_peer_catch_up_page(
                     return Err(error.into());
                 }
             }
+        } else if repair.history_truncated
+            && stream_has_retained_anchor
+            && same_consumed_recovery_stream
+        {
+            state
+                .repository_replica
+                .lock()
+                .await
+                .can_accept_consumed_retained_sequence_gap(&segment.wire)?
         } else {
             false
         };
