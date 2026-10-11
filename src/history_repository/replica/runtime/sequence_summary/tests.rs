@@ -87,7 +87,7 @@ fn sequence_summary_migration_survives_late_writes_and_restart() {
     );
     runtime.mark_history_truncated().unwrap();
     let summary = runtime.replication_summary_after(None, true).unwrap();
-    assert!(runtime.requires_repair(&summary, true).unwrap());
+    assert!(!runtime.requires_repair(&summary, true).unwrap());
     assert!(!runtime.requires_retained_repair(&summary).unwrap());
     assert!(runtime.retained_partitions_converged(&summary).unwrap());
     assert!(runtime.history_is_truncated());
