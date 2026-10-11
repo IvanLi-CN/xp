@@ -27,9 +27,9 @@ fn consumed_recovery_seals_the_previously_observed_truncated_gap_once() {
         )
         .expect_err("ordinary backfill must record the observed gap");
     let additional_gap = super::RepositoryReplicaGap {
-        source_node_id: "other-source".to_owned(),
+        source_node_id: "node-a".to_owned(),
         source_epoch: 7,
-        stream: "records".to_owned(),
+        stream: "runtime".to_owned(),
         first_sequence: 9,
         last_sequence: 10,
         start_unix_seconds: 0,

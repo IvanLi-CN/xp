@@ -132,7 +132,12 @@ impl RepositoryReplicaRuntime {
             .snapshot
             .gaps
             .iter()
-            .filter(|gap| !gap.permanent)
+            .filter(|gap| {
+                !gap.permanent
+                    && gap.source_node_id == first.source_node_id()
+                    && gap.source_epoch == first.source_epoch()
+                    && gap.stream == first.stream()
+            })
             .count();
         Ok(matching_count == 1 && transient_gap_count == 1)
     }
