@@ -8,6 +8,9 @@
   repair 每次尝试把 pending 数量、游标、进度时间、响应身份变化、明确不可用、无进展、HTTPS
   失败和 SQLite 存储失败写入现有控制快照。无进展响应只保留 pending 并按固定预算重试，避免
   长期停在无诊断的 `64`；永久 gap、`partial` 和 `replica_converged=false` 语义不变。
+- Follow-up 修复让同一 consumed checkpoint 在首次锚点尝试留下精确非永久 sequence gap 后，
+  仅凭 source 的 `history_truncated=true` 封存该已观测范围并继续当前 pending page；未知或
+  新范围仍 fail closed，不会重新 arm generation 或创建第二次 handoff。
 - 修复服务端单个 segment 超出 256 KiB wire 预算时的静默空响应：在生成 response identity
   前返回 storage error，避免接收方把空响应误判为可消费的 repair 页；不改变历史行、配额或
   source outbox。

@@ -26,6 +26,12 @@ SQLite database, WAL and diagnostic file before any restart. Do not re-apply a c
 generation, delete source outbox rows, increase quota, create a second database, or run full
 `VACUUM` as a diagnostic shortcut.
 
+If a consumed-generation retry has already left an exact non-permanent sequence gap, the next
+repair response may promote that same range to `source_retention_expired` when the serving peer
+proves `history_truncated=true`; this is a continuation of the existing checkpoint and should
+reduce `pending_count`. A different range must remain pending with a storage-boundary diagnostic;
+operators must not infer or apply a second retention crossing from the marker alone.
+
 The repair worker only uses the peer's registered public HTTPS `api_base_url`. A response that
 explicitly lists unavailable IDs may reduce `pending_count` and records `explicit_unavailable`; it
 does not alter permanent gap, `partial`, or `replica_converged=false` semantics. A segment that

@@ -4,6 +4,8 @@ use crate::{
     state::history_repository::identity::{Ed25519PublicKey, RepositoryNodeId, X25519PublicKey},
 };
 use ed25519_dalek::SigningKey;
+#[path = "consumed_retained_tests.rs"]
+mod consumed_retained_tests;
 #[path = "deep_summary_tests.rs"]
 mod deep_summary_tests;
 #[path = "recovery_partial_commit_tests.rs"]

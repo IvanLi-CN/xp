@@ -99,6 +99,49 @@ pub(crate) struct InitialPeerRecoveryPreview {
 }
 
 impl RepositoryReplicaRuntime {
+    /// Seal the exact gap left by a failed consumed-generation anchor attempt when the source
+    /// later proves that its retained history is truncated.
+    pub(crate) fn can_accept_consumed_retained_sequence_gap(
+        &self,
+        wire: &[u8],
+    ) -> Result<bool, RepositoryRuntimeError> {
+        let segment = crate::history_sync::SignedSegment::from_wire(wire)?;
+        let first = segment.canonical().first_cursor();
+        let Some(receiver) = self.receiver.as_ref() else {
+            return Ok(false);
+        };
+        let Some(watermark) = receiver.continuous_watermark(first)? else {
+            return Ok(false);
+        };
+        let Some(expected) = watermark.sequence().checked_add(1) else {
+            return Ok(false);
+        };
+        if first.sequence() <= expected || segment.canonical().previous_segment_hash().is_none() {
+            return Ok(false);
+        }
+        let matching_gap = self.snapshot.gaps.iter().filter(|gap| {
+            !gap.permanent
+                && gap.source_node_id == first.source_node_id()
+                && gap.source_epoch == first.source_epoch()
+                && gap.stream == first.stream()
+                && gap.first_sequence == expected
+                && gap.last_sequence == first.sequence().saturating_sub(1)
+        });
+        let matching_count = matching_gap.count();
+        let transient_gap_count = self
+            .snapshot
+            .gaps
+            .iter()
+            .filter(|gap| {
+                !gap.permanent
+                    && gap.source_node_id == first.source_node_id()
+                    && gap.source_epoch == first.source_epoch()
+                    && gap.stream == first.stream()
+            })
+            .count();
+        Ok(matching_count == 1 && transient_gap_count == 1)
+    }
+
     pub(crate) fn initial_peer_backfill_checkpoint(
         &self,
         peer_node_id: &str,

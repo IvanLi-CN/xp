@@ -58,6 +58,11 @@
   explicit-unavailable, no-progress and storage outcomes remain visible after restart. The serving
   repair endpoint rejects a retained segment that cannot fit the 256 KiB response budget before
   issuing a response identity.
+- If the first consumed-generation retry recorded a non-permanent sequence gap, a later
+  `history_truncated=true` response can prove that exact range is permanently expired. The receiver
+  promotes only that previously observed range, accepts the anchor atomically, and continues the
+  same pending page without changing generation state or scheduling a second handoff. A different
+  range remains a storage-boundary failure and is never inferred from the marker alone.
 
 - Expired armed-recovery repair pages retain existing IDs and add bounded current IDs.
   Refresh commits gaps and checkpoint atomically, preserves generation, and re-reads the same
