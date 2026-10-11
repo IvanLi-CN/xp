@@ -35,8 +35,11 @@ use source::LocalSourceState;
 
 mod error;
 mod status;
+mod summary_repair;
 
 use status::SourceDeliveryStatus;
+pub(crate) use status::{SummaryRepairDiagnostic, SummaryRepairResult};
+pub(crate) use summary_repair::SummaryRepairDiagnosticUpdate;
 
 pub(crate) use backfill::{
     RepositoryTieredBackfillRecord, tiered_backfill_record_bytes, validate_tiered_backfill_cursor,
@@ -277,6 +280,8 @@ pub(crate) struct RepositoryReplicaSnapshot {
     #[serde(default)]
     initial_peer_backfills: BTreeMap<String, InitialPeerBackfillCheckpoint>,
     #[serde(default)]
+    summary_repair_diagnostics: BTreeMap<String, SummaryRepairDiagnostic>,
+    #[serde(default)]
     retention_compaction_cursor: Option<RetentionCompactionCursor>,
     #[serde(default)]
     retention_compaction_continuation: Option<RetentionCompactionContinuation>,
@@ -326,6 +331,7 @@ impl Default for RepositoryReplicaSnapshot {
             legacy_segment_cursor_index_after_id: None,
             legacy_segment_cursor_index_complete: false,
             initial_peer_backfills: BTreeMap::new(),
+            summary_repair_diagnostics: BTreeMap::new(),
             retention_compaction_cursor: None,
             retention_compaction_continuation: None,
             partition_summaries: Vec::new(),
@@ -665,6 +671,7 @@ impl RepositoryReplicaRuntime {
         now_unix_seconds: u64,
         caller_class: &'static str,
     ) -> Result<RepositoryRuntimeStatus, RepositoryRuntimeError> {
+        self.sync_summary_repair_diagnostics();
         let diagnostic = self.storage.begin_diagnostic(
             HistoryStorageDiagnosticOperation::RuntimeStatus,
             caller_class,
@@ -710,6 +717,7 @@ impl RepositoryReplicaRuntime {
                 .snapshot
                 .last_dynamic_relay_attempt_unix_seconds,
             source_delivery,
+            summary_repairs: self.snapshot.summary_repair_diagnostics.clone(),
         };
         diagnostic.finish();
         Ok(status)

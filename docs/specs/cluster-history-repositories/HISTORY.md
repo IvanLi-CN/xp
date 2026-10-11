@@ -4,6 +4,14 @@
 
 ## Decision Trace
 
+- 101 的 consumed recovery generation 继续使用已有 summary checkpoint，不重新 arm generation；
+  repair 每次尝试把 pending 数量、游标、进度时间、响应身份变化、明确不可用、无进展、HTTPS
+  失败和 SQLite 存储失败写入现有控制快照。无进展响应只保留 pending 并按固定预算重试，避免
+  长期停在无诊断的 `64`；永久 gap、`partial` 和 `replica_converged=false` 语义不变。
+- 修复服务端单个 segment 超出 256 KiB wire 预算时的静默空响应：在生成 response identity
+  前返回 storage error，避免接收方把空响应误判为可消费的 repair 页；不改变历史行、配额或
+  source outbox。
+
 - A restart regression reproduced a completed handoff with its predecessor receiver watermark.
 - Handoff completion now snapshots the receiver in the same transaction as gap and consumption.
 - Storage-failure coverage verifies rollback and a successful retry without another crossing.

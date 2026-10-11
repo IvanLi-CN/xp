@@ -422,17 +422,13 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(crate) fn requires_repair(
-        &mut self,
+        &self,
         remote: &RepositoryReplicaSummary,
         deep_verification: bool,
     ) -> Result<bool, RepositoryRuntimeError> {
-        if remote.history_truncated && !self.snapshot.history_truncated {
-            self.snapshot.history_truncated = true;
-            self.persist_control_state()?;
-        }
         let gaps_converged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary))
             == canonical_gaps(remote.gaps.iter().cloned());
-        let truncation_converged = !self.snapshot.history_truncated && !remote.history_truncated;
+        let truncation_converged = self.snapshot.history_truncated == remote.history_truncated;
         let partitions_converged = if !deep_verification || !remote.partitions_included {
             true
         } else if remote.summary_version == 3 {
@@ -509,8 +505,16 @@ impl RepositoryReplicaRuntime {
             .iter()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
-        let mut stored_segments = self
-            .stored_segments_by_ids(requested_segment_ids)?
+        let stored_segments = self.stored_segments_by_ids(requested_segment_ids)?;
+        if stored_segments
+            .iter()
+            .any(|segment| segment.wire.len().saturating_add(128) > MAX_RESPONSE_WIRE_BYTES)
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                "repository repair segment exceeds response wire budget".to_owned(),
+            ));
+        }
+        let mut stored_segments = stored_segments
             .into_iter()
             .map(|segment| Ok((repair_segment_order(&segment)?, segment)))
             .collect::<Result<Vec<_>, RepositoryRuntimeError>>()?;
@@ -518,6 +522,7 @@ impl RepositoryReplicaRuntime {
             .iter()
             .map(|(_, segment)| segment.id.as_str())
             .collect::<BTreeSet<_>>();
+        let stored_segment_count = stored_segments.len();
         let unavailable_segment_ids = requested_segment_ids
             .iter()
             .filter(|id| !stored_ids.contains(id.as_str()))
@@ -539,6 +544,11 @@ impl RepositoryReplicaRuntime {
                 identity: segment.identity,
                 wire: segment.wire,
             });
+        }
+        if segments.is_empty() && stored_segment_count > 0 {
+            return Err(RepositoryRuntimeError::Storage(
+                "repository repair segment exceeds response wire budget".to_owned(),
+            ));
         }
         let mut response = RepositoryRepairBatch {
             segments,
@@ -683,6 +693,7 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(super) fn persist_control_state(&mut self) -> Result<(), RepositoryRuntimeError> {
+        self.sync_summary_repair_diagnostics();
         self.snapshot.tombstones = self.tombstones.checkpoint();
         let bytes = serde_json::to_vec(&self.snapshot_for_persistence())
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;

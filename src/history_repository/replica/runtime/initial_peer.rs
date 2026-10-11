@@ -1,4 +1,4 @@
-use super::{RepositoryReplicaRuntime, RepositoryRuntimeError};
+use super::{RepositoryReplicaRuntime, RepositoryRuntimeError, SummaryRepairDiagnosticUpdate};
 use crate::history_sync::Cursor;
 use crate::state::history_repository::control::{
     HISTORY_RECOVERY_METADATA_BUDGET_BYTES, HISTORY_RECOVERY_PAGE_BUDGET_BYTES,
@@ -166,6 +166,30 @@ impl RepositoryReplicaRuntime {
         summary_requires_tiered_backfill: bool,
     ) -> Result<(), RepositoryRuntimeError> {
         let previous_snapshot = self.snapshot.clone();
+        self.update_initial_peer_summary_checkpoint_in_memory(
+            peer_node_id,
+            summary_cursor,
+            pending_segment_ids,
+            pending_next_cursor,
+            summary_complete,
+            summary_requires_tiered_backfill,
+        );
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn update_initial_peer_summary_checkpoint_in_memory(
+        &mut self,
+        peer_node_id: &str,
+        summary_cursor: Option<String>,
+        pending_segment_ids: Vec<String>,
+        pending_next_cursor: Option<String>,
+        summary_complete: bool,
+        summary_requires_tiered_backfill: bool,
+    ) {
         let checkpoint = self
             .snapshot
             .initial_peer_backfills
@@ -179,11 +203,10 @@ impl RepositoryReplicaRuntime {
         checkpoint.summary_pending_next_cursor = pending_next_cursor;
         checkpoint.summary_complete = summary_complete;
         checkpoint.summary_requires_tiered_backfill = summary_requires_tiered_backfill;
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
-            return Err(error);
-        }
-        Ok(())
+    }
+
+    pub(crate) fn mark_history_truncated_in_memory(&mut self) {
+        self.snapshot.history_truncated = true;
     }
 
     pub(crate) fn clear_initial_peer_retained_anchor_response_id(
@@ -191,19 +214,21 @@ impl RepositoryReplicaRuntime {
         peer_node_id: &str,
     ) -> Result<(), RepositoryRuntimeError> {
         let previous_snapshot = self.snapshot.clone();
-        let Some(checkpoint) = self.snapshot.initial_peer_backfills.get_mut(peer_node_id) else {
-            return Ok(());
-        };
-        if checkpoint
-            .retained_anchor_repair_response_id
-            .take()
-            .is_some()
-            && let Err(error) = self.persist_control_state()
-        {
+        self.clear_initial_peer_retained_anchor_response_id_in_memory(peer_node_id);
+        if let Err(error) = self.persist_control_state() {
             self.snapshot = previous_snapshot;
             return Err(error);
         }
         Ok(())
+    }
+
+    pub(crate) fn clear_initial_peer_retained_anchor_response_id_in_memory(
+        &mut self,
+        peer_node_id: &str,
+    ) {
+        if let Some(checkpoint) = self.snapshot.initial_peer_backfills.get_mut(peer_node_id) {
+            checkpoint.retained_anchor_repair_response_id = None;
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -252,6 +277,39 @@ impl RepositoryReplicaRuntime {
         retained_anchor_streams: BTreeSet<InitialPeerRetainedAnchorStream>,
     ) -> Result<(), RepositoryRuntimeError> {
         let previous_snapshot = self.snapshot.clone();
+        self.update_initial_peer_summary_checkpoint_with_anchor_in_memory(
+            peer_node_id,
+            summary_cursor,
+            pending_segment_ids,
+            pending_next_cursor,
+            summary_complete,
+            summary_requires_tiered_backfill,
+            retained_anchor_repair_response_id,
+            retained_anchor_repair_response_complete,
+            retained_anchor_allowance_complete,
+            retained_anchor_streams,
+        )?;
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn update_initial_peer_summary_checkpoint_with_anchor_in_memory(
+        &mut self,
+        peer_node_id: &str,
+        summary_cursor: Option<String>,
+        pending_segment_ids: Vec<String>,
+        pending_next_cursor: Option<String>,
+        summary_complete: bool,
+        summary_requires_tiered_backfill: bool,
+        retained_anchor_repair_response_id: Option<String>,
+        retained_anchor_repair_response_complete: bool,
+        retained_anchor_allowance_complete: bool,
+        retained_anchor_streams: BTreeSet<InitialPeerRetainedAnchorStream>,
+    ) -> Result<(), RepositoryRuntimeError> {
         let checkpoint = self
             .snapshot
             .initial_peer_backfills
@@ -291,10 +349,6 @@ impl RepositoryReplicaRuntime {
             checkpoint.retained_anchor_repair_response_id = None;
         }
         checkpoint.retained_anchor_streams = retained_anchor_streams;
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
-            return Err(error);
-        }
         Ok(())
     }
 
@@ -304,6 +358,19 @@ impl RepositoryReplicaRuntime {
         handoff: InitialPeerTieredHandoff,
     ) -> Result<(), RepositoryRuntimeError> {
         let previous_snapshot = self.snapshot.clone();
+        self.start_initial_peer_tiered_handoff_in_memory(peer_node_id, handoff)?;
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn start_initial_peer_tiered_handoff_in_memory(
+        &mut self,
+        peer_node_id: &str,
+        handoff: InitialPeerTieredHandoff,
+    ) -> Result<(), RepositoryRuntimeError> {
         let prior = self
             .snapshot
             .initial_peer_backfills
@@ -346,10 +413,6 @@ impl RepositoryReplicaRuntime {
                 recovery_handoff: prior.recovery_handoff,
             },
         );
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
-            return Err(error);
-        }
         Ok(())
     }
 
@@ -357,6 +420,19 @@ impl RepositoryReplicaRuntime {
         &mut self,
         peer_node_id: &str,
         handoff: &InitialPeerTieredHandoff,
+    ) -> Result<(), RepositoryRuntimeError> {
+        self.complete_initial_peer_tiered_handoff_with_summary_repair_result(
+            peer_node_id,
+            handoff,
+            None,
+        )
+    }
+
+    pub(crate) fn complete_initial_peer_tiered_handoff_with_summary_repair_result(
+        &mut self,
+        peer_node_id: &str,
+        handoff: &InitialPeerTieredHandoff,
+        summary_repair_update: Option<SummaryRepairDiagnosticUpdate>,
     ) -> Result<(), RepositoryRuntimeError> {
         let checkpoint = self
             .snapshot
@@ -447,6 +523,15 @@ impl RepositoryReplicaRuntime {
         {
             checkpoint.recovery_generation_consumed = true;
             checkpoint.recovery_handoff = Some(handoff.clone());
+        }
+        if let Some(update) = summary_repair_update {
+            self.record_summary_repair_result_in_memory(
+                peer_node_id,
+                update.now_unix_seconds,
+                update.result,
+                update.error_code,
+                update.retry_after,
+            );
         }
         if let Err(error) = self.persist_or_restore(&previous_receiver, &previous_snapshot) {
             self.restore(&previous_receiver, previous_snapshot)?;

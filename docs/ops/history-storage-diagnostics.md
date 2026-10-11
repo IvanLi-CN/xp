@@ -9,6 +9,29 @@ for the history database.
 
 The file is `${XP_DATA_DIR}/history.sqlite3.diagnostics.json`.
 
+## Summary repair status
+
+The read-only repository runtime status includes `summary_repairs`, keyed by peer node ID. Each
+entry
+exposes `pending_count`, `summary_cursor`, `pending_next_cursor`, `last_attempt_at`,
+`last_progress_at`, `last_result`, `last_error_code`, `retry_after`, and `attempt_count`.
+`last_result` distinguishes `progress`, `explicit_unavailable`, `response_changed`, `no_progress`,
+`transport_error`, `storage_error`, and `in_progress`.
+
+When `pending_count` remains non-zero, collect the status twice across one lifecycle interval. A
+changing `last_attempt_at` with `transport_error` points to the registered public HTTPS path;
+`response_changed` means the same pending page was reissued with a refreshed response identity;
+`no_progress` leaves the pending IDs intact for retry; and `storage_error` requires preserving the
+SQLite database, WAL and diagnostic file before any restart. Do not re-apply a consumed recovery
+generation, delete source outbox rows, increase quota, create a second database, or run full
+`VACUUM` as a diagnostic shortcut.
+
+The repair worker only uses the peer's registered public HTTPS `api_base_url`. A response that
+explicitly lists unavailable IDs may reduce `pending_count` and records `explicit_unavailable`; it
+does not alter permanent gap, `partial`, or `replica_converged=false` semantics. A segment that
+cannot fit the 256 KiB repair wire budget is reported as `storage_error` before any checkpoint or
+ACK change.
+
 - The file is private (`0600`) and atomically replaced.
 - The serialized state is capped at 16 KiB and retains only the current in-flight operation, the
   latest slow operation, the latest slow leaf SQL operation, the last operation interrupted across

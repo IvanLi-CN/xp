@@ -288,6 +288,9 @@ fn truncated_gap_marker_propagates_to_peer_and_keeps_queries_partial() {
             .requires_repair(&summary, false)
             .expect("observe sender truncation")
     );
+    receiver
+        .mark_history_truncated()
+        .expect("persist sender truncation");
     assert!(receiver.snapshot.history_truncated);
     let response = receiver
         .query(

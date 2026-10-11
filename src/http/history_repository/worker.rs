@@ -757,8 +757,11 @@ async fn replicate_peer(
         if work.is_deep_verification() && after_segment_id.is_none() {
             deep_verification_available = remote_summary.partitions_included;
         }
+        if remote_summary.history_truncated {
+            preserve_history_truncated(state, true).await?;
+        }
         let requires_repair = {
-            let mut runtime = state.repository_replica.lock().await;
+            let runtime = state.repository_replica.lock().await;
             repository_blocking(|| {
                 runtime.requires_repair(&remote_summary, work.is_deep_verification())
             })?

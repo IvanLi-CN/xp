@@ -15,6 +15,17 @@
 
 ### Recovery generation and sequence-block summaries
 
+- Consumed recovery generations resume the existing summary checkpoint without re-arming a
+  generation or changing the source epoch. Every bounded repair attempt persists additive
+  `summary_repairs` diagnostics in the existing control snapshot, including pending count/cursors,
+  attempt and progress timestamps, a stable result category, error code and retry deadline.
+  Transport failures, changed response identities, explicit unavailable IDs, no-progress responses
+  and storage failures remain distinguishable after restart; a no-progress response keeps its
+  pending IDs for the next tick.
+- A repair response that contains retained segments but cannot fit one segment under the 256 KiB
+  wire budget fails closed as a storage error before any checkpoint or ACK change. A response that
+  explicitly marks IDs unavailable removes only those IDs in the same checkpoint transaction.
+
 - Recovery refresh validates repair and summary gaps as two independently bounded wire pages.
 - Both gap merges and the checkpoint commit together.
 - Oversized or malformed pages preserve the prior durable state.
@@ -42,6 +53,11 @@
   pages. Canonical v3 hashes exclude local receive time; a version column and prefix rebuild old
   metadata in place. Explicit v3 query negotiation preserves the v1 path for older peers.
   Retained verification with permanent gaps never sets complete-history convergence.
+- Summary repair continuation persists per-peer diagnostics in the same control snapshot. Consumed
+  generations resume their pending IDs without re-arming; transport, response-change,
+  explicit-unavailable, no-progress and storage outcomes remain visible after restart. The serving
+  repair endpoint rejects a retained segment that cannot fit the 256 KiB response budget before
+  issuing a response identity.
 
 - Expired armed-recovery repair pages retain existing IDs and add bounded current IDs.
   Refresh commits gaps and checkpoint atomically, preserves generation, and re-reads the same
@@ -299,6 +315,8 @@
 ## Remaining Gaps
 
 - Aggregate acceptance must bind the final integration SHA after all serialized Wave PRs land.
+- Production 101 summary repair still requires the merged release and a live observation proving the
+  pending set drains to zero; the diagnostic path alone does not mark a repository ready.
 - Production recovery still requires signed next-generation apply and five minutes of stable Ready.
 - Fixed retained-range deep verification under writes remains a delivery gate after CI and release.
 
