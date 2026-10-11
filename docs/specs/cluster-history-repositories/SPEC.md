@@ -125,11 +125,19 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   发生中断时，相同摘要可继续使用未消费的 stream allowance。若服务端明确拒绝旧摘要，或旧
   服务端直接返回了不同摘要，接收方只清除持久化的 response identity，并用同一 pending
   segment 集合重新请求；cursor、gap、tombstone 和 handoff 状态保持不变。响应自身的摘要
-  与其内容不一致、含未知段或无法推进时仍 fail closed。已完整处理的 response 清除其摘要，
+  与其内容不一致、含未知段或无法验证时仍 fail closed；明确的无进展响应保留 pending 集合并
+  进入下一次有界重试，不得伪造成功或移除未确认的 ID。已完整处理的 response 清除其摘要，
   但不会关闭其他尚未消费的 stream allowance。
 - repair 响应在请求段已按保留策略淘汰时，以 `unavailable_segment_ids` 明确列出该请求中的
   不可恢复 ID；catch-up 只移除服务端明确报告的 ID，未知或重复 ID 必须 fail closed。该
   状态不伪造 segment payload、不推进 source ACK，也不删除本地未确认历史。
+- 每次 summary repair attempt 必须在现有控制快照中记录 `last_attempt_at`、`attempt_count`、
+  `pending_count`、`summary_cursor`、`pending_next_cursor`、`last_progress_at`、`last_result`、
+  `last_error_code` 和可选 `retry_after`。`last_result` 至少区分 `progress`、
+  `explicit_unavailable`、`response_changed`、`no_progress`、`transport_error`、`storage_error`
+  和 `in_progress`；诊断字段 additive/defaulted，旧快照和旧 peer 缺失时按默认值读取。每次
+  response、gap、watermark 和 checkpoint 的成功提交仍必须保持原子；诊断写入失败必须报告
+  `storage_error` 并保留原 pending checkpoint，不能把 repair 误报为完成。
 - deep verification 的 retained partition summary 使用控制快照中的持久缓存，并由后台按
   SQLite keyset 有界重建；缓存未完成时 summary 保持 segment/gap 可用并返回
   `partitions_included=false`，不得读取或反序列化 payload 来响应 summary，也不得因此把

@@ -5,6 +5,7 @@ pub(super) async fn refresh(
     peer: &MeshPeerTarget,
     checkpoint: &InitialPeerBackfillCheckpoint,
     repair: &RepositoryRepairBatch,
+    summary_repair_update: Option<SummaryRepairDiagnosticUpdate>,
 ) -> anyhow::Result<InitialBackfillProgress> {
     let path = checkpoint.summary_cursor.as_ref().map_or_else(
         || "/api/admin/_internal/history-repository/summary".to_owned(),
@@ -18,14 +19,18 @@ pub(super) async fn refresh(
     let fresh = runtime.missing_segment_ids(&summary, false)?;
     let pending = refreshed_pending(checkpoint, &repair.unavailable_segment_ids, &fresh);
     if pending == checkpoint.summary_pending_segment_ids {
+        if let Some(update) = summary_repair_update {
+            runtime.persist_summary_repair_transition(&peer.node_id, update, |_| Ok(()))?;
+        }
         return Ok(InitialBackfillProgress::Unavailable);
     }
-    runtime.refresh_initial_peer_recovery_pending(
+    runtime.refresh_initial_peer_recovery_pending_with_summary_repair_result(
         checkpoint,
         &peer.node_id,
         pending,
         [&repair.gaps, &summary.gaps],
         summary.next_segment_id,
+        summary_repair_update,
     )?;
     tracing::warn!(peer = %peer.node_id, "expired recovery repair page refreshed without rearming");
     Ok(InitialBackfillProgress::InProgress)

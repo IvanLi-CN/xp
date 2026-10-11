@@ -2,6 +2,8 @@ use super::{
     RepositoryRepairBatch,
     tests::{identity, load, record, segment, signing_key},
 };
+use crate::history_sync::{CanonicalSegment, Cursor, SyncRecord};
+use sha2::{Digest as _, Sha256};
 
 #[test]
 fn repair_response_digest_binds_the_returned_content() {
@@ -64,4 +66,65 @@ fn repair_response_id_accepts_only_the_same_returned_content() {
             .repair_batch_with_response_id(&[segment_id], Some("changed-response"))
             .is_err()
     );
+}
+
+#[test]
+fn repair_response_splits_pending_segments_at_the_wire_budget() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = signing_key();
+    let identity = identity(&signing_key);
+    let mut runtime = load(temporary.path());
+    let mut previous = None;
+
+    for sequence in 0..64 {
+        let segment = CanonicalSegment::new(
+            "cluster-a",
+            Cursor::new("node-a", 7, "runtime", sequence).expect("cursor"),
+            vec![SyncRecord::new(
+                "subject-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                format!("key-{sequence}").into_bytes(),
+                vec![7; 6_000],
+                false,
+            )],
+            previous,
+            10,
+            11,
+        )
+        .expect("segment")
+        .sign(&signing_key)
+        .expect("signature");
+        previous = Some(segment.segment_hash().expect("segment hash"));
+        runtime
+            .receive_wire(
+                "cluster-a",
+                &identity,
+                &segment.wire_bytes().expect("wire"),
+                12 + sequence,
+            )
+            .expect("store segment");
+    }
+
+    let requested = runtime.replication_summary().expect("summary").segment_ids;
+    assert_eq!(requested.len(), 64);
+    let first = runtime.repair_batch(&requested).expect("first repair page");
+    assert!(!first.segments.is_empty());
+    assert!(first.segments.len() < requested.len());
+    assert!(first.unavailable_segment_ids.is_empty());
+
+    let delivered = first
+        .segments
+        .iter()
+        .map(|segment| hex::encode(Sha256::digest(&segment.wire)))
+        .collect::<std::collections::BTreeSet<_>>();
+    let remaining = requested
+        .into_iter()
+        .filter(|segment_id| !delivered.contains(segment_id))
+        .collect::<Vec<_>>();
+    let second = runtime
+        .repair_batch(&remaining)
+        .expect("remaining repair page");
+    assert!(!second.segments.is_empty());
 }

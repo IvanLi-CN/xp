@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::state::history_repository::control::RepositoryCapacity;
 
@@ -15,6 +16,42 @@ pub(crate) struct SourceDeliveryStatus {
     pub(super) last_acknowledged_at: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) last_delivery_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SummaryRepairResult {
+    #[default]
+    Idle,
+    InProgress,
+    Progress,
+    ExplicitUnavailable,
+    ResponseChanged,
+    NoProgress,
+    TransportError,
+    StorageError,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SummaryRepairDiagnostic {
+    #[serde(default)]
+    pub(crate) pending_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) summary_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pending_next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_attempt_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_progress_at: Option<u64>,
+    #[serde(default)]
+    pub(crate) last_result: SummaryRepairResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) retry_after: Option<u64>,
+    #[serde(default)]
+    pub(crate) attempt_count: u64,
 }
 
 impl Default for SourceDeliveryStatus {
@@ -45,6 +82,9 @@ pub(crate) struct RepositoryRuntimeStatus {
     pub(super) last_dynamic_relay_attempt_unix_seconds: Option<u64>,
     #[serde(default)]
     pub(super) source_delivery: SourceDeliveryStatus,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) summary_repairs: BTreeMap<String, SummaryRepairDiagnostic>,
 }
 
 impl RepositoryRuntimeStatus {

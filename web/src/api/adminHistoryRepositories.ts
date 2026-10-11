@@ -9,6 +9,27 @@ export const HistoryRepositoryCapacitySchema = z.object({
 	filesystem_available_bytes: z.number(),
 });
 
+export const SummaryRepairDiagnosticSchema = z.object({
+	pending_count: z.number(),
+	summary_cursor: z.string().nullable().optional(),
+	pending_next_cursor: z.string().nullable().optional(),
+	last_attempt_at: z.number().nullable().optional(),
+	last_progress_at: z.number().nullable().optional(),
+	last_result: z.enum([
+		"idle",
+		"in_progress",
+		"progress",
+		"explicit_unavailable",
+		"response_changed",
+		"no_progress",
+		"transport_error",
+		"storage_error",
+	]),
+	last_error_code: z.string().nullable().optional(),
+	retry_after: z.number().nullable().optional(),
+	attempt_count: z.number(),
+});
+
 export const HistoryRepositoryMemberSchema = z.object({
 	identity: z.object({
 		node_id: z.string(),
@@ -50,6 +71,9 @@ export const HistoryRepositoryRuntimeSchema = z.object({
 			last_acknowledged_at: z.number().nullable().optional(),
 			last_delivery_path: z.string().nullable().optional(),
 		})
+		.optional(),
+	summary_repairs: z
+		.record(z.string(), SummaryRepairDiagnosticSchema)
 		.optional(),
 });
 

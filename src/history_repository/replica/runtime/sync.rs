@@ -518,6 +518,7 @@ impl RepositoryReplicaRuntime {
             .iter()
             .map(|(_, segment)| segment.id.as_str())
             .collect::<BTreeSet<_>>();
+        let stored_segment_count = stored_segments.len();
         let unavailable_segment_ids = requested_segment_ids
             .iter()
             .filter(|id| !stored_ids.contains(id.as_str()))
@@ -539,6 +540,11 @@ impl RepositoryReplicaRuntime {
                 identity: segment.identity,
                 wire: segment.wire,
             });
+        }
+        if segments.is_empty() && stored_segment_count > 0 && unavailable_segment_ids.is_empty() {
+            return Err(RepositoryRuntimeError::Storage(
+                "repository repair segment exceeds response wire budget".to_owned(),
+            ));
         }
         let mut response = RepositoryRepairBatch {
             segments,
@@ -683,6 +689,7 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(super) fn persist_control_state(&mut self) -> Result<(), RepositoryRuntimeError> {
+        self.sync_summary_repair_diagnostics();
         self.snapshot.tombstones = self.tombstones.checkpoint();
         let bytes = serde_json::to_vec(&self.snapshot_for_persistence())
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;

@@ -10,6 +10,25 @@ impl RepositoryReplicaRuntime {
         gap_pages: [&[RepositoryReplicaGap]; 2],
         refreshed_next_cursor: Option<String>,
     ) -> Result<(), RepositoryRuntimeError> {
+        self.refresh_initial_peer_recovery_pending_with_summary_repair_result(
+            expected,
+            peer_node_id,
+            pending,
+            gap_pages,
+            refreshed_next_cursor,
+            None,
+        )
+    }
+
+    pub(crate) fn refresh_initial_peer_recovery_pending_with_summary_repair_result(
+        &mut self,
+        expected: &InitialPeerBackfillCheckpoint,
+        peer_node_id: &str,
+        pending: Vec<String>,
+        gap_pages: [&[RepositoryReplicaGap]; 2],
+        refreshed_next_cursor: Option<String>,
+        summary_repair_update: Option<SummaryRepairDiagnosticUpdate>,
+    ) -> Result<(), RepositoryRuntimeError> {
         let current = self
             .snapshot
             .initial_peer_backfills
@@ -52,6 +71,15 @@ impl RepositoryReplicaRuntime {
             }
             checkpoint.retained_anchor_repair_response_id = None;
             checkpoint.retained_anchor_repair_response_seen = false;
+            if let Some(update) = summary_repair_update {
+                self.record_summary_repair_result_in_memory(
+                    peer_node_id,
+                    update.now_unix_seconds,
+                    update.result,
+                    update.error_code,
+                    update.retry_after,
+                );
+            }
             self.persist_control_state()
         })();
         if result.is_err() {

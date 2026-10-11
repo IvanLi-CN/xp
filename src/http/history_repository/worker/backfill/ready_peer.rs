@@ -1,14 +1,19 @@
 use super::*;
 mod expired_repair;
 mod handoff_selection;
+mod summary_repair;
 use crate::state::history_repository::replica::{
     InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, InitialPeerTieredHandoff,
-    RetainedAnchorCheckpointUpdate,
+    RetainedAnchorCheckpointUpdate, SummaryRepairDiagnosticUpdate, SummaryRepairResult,
 };
 #[cfg(test)]
 use handoff_selection::can_schedule_tiered_handoff;
 use handoff_selection::select_tiered_handoff;
 use std::future::Future;
+use summary_repair::{
+    classify_summary_repair_error, record_summary_repair_attempt, record_summary_repair_error,
+    record_summary_repair_result, retry_after,
+};
 use tokio::time::Instant;
 
 const MAX_INITIAL_CATCH_UP_PAGES_PER_TICK: usize = 8;
@@ -316,6 +321,9 @@ async fn advance_ready_peer_catch_up_page(
         .await
         .initial_peer_backfill_checkpoint(&peer.node_id)
         .unwrap_or_default();
+    if !checkpoint.summary_complete {
+        record_summary_repair_attempt(state, &peer.node_id, now).await?;
+    }
     if let Some(handoff) = checkpoint.summary_tiered_handoff.clone() {
         let tiered_progress = pull_peer_initial_history(state, peer, ready_repository_ids).await?;
         if tiered_progress == InitialBackfillProgress::Complete {
@@ -323,7 +331,16 @@ async fn advance_ready_peer_catch_up_page(
                 .repository_replica
                 .lock()
                 .await
-                .complete_initial_peer_tiered_handoff(&peer.node_id, &handoff)?;
+                .complete_initial_peer_tiered_handoff_with_summary_repair_result(
+                    &peer.node_id,
+                    &handoff,
+                    Some(SummaryRepairDiagnosticUpdate {
+                        now_unix_seconds: now,
+                        result: SummaryRepairResult::Progress,
+                        error_code: None,
+                        retry_after: None,
+                    }),
+                )?;
             tracing::info!(
                 peer = %peer.node_id,
                 source = %handoff.source_node_id,
@@ -333,6 +350,17 @@ async fn advance_ready_peer_catch_up_page(
                 "history repair tiered handoff completed"
             );
             return Ok(InitialBackfillProgress::InProgress);
+        }
+        if tiered_progress == InitialBackfillProgress::Unavailable {
+            record_summary_repair_result(
+                state,
+                &peer.node_id,
+                now,
+                SummaryRepairResult::TransportError,
+                Some("transport_error"),
+                Some(retry_after(now)),
+            )
+            .await?;
         }
         return Ok(tiered_progress);
     }
@@ -360,6 +388,15 @@ async fn advance_ready_peer_catch_up_page(
         match repository_direct_request(state, peer, Method::GET, &path, Vec::new()).await {
             Ok(summary) => summary,
             Err(error) if error.is_transport() => {
+                record_summary_repair_result(
+                    state,
+                    &peer.node_id,
+                    now,
+                    SummaryRepairResult::TransportError,
+                    Some("transport_error"),
+                    Some(retry_after(now)),
+                )
+                .await?;
                 tracing::debug!(
                     peer = %peer.node_id,
                     error = %error,
@@ -367,7 +404,19 @@ async fn advance_ready_peer_catch_up_page(
                 );
                 return Ok(InitialBackfillProgress::Unavailable);
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                let (error_code, result) = classify_summary_repair_error(&error);
+                record_summary_repair_result(
+                    state,
+                    &peer.node_id,
+                    now,
+                    result,
+                    Some(error_code),
+                    Some(retry_after(now)),
+                )
+                .await?;
+                return Err(error.into());
+            }
         };
     let (requires_repair, missing_segment_ids, partitions_converged) = {
         let mut runtime = state.repository_replica.lock().await;
@@ -384,35 +433,63 @@ async fn advance_ready_peer_catch_up_page(
             .repository_replica
             .lock()
             .await
-            .update_initial_peer_summary_checkpoint(
+            .persist_summary_repair_transition(
                 &peer.node_id,
-                checkpoint.summary_cursor,
-                missing_segment_ids,
-                remote_summary.next_segment_id,
-                false,
-                requires_tiered_backfill,
+                SummaryRepairDiagnosticUpdate {
+                    now_unix_seconds: now,
+                    result: SummaryRepairResult::Progress,
+                    error_code: None,
+                    retry_after: None,
+                },
+                |runtime| {
+                    runtime.update_initial_peer_summary_checkpoint_in_memory(
+                        &peer.node_id,
+                        checkpoint.summary_cursor.clone(),
+                        missing_segment_ids,
+                        remote_summary.next_segment_id.clone(),
+                        false,
+                        requires_tiered_backfill,
+                    );
+                    Ok(())
+                },
             )?;
         return Ok(InitialBackfillProgress::InProgress);
     }
-    if requires_repair {
-        state
-            .repository_replica
-            .lock()
-            .await
-            .merge_replica_gaps(&remote_summary.gaps)?;
-    }
     let summary_complete = remote_summary.next_segment_id.is_none();
+    let summary_progressed = requires_repair
+        || remote_summary.next_segment_id != checkpoint.summary_cursor
+        || (summary_complete && !checkpoint.summary_complete);
+    let summary_result = if summary_progressed {
+        SummaryRepairResult::Progress
+    } else {
+        SummaryRepairResult::NoProgress
+    };
     state
         .repository_replica
         .lock()
         .await
-        .update_initial_peer_summary_checkpoint(
+        .persist_summary_repair_transition(
             &peer.node_id,
-            remote_summary.next_segment_id,
-            Vec::new(),
-            None,
-            summary_complete,
-            requires_tiered_backfill,
+            SummaryRepairDiagnosticUpdate {
+                now_unix_seconds: now,
+                result: summary_result,
+                error_code: (!summary_progressed).then_some("no_progress".to_owned()),
+                retry_after: (!summary_progressed).then(|| retry_after(now)),
+            },
+            |runtime| {
+                if requires_repair {
+                    runtime.merge_replica_gaps_in_memory(&remote_summary.gaps)?;
+                }
+                runtime.update_initial_peer_summary_checkpoint_in_memory(
+                    &peer.node_id,
+                    remote_summary.next_segment_id.clone(),
+                    Vec::new(),
+                    None,
+                    summary_complete,
+                    requires_tiered_backfill,
+                );
+                Ok(())
+            },
         )?;
     Ok(InitialBackfillProgress::InProgress)
 }
@@ -444,7 +521,21 @@ async fn repair_ready_peer_catch_up_page(
                     .repository_replica
                     .lock()
                     .await
-                    .clear_initial_peer_retained_anchor_response_id(&peer.node_id)?;
+                    .persist_summary_repair_transition(
+                        &peer.node_id,
+                        SummaryRepairDiagnosticUpdate {
+                            now_unix_seconds: now,
+                            result: SummaryRepairResult::ResponseChanged,
+                            error_code: Some("response_changed".to_owned()),
+                            retry_after: Some(retry_after(now)),
+                        },
+                        |runtime| {
+                            runtime.clear_initial_peer_retained_anchor_response_id_in_memory(
+                                &peer.node_id,
+                            );
+                            Ok(())
+                        },
+                    )?;
                 expected_response_id = None;
                 tracing::warn!(
                     peer = %peer.node_id,
@@ -453,6 +544,7 @@ async fn repair_ready_peer_catch_up_page(
                 match request_repair_page(state, peer, &pending, None).await {
                     Ok(repair) => repair,
                     Err(error) if error.is_transport() => {
+                        record_summary_repair_error(state, &peer.node_id, now, &error).await?;
                         tracing::debug!(
                             peer = %peer.node_id,
                             error = %error,
@@ -460,11 +552,15 @@ async fn repair_ready_peer_catch_up_page(
                         );
                         return Ok(InitialBackfillProgress::Unavailable);
                     }
-                    Err(error) => return Err(error.into()),
+                    Err(error) => {
+                        record_summary_repair_error(state, &peer.node_id, now, &error).await?;
+                        return Err(error.into());
+                    }
                 }
             }
             Err(error) => {
                 if error.is_transport() {
+                    record_summary_repair_error(state, &peer.node_id, now, &error).await?;
                     tracing::debug!(
                         peer = %peer.node_id,
                         error = %error,
@@ -472,6 +568,7 @@ async fn repair_ready_peer_catch_up_page(
                     );
                     return Ok(InitialBackfillProgress::Unavailable);
                 }
+                record_summary_repair_error(state, &peer.node_id, now, &error).await?;
                 return Err(error.into());
             }
         };
@@ -483,6 +580,15 @@ async fn repair_ready_peer_catch_up_page(
         .as_ref()
         .is_some_and(|provided| provided != &response_id)
     {
+        record_summary_repair_result(
+            state,
+            &peer.node_id,
+            now,
+            SummaryRepairResult::StorageError,
+            Some("response_identity_mismatch"),
+            Some(retry_after(now)),
+        )
+        .await?;
         anyhow::bail!("repository repair response identity does not match its content");
     }
     if expected_response_id
@@ -496,7 +602,19 @@ async fn repair_ready_peer_catch_up_page(
             .repository_replica
             .lock()
             .await
-            .clear_initial_peer_retained_anchor_response_id(&peer.node_id)?;
+            .persist_summary_repair_transition(
+                &peer.node_id,
+                SummaryRepairDiagnosticUpdate {
+                    now_unix_seconds: now,
+                    result: SummaryRepairResult::ResponseChanged,
+                    error_code: Some("response_changed".to_owned()),
+                    retry_after: Some(retry_after(now)),
+                },
+                |runtime| {
+                    runtime.clear_initial_peer_retained_anchor_response_id_in_memory(&peer.node_id);
+                    Ok(())
+                },
+            )?;
         tracing::warn!(
             peer = %peer.node_id,
             "repair response changed; retrying the pending page without the stale identity"
@@ -504,6 +622,7 @@ async fn repair_ready_peer_catch_up_page(
         repair = match request_repair_page(state, peer, &pending, None).await {
             Ok(repair) => repair,
             Err(error) if error.is_transport() => {
+                record_summary_repair_error(state, &peer.node_id, now, &error).await?;
                 tracing::debug!(
                     peer = %peer.node_id,
                     error = %error,
@@ -511,7 +630,10 @@ async fn repair_ready_peer_catch_up_page(
                 );
                 return Ok(InitialBackfillProgress::Unavailable);
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                record_summary_repair_error(state, &peer.node_id, now, &error).await?;
+                return Err(error.into());
+            }
         };
         response_id = repair.response_id_digest()?;
         if repair
@@ -519,13 +641,31 @@ async fn repair_ready_peer_catch_up_page(
             .as_ref()
             .is_some_and(|provided| provided != &response_id)
         {
+            record_summary_repair_result(
+                state,
+                &peer.node_id,
+                now,
+                SummaryRepairResult::StorageError,
+                Some("response_identity_mismatch"),
+                Some(retry_after(now)),
+            )
+            .await?;
             anyhow::bail!("repository repair response identity does not match its content");
         }
     }
     let mut remaining = pending.clone();
     if repair.segments.is_empty() {
         if repair.unavailable_segment_ids.is_empty() {
-            anyhow::bail!("repository repair response did not advance the requested segment set");
+            record_summary_repair_result(
+                state,
+                &peer.node_id,
+                now,
+                SummaryRepairResult::NoProgress,
+                Some("no_progress"),
+                Some(retry_after(now)),
+            )
+            .await?;
+            return Ok(InitialBackfillProgress::InProgress);
         }
     } else {
         super::super::remove_delivered_repair_segment_ids(
@@ -567,19 +707,34 @@ async fn repair_ready_peer_catch_up_page(
                 stream: tiered_handoff.stream.clone(),
             });
             let mut runtime = state.repository_replica.lock().await;
-            runtime.merge_replica_gaps_in_memory(&repair_gaps)?;
-            runtime.start_initial_peer_tiered_handoff(&peer.node_id, tiered_handoff)?;
-            runtime.update_initial_peer_summary_checkpoint_with_retained_anchor_response(
+            runtime.persist_summary_repair_transition(
                 &peer.node_id,
-                checkpoint.summary_cursor.clone(),
-                pending_segment_ids,
-                checkpoint.summary_pending_next_cursor.clone(),
-                false,
-                true,
-                Some(response_id),
-                false,
-                false,
-                retained_anchor_streams,
+                SummaryRepairDiagnosticUpdate {
+                    now_unix_seconds: now,
+                    result: SummaryRepairResult::Progress,
+                    error_code: None,
+                    retry_after: None,
+                },
+                |runtime| {
+                    runtime.merge_replica_gaps_in_memory(&repair_gaps)?;
+                    runtime.start_initial_peer_tiered_handoff_in_memory(
+                        &peer.node_id,
+                        tiered_handoff.clone(),
+                    )?;
+                    runtime.update_initial_peer_summary_checkpoint_with_anchor_in_memory(
+                        &peer.node_id,
+                        checkpoint.summary_cursor.clone(),
+                        pending_segment_ids,
+                        checkpoint.summary_pending_next_cursor.clone(),
+                        false,
+                        true,
+                        Some(response_id.clone()),
+                        false,
+                        false,
+                        retained_anchor_streams,
+                    )?;
+                    Ok(())
+                },
             )?;
             tracing::warn!(
                 peer = %peer.node_id,
@@ -591,16 +746,24 @@ async fn repair_ready_peer_catch_up_page(
             && !checkpoint.recovery_generation_consumed
             && !repair.unavailable_segment_ids.is_empty()
         {
-            return expired_repair::refresh(state, peer, &checkpoint, &repair).await;
+            let progress = expired_repair::refresh(
+                state,
+                peer,
+                &checkpoint,
+                &repair,
+                Some(SummaryRepairDiagnosticUpdate {
+                    now_unix_seconds: now,
+                    result: SummaryRepairResult::ExplicitUnavailable,
+                    error_code: Some("source_retention_expired".to_owned()),
+                    retry_after: None,
+                }),
+            )
+            .await?;
+            return Ok(progress);
         }
     }
-    if repair.segments.is_empty() && !repair.gaps.is_empty() {
-        state
-            .repository_replica
-            .lock()
-            .await
-            .merge_replica_gaps(&repair.gaps)?;
-    }
+    let had_segments = !repair.segments.is_empty();
+    let had_unavailable = !repair.unavailable_segment_ids.is_empty();
     let repair_gaps = repair.gaps;
     let mut retained_anchor_streams = checkpoint.retained_anchor_streams.clone();
     for (index, segment) in repair.segments.into_iter().enumerate() {
@@ -660,327 +823,44 @@ async fn repair_ready_peer_catch_up_page(
             )?;
     }
     let completed_response = completed_repair_response(&checkpoint, remaining);
-    state
-        .repository_replica
-        .lock()
-        .await
-        .update_initial_peer_summary_checkpoint_with_retained_anchor_response(
-            &peer.node_id,
-            completed_response.summary_cursor,
-            completed_response.pending_segment_ids,
-            completed_response.pending_next_cursor,
-            completed_response.summary_complete,
-            checkpoint.summary_requires_tiered_backfill,
-            Some(response_id),
-            completed_response.response_complete,
-            completed_response.allowance_complete,
-            retained_anchor_streams,
-        )?;
+    let result = if !had_segments && had_unavailable {
+        SummaryRepairResult::ExplicitUnavailable
+    } else {
+        SummaryRepairResult::Progress
+    };
+    let error_code = (result == SummaryRepairResult::ExplicitUnavailable)
+        .then_some("explicit_unavailable".to_owned());
+    let mut runtime = state.repository_replica.lock().await;
+    runtime.persist_summary_repair_transition(
+        &peer.node_id,
+        SummaryRepairDiagnosticUpdate {
+            now_unix_seconds: now,
+            result,
+            error_code,
+            retry_after: None,
+        },
+        |runtime| {
+            if !had_segments && !repair_gaps.is_empty() {
+                runtime.merge_replica_gaps_in_memory(&repair_gaps)?;
+            }
+            runtime.update_initial_peer_summary_checkpoint_with_anchor_in_memory(
+                &peer.node_id,
+                completed_response.summary_cursor,
+                completed_response.pending_segment_ids,
+                completed_response.pending_next_cursor,
+                completed_response.summary_complete,
+                checkpoint.summary_requires_tiered_backfill,
+                Some(response_id),
+                completed_response.response_complete,
+                completed_response.allowance_complete,
+                retained_anchor_streams,
+            )?;
+            Ok(())
+        },
+    )?;
     Ok(InitialBackfillProgress::InProgress)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test(start_paused = true)]
-    async fn bounded_catch_up_drain_consumes_multiple_pages_in_one_tick() {
-        let mut calls = 0;
-        let result =
-            drain_bounded_catch_up_pages(8, Instant::now() + Duration::from_secs(1), || {
-                calls += 1;
-                async move {
-                    Ok(if calls < 3 {
-                        InitialBackfillProgress::InProgress
-                    } else {
-                        InitialBackfillProgress::Complete
-                    })
-                }
-            })
-            .await
-            .expect("bounded catch-up drain");
-
-        assert_eq!(calls, 3);
-        assert_eq!(result.progress, InitialBackfillProgress::Complete);
-        assert_eq!(result.pages_consumed, 3);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn bounded_catch_up_drain_stops_at_page_cap() {
-        let mut calls = 0;
-        let result =
-            drain_bounded_catch_up_pages(3, Instant::now() + Duration::from_secs(1), || {
-                calls += 1;
-                async { Ok(InitialBackfillProgress::InProgress) }
-            })
-            .await
-            .expect("bounded catch-up drain");
-
-        assert_eq!(calls, 3);
-        assert_eq!(result.progress, InitialBackfillProgress::InProgress);
-        assert_eq!(result.pages_consumed, 3);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn bounded_catch_up_drain_stops_before_an_expired_deadline() {
-        let mut calls = 0;
-        let result =
-            drain_bounded_catch_up_pages(8, Instant::now() - Duration::from_secs(1), || {
-                calls += 1;
-                async { Ok(InitialBackfillProgress::InProgress) }
-            })
-            .await
-            .expect("bounded catch-up drain");
-
-        assert_eq!(calls, 0);
-        assert_eq!(result.progress, InitialBackfillProgress::InProgress);
-        assert_eq!(result.pages_consumed, 0);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn bounded_catch_up_drain_cancels_a_slow_page_at_the_deadline() {
-        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let recorded_calls = calls.clone();
-        let task = tokio::spawn(async move {
-            drain_bounded_catch_up_pages(8, Instant::now() + Duration::from_millis(20), || {
-                recorded_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                async {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    Ok(InitialBackfillProgress::InProgress)
-                }
-            })
-            .await
-        });
-        tokio::task::yield_now().await;
-        tokio::time::advance(Duration::from_millis(20)).await;
-        let result = task
-            .await
-            .expect("bounded catch-up drain task")
-            .expect("bounded catch-up drain");
-
-        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
-        assert_eq!(result.progress, InitialBackfillProgress::InProgress);
-        assert_eq!(result.pages_consumed, 1);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn bounded_catch_up_drain_stops_after_an_unavailable_page() {
-        let mut calls = 0;
-        let result =
-            drain_bounded_catch_up_pages(8, Instant::now() + Duration::from_secs(1), || {
-                calls += 1;
-                async { Ok(InitialBackfillProgress::Unavailable) }
-            })
-            .await
-            .expect("bounded catch-up drain");
-
-        assert_eq!(calls, 1);
-        assert_eq!(result.progress, InitialBackfillProgress::Unavailable);
-        assert_eq!(result.pages_consumed, 1);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn ready_peer_drain_gives_later_peers_a_slice_after_a_slow_peer() {
-        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let recorded_calls = calls.clone();
-        let task = tokio::spawn(async move {
-            drain_ready_peer_pages(
-                2,
-                Instant::now() + Duration::from_millis(40),
-                move |index| {
-                    recorded_calls.lock().expect("record peer call").push(index);
-                    async move {
-                        if index == 0 {
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                            Ok(InitialBackfillProgress::InProgress)
-                        } else {
-                            Ok(InitialBackfillProgress::Complete)
-                        }
-                    }
-                },
-            )
-            .await
-        });
-        tokio::task::yield_now().await;
-        tokio::time::advance(Duration::from_millis(20)).await;
-        tokio::task::yield_now().await;
-        tokio::time::advance(Duration::from_millis(20)).await;
-        let result = task
-            .await
-            .expect("ready peer drain task")
-            .expect("ready peer drain");
-
-        assert_eq!(*calls.lock().expect("read peer calls"), vec![0, 1]);
-        assert_eq!(result.0, InitialBackfillProgress::InProgress);
-        assert_eq!(result.1, vec![1, 1]);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn ready_peer_drain_continues_after_an_unavailable_peer() {
-        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let recorded_calls = calls.clone();
-        let result =
-            drain_ready_peer_pages(2, Instant::now() + Duration::from_secs(1), move |index| {
-                recorded_calls.lock().expect("record peer call").push(index);
-                async move {
-                    if index == 0 {
-                        Ok(InitialBackfillProgress::Unavailable)
-                    } else {
-                        Ok(InitialBackfillProgress::Complete)
-                    }
-                }
-            })
-            .await
-            .expect("ready peer drain");
-
-        assert_eq!(*calls.lock().expect("read peer calls"), vec![0, 1]);
-        assert_eq!(result.0, InitialBackfillProgress::Unavailable);
-        assert_eq!(result.1, vec![1, 1]);
-        assert_eq!(
-            result.2,
-            vec![
-                InitialBackfillProgress::Unavailable,
-                InitialBackfillProgress::Complete,
-            ]
-        );
-    }
-    #[test]
-    fn tiered_export_uses_only_the_remaining_peer_page_budget() {
-        assert_eq!(remaining_peer_page_budget(0), 8);
-        assert_eq!(remaining_peer_page_budget(3), 5);
-        assert_eq!(remaining_peer_page_budget(8), 0);
-        assert_eq!(remaining_peer_page_budget(16), 0);
-    }
-
-    #[test]
-    fn unavailable_ready_peer_keeps_catch_up_incomplete_after_tiered_drain() {
-        assert_eq!(
-            ready_peer_catch_up_result(
-                InitialBackfillProgress::Unavailable,
-                false,
-                InitialBackfillProgress::Complete,
-            ),
-            InitialBackfillProgress::Unavailable
-        );
-        assert_eq!(
-            ready_peer_catch_up_result(
-                InitialBackfillProgress::Complete,
-                false,
-                InitialBackfillProgress::Complete,
-            ),
-            InitialBackfillProgress::Complete
-        );
-    }
-
-    #[test]
-    fn refreshed_first_summary_page_is_revisited_after_bounded_repair() {
-        let checkpoint = InitialPeerBackfillCheckpoint {
-            summary_pending_revisit_cursor: true,
-            ..Default::default()
-        };
-        let response = completed_repair_response(&checkpoint, BTreeSet::new());
-        assert!(response.summary_cursor.is_none());
-        assert!(response.pending_segment_ids.is_empty());
-        assert!(!response.summary_complete);
-        assert!(response.response_complete);
-    }
-
-    #[test]
-    fn wire_bounded_repair_response_completes_its_identity_with_pending_ids() {
-        let checkpoint = InitialPeerBackfillCheckpoint {
-            summary_pending_next_cursor: Some("next-summary-page".to_owned()),
-            ..InitialPeerBackfillCheckpoint::default()
-        };
-        let response = completed_repair_response(
-            &checkpoint,
-            BTreeSet::from(["remaining-segment".to_owned()]),
-        );
-
-        assert_eq!(
-            response.pending_segment_ids,
-            vec!["remaining-segment".to_owned()]
-        );
-        assert_eq!(
-            response.pending_next_cursor.as_deref(),
-            Some("next-summary-page")
-        );
-        assert!(response.summary_cursor.is_none());
-        assert!(!response.summary_complete);
-        assert!(response.response_complete);
-        assert!(!response.allowance_complete);
-    }
-
-    #[test]
-    fn tiered_handoff_allows_an_unseen_stream_after_another_stream_consumed_allowance() {
-        let handoff = InitialPeerTieredHandoff {
-            source_node_id: "node-a".to_owned(),
-            source_epoch: 7,
-            stream: "tombstone".to_owned(),
-            first_missing: 1,
-            last_missing: 2,
-            next_sequence: 3,
-            end_unix_seconds: 12,
-        };
-        assert!(can_schedule_tiered_handoff(
-            &InitialPeerBackfillCheckpoint::default(),
-            &handoff
-        ));
-        let mut stream_consumed = InitialPeerBackfillCheckpoint::default();
-        stream_consumed
-            .retained_anchor_streams
-            .insert(InitialPeerRetainedAnchorStream {
-                source_node_id: handoff.source_node_id.clone(),
-                source_epoch: handoff.source_epoch,
-                stream: "connections".to_owned(),
-            });
-        assert!(can_schedule_tiered_handoff(&stream_consumed, &handoff));
-        let same_stream = InitialPeerTieredHandoff {
-            stream: "connections".to_owned(),
-            ..handoff.clone()
-        };
-        assert!(can_schedule_tiered_handoff(&stream_consumed, &same_stream));
-        let active_handoff = InitialPeerBackfillCheckpoint {
-            summary_tiered_handoff: Some(same_stream.clone()),
-            retained_anchor_streams: stream_consumed.retained_anchor_streams.clone(),
-            ..InitialPeerBackfillCheckpoint::default()
-        };
-        assert!(!can_schedule_tiered_handoff(&active_handoff, &same_stream));
-        let completed_handoff = InitialPeerBackfillCheckpoint {
-            retained_anchor_handoffs: BTreeSet::from([same_stream.clone()]),
-            ..InitialPeerBackfillCheckpoint::default()
-        };
-        assert!(!can_schedule_tiered_handoff(
-            &completed_handoff,
-            &same_stream
-        ));
-        let armed_recovery = InitialPeerBackfillCheckpoint {
-            recovery_generation: 1,
-            recovery_generation_consumed: false,
-            recovery_handoff: Some(same_stream.clone()),
-            retained_anchor_handoffs: BTreeSet::from([same_stream.clone()]),
-            ..InitialPeerBackfillCheckpoint::default()
-        };
-        let mut extended_recovery_handoff = same_stream.clone();
-        extended_recovery_handoff.last_missing += 10;
-        extended_recovery_handoff.next_sequence += 11;
-        extended_recovery_handoff.end_unix_seconds += 1;
-        assert!(can_schedule_tiered_handoff(
-            &armed_recovery,
-            &extended_recovery_handoff
-        ));
-        let consumed_recovery = InitialPeerBackfillCheckpoint {
-            recovery_generation: 1,
-            recovery_generation_consumed: true,
-            retained_anchor_handoffs: BTreeSet::from([same_stream.clone()]),
-            ..InitialPeerBackfillCheckpoint::default()
-        };
-        assert!(!can_schedule_tiered_handoff(
-            &consumed_recovery,
-            &same_stream
-        ));
-        assert!(!can_schedule_tiered_handoff(
-            &consumed_recovery,
-            &extended_recovery_handoff
-        ));
-    }
-}
+#[path = "ready_peer/tests.rs"]
+mod tests;
