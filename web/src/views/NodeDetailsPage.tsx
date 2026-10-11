@@ -1,6 +1,11 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import {
+	Link,
+	useNavigate,
+	useParams,
+	useSearch,
+} from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -130,14 +135,16 @@ const quotaResetSchema = z
 	});
 type QuotaResetFormValues = z.infer<typeof quotaResetSchema>;
 type QuotaResetFormInput = z.input<typeof quotaResetSchema>;
-type NodeDetailsTab =
-	| "resources"
-	| "runtime"
-	| "metadata"
-	| "traffic"
-	| "ipUsage"
-	| "tcpConnections"
-	| "settings";
+export const NODE_DETAILS_TAB_VALUES = [
+	"resources",
+	"runtime",
+	"metadata",
+	"traffic",
+	"ipUsage",
+	"tcpConnections",
+	"settings",
+] as const;
+type NodeDetailsTab = (typeof NODE_DETAILS_TAB_VALUES)[number];
 const NODE_DETAILS_TAB_OPTIONS: Array<{
 	value: NodeDetailsTab;
 	label: string;
@@ -358,11 +365,17 @@ function formatEndpointKind(
 }
 export function NodeDetailsPage() {
 	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
+	const { tab: requestedTab } = useSearch({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
 	const appRuntime = useAppRuntime();
 	const prefs = useUiPrefs();
 	const nodesCapability = useApiCapability("admin.nodes");
-	const [activeTab, setActiveTab] = useState<NodeDetailsTab>("runtime");
+	const [activeTab, setActiveTab] = useState<NodeDetailsTab>(
+		requestedTab ?? "runtime",
+	);
+	useEffect(() => {
+		setActiveTab(requestedTab ?? "runtime");
+	}, [requestedTab]);
 	const [selectedRuntimeRole, setSelectedRuntimeRole] =
 		useState<ResourceRole | null>(null);
 	const mihomoPrivateCidrsCapability = useApiCapability(
@@ -371,8 +384,21 @@ export function NodeDetailsPage() {
 	const canReadRuntime =
 		adminToken.length > 0 && nodesCapability.available && appRuntime.isOnline;
 	const { pushToast } = useToast();
-	const navigate = useNavigate();
+	const navigate = useNavigate({ from: "/nodes/$nodeId" });
 	const queryClient = useQueryClient();
+	const handleTabChange = useCallback(
+		(value: string) => {
+			if (!NODE_DETAILS_TAB_VALUES.includes(value as NodeDetailsTab)) return;
+			setActiveTab(value as NodeDetailsTab);
+			void navigate({
+				search: (current) => ({
+					...current,
+					tab: value as NodeDetailsTab,
+				}),
+			});
+		},
+		[navigate],
+	);
 	const nodeQuery = useQuery({
 		queryKey: ["adminNode", adminToken, nodeId],
 		enabled: adminToken.length > 0 && nodesCapability.available,
@@ -936,7 +962,7 @@ export function NodeDetailsPage() {
 				<ModuleTabsLayout
 					options={NODE_DETAILS_TAB_OPTIONS}
 					value={activeTab}
-					onValueChange={(value) => setActiveTab(value as NodeDetailsTab)}
+					onValueChange={handleTabChange}
 					ariaLabel="Node details sections"
 					mobileAriaLabel="Node details section"
 				>

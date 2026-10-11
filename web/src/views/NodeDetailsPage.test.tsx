@@ -38,13 +38,13 @@ import { UiPrefsProvider } from "../components/UiPrefs";
 import { createQueryClient } from "../queryClient";
 import { NodeDetailsPage } from "./NodeDetailsPage";
 
-const { mockNavigate, mockReadAdminToken, mockRouteParams } = vi.hoisted(
-	() => ({
+const { mockNavigate, mockReadAdminToken, mockRouteParams, mockRouteSearch } =
+	vi.hoisted(() => ({
 		mockNavigate: vi.fn(),
 		mockReadAdminToken: vi.fn(() => "admintoken"),
 		mockRouteParams: {} as { nodeId: string },
-	}),
-);
+		mockRouteSearch: {} as { tab?: string },
+	}));
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
 	const actual =
@@ -65,6 +65,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 		),
 		useNavigate: () => mockNavigate,
 		useParams: () => mockRouteParams,
+		useSearch: () => mockRouteSearch,
 	};
 });
 
@@ -398,22 +399,20 @@ describe("<NodeDetailsPage />", () => {
 		vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-03-08T00:59:30Z"));
 		mockReadAdminToken.mockReturnValue("admintoken");
 		mockRouteParams.nodeId = fixtureCatalog.nodeId.fixture134();
+		mockRouteSearch.tab = undefined;
 	});
 
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();
 	});
-
 	it("loads IP usage on demand and switches windows", async () => {
 		setupMocks();
 		renderPage();
-
 		await waitFor(() => {
 			expect(fetchAdminNode).toHaveBeenCalled();
 		});
 		expect(fetchAdminNodeIpUsage).not.toHaveBeenCalled();
-
 		fireEvent.click(await screenByRole("tab", "IP usage"));
 		await waitFor(() => {
 			expect(fetchAdminNodeIpUsage).toHaveBeenCalledWith(
@@ -423,7 +422,6 @@ describe("<NodeDetailsPage />", () => {
 				expect.any(AbortSignal),
 			);
 		});
-
 		await waitFor(() => {
 			expect(
 				screen.getAllByText(fixtureCatalog.address.documentation192_0_2_30())
@@ -431,7 +429,6 @@ describe("<NodeDetailsPage />", () => {
 			).toBeGreaterThan(0);
 		});
 		expect(await screenByText("IP occupancy lanes")).toBeTruthy();
-
 		fireEvent.click(await screenByRole("button", "7d"));
 		await waitFor(() => {
 			expect(fetchAdminNodeIpUsage).toHaveBeenLastCalledWith(
@@ -442,16 +439,13 @@ describe("<NodeDetailsPage />", () => {
 			);
 		});
 	});
-
 	it("loads TCP connections on demand and switches windows", async () => {
 		setupMocks();
 		renderPage();
-
 		await waitFor(() => {
 			expect(fetchAdminNode).toHaveBeenCalled();
 		});
 		expect(fetchAdminNodeTcpConnections).not.toHaveBeenCalled();
-
 		fireEvent.click(await screenByRole("tab", "TCP connections"));
 		await waitFor(() => {
 			expect(fetchAdminNodeTcpConnections).toHaveBeenCalledWith(
@@ -461,7 +455,6 @@ describe("<NodeDetailsPage />", () => {
 				expect.any(AbortSignal),
 			);
 		});
-
 		expect(
 			await screenByText(/Per-minute ESTABLISHED inbound TCP connections/i),
 		).toBeTruthy();
@@ -471,7 +464,6 @@ describe("<NodeDetailsPage />", () => {
 		expect(
 			await screenByText(`${fixtureCatalog.endpointTag.fixture141()} :8388`),
 		).toBeTruthy();
-
 		fireEvent.click(await screenByRole("button", "7d"));
 		await waitFor(() => {
 			expect(fetchAdminNodeTcpConnections).toHaveBeenLastCalledWith(
@@ -482,7 +474,6 @@ describe("<NodeDetailsPage />", () => {
 			);
 		});
 	});
-
 	it("keeps the selected tab and time window when the node route changes", async () => {
 		setupMocks();
 		const page = renderPage();
@@ -505,7 +496,6 @@ describe("<NodeDetailsPage />", () => {
 				expect.any(AbortSignal),
 			);
 		});
-
 		mockRouteParams.nodeId = fixtureCatalog.nodeId.fixture145();
 		page.rerenderPage();
 
@@ -524,8 +514,13 @@ describe("<NodeDetailsPage />", () => {
 	});
 
 	it("uses a section select on mobile and keeps tabs for larger screens", async () => {
+		mockRouteSearch.tab = "traffic";
 		setupMocks();
 		renderPage();
+		expect(await screenByRole("tab", "Traffic")).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
 
 		const sectionSelect = await screenByRole(
 			"combobox",
@@ -545,6 +540,11 @@ describe("<NodeDetailsPage />", () => {
 		const tcpTab = await screenByRole("tab", "TCP connections");
 		expect(tcpTab.className).toContain("basis-[calc(50%-0.125rem)]");
 		expect(tcpTab.className).toContain("min-h-11");
+
+		fireEvent.click(await screenByRole("tab", "Node metadata"));
+		expect(mockNavigate.mock.calls.at(-1)?.[0]?.search({})).toEqual({
+			tab: "metadata",
+		});
 	});
 
 	it("keeps node settings as the final tab and groups its sections", async () => {
