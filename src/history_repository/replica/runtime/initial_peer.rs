@@ -104,6 +104,7 @@ impl RepositoryReplicaRuntime {
     pub(crate) fn can_accept_consumed_retained_sequence_gap(
         &self,
         wire: &[u8],
+        retained_first_sequence: Option<u64>,
     ) -> Result<bool, RepositoryRuntimeError> {
         let segment = crate::history_sync::SignedSegment::from_wire(wire)?;
         let first = segment.canonical().first_cursor();
@@ -117,6 +118,9 @@ impl RepositoryReplicaRuntime {
             return Ok(false);
         };
         if first.sequence() <= expected || segment.canonical().previous_segment_hash().is_none() {
+            return Ok(false);
+        }
+        if retained_first_sequence != Some(first.sequence()) {
             return Ok(false);
         }
         let matching_gap = self.snapshot.gaps.iter().filter(|gap| {
@@ -139,7 +143,8 @@ impl RepositoryReplicaRuntime {
                     && gap.stream == first.stream()
             })
             .count();
-        Ok(matching_count == 1 && transient_gap_count == 1)
+        Ok((matching_count == 1 && transient_gap_count == 1)
+            || (matching_count == 0 && transient_gap_count == 0))
     }
 
     pub(crate) fn initial_peer_backfill_checkpoint(

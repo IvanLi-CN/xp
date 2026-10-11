@@ -131,6 +131,12 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - repair 响应在请求段已按保留策略淘汰时，以 `unavailable_segment_ids` 明确列出该请求中的
   不可恢复 ID；catch-up 只移除服务端明确报告的 ID，未知或重复 ID 必须 fail closed。该
   状态不伪造 segment payload、不推进 source ACK，也不删除本地未确认历史。
+- 延迟的 consumed-generation repair 若源端保留窗口已在首次失败的 anchor 尝试后前移，
+  可在 `history_truncated=true` 响应中附带有界 `retained_stream_boundaries`。每个条目由源端
+  现有 segment 行计算，声明对应 `(source_node_id, source_epoch, stream)` 的最小保留
+  `first_sequence`；接收方只有在首个返回 segment 与声明值精确相等、同一 consumed handoff
+  且独立 content digest 匹配时，才可原地封存该精确区间。旧 peer 继续使用未改变的 v1
+  `response_id`，缺失或变化的 boundary 仍 fail closed，不得凭 `history_truncated` 单独推断。
 - 每次 summary repair attempt 必须在现有控制快照中记录 `last_attempt_at`、`attempt_count`、
   `pending_count`、`summary_cursor`、`pending_next_cursor`、`last_progress_at`、`last_result`、
   `last_error_code` 和可选 `retry_after`。`last_result` 至少区分 `progress`、
@@ -172,8 +178,11 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - When a consumed generation retry has already recorded the exact sequence gap for its bound stream,
   a later repair response with `history_truncated=true` may seal that same observed range as the
   permanent `source_retention_expired` gap and accept the retained anchor in the same transaction.
-  This continuation does not arm a generation, schedule a second handoff, or authorize another
-  retention crossing; a different or unobserved range remains fail-closed and pending.
+  A delayed retry with no pre-existing transient gap may use the same continuation only when a
+  newer serving peer declares the durable minimum retained `first_sequence` for the stream and the
+  first returned segment and separate content digest match that declaration. This continuation does
+  not arm a generation or schedule a second handoff; missing or changed boundary evidence remains
+  fail-closed and pending.
 - A bounded mixed-stream repair page selects the first eligible handoff, skipping gaps outside an
   armed recovery binding. Completing an independent source/epoch/stream handoff preserves the
   generation's original binding; it cannot grant that bound stream a second crossing.

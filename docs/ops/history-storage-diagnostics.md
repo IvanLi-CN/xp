@@ -32,6 +32,13 @@ proves `history_truncated=true`; this is a continuation of the existing checkpoi
 reduce `pending_count`. A different range must remain pending with a storage-boundary diagnostic;
 operators must not infer or apply a second retention crossing from the marker alone.
 
+When the receiver has no transient gap because the source retention window moved after a delayed
+retry, a newer serving peer may include `retained_stream_boundaries` in the authenticated repair
+response. The receiver accepts a consumed-generation continuation only when the first returned
+segment equals the source-declared minimum retained sequence for that stream; the boundary is
+bound by a separate content digest while the legacy `response_id` remains available to v1 peers.
+Missing or changed boundary metadata remains fail-closed and leaves the pending IDs intact.
+
 The repair worker only uses the peer's registered public HTTPS `api_base_url`. A response that
 explicitly lists unavailable IDs may reduce `pending_count` and records `explicit_unavailable`; it
 does not alter permanent gap, `partial`, or `replica_converged=false` semantics. A segment that

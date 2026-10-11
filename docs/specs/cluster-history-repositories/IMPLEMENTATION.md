@@ -64,6 +64,14 @@
   same pending page without changing generation state or scheduling a second handoff. A different
   range remains a storage-boundary failure and is never inferred from the marker alone.
 
+- A delayed consumed-generation retry may encounter a source whose retention window moved after
+  the first failed anchor attempt. A truncated repair response may then carry bounded
+  `retained_stream_boundaries` derived from the source's durable segment rows. The receiver accepts
+  a continuation without a pre-existing transient gap only when the first returned segment equals
+  the declared minimum retained sequence for the same source, epoch and stream and the response's
+  separate content digest matches. The legacy `response_id` remains unchanged for v1 peers; absent
+  or changed boundary metadata remains fail-closed.
+
 - Expired armed-recovery repair pages retain existing IDs and add bounded current IDs.
   Refresh commits gaps and checkpoint atomically, preserves generation, and re-reads the same
   summary cursor after draining so a partial refresh cannot skip current segments.

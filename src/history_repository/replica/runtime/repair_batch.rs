@@ -1,4 +1,7 @@
-use std::io::{Cursor as IoCursor, Read as _};
+use std::{
+    collections::BTreeSet,
+    io::{Cursor as IoCursor, Read as _},
+};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -23,6 +26,17 @@ pub(crate) struct RepositoryReplicaSegment {
     pub(crate) wire: Vec<u8>,
 }
 
+/// Signed repair responses may declare the first retained segment for each stream represented in
+/// the response. Receivers use this only to prove an exact retention gap when a consumed recovery
+/// generation is resumed after the source retention window moved.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct RepositoryRetainedStreamBoundary {
+    pub(crate) source_node_id: String,
+    pub(crate) source_epoch: u64,
+    pub(crate) stream: String,
+    pub(crate) first_sequence: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositoryRepairBatch {
     pub(crate) segments: Vec<RepositoryReplicaSegment>,
@@ -32,6 +46,10 @@ pub(crate) struct RepositoryRepairBatch {
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
     #[serde(default, skip_serializing_if = "super::sync::is_false")]
     pub(crate) history_truncated: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) retained_stream_boundaries: Vec<RepositoryRetainedStreamBoundary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) response_content_digest: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) response_id: Option<String>,
 }
@@ -48,21 +66,27 @@ impl RepositoryRepairBatch {
         if self.segments.len() > MAX_REPAIR_SEGMENTS
             || self.unavailable_segment_ids.len() > MAX_REPAIR_SEGMENTS
             || self.gaps.len() > MAX_REPAIR_GAPS
+            || self.retained_stream_boundaries.len() > MAX_REPAIR_SEGMENTS
         {
             return Err(ReplicaError::RepairLimitExceeded.into());
         }
         validate_unavailable_segment_ids(&self.unavailable_segment_ids)?;
         validate_replica_gaps(&self.gaps)?;
+        validate_retained_stream_boundaries(&self.retained_stream_boundaries)?;
 
         let gaps = self.gaps;
         let unavailable_segment_ids = self.unavailable_segment_ids;
         let history_truncated = self.history_truncated;
+        let retained_stream_boundaries = self.retained_stream_boundaries;
+        let response_content_digest = self.response_content_digest;
         let mut selected = Vec::new();
         let mut bytes = encode_relay_repair_batch(&RepositoryRepairBatch {
             segments: Vec::new(),
             unavailable_segment_ids: unavailable_segment_ids.clone(),
             gaps: gaps.clone(),
             history_truncated,
+            retained_stream_boundaries: retained_stream_boundaries.clone(),
+            response_content_digest: response_content_digest.clone(),
             response_id: None,
         })?;
         if bytes.len() > MAX_RELAY_PLAINTEXT_BYTES {
@@ -82,6 +106,8 @@ impl RepositoryRepairBatch {
                 unavailable_segment_ids: unavailable_segment_ids.clone(),
                 gaps: gaps.clone(),
                 history_truncated,
+                retained_stream_boundaries: retained_stream_boundaries.clone(),
+                response_content_digest: response_content_digest.clone(),
                 response_id: None,
             };
             let candidate_bytes = encode_relay_repair_batch(&candidate_batch)?;
@@ -102,6 +128,8 @@ impl RepositoryRepairBatch {
                 unavailable_segment_ids,
                 gaps,
                 history_truncated,
+                retained_stream_boundaries,
+                response_content_digest,
                 response_id: None,
             },
             bytes,
@@ -140,11 +168,13 @@ impl RepositoryRepairBatch {
         if batch.segments.len() > MAX_REPAIR_SEGMENTS
             || batch.unavailable_segment_ids.len() > MAX_REPAIR_SEGMENTS
             || batch.gaps.len() > MAX_REPAIR_GAPS
+            || batch.retained_stream_boundaries.len() > MAX_REPAIR_SEGMENTS
         {
             return Err(ReplicaError::RepairLimitExceeded.into());
         }
         validate_unavailable_segment_ids(&batch.unavailable_segment_ids)?;
         validate_replica_gaps(&batch.gaps)?;
+        validate_retained_stream_boundaries(&batch.retained_stream_boundaries)?;
         Ok(batch)
     }
 
@@ -162,6 +192,43 @@ impl RepositoryRepairBatch {
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         Ok(hex::encode(Sha256::digest(bytes)))
     }
+
+    pub(crate) fn response_content_digest(&self) -> Result<String, RepositoryRuntimeError> {
+        let response = (
+            self.segments
+                .iter()
+                .map(|segment| Sha256::digest(&segment.wire).to_vec())
+                .collect::<Vec<_>>(),
+            &self.unavailable_segment_ids,
+            &self.gaps,
+            self.history_truncated,
+            &self.retained_stream_boundaries,
+        );
+        let bytes = serde_json::to_vec(&response)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        Ok(hex::encode(Sha256::digest(bytes)))
+    }
+}
+
+fn validate_retained_stream_boundaries(
+    boundaries: &[RepositoryRetainedStreamBoundary],
+) -> Result<(), RepositoryRuntimeError> {
+    let mut keys = BTreeSet::new();
+    for boundary in boundaries {
+        if boundary.source_node_id.is_empty()
+            || boundary.stream.is_empty()
+            || !keys.insert((
+                boundary.source_node_id.as_str(),
+                boundary.source_epoch,
+                boundary.stream.as_str(),
+            ))
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                "repository repair retained stream boundary is invalid".to_owned(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn encode_relay_repair_batch(

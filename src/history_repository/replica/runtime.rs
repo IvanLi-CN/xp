@@ -50,7 +50,9 @@ pub(crate) use initial_peer::{
     InitialPeerTieredHandoff, RetainedAnchorCheckpointUpdate,
 };
 pub(crate) use receive::{PendingRepositoryMutation, source_stream_for_schema};
-pub(crate) use repair_batch::{RepositoryRepairBatch, RepositoryReplicaSegment};
+pub(crate) use repair_batch::{
+    RepositoryRepairBatch, RepositoryReplicaSegment, RepositoryRetainedStreamBoundary,
+};
 pub(crate) use status::RepositoryRuntimeStatus;
 pub(crate) use sync::RepositoryReplicaGap;
 
