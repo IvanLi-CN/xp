@@ -929,8 +929,10 @@ Notes:
   Final tiered export pages retain their existing 15-minute export lease until natural expiry so
   retention cannot remove the pending repair anchor during the handoff. No lease is extended by
   finalization; normal retention resumes after all bounded leases expire.
-  Live source delivery, ordinary anti-entropy, and later repair pages still reject sequence gaps;
-  do not bypass that boundary by editing the checkpoint.
+  Live source delivery, ordinary anti-entropy, and later repair pages still reject unobserved
+  sequence gaps; the one exception is a `history_truncated=true` response that proves the exact
+  non-permanent gap already recorded by a consumed recovery checkpoint. Do not bypass either
+  boundary by editing the checkpoint.
   A stale retained-anchor marker is recovered in place through the signed local command during the
   approved maintenance window:
 

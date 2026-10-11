@@ -119,14 +119,22 @@ impl RepositoryReplicaRuntime {
         if first.sequence() <= expected || segment.canonical().previous_segment_hash().is_none() {
             return Ok(false);
         }
-        Ok(self.snapshot.gaps.iter().any(|gap| {
+        let matching_gap = self.snapshot.gaps.iter().filter(|gap| {
             !gap.permanent
                 && gap.source_node_id == first.source_node_id()
                 && gap.source_epoch == first.source_epoch()
                 && gap.stream == first.stream()
                 && gap.first_sequence == expected
                 && gap.last_sequence == first.sequence().saturating_sub(1)
-        }))
+        });
+        let matching_count = matching_gap.count();
+        let transient_gap_count = self
+            .snapshot
+            .gaps
+            .iter()
+            .filter(|gap| !gap.permanent)
+            .count();
+        Ok(matching_count == 1 && transient_gap_count == 1)
     }
 
     pub(crate) fn initial_peer_backfill_checkpoint(

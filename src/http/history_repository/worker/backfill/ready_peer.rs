@@ -900,11 +900,17 @@ async fn repair_ready_peer_catch_up_page(
             && stream_has_retained_anchor
             && same_consumed_recovery_stream
         {
-            state
-                .repository_replica
-                .lock()
-                .await
-                .can_accept_consumed_retained_sequence_gap(&segment.wire)?
+            let runtime = state.repository_replica.lock().await;
+            match runtime.can_accept_consumed_retained_sequence_gap(&segment.wire) {
+                Ok(allowed) => allowed,
+                Err(error) => {
+                    let message = error.to_string();
+                    drop(runtime);
+                    record_summary_repair_internal_failure(state, &peer.node_id, now, &message)
+                        .await?;
+                    return Err(error.into());
+                }
+            }
         } else {
             false
         };
