@@ -505,8 +505,16 @@ impl RepositoryReplicaRuntime {
             .iter()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
-        let mut stored_segments = self
-            .stored_segments_by_ids(requested_segment_ids)?
+        let stored_segments = self.stored_segments_by_ids(requested_segment_ids)?;
+        if stored_segments
+            .iter()
+            .any(|segment| segment.wire.len().saturating_add(128) > MAX_RESPONSE_WIRE_BYTES)
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                "repository repair segment exceeds response wire budget".to_owned(),
+            ));
+        }
+        let mut stored_segments = stored_segments
             .into_iter()
             .map(|segment| Ok((repair_segment_order(&segment)?, segment)))
             .collect::<Result<Vec<_>, RepositoryRuntimeError>>()?;
@@ -537,7 +545,7 @@ impl RepositoryReplicaRuntime {
                 wire: segment.wire,
             });
         }
-        if segments.is_empty() && stored_segment_count > 0 && unavailable_segment_ids.is_empty() {
+        if segments.is_empty() && stored_segment_count > 0 {
             return Err(RepositoryRuntimeError::Storage(
                 "repository repair segment exceeds response wire budget".to_owned(),
             ));

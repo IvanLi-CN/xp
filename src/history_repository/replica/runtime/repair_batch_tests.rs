@@ -1,9 +1,10 @@
 use super::{
     RepositoryRepairBatch,
     tests::{identity, load, record, segment, signing_key},
+    *,
 };
 use crate::history_sync::{CanonicalSegment, Cursor, SyncRecord};
-use sha2::{Digest as _, Sha256};
+use sha2::Sha256;
 
 #[test]
 fn repair_response_digest_binds_the_returned_content() {
@@ -127,4 +128,34 @@ fn repair_response_splits_pending_segments_at_the_wire_budget() {
         .repair_batch(&remaining)
         .expect("remaining repair page");
     assert!(!second.segments.is_empty());
+}
+
+#[test]
+fn repair_response_rejects_oversized_stored_segment_with_unavailable_id() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = signing_key();
+    let identity = identity(&signing_key);
+    let segment = segment(&signing_key, 0, vec![record(b"oversized", false)], None);
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = false;
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &segment.wire_bytes().expect("wire"),
+            12,
+        )
+        .expect("store oversized segment");
+    runtime.snapshot.segments[0].wire = vec![0; crate::history_sync::MAX_RESPONSE_WIRE_BYTES];
+    let segment_id = runtime
+        .replication_summary()
+        .expect("summary")
+        .segment_ids
+        .pop()
+        .expect("segment id");
+
+    let error = runtime
+        .repair_batch(&[segment_id, "missing-segment".to_owned()])
+        .expect_err("oversized retained segment must fail closed");
+    assert!(matches!(error, RepositoryRuntimeError::Storage(_)));
 }
