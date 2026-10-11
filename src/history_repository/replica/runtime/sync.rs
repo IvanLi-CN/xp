@@ -422,17 +422,13 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(crate) fn requires_repair(
-        &mut self,
+        &self,
         remote: &RepositoryReplicaSummary,
         deep_verification: bool,
     ) -> Result<bool, RepositoryRuntimeError> {
-        if remote.history_truncated && !self.snapshot.history_truncated {
-            self.snapshot.history_truncated = true;
-            self.persist_control_state()?;
-        }
         let gaps_converged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary))
             == canonical_gaps(remote.gaps.iter().cloned());
-        let truncation_converged = !self.snapshot.history_truncated && !remote.history_truncated;
+        let truncation_converged = self.snapshot.history_truncated == remote.history_truncated;
         let partitions_converged = if !deep_verification || !remote.partitions_included {
             true
         } else if remote.summary_version == 3 {

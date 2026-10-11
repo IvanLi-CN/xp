@@ -127,6 +127,7 @@ fn summary_repair_transition_rolls_back_checkpoint_when_diagnostic_write_fails()
                     retry_after: None,
                 },
                 |runtime| {
+                    runtime.mark_history_truncated_in_memory();
                     runtime.update_initial_peer_summary_checkpoint_in_memory(
                         "peer-101",
                         Some("after".to_owned()),
@@ -163,6 +164,7 @@ fn summary_repair_transition_rolls_back_checkpoint_when_diagnostic_write_fails()
                 retry_after: None,
             },
             |runtime| {
+                runtime.mark_history_truncated_in_memory();
                 runtime.update_initial_peer_summary_checkpoint_in_memory(
                     "peer-101",
                     Some("after".to_owned()),
@@ -182,6 +184,7 @@ fn summary_repair_transition_rolls_back_checkpoint_when_diagnostic_write_fails()
         .expect("checkpoint");
     assert!(checkpoint.summary_complete);
     assert_eq!(checkpoint.summary_cursor.as_deref(), Some("after"));
+    assert!(restored.history_truncated());
     assert_eq!(
         restored
             .runtime_status(104)

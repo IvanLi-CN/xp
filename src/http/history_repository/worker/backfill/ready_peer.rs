@@ -34,6 +34,28 @@ struct CompletedRepairResponse {
     allowance_complete: bool,
 }
 
+async fn record_summary_repair_internal_failure(
+    state: &AppState,
+    peer_node_id: &str,
+    now: u64,
+    message: &str,
+) -> anyhow::Result<()> {
+    let (error_code, result) = if message.contains("did not advance") {
+        ("no_progress", SummaryRepairResult::NoProgress)
+    } else {
+        ("storage_error", SummaryRepairResult::StorageError)
+    };
+    record_summary_repair_result(
+        state,
+        peer_node_id,
+        now,
+        result,
+        Some(error_code),
+        Some(retry_after(now)),
+    )
+    .await
+}
+
 async fn request_repair_page(
     state: &AppState,
     peer: &MeshPeerTarget,
@@ -419,7 +441,7 @@ async fn advance_ready_peer_catch_up_page(
             }
         };
     let (requires_repair, missing_segment_ids, partitions_converged) = {
-        let mut runtime = state.repository_replica.lock().await;
+        let runtime = state.repository_replica.lock().await;
         (
             runtime.requires_repair(&remote_summary, true)?,
             runtime.missing_segment_ids(&remote_summary, true)?,
@@ -442,6 +464,9 @@ async fn advance_ready_peer_catch_up_page(
                     retry_after: None,
                 },
                 |runtime| {
+                    if remote_summary.history_truncated {
+                        runtime.mark_history_truncated_in_memory();
+                    }
                     runtime.update_initial_peer_summary_checkpoint_in_memory(
                         &peer.node_id,
                         checkpoint.summary_cursor.clone(),
@@ -477,6 +502,9 @@ async fn advance_ready_peer_catch_up_page(
                 retry_after: (!summary_progressed).then(|| retry_after(now)),
             },
             |runtime| {
+                if remote_summary.history_truncated {
+                    runtime.mark_history_truncated_in_memory();
+                }
                 if requires_repair {
                     runtime.merge_replica_gaps_in_memory(&remote_summary.gaps)?;
                 }
@@ -574,7 +602,14 @@ async fn repair_ready_peer_catch_up_page(
         };
     // Old peers omit response_id. Derive it from their actual response rather than the
     // request, so a changed retry cannot consume a first-response allowance.
-    let mut response_id = repair.response_id_digest()?;
+    let mut response_id = match repair.response_id_digest() {
+        Ok(response_id) => response_id,
+        Err(error) => {
+            let message = error.to_string();
+            record_summary_repair_internal_failure(state, &peer.node_id, now, &message).await?;
+            return Err(error.into());
+        }
+    };
     if repair
         .response_id
         .as_ref()
@@ -635,7 +670,14 @@ async fn repair_ready_peer_catch_up_page(
                 return Err(error.into());
             }
         };
-        response_id = repair.response_id_digest()?;
+        response_id = match repair.response_id_digest() {
+            Ok(response_id) => response_id,
+            Err(error) => {
+                let message = error.to_string();
+                record_summary_repair_internal_failure(state, &peer.node_id, now, &message).await?;
+                return Err(error.into());
+            }
+        };
         if repair
             .response_id
             .as_ref()
@@ -668,31 +710,47 @@ async fn repair_ready_peer_catch_up_page(
             return Ok(InitialBackfillProgress::InProgress);
         }
     } else {
-        super::super::remove_delivered_repair_segment_ids(
+        if let Err(error) = super::super::remove_delivered_repair_segment_ids(
             &mut remaining,
             repair
                 .segments
                 .iter()
                 .map(|segment| segment.wire.as_slice()),
-        )?;
+        ) {
+            let message = error.to_string();
+            record_summary_repair_internal_failure(state, &peer.node_id, now, &message).await?;
+            return Err(error);
+        }
     }
-    super::super::remove_unavailable_repair_segment_ids(
+    if let Err(error) = super::super::remove_unavailable_repair_segment_ids(
         &mut remaining,
         &repair.unavailable_segment_ids,
-    )?;
+    ) {
+        let message = error.to_string();
+        record_summary_repair_internal_failure(state, &peer.node_id, now, &message).await?;
+        return Err(error);
+    }
     // A truncated repository can return a valid retained anchor (with no unavailable IDs) whose
     // first segment starts after this receiver's watermark. Detect that sequence gap before
     // applying any segment; otherwise the receive path rejects the anchor and retries forever.
     if repair.history_truncated {
         let tiered_handoff = {
             let runtime = state.repository_replica.lock().await;
-            select_tiered_handoff(
+            match select_tiered_handoff(
                 &checkpoint,
                 repair
                     .segments
                     .iter()
                     .map(|segment| runtime.tiered_handoff_for_sequence_gap(&segment.wire)),
-            )?
+            ) {
+                Ok(tiered_handoff) => tiered_handoff,
+                Err(error) => {
+                    let message = error.to_string();
+                    record_summary_repair_internal_failure(state, &peer.node_id, now, &message)
+                        .await?;
+                    return Err(error.into());
+                }
+            }
         };
         if let Some(tiered_handoff) = tiered_handoff {
             // Do not remove any segment from the original request yet. The bounded response has
@@ -716,6 +774,9 @@ async fn repair_ready_peer_catch_up_page(
                     retry_after: None,
                 },
                 |runtime| {
+                    if repair.history_truncated {
+                        runtime.mark_history_truncated_in_memory();
+                    }
                     runtime.merge_replica_gaps_in_memory(&repair_gaps)?;
                     runtime.start_initial_peer_tiered_handoff_in_memory(
                         &peer.node_id,
@@ -757,6 +818,7 @@ async fn repair_ready_peer_catch_up_page(
                     error_code: Some("source_retention_expired".to_owned()),
                     retry_after: None,
                 }),
+                repair.history_truncated,
             )
             .await?;
             return Ok(progress);
@@ -767,16 +829,44 @@ async fn repair_ready_peer_catch_up_page(
     let repair_gaps = repair.gaps;
     let mut retained_anchor_streams = checkpoint.retained_anchor_streams.clone();
     for (index, segment) in repair.segments.into_iter().enumerate() {
-        if !super::super::super::identity_is_valid_for_history_replay(state, &segment.identity)
-            .await
-            .map_err(|_| anyhow::anyhow!("check repository repair segment identity"))?
+        let identity_valid = match super::super::super::identity_is_valid_for_history_replay(
+            state,
+            &segment.identity,
+        )
+        .await
         {
+            Ok(identity_valid) => identity_valid,
+            Err(error) => {
+                record_summary_repair_internal_failure(
+                    state,
+                    &peer.node_id,
+                    now,
+                    "check repository repair segment identity",
+                )
+                .await?;
+                return Err(anyhow::anyhow!(
+                    "check repository repair segment identity: {error:?}"
+                ));
+            }
+        };
+        if !identity_valid {
+            record_summary_repair_internal_failure(
+                state,
+                &peer.node_id,
+                now,
+                "repository repair segment identity is not pinned",
+            )
+            .await?;
             anyhow::bail!("repository repair segment identity is not pinned");
         }
-        let first_cursor = crate::history_sync::SignedSegment::from_wire(&segment.wire)?
-            .canonical()
-            .first_cursor()
-            .clone();
+        let first_cursor = match crate::history_sync::SignedSegment::from_wire(&segment.wire) {
+            Ok(signed) => signed.canonical().first_cursor().clone(),
+            Err(error) => {
+                let message = error.to_string();
+                record_summary_repair_internal_failure(state, &peer.node_id, now, &message).await?;
+                return Err(error.into());
+            }
+        };
         let stream_key = (
             first_cursor.source_node_id().to_owned(),
             first_cursor.source_epoch(),
@@ -789,7 +879,16 @@ async fn repair_ready_peer_catch_up_page(
                     && key.stream == stream_key.2
             }) {
             let runtime = state.repository_replica.lock().await;
-            runtime.can_accept_retained_sequence_gap(&segment.wire, false)?
+            match runtime.can_accept_retained_sequence_gap(&segment.wire, false) {
+                Ok(allowed) => allowed,
+                Err(error) => {
+                    let message = error.to_string();
+                    drop(runtime);
+                    record_summary_repair_internal_failure(state, &peer.node_id, now, &message)
+                        .await?;
+                    return Err(error.into());
+                }
+            }
         } else {
             false
         };
@@ -800,7 +899,7 @@ async fn repair_ready_peer_catch_up_page(
                 stream: stream_key.2,
             });
         }
-        state
+        let receive_result = state
             .repository_replica
             .lock()
             .await
@@ -820,7 +919,12 @@ async fn repair_ready_peer_catch_up_page(
                     allowance_complete: false,
                     streams: retained_anchor_streams.clone(),
                 }),
-            )?;
+            );
+        if let Err(error) = receive_result {
+            let message = error.to_string();
+            record_summary_repair_internal_failure(state, &peer.node_id, now, &message).await?;
+            return Err(error.into());
+        }
     }
     let completed_response = completed_repair_response(&checkpoint, remaining);
     let result = if !had_segments && had_unavailable {
@@ -840,6 +944,9 @@ async fn repair_ready_peer_catch_up_page(
             retry_after: None,
         },
         |runtime| {
+            if repair.history_truncated {
+                runtime.mark_history_truncated_in_memory();
+            }
             if !had_segments && !repair_gaps.is_empty() {
                 runtime.merge_replica_gaps_in_memory(&repair_gaps)?;
             }

@@ -205,6 +205,10 @@ impl RepositoryReplicaRuntime {
         checkpoint.summary_requires_tiered_backfill = summary_requires_tiered_backfill;
     }
 
+    pub(crate) fn mark_history_truncated_in_memory(&mut self) {
+        self.snapshot.history_truncated = true;
+    }
+
     pub(crate) fn clear_initial_peer_retained_anchor_response_id(
         &mut self,
         peer_node_id: &str,

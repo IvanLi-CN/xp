@@ -6,6 +6,7 @@ pub(super) async fn refresh(
     checkpoint: &InitialPeerBackfillCheckpoint,
     repair: &RepositoryRepairBatch,
     summary_repair_update: Option<SummaryRepairDiagnosticUpdate>,
+    history_truncated: bool,
 ) -> anyhow::Result<InitialBackfillProgress> {
     let path = checkpoint.summary_cursor.as_ref().map_or_else(
         || "/api/admin/_internal/history-repository/summary".to_owned(),
@@ -20,7 +21,12 @@ pub(super) async fn refresh(
     let pending = refreshed_pending(checkpoint, &repair.unavailable_segment_ids, &fresh);
     if pending == checkpoint.summary_pending_segment_ids {
         if let Some(update) = summary_repair_update {
-            runtime.persist_summary_repair_transition(&peer.node_id, update, |_| Ok(()))?;
+            runtime.persist_summary_repair_transition(&peer.node_id, update, |runtime| {
+                if history_truncated {
+                    runtime.mark_history_truncated_in_memory();
+                }
+                Ok(())
+            })?;
         }
         return Ok(InitialBackfillProgress::Unavailable);
     }
@@ -31,6 +37,7 @@ pub(super) async fn refresh(
         [&repair.gaps, &summary.gaps],
         summary.next_segment_id,
         summary_repair_update,
+        history_truncated,
     )?;
     tracing::warn!(peer = %peer.node_id, "expired recovery repair page refreshed without rearming");
     Ok(InitialBackfillProgress::InProgress)

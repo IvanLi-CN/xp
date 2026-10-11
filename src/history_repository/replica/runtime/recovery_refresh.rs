@@ -17,9 +17,11 @@ impl RepositoryReplicaRuntime {
             gap_pages,
             refreshed_next_cursor,
             None,
+            false,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn refresh_initial_peer_recovery_pending_with_summary_repair_result(
         &mut self,
         expected: &InitialPeerBackfillCheckpoint,
@@ -28,6 +30,7 @@ impl RepositoryReplicaRuntime {
         gap_pages: [&[RepositoryReplicaGap]; 2],
         refreshed_next_cursor: Option<String>,
         summary_repair_update: Option<SummaryRepairDiagnosticUpdate>,
+        history_truncated: bool,
     ) -> Result<(), RepositoryRuntimeError> {
         let current = self
             .snapshot
@@ -49,6 +52,9 @@ impl RepositoryReplicaRuntime {
         }
         let previous = self.snapshot.clone();
         let result = (|| {
+            if history_truncated {
+                self.mark_history_truncated_in_memory();
+            }
             for gaps in gap_pages {
                 self.merge_replica_gaps_in_memory(gaps)?;
             }
