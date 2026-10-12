@@ -79,6 +79,22 @@ fn stale_ready_metadata_keeps_anti_entropy_incomplete() {
 }
 
 #[test]
+fn local_source_fallback_retries_remote_primary() {
+    assert_eq!(
+        super::avoid_local_source_fallback("local".to_owned(), "remote", "local"),
+        "remote"
+    );
+    assert_eq!(
+        super::avoid_local_source_fallback("remote".to_owned(), "remote", "local"),
+        "remote"
+    );
+    assert_eq!(
+        super::avoid_local_source_fallback("local".to_owned(), "local", "local"),
+        "local"
+    );
+}
+
+#[test]
 fn stale_ready_metadata_blocks_tombstone_ack_cursor_advance() {
     let ready = vec!["local".to_owned(), "stale-ready".to_owned()];
     let peers = Vec::new();
