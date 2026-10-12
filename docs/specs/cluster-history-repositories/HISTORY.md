@@ -53,6 +53,8 @@
   rebuilding and v1 peer fallback.
 - v3 block rebuilds normalize the serialized record wrapper before hashing so replica-local
   `received_at_unix_seconds` cannot make otherwise identical retained records diverge.
+- A persisted canonical payload revision marks predecessor v3 blocks dirty once and rebuilds them
+  in bounded pages without re-arming recovery.
 
 - 选择 SQLite 作为普通节点和仓库的统一本地存储；迁移必须可回退且不改变普通节点数据策略。
 - 选择 Zstandard level 1 作为新同步唯一压缩算法；小 payload 或压缩无收益时使用 identity。既有 GZIP 仅用于嵌入式 Web 静态资源。

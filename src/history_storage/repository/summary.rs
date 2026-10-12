@@ -143,6 +143,21 @@ impl HistoryStorage {
         transaction.commit().map_err(sqlite_error)
     }
 
+    pub(crate) fn mark_all_repository_history_sequence_summary_blocks_dirty(&self) -> Result<()> {
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Ok(());
+        };
+        connection
+            .execute(
+                "UPDATE repository_history_sequence_summary_blocks SET dirty = 1
+                  WHERE dirty = 0 AND digest_version = 3 AND length(digest) = 33",
+                [],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
     pub(crate) fn repository_history_dirty_sequence_summary_blocks(
         &self,
         limit: usize,

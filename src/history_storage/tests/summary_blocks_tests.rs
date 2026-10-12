@@ -90,6 +90,53 @@ fn sequence_summary_digest_ignores_received_time_inside_stored_record_payload() 
 }
 
 #[test]
+fn canonical_digest_revision_marks_existing_v3_blocks_dirty() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    let record = RepositoryHistoryRecordRow {
+        source_node_id: "source".to_owned(),
+        source_epoch: 1,
+        stream: "runtime".to_owned(),
+        sequence: 1,
+        subject_node_id: "subject".to_owned(),
+        observer_node_id: "observer".to_owned(),
+        schema_id: "schema".to_owned(),
+        schema_version: 1,
+        record_key: b"key".to_vec(),
+        tombstone: false,
+        observed_start_unix_seconds: 10,
+        observed_end_unix_seconds: 10,
+        received_at_unix_seconds: 11,
+        aggregate_complete: Some(true),
+        aggregate_start_unix_seconds: Some(10),
+        aggregate_end_unix_seconds: Some(10),
+        payload: b"payload".to_vec(),
+    };
+    storage
+        .upsert_repository_history_records(&[record])
+        .unwrap();
+    storage
+        .rebuild_repository_history_sequence_summary_block("source", 1, "runtime", 0)
+        .unwrap();
+    assert!(
+        storage
+            .repository_history_dirty_sequence_summary_blocks(16)
+            .unwrap()
+            .is_empty()
+    );
+
+    storage
+        .mark_all_repository_history_sequence_summary_blocks_dirty()
+        .unwrap();
+    assert_eq!(
+        storage
+            .repository_history_dirty_sequence_summary_blocks(16)
+            .unwrap(),
+        vec![("source".to_owned(), 1, "runtime".to_owned(), 0)]
+    );
+}
+
+#[test]
 fn sequence_summary_block_rebuild_is_incremental_and_tombstone_safe() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());

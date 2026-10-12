@@ -1,6 +1,7 @@
 use super::{RepositoryReplicaRuntime, RepositoryRuntimeError};
 
 pub(crate) const MAX_SEQUENCE_SUMMARY_BLOCKS: usize = 1024;
+const CANONICAL_PAYLOAD_DIGEST_REVISION: u8 = 1;
 
 #[cfg(test)]
 mod tests;
@@ -25,11 +26,26 @@ impl RepositoryReplicaRuntime {
     pub(crate) fn advance_sequence_summary_block_rebuild_page(
         &mut self,
     ) -> Result<bool, RepositoryRuntimeError> {
-        if self.uses_sqlite_history() && self.snapshot.sequence_summary_version != 3 {
-            self.snapshot.sequence_summary_blocks_complete = false;
-            self.snapshot.sequence_summary_version = 3;
-            self.snapshot.deep_verified_peer_ids.clear();
-            self.persist_control_state()?;
+        if self.uses_sqlite_history() {
+            let mut metadata_changed = false;
+            if self.snapshot.sequence_summary_version != 3 {
+                self.snapshot.sequence_summary_blocks_complete = false;
+                self.snapshot.sequence_summary_version = 3;
+                self.snapshot.deep_verified_peer_ids.clear();
+                metadata_changed = true;
+            }
+            if self.snapshot.sequence_summary_digest_revision < CANONICAL_PAYLOAD_DIGEST_REVISION {
+                self.storage
+                    .mark_all_repository_history_sequence_summary_blocks_dirty()
+                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+                self.snapshot.sequence_summary_blocks_complete = false;
+                self.snapshot.sequence_summary_digest_revision = CANONICAL_PAYLOAD_DIGEST_REVISION;
+                self.snapshot.deep_verified_peer_ids.clear();
+                metadata_changed = true;
+            }
+            if metadata_changed {
+                self.persist_control_state()?;
+            }
         }
         if !self.uses_sqlite_history() || self.snapshot.sequence_summary_blocks_complete {
             if !self.uses_sqlite_history() {

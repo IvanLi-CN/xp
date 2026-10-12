@@ -52,8 +52,10 @@
   affected blocks without resetting migration. A five-second blocking worker advances bounded
   pages. Canonical v3 hashes exclude local receive time; existing serialized record wrappers are
   normalized during bounded rebuild after identity validation, while arbitrary legacy payloads
-  retain their original bytes. A version column and prefix rebuild old metadata in place. Explicit
-  v3 query negotiation preserves the v1 path for older peers.
+  retain their original bytes. A version column and prefix rebuild old metadata in place. The
+  canonical payload revision is persisted in the control snapshot and marks predecessor v3
+  blocks dirty once, so an upgrade cannot publish stale pre-normalization digests. Explicit v3
+  query negotiation preserves the v1 path for older peers.
   Retained verification with permanent gaps never sets complete-history convergence.
 - Summary repair continuation persists per-peer diagnostics in the same control snapshot. Consumed
   generations resume their pending IDs without re-arming; transport, response-change,
