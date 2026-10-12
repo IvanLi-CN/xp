@@ -12,7 +12,7 @@ use handoff_selection::select_tiered_handoff;
 use std::future::Future;
 use summary_repair::{
     classify_summary_repair_error, record_summary_repair_attempt, record_summary_repair_error,
-    record_summary_repair_result, retry_after,
+    record_summary_repair_result, retry_after, validate_repair_response,
 };
 use tokio::time::Instant;
 
@@ -60,8 +60,13 @@ async fn request_repair_page(
     state: &AppState,
     peer: &MeshPeerTarget,
     pending: &BTreeSet<String>,
-    response_id: Option<String>,
+    response_identity: Option<String>,
 ) -> Result<RepositoryRepairBatch, RepositoryDirectError> {
+    let response_id = response_identity.map(|identity| {
+        identity
+            .split_once('|')
+            .map_or(identity.clone(), |(legacy, _)| legacy.to_owned())
+    });
     let body = serde_json::to_vec(&RepositoryRepairRequest {
         segment_ids: pending.iter().cloned().collect(),
         response_id,
@@ -600,32 +605,8 @@ async fn repair_ready_peer_catch_up_page(
                 return Err(error.into());
             }
         };
-    // Old peers omit response_id. Derive it from their actual response rather than the
-    // request, so a changed retry cannot consume a first-response allowance.
-    let mut response_id = match repair.response_id_digest() {
-        Ok(response_id) => response_id,
-        Err(error) => {
-            let message = error.to_string();
-            record_summary_repair_internal_failure(state, &peer.node_id, now, &message).await?;
-            return Err(error.into());
-        }
-    };
-    if repair
-        .response_id
-        .as_ref()
-        .is_some_and(|provided| provided != &response_id)
-    {
-        record_summary_repair_result(
-            state,
-            &peer.node_id,
-            now,
-            SummaryRepairResult::StorageError,
-            Some("response_identity_mismatch"),
-            Some(retry_after(now)),
-        )
-        .await?;
-        anyhow::bail!("repository repair response identity does not match its content");
-    }
+    // Old peers omit response_id. Derive it from their actual response rather than the request.
+    let mut response_id = validate_repair_response(state, peer, now, &repair).await?;
     if expected_response_id
         .as_ref()
         .is_some_and(|expected| expected != &response_id)
@@ -670,30 +651,7 @@ async fn repair_ready_peer_catch_up_page(
                 return Err(error.into());
             }
         };
-        response_id = match repair.response_id_digest() {
-            Ok(response_id) => response_id,
-            Err(error) => {
-                let message = error.to_string();
-                record_summary_repair_internal_failure(state, &peer.node_id, now, &message).await?;
-                return Err(error.into());
-            }
-        };
-        if repair
-            .response_id
-            .as_ref()
-            .is_some_and(|provided| provided != &response_id)
-        {
-            record_summary_repair_result(
-                state,
-                &peer.node_id,
-                now,
-                SummaryRepairResult::StorageError,
-                Some("response_identity_mismatch"),
-                Some(retry_after(now)),
-            )
-            .await?;
-            anyhow::bail!("repository repair response identity does not match its content");
-        }
+        response_id = validate_repair_response(state, peer, now, &repair).await?;
     }
     let mut remaining = pending.clone();
     if repair.segments.is_empty() {
@@ -883,6 +841,15 @@ async fn repair_ready_peer_catch_up_page(
                     && handoff.source_epoch == stream_key.1
                     && handoff.stream == stream_key.2
             });
+        let retained_first_sequence = repair
+            .retained_stream_boundaries
+            .iter()
+            .find(|boundary| {
+                boundary.source_node_id == stream_key.0
+                    && boundary.source_epoch == stream_key.1
+                    && boundary.stream == stream_key.2
+            })
+            .map(|boundary| boundary.first_sequence);
         let allow_retained_sequence_gap = if repair.history_truncated && !stream_has_retained_anchor
         {
             let runtime = state.repository_replica.lock().await;
@@ -901,7 +868,9 @@ async fn repair_ready_peer_catch_up_page(
             && same_consumed_recovery_stream
         {
             let runtime = state.repository_replica.lock().await;
-            match runtime.can_accept_consumed_retained_sequence_gap(&segment.wire) {
+            match runtime
+                .can_accept_consumed_retained_sequence_gap(&segment.wire, retained_first_sequence)
+            {
                 Ok(allowed) => allowed,
                 Err(error) => {
                     let message = error.to_string();

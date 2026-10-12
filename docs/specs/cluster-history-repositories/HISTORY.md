@@ -11,6 +11,9 @@
 - Follow-up 修复让同一 consumed checkpoint 在首次锚点尝试留下精确非永久 sequence gap 后，
   仅凭 source 的 `history_truncated=true` 封存该已观测范围并继续当前 pending page；未知或
   新范围仍 fail closed，不会重新 arm generation 或创建第二次 handoff。
+- 后续生产观察发现保留窗口会在延迟重试期间继续前移。新增有界、独立摘要绑定的
+  `retained_stream_boundaries`，只有源端声明的最小保留序号与首个返回 segment 精确相等时，
+  consumed checkpoint 才能原地封存新证据范围；v1 `response_id` 和旧 peer fallback 保持不变。
 - 修复服务端单个 segment 超出 256 KiB wire 预算时的静默空响应：在生成 response identity
   前返回 storage error，避免接收方把空响应误判为可消费的 repair 页；不改变历史行、配额或
   source outbox。
@@ -72,6 +75,9 @@
 [ADR 0019](../../adr/0019-history-handoff-completion-and-recovery-preflight.md) 继承 ADR 0018。
 
 它明确旧版部分提交的审计修复、最终页有界 repair grace 和 signed voter/version/quorum preflight。生产验收不以单元测试替代。
+
+[ADR 0022](../../adr/0022-signed-retained-stream-boundary.md) 记录 delayed consumed-generation
+repair 的源端保留边界证明。
 
 ## References
 

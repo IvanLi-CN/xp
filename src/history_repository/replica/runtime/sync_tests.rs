@@ -39,7 +39,6 @@ fn identity() -> RepositoryNodeIdentity {
 fn load(path: &std::path::Path) -> RepositoryReplicaRuntime {
     RepositoryReplicaRuntime::load(HistoryStorage::open(path)).expect("runtime")
 }
-
 #[test]
 fn repair_and_relay_pages_send_tombstone_segments_first() {
     let temporary = tempfile::tempdir().expect("temporary directory");
@@ -86,7 +85,6 @@ fn repair_and_relay_pages_send_tombstone_segments_first() {
             wire: tombstone_wire.clone(),
         },
     ];
-
     let summary = runtime.replication_summary().expect("summary");
     assert_eq!(summary.segment_ids, ["z-tombstone", "a-record"]);
     let repair = runtime
@@ -245,6 +243,8 @@ fn relay_payload_rejects_malformed_gap_ranges_before_delivery() {
         segments: Vec::new(),
         unavailable_segment_ids: Vec::new(),
         history_truncated: false,
+        retained_stream_boundaries: Vec::new(),
+        response_content_digest: None,
         response_id: None,
         gaps: vec![RepositoryReplicaGap {
             source_node_id: "node-a".to_owned(),

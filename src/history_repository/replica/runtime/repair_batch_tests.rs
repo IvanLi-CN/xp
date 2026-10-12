@@ -13,9 +13,32 @@ fn repair_response_digest_binds_the_returned_content() {
         unavailable_segment_ids: Vec::new(),
         gaps: Vec::new(),
         history_truncated: false,
+        retained_stream_boundaries: Vec::new(),
+        response_content_digest: None,
         response_id: None,
     };
     let original = response.response_id_digest().expect("response digest");
+
+    response
+        .retained_stream_boundaries
+        .push(super::RepositoryRetainedStreamBoundary {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            first_sequence: 0,
+        });
+    assert_eq!(
+        original,
+        response
+            .response_id_digest()
+            .expect("legacy response digest")
+    );
+    assert_ne!(
+        original,
+        response
+            .response_content_digest()
+            .expect("boundary-bound response digest")
+    );
 
     response.history_truncated = true;
     assert_ne!(
@@ -43,10 +66,13 @@ fn repair_response_id_accepts_only_the_same_returned_content() {
         .segment_ids
         .pop()
         .expect("segment id");
+    runtime.snapshot.history_truncated = true;
 
     let response = runtime
         .repair_batch(std::slice::from_ref(&segment_id))
         .expect("repair response");
+    assert_eq!(response.retained_stream_boundaries.len(), 1);
+    assert_eq!(response.retained_stream_boundaries[0].first_sequence, 0);
     let response_id = response.response_id.clone().expect("response id");
     assert_eq!(
         response.response_id_digest().expect("response digest"),

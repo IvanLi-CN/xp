@@ -1,11 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use super::{
     InitialPeerRetainedAnchorStream, RetainedAnchorCheckpointUpdate, identity, load, record,
     segment, signing_key,
 };
 use crate::state::history_repository::replica::RepositoryRepairBatch;
-
+use std::collections::{BTreeMap, BTreeSet};
 #[test]
 fn initial_backfill_accepts_a_truncated_tail_after_local_progress() {
     let temporary = tempfile::tempdir().expect("temporary directory");
@@ -677,6 +675,8 @@ fn retained_anchor_response_identity_survives_partial_failure() {
         unavailable_segment_ids: Vec::new(),
         gaps: Vec::new(),
         history_truncated: true,
+        retained_stream_boundaries: Vec::new(),
+        response_content_digest: None,
         response_id: None,
     }
     .response_id_digest()

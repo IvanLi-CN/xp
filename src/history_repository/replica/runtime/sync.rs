@@ -6,8 +6,8 @@ use crate::history_sync::{MAX_RESPONSE_WIRE_BYTES, SignedSegment, SyncRecord};
 
 use super::{
     RelaySegmentCursor, RepositoryPartitionSummary, RepositoryReplicaRuntime,
-    RepositoryRuntimeError, RepositorySequenceBlockSummary, RepositoryTombstoneAcknowledgement,
-    StoredGap,
+    RepositoryRetainedStreamBoundary, RepositoryRuntimeError, RepositorySequenceBlockSummary,
+    RepositoryTombstoneAcknowledgement, StoredGap, StoredSegment,
     repair_batch::{RepositoryRepairBatch, RepositoryReplicaSegment},
 };
 use crate::state::history_repository::replica::{
@@ -482,14 +482,73 @@ impl RepositoryReplicaRuntime {
     pub(crate) fn history_is_truncated(&self) -> bool {
         self.snapshot.history_truncated || !self.snapshot.gaps.is_empty()
     }
-
     pub(crate) fn repair_batch(
         &self,
         requested_segment_ids: &[String],
     ) -> Result<RepositoryRepairBatch, RepositoryRuntimeError> {
         self.repair_batch_with_response_id(requested_segment_ids, None)
     }
-
+    fn retained_stream_boundaries(
+        &self,
+        segments: &[StoredSegment],
+    ) -> Result<Vec<RepositoryRetainedStreamBoundary>, RepositoryRuntimeError> {
+        let streams = segments
+            .iter()
+            .map(|segment| {
+                let signed = SignedSegment::from_wire(&segment.wire)?;
+                let cursor = signed.canonical().first_cursor();
+                Ok((
+                    cursor.source_node_id().to_owned(),
+                    cursor.source_epoch(),
+                    cursor.stream().to_owned(),
+                ))
+            })
+            .collect::<Result<BTreeSet<_>, RepositoryRuntimeError>>()?;
+        let first_sequences = if self.uses_sqlite_history() {
+            self.storage
+                .repository_history_segment_first_sequences(
+                    &streams.iter().cloned().collect::<Vec<_>>(),
+                )
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+        } else {
+            streams
+                .iter()
+                .filter_map(|(source_node_id, source_epoch, stream)| {
+                    self.snapshot
+                        .segments
+                        .iter()
+                        .filter_map(|segment| {
+                            let signed = SignedSegment::from_wire(&segment.wire).ok()?;
+                            let cursor = signed.canonical().first_cursor();
+                            (cursor.source_node_id() == source_node_id
+                                && cursor.source_epoch() == *source_epoch
+                                && cursor.stream() == stream)
+                                .then_some(cursor.sequence())
+                        })
+                        .min()
+                        .map(|first_sequence| {
+                            (
+                                source_node_id.clone(),
+                                *source_epoch,
+                                stream.clone(),
+                                first_sequence,
+                            )
+                        })
+                })
+                .collect()
+        };
+        Ok(first_sequences
+            .into_iter()
+            .map(|(source_node_id, source_epoch, stream, first_sequence)| {
+                RepositoryRetainedStreamBoundary {
+                    source_node_id,
+                    source_epoch,
+                    stream,
+                    first_sequence,
+                }
+            })
+            .collect())
+    }
     pub(crate) fn repair_batch_with_response_id(
         &self,
         requested_segment_ids: &[String],
@@ -530,7 +589,7 @@ impl RepositoryReplicaRuntime {
             .collect::<BTreeSet<_>>();
         stored_segments.sort_by(|(left, _), (right, _)| left.cmp(right));
         let mut response_bytes = 0usize;
-        let mut segments = Vec::new();
+        let mut selected_segments = Vec::new();
         for (_, segment) in stored_segments {
             if !requested.contains(segment.id.as_str()) {
                 continue;
@@ -540,31 +599,46 @@ impl RepositoryReplicaRuntime {
                 break;
             }
             response_bytes = response_bytes.saturating_add(next);
-            segments.push(RepositoryReplicaSegment {
-                identity: segment.identity,
-                wire: segment.wire,
-            });
+            selected_segments.push(segment);
         }
-        if segments.is_empty() && stored_segment_count > 0 {
+        if selected_segments.is_empty() && stored_segment_count > 0 {
             return Err(RepositoryRuntimeError::Storage(
                 "repository repair segment exceeds response wire budget".to_owned(),
             ));
         }
+        let retained_stream_boundaries = self
+            .snapshot
+            .history_truncated
+            .then(|| self.retained_stream_boundaries(&selected_segments))
+            .transpose()?
+            .unwrap_or_default();
+        let segments = selected_segments
+            .into_iter()
+            .map(|segment| RepositoryReplicaSegment {
+                identity: segment.identity,
+                wire: segment.wire,
+            })
+            .collect();
         let mut response = RepositoryRepairBatch {
             segments,
             unavailable_segment_ids: unavailable_segment_ids.into_iter().collect(),
             gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
             history_truncated: self.snapshot.history_truncated,
+            retained_stream_boundaries,
+            response_content_digest: None,
             response_id: None,
         };
         let response_id = response.response_id_digest()?;
+        let response_content_digest = (!response.retained_stream_boundaries.is_empty())
+            .then(|| response.response_content_digest())
+            .transpose()?;
         if expected_response_id.is_some_and(|expected| expected != response_id) {
             return Err(RepositoryRuntimeError::RepairResponseChanged);
         }
         response.response_id = Some(response_id);
+        response.response_content_digest = response_content_digest;
         Ok(response)
     }
-
     pub(crate) fn relay_batch(
         &self,
         target_repository_id: &str,
@@ -601,6 +675,8 @@ impl RepositoryReplicaRuntime {
             unavailable_segment_ids: Vec::new(),
             gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
             history_truncated: self.snapshot.history_truncated,
+            retained_stream_boundaries: Vec::new(),
+            response_content_digest: None,
             response_id: None,
         }
         .frame_sized_relay_payload()?;
@@ -616,7 +692,6 @@ impl RepositoryReplicaRuntime {
             next_segment_id,
         })
     }
-
     pub(crate) fn record_relay_batch_delivered(
         &mut self,
         target_repository_id: &str,
@@ -642,7 +717,6 @@ impl RepositoryReplicaRuntime {
         );
         self.persist_control_state()
     }
-
     pub(crate) fn merge_replica_gaps(
         &mut self,
         remote_gaps: &[RepositoryReplicaGap],
@@ -650,7 +724,6 @@ impl RepositoryReplicaRuntime {
         self.merge_replica_gaps_in_memory(remote_gaps)?;
         self.persist_control_state()
     }
-
     pub(crate) fn mark_history_truncated(&mut self) -> Result<(), RepositoryRuntimeError> {
         if !self.snapshot.history_truncated {
             self.snapshot.history_truncated = true;
@@ -658,7 +731,6 @@ impl RepositoryReplicaRuntime {
         }
         Ok(())
     }
-
     pub(crate) fn merge_replica_gaps_in_memory(
         &mut self,
         remote_gaps: &[RepositoryReplicaGap],
@@ -675,7 +747,6 @@ impl RepositoryReplicaRuntime {
         self.snapshot.gaps = merged.into_iter().map(stored_gap).collect();
         Ok(())
     }
-
     pub(crate) fn acknowledge_tombstones(
         &mut self,
         acknowledgements: &[RepositoryTombstoneAcknowledgement],
@@ -691,7 +762,6 @@ impl RepositoryReplicaRuntime {
         }
         self.persist_control_state()
     }
-
     pub(super) fn persist_control_state(&mut self) -> Result<(), RepositoryRuntimeError> {
         self.sync_summary_repair_diagnostics();
         self.snapshot.tombstones = self.tombstones.checkpoint();
@@ -712,7 +782,6 @@ impl RepositoryReplicaRuntime {
         }
         Ok(())
     }
-
     fn retained_partition_summaries(
         &self,
     ) -> Result<Vec<RepositoryPartitionSummary>, RepositoryRuntimeError> {
@@ -744,12 +813,10 @@ impl RepositoryReplicaRuntime {
         Ok(summaries.into_values().collect())
     }
 }
-
 struct SummarySegment {
     id: String,
     cursor: String,
 }
-
 pub(super) fn accumulate_record_partitions<'a>(
     summaries: &mut BTreeMap<(String, u64, String, u32), RepositoryPartitionSummary>,
     records: impl IntoIterator<Item = &'a super::StoredRecord>,

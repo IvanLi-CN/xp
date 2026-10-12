@@ -112,6 +112,15 @@ tombstones, and handoff state remain durable. A response whose supplied digest
 does not match its content, contains unknown IDs, or does not advance the pending
 set still fails closed.
 
+For a truncated response, a newer peer may also include bounded
+`retained_stream_boundaries` and a separate content digest. Each boundary is the
+minimum retained `first_sequence` for one source/epoch/stream, computed from the
+serving repository's durable segment rows. A consumed-generation continuation
+without a pre-existing transient gap is accepted only when the first returned
+segment equals that declared boundary and the content digest matches. The legacy
+`response_id` remains unchanged so older peers continue their v1 fallback; absent
+or changed boundary metadata remains fail-closed.
+
 A temporary transport failure, exhausted retry schedule, or full bounded outbox
 creates Recoverable Backlog, never a permanent gap. A Source or any ready
 repository that retains the original cursor range may repair it. A permanent
