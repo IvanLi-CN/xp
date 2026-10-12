@@ -257,6 +257,13 @@ impl HistoryStorage {
                 .transpose()
                 .map_err(sqlite_error)?;
             let payload = row.get::<_, Vec<u8>>(15).map_err(sqlite_error)?;
+            let payload = canonical_sequence_summary_payload(
+                &payload,
+                &source,
+                epoch,
+                &stream_name,
+                sequence,
+            );
             let mut leaf = sha2::Sha256::new();
             leaf.update(b"xp-history-repository-sequence-leaf-v3\0");
             hash_field(&mut leaf, source.as_bytes());
@@ -497,6 +504,43 @@ fn checked_u64(value: i64, column: usize) -> rusqlite::Result<u64> {
 fn hash_field(hasher: &mut sha2::Sha256, value: &[u8]) {
     hasher.update((value.len() as u64).to_be_bytes());
     hasher.update(value);
+}
+
+/// SQLite rows written by XP store a serialized `StoredRecord` in `payload`. That wrapper also
+/// carries the local receive timestamp, which differs on each repository. Keep the wrapper
+/// format for existing readers, but remove that replica-local field from v3 metadata. Legacy
+/// tests and predecessor rows may contain arbitrary payload bytes, so only normalize a payload
+/// that has the expected record identity; all other bytes retain their existing hash behavior.
+fn canonical_sequence_summary_payload(
+    payload: &[u8],
+    source_node_id: &str,
+    source_epoch: u64,
+    stream: &str,
+    sequence: u64,
+) -> Vec<u8> {
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(payload) else {
+        return payload.to_vec();
+    };
+    let Some(object) = value.as_object_mut() else {
+        return payload.to_vec();
+    };
+    let identity_matches = object
+        .get("source_node_id")
+        .and_then(serde_json::Value::as_str)
+        == Some(source_node_id)
+        && object
+            .get("source_epoch")
+            .and_then(serde_json::Value::as_u64)
+            == Some(source_epoch)
+        && object.get("stream").and_then(serde_json::Value::as_str) == Some(stream)
+        && object.get("sequence").and_then(serde_json::Value::as_u64) == Some(sequence)
+        && object.contains_key("received_at_unix_seconds")
+        && object.contains_key("payload");
+    if !identity_matches {
+        return payload.to_vec();
+    }
+    object.remove("received_at_unix_seconds");
+    serde_json::to_vec(&value).unwrap_or_else(|_| payload.to_vec())
 }
 
 fn hash_optional_u64(hasher: &mut sha2::Sha256, value: Option<u64>) {
