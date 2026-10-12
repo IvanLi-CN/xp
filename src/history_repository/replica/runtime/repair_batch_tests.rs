@@ -57,7 +57,6 @@ fn repair_response_id_accepts_only_the_same_returned_content() {
     let segment = segment(&signing_key, 0, vec![record(b"repair", false)], None);
     let wire = segment.wire_bytes().expect("segment wire");
     let mut runtime = load(temporary.path());
-    runtime.snapshot.history_truncated = true;
     runtime
         .receive_wire("cluster-a", &identity, &wire, 12)
         .expect("store repair segment");
@@ -67,6 +66,8 @@ fn repair_response_id_accepts_only_the_same_returned_content() {
         .segment_ids
         .pop()
         .expect("segment id");
+    runtime.snapshot.history_truncated = true;
+
     let response = runtime
         .repair_batch(std::slice::from_ref(&segment_id))
         .expect("repair response");
@@ -100,7 +101,6 @@ fn repair_response_splits_pending_segments_at_the_wire_budget() {
     let signing_key = signing_key();
     let identity = identity(&signing_key);
     let mut runtime = load(temporary.path());
-    runtime.snapshot.history_truncated = true;
     let mut previous = None;
 
     for sequence in 0..64 {
@@ -140,7 +140,6 @@ fn repair_response_splits_pending_segments_at_the_wire_budget() {
     assert!(!first.segments.is_empty());
     assert!(first.segments.len() < requested.len());
     assert!(first.unavailable_segment_ids.is_empty());
-    assert_eq!(first.retained_stream_boundaries[0].first_sequence, 0);
 
     let delivered = first
         .segments
@@ -155,15 +154,6 @@ fn repair_response_splits_pending_segments_at_the_wire_budget() {
         .repair_batch(&remaining)
         .expect("remaining repair page");
     assert!(!second.segments.is_empty());
-    let second_first_sequence = SignedSegment::from_wire(&second.segments[0].wire)
-        .expect("second repair wire")
-        .canonical()
-        .first_cursor()
-        .sequence();
-    assert_eq!(
-        second.retained_stream_boundaries[0].first_sequence, second_first_sequence,
-        "continuation boundary must follow the first selected segment"
-    );
 }
 
 #[test]

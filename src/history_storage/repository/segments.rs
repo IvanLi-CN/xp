@@ -106,6 +106,49 @@ impl HistoryStorage {
             .map_err(sqlite_error)
     }
 
+    pub(crate) fn repository_history_segment_first_sequences(
+        &self,
+        streams: &[(String, u64, String)],
+    ) -> Result<Vec<(String, u64, String, u64)>> {
+        if streams.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut backend = self.lock_backend();
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => return Ok(Vec::new()),
+        };
+        streams
+            .iter()
+            .filter_map(|(source_node_id, source_epoch, stream)| {
+                connection
+                    .query_row(
+                        "SELECT source_node_id, source_epoch, stream, MIN(first_sequence)
+                         FROM repository_history_segments
+                         WHERE source_node_id = ?1 AND source_epoch = ?2 AND stream = ?3
+                         GROUP BY source_node_id, source_epoch, stream",
+                        params![
+                            source_node_id,
+                            i64::try_from(*source_epoch).unwrap_or(i64::MAX),
+                            stream
+                        ],
+                        |row| {
+                            Ok((
+                                row.get(0)?,
+                                u64::try_from(row.get::<_, i64>(1)?).unwrap_or(u64::MAX),
+                                row.get(2)?,
+                                u64::try_from(row.get::<_, i64>(3)?).unwrap_or(u64::MAX),
+                            ))
+                        },
+                    )
+                    .optional()
+                    .transpose()
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error)
+    }
+
     pub(crate) fn repository_history_segment_ids_by_ids(
         &self,
         ids: &[String],

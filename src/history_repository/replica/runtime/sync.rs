@@ -504,34 +504,39 @@ impl RepositoryReplicaRuntime {
                 ))
             })
             .collect::<Result<BTreeSet<_>, RepositoryRuntimeError>>()?;
-        // Boundaries describe this response page, so derive them from the selected
-        // segments rather than the repository-wide retained range. A continuation
-        // page may begin after older retained rows, and the receiver uses the
-        // boundary to validate the page's first sequence exactly.
-        let first_sequences: Vec<_> = streams
-            .iter()
-            .filter_map(|(source_node_id, source_epoch, stream)| {
-                segments
-                    .iter()
-                    .filter_map(|segment| {
-                        let signed = SignedSegment::from_wire(&segment.wire).ok()?;
-                        let cursor = signed.canonical().first_cursor();
-                        (cursor.source_node_id() == source_node_id
-                            && cursor.source_epoch() == *source_epoch
-                            && cursor.stream() == stream)
-                            .then_some(cursor.sequence())
-                    })
-                    .min()
-                    .map(|first_sequence| {
-                        (
-                            source_node_id.clone(),
-                            *source_epoch,
-                            stream.clone(),
-                            first_sequence,
-                        )
-                    })
-            })
-            .collect();
+        let first_sequences = if self.uses_sqlite_history() {
+            self.storage
+                .repository_history_segment_first_sequences(
+                    &streams.iter().cloned().collect::<Vec<_>>(),
+                )
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+        } else {
+            streams
+                .iter()
+                .filter_map(|(source_node_id, source_epoch, stream)| {
+                    self.snapshot
+                        .segments
+                        .iter()
+                        .filter_map(|segment| {
+                            let signed = SignedSegment::from_wire(&segment.wire).ok()?;
+                            let cursor = signed.canonical().first_cursor();
+                            (cursor.source_node_id() == source_node_id
+                                && cursor.source_epoch() == *source_epoch
+                                && cursor.stream() == stream)
+                                .then_some(cursor.sequence())
+                        })
+                        .min()
+                        .map(|first_sequence| {
+                            (
+                                source_node_id.clone(),
+                                *source_epoch,
+                                stream.clone(),
+                                first_sequence,
+                            )
+                        })
+                })
+                .collect()
+        };
         Ok(first_sequences
             .into_iter()
             .map(|(source_node_id, source_epoch, stream, first_sequence)| {
