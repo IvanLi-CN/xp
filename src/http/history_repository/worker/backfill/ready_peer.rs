@@ -342,12 +342,18 @@ async fn advance_ready_peer_catch_up_page(
     ready_repository_ids: &[String],
     now: u64,
 ) -> anyhow::Result<InitialBackfillProgress> {
-    let checkpoint = state
-        .repository_replica
-        .lock()
-        .await
-        .initial_peer_backfill_checkpoint(&peer.node_id)
-        .unwrap_or_default();
+    let checkpoint = {
+        let mut runtime = state.repository_replica.lock().await;
+        if runtime.resume_legacy_consumed_summary_page(&peer.node_id, now)? {
+            tracing::info!(
+                peer = %peer.node_id,
+                "resumed legacy bounded summary page from its durable cursor"
+            );
+        }
+        runtime
+            .initial_peer_backfill_checkpoint(&peer.node_id)
+            .unwrap_or_default()
+    };
     if !checkpoint.summary_complete {
         record_summary_repair_attempt(state, &peer.node_id, now).await?;
     }

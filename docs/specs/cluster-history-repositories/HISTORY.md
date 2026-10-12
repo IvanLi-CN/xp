@@ -8,6 +8,8 @@
   repair 每次尝试把 pending 数量、游标、进度时间、响应身份变化、明确不可用、无进展、HTTPS
   失败和 SQLite 存储失败写入现有控制快照。无进展响应只保留 pending 并按固定预算重试，避免
   长期停在无诊断的 `64`；永久 gap、`partial` 和 `replica_converged=false` 语义不变。
+- 兼容旧版 consumed summary checkpoint：64 个 pending ID 与下一页游标不一致时原地标记同页
+  revisit，避免跳过同一摘要页中尚未修复的 ID；generation、源绑定、水位和永久 gap 不变。
 - Follow-up 修复让同一 consumed checkpoint 在首次锚点尝试留下精确非永久 sequence gap 后，
   仅凭 source 的 `history_truncated=true` 封存该已观测范围并继续当前 pending page；未知或
   新范围仍 fail closed，不会重新 arm generation 或创建第二次 handoff。

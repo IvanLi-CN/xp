@@ -363,3 +363,8 @@ Recovery 入口新增只读 signed voter preflight，经注册公网 HTTPS 校�
 A refreshed first summary page persists an explicit revisit marker, so its absent cursor is not
 interpreted as end-of-export after one bounded repair. An all-expired page with no missing current
 IDs persists gaps and the serving page continuation atomically without consuming its generation.
+Legacy consumed-generation checkpoints created before that marker existed are migrated in place at
+the beginning of a ready-peer catch-up tick only when they contain exactly one bounded pending
+batch and a distinct next cursor. The migration points the pending cursor back to the saved summary
+cursor, persists the marker atomically, and never re-arms the generation or changes the receiver
+watermark.
