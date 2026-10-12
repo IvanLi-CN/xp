@@ -445,11 +445,19 @@ async fn advance_ready_peer_catch_up_page(
                 return Err(error.into());
             }
         };
-    let (requires_repair, missing_segment_ids, partitions_converged) = {
+    let (
+        requires_repair,
+        missing_segment_ids,
+        missing_segment_page_truncated,
+        partitions_converged,
+    ) = {
         let runtime = state.repository_replica.lock().await;
+        let (missing_segment_ids, missing_segment_page_truncated) =
+            runtime.missing_segment_page(&remote_summary)?;
         (
             runtime.requires_repair(&remote_summary, true)?,
-            runtime.missing_segment_ids(&remote_summary, true)?,
+            missing_segment_ids,
+            missing_segment_page_truncated,
             runtime.retained_partitions_converged(&remote_summary)?,
         )
     };
@@ -474,12 +482,25 @@ async fn advance_ready_peer_catch_up_page(
                     }
                     runtime.update_initial_peer_summary_checkpoint_in_memory(
                         &peer.node_id,
-                        checkpoint.summary_cursor.clone(),
+                        if missing_segment_page_truncated {
+                            checkpoint.summary_cursor.clone()
+                        } else {
+                            remote_summary.next_segment_id.clone()
+                        },
                         missing_segment_ids,
-                        remote_summary.next_segment_id.clone(),
+                        if missing_segment_page_truncated {
+                            checkpoint.summary_cursor.clone()
+                        } else {
+                            remote_summary.next_segment_id.clone()
+                        },
                         false,
                         requires_tiered_backfill,
                     );
+                    if missing_segment_page_truncated {
+                        runtime.mark_initial_peer_summary_pending_revisit_cursor_in_memory(
+                            &peer.node_id,
+                        );
+                    }
                     Ok(())
                 },
             )?;

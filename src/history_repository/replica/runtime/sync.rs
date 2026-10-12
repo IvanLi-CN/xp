@@ -408,17 +408,7 @@ impl RepositoryReplicaRuntime {
         remote: &RepositoryReplicaSummary,
         _deep_verification: bool,
     ) -> Result<Vec<String>, RepositoryRuntimeError> {
-        let local_ids = self
-            .stored_segment_ids_by_ids(&remote.segment_ids)?
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        Ok(remote
-            .segment_ids
-            .iter()
-            .filter(|id| !local_ids.contains(*id))
-            .take(MAX_REPAIR_SEGMENTS)
-            .cloned()
-            .collect())
+        Ok(self.missing_segment_page(remote)?.0)
     }
 
     pub(crate) fn requires_repair(
