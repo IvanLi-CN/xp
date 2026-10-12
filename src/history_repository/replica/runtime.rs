@@ -297,6 +297,10 @@ pub(crate) struct RepositoryReplicaSnapshot {
     sequence_summary_blocks_complete: bool,
     #[serde(default)]
     sequence_summary_version: u8,
+    /// Revision of the canonical payload algorithm used for v3 sequence block digests.
+    /// A zero value is predecessor state and causes one bounded rebuild of existing blocks.
+    #[serde(default)]
+    sequence_summary_digest_revision: u8,
     #[serde(default)]
     sequence_summary_migration_cursor: Option<RepositoryHistoryCompactionCursor>,
     #[serde(default)]
@@ -341,6 +345,7 @@ impl Default for RepositoryReplicaSnapshot {
             partition_summaries_complete: false,
             sequence_summary_blocks_complete: false,
             sequence_summary_version: 0,
+            sequence_summary_digest_revision: 0,
             sequence_summary_migration_cursor: None,
             sequence_summary_migration_complete: false,
         }
