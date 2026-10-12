@@ -1,4 +1,8 @@
-use super::{RepositoryReplicaRuntime, RepositoryRuntimeError, SummaryRepairDiagnosticUpdate};
+use super::sync::MAX_REPAIR_SEGMENTS;
+use super::{
+    RepositoryReplicaRuntime, RepositoryRuntimeError, SummaryRepairDiagnosticUpdate,
+    SummaryRepairResult,
+};
 use crate::history_sync::Cursor;
 use crate::state::history_repository::control::{
     HISTORY_RECOVERY_METADATA_BUDGET_BYTES, HISTORY_RECOVERY_PAGE_BUDGET_BYTES,
@@ -99,6 +103,45 @@ pub(crate) struct InitialPeerRecoveryPreview {
 }
 
 impl RepositoryReplicaRuntime {
+    pub(crate) fn resume_legacy_consumed_summary_page(
+        &mut self,
+        peer_node_id: &str,
+        now_unix_seconds: u64,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        let Some(checkpoint) = self.snapshot.initial_peer_backfills.get(peer_node_id) else {
+            return Ok(false);
+        };
+        if !checkpoint.recovery_generation_consumed
+            || checkpoint.summary_pending_segment_ids.len() != MAX_REPAIR_SEGMENTS
+            || checkpoint.summary_pending_revisit_cursor
+            || checkpoint.summary_pending_next_cursor == checkpoint.summary_cursor
+        {
+            return Ok(false);
+        }
+
+        let previous_snapshot = self.snapshot.clone();
+        let checkpoint = self
+            .snapshot
+            .initial_peer_backfills
+            .get_mut(peer_node_id)
+            .expect("validated legacy summary checkpoint");
+        checkpoint.summary_pending_next_cursor = checkpoint.summary_cursor.clone();
+        checkpoint.summary_pending_revisit_cursor = true;
+        checkpoint.summary_complete = false;
+        self.record_summary_repair_result_in_memory(
+            peer_node_id,
+            now_unix_seconds,
+            SummaryRepairResult::Progress,
+            None,
+            None,
+        );
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
+        Ok(true)
+    }
+
     /// Seal the exact gap left by a failed consumed-generation anchor attempt when the source
     /// later proves that its retained history is truncated.
     pub(crate) fn can_accept_consumed_retained_sequence_gap(

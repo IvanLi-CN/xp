@@ -101,6 +101,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn consumed_legacy_bounded_summary_page_revisits_its_cursor_after_restart() {
+        let temporary = tempfile::tempdir().unwrap();
+        let mut runtime = load(temporary.path());
+        let pending = (0..64).map(|_| "a".repeat(64)).collect::<Vec<_>>();
+        let checkpoint = InitialPeerBackfillCheckpoint {
+            summary_cursor: Some("r:summary-page-start".to_owned()),
+            summary_pending_segment_ids: pending.clone(),
+            summary_pending_next_cursor: Some("r:next-summary-page".to_owned()),
+            recovery_generation: 2,
+            recovery_generation_consumed: true,
+            ..Default::default()
+        };
+        runtime
+            .snapshot
+            .initial_peer_backfills
+            .insert("peer".to_owned(), checkpoint);
+        runtime.persist_control_state().unwrap();
+
+        assert!(
+            runtime
+                .resume_legacy_consumed_summary_page("peer", 123)
+                .unwrap()
+        );
+        drop(runtime);
+
+        let mut runtime = load(temporary.path());
+        let resumed = runtime.initial_peer_backfill_checkpoint("peer").unwrap();
+        assert_eq!(
+            resumed.summary_cursor.as_deref(),
+            Some("r:summary-page-start")
+        );
+        assert_eq!(resumed.summary_pending_next_cursor, resumed.summary_cursor);
+        assert_eq!(resumed.summary_pending_segment_ids, pending);
+        assert!(resumed.summary_pending_revisit_cursor);
+        assert!(!resumed.summary_complete);
+        assert_eq!(resumed.recovery_generation, 2);
+        assert!(resumed.recovery_generation_consumed);
+        let diagnostic = runtime
+            .snapshot
+            .summary_repair_diagnostics
+            .get("peer")
+            .unwrap();
+        assert_eq!(diagnostic.last_result, SummaryRepairResult::Progress);
+        assert_eq!(diagnostic.last_progress_at, Some(123));
+        assert!(
+            !runtime
+                .resume_legacy_consumed_summary_page("peer", 124)
+                .unwrap()
+        );
+    }
+
+    #[test]
     fn recovery_refresh_accepts_two_full_gap_pages_atomically() {
         let temporary = tempfile::tempdir().unwrap();
         let mut runtime = load(temporary.path());
