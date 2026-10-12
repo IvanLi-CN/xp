@@ -936,6 +936,11 @@ mod repair_selection_tests;
 #[cfg(test)]
 #[path = "runtime/sqlite_order_tests.rs"]
 mod sqlite_order_tests;
+#[path = "runtime/sync_page.rs"]
+mod sync_page;
+#[cfg(test)]
+#[path = "runtime/sync_page_tests.rs"]
+mod sync_page_tests;
 #[cfg(test)]
 #[path = "runtime/sync_tests.rs"]
 mod sync_tests;

@@ -253,6 +253,16 @@ impl RepositoryReplicaRuntime {
         checkpoint.summary_requires_tiered_backfill = summary_requires_tiered_backfill;
     }
 
+    pub(crate) fn mark_initial_peer_summary_pending_revisit_cursor_in_memory(
+        &mut self,
+        peer_node_id: &str,
+    ) {
+        if let Some(checkpoint) = self.snapshot.initial_peer_backfills.get_mut(peer_node_id) {
+            checkpoint.summary_pending_revisit_cursor = true;
+            checkpoint.summary_complete = false;
+        }
+    }
+
     pub(crate) fn mark_history_truncated_in_memory(&mut self) {
         self.snapshot.history_truncated = true;
     }
