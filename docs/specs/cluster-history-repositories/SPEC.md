@@ -242,6 +242,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 - rendezvous hashing 选择 source 的 primary collector，保留 standby；primary 连续三个一分钟周期失败
   后切换。
+- 若持久化 failover 状态选择本地仓库作为 standby 而 primary 是远端，worker 必须重试已注册的公网
+  HTTPS primary；不得把已由远端推进的 source chain 送回本地 receiver 形成 `HashChainMismatch` 循环。
 - 每五分钟按 source/epoch/stream/partition 做摘要和范围修复，每日做深校验；
   `replica_converged` 仅在所有保留摘要相同时成立。
 - unknown schema 保留并转发签名 raw，不参与查询/聚合；legacy 节点保持原行为并标记

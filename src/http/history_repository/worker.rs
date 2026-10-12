@@ -386,6 +386,11 @@ async fn publish_local_history_segment(
             .lock()
             .await
             .local_source_collector(&primary_repository_id, assignment.standby());
+        let selected_repository_id = avoid_local_source_fallback(
+            selected_repository_id,
+            &primary_repository_id,
+            &state.cluster.node_id,
+        );
         (primary_repository_id, selected_repository_id)
     } else {
         // A Ready local repository can drain its own durable outbox even when every remote
@@ -530,6 +535,19 @@ async fn publish_local_history_segment(
         })?;
     }
     Ok(delivery_succeeded)
+}
+
+fn avoid_local_source_fallback(
+    selected_repository_id: String,
+    primary_repository_id: &str,
+    local_repository_id: &str,
+) -> String {
+    if selected_repository_id == local_repository_id && primary_repository_id != local_repository_id
+    {
+        primary_repository_id.to_owned()
+    } else {
+        selected_repository_id
+    }
 }
 async fn sync_local_repository_capacity(state: &AppState) -> anyhow::Result<()> {
     let mut runtime = state.repository_replica.lock().await;

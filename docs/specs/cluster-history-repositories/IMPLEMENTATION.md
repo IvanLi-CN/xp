@@ -248,6 +248,9 @@
   standby; both collectors accept the signed segment so that the transition has no coordination
   race. When the public direct path fails, the pending-source page remains durable and is retried on
   the next bounded cycle; no history relay or alternate Mesh path is opened.
+  If persisted failover state selects the local repository as standby while the primary is remote,
+  the worker retries that registered public-HTTPS primary instead of sending the already-advanced
+  source chain through the local receiver and looping on `HashChainMismatch`.
   A target returns the signed source-delivery receipt once the segment is durable. Tombstone
   acknowledgement fanout to other repositories is best-effort and logged for retry; a transient
   fanout failure never converts an already persisted source delivery into a 5xx response.

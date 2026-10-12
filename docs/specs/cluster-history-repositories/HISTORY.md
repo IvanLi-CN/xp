@@ -4,6 +4,10 @@
 
 ## Decision Trace
 
+- 修复 source delivery 在公网 primary 恢复后仍沿用本地 standby 的状态循环：若选择结果是本地仓库而
+  primary 是远端，worker 回退到已注册的公网 HTTPS primary，避免已前进的 source chain 在本地接收器上
+  触发 `HashChainMismatch`；pending outbox、源连续性和恢复 generation 均保持不变。
+
 - 101 的 consumed recovery generation 继续使用已有 summary checkpoint，不重新 arm generation；
   repair 每次尝试把 pending 数量、游标、进度时间、响应身份变化、明确不可用、无进展、HTTPS
   失败和 SQLite 存储失败写入现有控制快照。无进展响应只保留 pending 并按固定预算重试，避免
