@@ -37,6 +37,59 @@ fn sequence_summary_digest_is_independent_of_replica_arrival_time() {
 }
 
 #[test]
+fn sequence_summary_digest_ignores_received_time_inside_stored_record_payload() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let summarize = |path: &std::path::Path, received_at| {
+        let storage = HistoryStorage::open(path);
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "observed_at_unix_seconds": 10,
+            "received_at_unix_seconds": received_at,
+            "source_node_id": "source",
+            "source_epoch": 1,
+            "stream": "runtime",
+            "sequence": 1,
+            "subject_node_id": "subject",
+            "observer_node_id": "observer",
+            "schema_id": "schema",
+            "schema_version": 1,
+            "record_key": [107, 101, 121],
+            "payload": [99, 97, 110, 111, 110, 105, 99],
+            "tombstone": false
+        }))
+        .unwrap();
+        storage
+            .upsert_repository_history_records(&[RepositoryHistoryRecordRow {
+                source_node_id: "source".to_owned(),
+                source_epoch: 1,
+                stream: "runtime".to_owned(),
+                sequence: 1,
+                subject_node_id: "subject".to_owned(),
+                observer_node_id: "observer".to_owned(),
+                schema_id: "schema".to_owned(),
+                schema_version: 1,
+                record_key: b"key".to_vec(),
+                tombstone: false,
+                observed_start_unix_seconds: 10,
+                observed_end_unix_seconds: 10,
+                received_at_unix_seconds: received_at,
+                aggregate_complete: Some(true),
+                aggregate_start_unix_seconds: Some(10),
+                aggregate_end_unix_seconds: Some(10),
+                payload,
+            }])
+            .unwrap();
+        storage
+            .rebuild_repository_history_sequence_summary_block("source", 1, "runtime", 0)
+            .unwrap();
+        storage
+            .repository_history_sequence_summary_blocks()
+            .unwrap()
+    };
+    assert_eq!(summarize(first.path(), 11), summarize(second.path(), 999));
+}
+
+#[test]
 fn sequence_summary_block_rebuild_is_incremental_and_tombstone_safe() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
