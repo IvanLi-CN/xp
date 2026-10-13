@@ -319,6 +319,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn proxy_rejects_when_process_limit_is_full() {
+        let global = GLOBAL_LIMIT
+            .get_or_init(|| Arc::new(Semaphore::new(GLOBAL_CONCURRENCY)))
+            .clone();
+        let mut permits = Vec::with_capacity(GLOBAL_CONCURRENCY);
+        for _ in 0..GLOBAL_CONCURRENCY {
+            permits.push(global.clone().acquire_owned().await.unwrap());
+        }
+        let response = proxy_resource(
+            Url::parse("https://example.com/resource").unwrap(),
+            "process-concurrency-test",
+            true,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+        drop(permits);
+    }
+
+    #[tokio::test]
     async fn resource_directory_cache_reuses_and_invalidates_by_revision() {
         let cache = ResourceDirectoryCache::new();
         let url = subscription::normalize_mihomo_external_url(FIXED_GEOX_ASSETS[0].1).unwrap();
