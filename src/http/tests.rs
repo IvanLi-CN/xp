@@ -31,6 +31,8 @@ mod history_recovery_preflight;
 #[path = "tests/history_repository.rs"]
 mod history_repository;
 mod managed_vless_create;
+#[path = "tests/mihomo_resource_route.rs"]
+mod mihomo_resource_route;
 mod mihomo_smux;
 #[path = "tests/platform_assets.rs"]
 mod platform_assets;
@@ -6215,7 +6217,6 @@ async fn mihomo_mirror_query_rewrites_urls_and_rejects_non_mihomo_formats() {
             .as_str()
             .is_some_and(|message| message.contains("requires a Mihomo profile"))
     );
-
     let arbitrary_res = app.clone()
         .oneshot(req(
             "GET",
@@ -6242,17 +6243,14 @@ async fn mihomo_mirror_query_rewrites_urls_and_rejects_non_mihomo_formats() {
         .unwrap();
     assert_eq!(raw_res.status(), StatusCode::BAD_REQUEST);
 }
-
 #[tokio::test]
 async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
-
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id.clone();
     let token = fixtures.subscription_token.clone();
-
     let put_res = app
         .clone()
         .oneshot(req_authed_json(

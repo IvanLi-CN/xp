@@ -218,6 +218,23 @@ mod tests {
         assert!(!declared_payload_too_large(None));
     }
 
+    #[test]
+    fn concurrency_limits_are_bounded() {
+        let global = Semaphore::new(GLOBAL_CONCURRENCY);
+        let global_permits = (0..GLOBAL_CONCURRENCY)
+            .map(|_| global.try_acquire().expect("global permit"))
+            .collect::<Vec<_>>();
+        assert!(global.try_acquire().is_err());
+        drop(global_permits);
+
+        let resource = Semaphore::new(PER_RESOURCE_CONCURRENCY);
+        let resource_permits = (0..PER_RESOURCE_CONCURRENCY)
+            .map(|_| resource.try_acquire().expect("resource permit"))
+            .collect::<Vec<_>>();
+        assert!(resource.try_acquire().is_err());
+        drop(resource_permits);
+    }
+
     #[tokio::test]
     async fn proxy_follows_five_redirects_but_not_the_sixth() {
         let server = MockServer::start().await;
@@ -323,6 +340,34 @@ mod tests {
         tokio::time::advance(Duration::from_secs(1)).await;
         let error = body.next().await.unwrap().unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(body.next().await.is_none());
+        assert_eq!(global.available_permits(), 1);
+        assert_eq!(resource.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn streaming_payload_limit_terminates_after_the_limit() {
+        let global = Arc::new(Semaphore::new(1));
+        let resource = Arc::new(Semaphore::new(1));
+        let global_permit = global.clone().try_acquire_owned().unwrap();
+        let resource_permit = resource.clone().try_acquire_owned().unwrap();
+        let mut body = Box::pin(limited_stream_with_limit(
+            futures_util::stream::iter([
+                Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"123")),
+                Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"45")),
+            ]),
+            Instant::now() + Duration::from_secs(1),
+            4,
+            global_permit,
+            resource_permit,
+        ));
+
+        assert_eq!(
+            body.next().await.unwrap().unwrap(),
+            Bytes::from_static(b"123")
+        );
+        let error = body.next().await.unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert!(body.next().await.is_none());
         assert_eq!(global.available_permits(), 1);
         assert_eq!(resource.available_permits(), 1);
@@ -606,6 +651,22 @@ fn limited_stream(
     global_permit: OwnedSemaphorePermit,
     resource_permit: OwnedSemaphorePermit,
 ) -> impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static {
+    limited_stream_with_limit(
+        stream,
+        deadline,
+        MAX_RESOURCE_BYTES,
+        global_permit,
+        resource_permit,
+    )
+}
+
+fn limited_stream_with_limit(
+    stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+    deadline: Instant,
+    max_bytes: u64,
+    global_permit: OwnedSemaphorePermit,
+    resource_permit: OwnedSemaphorePermit,
+) -> impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static {
     let state = LimitedStream {
         stream: Box::pin(stream),
         deadline,
@@ -614,7 +675,7 @@ fn limited_stream(
         _global_permit: Some(global_permit),
         _resource_permit: Some(resource_permit),
     };
-    stream::unfold(state, |mut state| async move {
+    stream::unfold(state, move |mut state| async move {
         if state.done {
             return None;
         }
@@ -628,7 +689,7 @@ fn limited_stream(
         match tokio::time::timeout_at(state.deadline, state.stream.next()).await {
             Ok(Some(Ok(chunk))) => {
                 state.seen = state.seen.saturating_add(chunk.len() as u64);
-                if state.seen > MAX_RESOURCE_BYTES {
+                if state.seen > max_bytes {
                     state.done = true;
                     return Some((
                         Err(io::Error::new(
