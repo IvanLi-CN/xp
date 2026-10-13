@@ -2,11 +2,12 @@
 
 use std::{
     collections::BTreeMap,
+    future::Future,
     io,
     net::SocketAddr,
     pin::Pin,
     sync::{Arc, OnceLock},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use axum::{
@@ -20,6 +21,7 @@ use hmac::{Hmac, Mac};
 use reqwest::{Client, Url};
 use sha2::Sha256;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
+use tokio::time::Instant;
 
 use crate::mihomo_policy::{self, MihomoResourcePolicy, PolicySnapshot};
 use crate::{state::UserMihomoProfile, subscription};
@@ -184,6 +186,13 @@ mod tests {
         );
     }
 
+    #[test]
+    fn declared_payload_limit_is_checked_before_streaming() {
+        assert!(declared_payload_too_large(Some(MAX_RESOURCE_BYTES + 1)));
+        assert!(!declared_payload_too_large(Some(MAX_RESOURCE_BYTES)));
+        assert!(!declared_payload_too_large(None));
+    }
+
     #[tokio::test]
     async fn proxy_follows_five_redirects_but_not_the_sixth() {
         let server = MockServer::start().await;
@@ -249,6 +258,50 @@ mod tests {
         assert_eq!(cache.lookup_cached(1, &id).await, Some(Some(url)));
         assert!(cache.lookup_cached(2, &id).await.is_none());
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn request_timeout_maps_to_gateway_timeout() {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let result = await_upstream_response(
+            deadline,
+            std::future::pending::<Result<reqwest::Response, reqwest::Error>>(),
+        )
+        .await;
+
+        assert_eq!(
+            result.err(),
+            Some((StatusCode::GATEWAY_TIMEOUT, "upstream_timeout"))
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn streaming_timeout_is_reported_after_headers_without_rewriting_status() {
+        let global = Arc::new(Semaphore::new(1));
+        let resource = Arc::new(Semaphore::new(1));
+        let global_permit = global.clone().try_acquire_owned().unwrap();
+        let resource_permit = resource.clone().try_acquire_owned().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut body = Box::pin(limited_stream(
+            futures_util::stream::once(async {
+                Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"first"))
+            })
+            .chain(futures_util::stream::pending()),
+            deadline,
+            global_permit,
+            resource_permit,
+        ));
+
+        assert_eq!(
+            body.next().await.unwrap().unwrap(),
+            Bytes::from_static(b"first")
+        );
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let error = body.next().await.unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(body.next().await.is_none());
+        assert_eq!(global.available_permits(), 1);
+        assert_eq!(resource.available_permits(), 1);
+    }
 }
 
 pub fn resource_id(cluster_ca_key_pem: &str, url: &Url) -> String {
@@ -309,7 +362,7 @@ fn build_resource_client() -> Client {
 
 async fn build_public_resource_client(
     url: &Url,
-    timeout: Duration,
+    deadline: Instant,
     policy: &PolicySnapshot,
 ) -> Result<Client, (StatusCode, &'static str)> {
     let host = url
@@ -318,7 +371,7 @@ async fn build_public_resource_client(
     let port = url
         .port_or_known_default()
         .ok_or((StatusCode::BAD_GATEWAY, "upstream_unreachable"))?;
-    let lookup = tokio::time::timeout(timeout, tokio::net::lookup_host((host, port))).await;
+    let lookup = tokio::time::timeout_at(deadline, tokio::net::lookup_host((host, port))).await;
     let addrs: Vec<SocketAddr> = match lookup {
         Ok(Ok(addrs)) => addrs.collect(),
         Ok(Err(_)) => return Err((StatusCode::BAD_GATEWAY, "upstream_unreachable")),
@@ -403,12 +456,12 @@ async fn proxy_resource_with_snapshot(
     let mut current = url;
     let mut redirects = 0;
     let response = loop {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+        if Instant::now() >= deadline {
             return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout");
-        };
+        }
         let client = match policy.as_ref() {
             None => CLIENT.get_or_init(build_resource_client).clone(),
-            Some(policy) => match build_public_resource_client(&current, remaining, policy).await {
+            Some(policy) => match build_public_resource_client(&current, deadline, policy).await {
                 Ok(client) => client,
                 Err((status, code)) => {
                     return error_response(status, code);
@@ -418,14 +471,9 @@ async fn proxy_resource_with_snapshot(
         let request = client
             .get(current.clone())
             .header(header::ACCEPT_ENCODING, "identity");
-        let response = match tokio::time::timeout(remaining, request.send()).await {
-            Ok(Ok(response)) => response,
-            Ok(Err(error)) if error.is_timeout() => {
-                return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout");
-            }
-            Ok(Err(_)) | Err(_) => {
-                return error_response(StatusCode::BAD_GATEWAY, "upstream_unreachable");
-            }
+        let response = match await_upstream_response(deadline, request.send()).await {
+            Ok(response) => response,
+            Err((status, code)) => return error_response(status, code),
         };
 
         if response.status().is_redirection() {
@@ -459,9 +507,7 @@ async fn proxy_resource_with_snapshot(
     if status.is_client_error() || status.is_server_error() {
         return error_response(status, "upstream_error");
     }
-    if let Some(length) = response.content_length()
-        && length > MAX_RESOURCE_BYTES
-    {
+    if declared_payload_too_large(response.content_length()) {
         return error_response(StatusCode::PAYLOAD_TOO_LARGE, "resource_too_large");
     }
 
@@ -488,6 +534,10 @@ async fn proxy_resource_with_snapshot(
     builder
         .body(Body::from_stream(stream))
         .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "response_build_failed"))
+}
+
+fn declared_payload_too_large(length: Option<u64>) -> bool {
+    length.is_some_and(|length| length > MAX_RESOURCE_BYTES)
 }
 
 type UpstreamStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
@@ -519,14 +569,14 @@ fn limited_stream(
         if state.done {
             return None;
         }
-        let Some(remaining) = state.deadline.checked_duration_since(Instant::now()) else {
+        if Instant::now() >= state.deadline {
             state.done = true;
             return Some((
                 Err(io::Error::new(io::ErrorKind::TimedOut, "upstream timeout")),
                 state,
             ));
-        };
-        match tokio::time::timeout(remaining, state.stream.next()).await {
+        }
+        match tokio::time::timeout_at(state.deadline, state.stream.next()).await {
             Ok(Some(Ok(chunk))) => {
                 state.seen = state.seen.saturating_add(chunk.len() as u64);
                 if state.seen > MAX_RESOURCE_BYTES {
@@ -555,6 +605,23 @@ fn limited_stream(
             }
         }
     })
+}
+
+async fn await_upstream_response<F>(
+    deadline: Instant,
+    request: F,
+) -> Result<reqwest::Response, (StatusCode, &'static str)>
+where
+    F: Future<Output = Result<reqwest::Response, reqwest::Error>>,
+{
+    match tokio::time::timeout_at(deadline, request).await {
+        Ok(Ok(response)) => Ok(response),
+        Ok(Err(error)) if error.is_timeout() => {
+            Err((StatusCode::GATEWAY_TIMEOUT, "upstream_timeout"))
+        }
+        Ok(Err(_)) => Err((StatusCode::BAD_GATEWAY, "upstream_unreachable")),
+        Err(_) => Err((StatusCode::GATEWAY_TIMEOUT, "upstream_timeout")),
+    }
 }
 
 fn error_response(status: StatusCode, code: &'static str) -> Response {

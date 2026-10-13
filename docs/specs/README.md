@@ -70,6 +70,7 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 | Control-plane relay   | superseded | retired        | [Spec][51] | [Spec][34] |       |
 | Xray ingress guard    | active     | complete       | [Spec][52] | -          |       |
 | Xray stale TCP        | active     | complete       | [Spec][53] | -          |       |
+| Mihomo mirror         | active     | unverified     | [Spec][54] | -          |       |
 
 [1]: access-model-hardcut-v9/SPEC.md
 [2]: admin-delete-node/SPEC.md
@@ -124,3 +125,4 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 [51]: xray-control-plane-relay/SPEC.md
 [52]: xray-ingress-guard/SPEC.md
 [53]: xray-stale-tcp-reclaim/SPEC.md
+[54]: mihomo-external-resource-mirror/SPEC.md
