@@ -22,7 +22,7 @@
 
 - `src/subscription/tests.rs`：资源重写、GeoX 默认补齐、HTTP 与 Header 拒绝。
 - `src/http/tests.rs`：canonical 镜像输出、无 profile 拒绝、raw 格式拒绝与未知资源 ID。
-- `src/mihomo_resources.rs`：资源 ID、目录版本、流式转发、缓存禁止、错误体脱敏、重定向上限，以及请求超时 `504`、统一截止时间和响应头后的流中止。
+- `src/mihomo_resources.rs`：资源 ID、目录、流式转发、缓存禁止、错误脱敏、重定向和统一截止时间；资源路由准入与转发共用截止时间。
 - `src/mihomo_policy.rs`：节点策略文件、环境默认与 CIDR 校验。
 - `web/src/views/UserDetailsPage.test.tsx`：镜像开关只作用于 Mihomo 预览请求。
 

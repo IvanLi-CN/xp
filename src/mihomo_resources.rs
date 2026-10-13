@@ -337,6 +337,10 @@ pub fn resource_id(cluster_ca_key_pem: &str, url: &Url) -> String {
     hex::encode(mac.finalize().into_bytes())
 }
 
+pub fn resource_deadline() -> Instant {
+    Instant::now() + RESOURCE_TIMEOUT
+}
+
 pub fn resolve_resource_url(
     cluster_ca_key_pem: &str,
     resource_id_value: &str,
@@ -424,7 +428,7 @@ pub async fn proxy_resource(
     resource_id_value: &str,
     allow_private_targets: bool,
 ) -> Response {
-    let deadline = Instant::now() + RESOURCE_TIMEOUT;
+    let deadline = resource_deadline();
     if allow_private_targets {
         proxy_resource_with_snapshot(url, resource_id_value, None, deadline).await
     } else {
@@ -445,7 +449,15 @@ pub async fn proxy_resource_with_policy(
     resource_id_value: &str,
     policy: &MihomoResourcePolicy,
 ) -> Response {
-    let deadline = Instant::now() + RESOURCE_TIMEOUT;
+    proxy_resource_with_policy_until(url, resource_id_value, policy, resource_deadline()).await
+}
+
+pub async fn proxy_resource_with_policy_until(
+    url: Url,
+    resource_id_value: &str,
+    policy: &MihomoResourcePolicy,
+    deadline: Instant,
+) -> Response {
     let snapshot = match tokio::time::timeout_at(deadline, policy.snapshot()).await {
         Ok(snapshot) => snapshot,
         Err(_) => return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout"),
@@ -676,6 +688,10 @@ fn error_response(status: StatusCode, code: &'static str) -> Response {
             .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
     }
     response
+}
+
+pub fn upstream_timeout_response() -> Response {
+    error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout")
 }
 
 pub fn not_found_response() -> Response {
