@@ -54,6 +54,16 @@ pub const FIXED_GEOX_ASSETS: &[(&str, &str)] = &[
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static GLOBAL_LIMIT: OnceLock<Arc<Semaphore>> = OnceLock::new();
 static RESOURCE_LIMITS: OnceLock<Mutex<BTreeMap<String, Arc<Semaphore>>>> = OnceLock::new();
+#[cfg(test)]
+static PROXY_TEST_SERIAL: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(test)]
+async fn proxy_test_serial() -> tokio::sync::MutexGuard<'static, ()> {
+    PROXY_TEST_SERIAL
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .await
+}
 
 #[derive(Default)]
 pub struct ResourceDirectoryCache {
@@ -150,6 +160,7 @@ mod tests {
 
     #[tokio::test]
     async fn proxy_streams_success_and_hides_upstream_error_bodies() {
+        let _serial = proxy_test_serial().await;
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/resource"))
@@ -237,6 +248,7 @@ mod tests {
 
     #[tokio::test]
     async fn proxy_follows_five_redirects_but_not_the_sixth() {
+        let _serial = proxy_test_serial().await;
         let server = MockServer::start().await;
         for index in 0..5 {
             Mock::given(method("GET"))
@@ -277,6 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn proxy_blocks_private_targets_when_policy_is_disabled() {
+        let _serial = proxy_test_serial().await;
         let response = proxy_resource(
             Url::parse("http://127.0.0.1:9/internal").unwrap(),
             "private-target-test",
@@ -288,6 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn proxy_rejects_the_fifth_request_for_one_resource() {
+        let _serial = proxy_test_serial().await;
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/slow"))
@@ -320,6 +334,7 @@ mod tests {
 
     #[tokio::test]
     async fn proxy_rejects_when_process_limit_is_full() {
+        let _serial = proxy_test_serial().await;
         let global = GLOBAL_LIMIT
             .get_or_init(|| Arc::new(Semaphore::new(GLOBAL_CONCURRENCY)))
             .clone();
@@ -327,10 +342,11 @@ mod tests {
         for _ in 0..GLOBAL_CONCURRENCY {
             permits.push(global.clone().acquire_owned().await.unwrap());
         }
-        let response = proxy_resource(
+        let response = proxy_resource_with_snapshot(
             Url::parse("https://example.com/resource").unwrap(),
             "process-concurrency-test",
-            true,
+            None,
+            resource_deadline(),
         )
         .await;
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);

@@ -652,29 +652,6 @@ describe("<UserDetailsPage />", () => {
 		});
 		expect(await screenByText("Subscription preview")).toBeTruthy();
 	});
-	it("supports mihomo subscription format preview", async () => {
-		setupMocks();
-		renderPage();
-
-		const group = (await screen.findByTestId(
-			"subscription-format",
-		)) as HTMLElement;
-		const inputs = group.querySelectorAll("input");
-		expect(inputs).toHaveLength(3);
-		const mihomoInput = inputs[2];
-		if (!(mihomoInput instanceof HTMLElement)) {
-			throw new Error("Missing mihomo subscription format input");
-		}
-		fireEvent.click(mihomoInput);
-		fireEvent.click(await screenByRole("button", "Fetch"));
-
-		await waitFor(() => {
-			expect(fetchSubscription).toHaveBeenCalledWith(
-				fixtureCatalog.token.fixture254(),
-				"mihomo",
-			);
-		});
-	});
 	it("passes the temporary mirror mode only for mihomo subscriptions", async () => {
 		setupMocks();
 		renderPage();
@@ -723,6 +700,17 @@ describe("<UserDetailsPage />", () => {
 		expect(writeText).toHaveBeenCalledWith(
 			expect.stringContaining("external_resources=mirror"),
 		);
+		for (const format of ["Raw", "Clash"] as const) {
+			fireEvent.click(
+				within(await screen.findByTestId("subscription-format")).getByLabelText(
+					format,
+				),
+			);
+			fireEvent.click(await screenByRole("button", "Copy subscription URL"));
+			expect(writeText).toHaveBeenLastCalledWith(
+				expect.not.stringContaining("external_resources=mirror"),
+			);
+		}
 	});
 	it("saves mihomo profile from user tab", async () => {
 		setupMocks();

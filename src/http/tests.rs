@@ -31,6 +31,8 @@ mod history_recovery_preflight;
 #[path = "tests/history_repository.rs"]
 mod history_repository;
 mod managed_vless_create;
+#[path = "tests/mihomo_external_resource.rs"]
+mod mihomo_external_resource;
 #[path = "tests/mihomo_resource_route.rs"]
 mod mihomo_resource_route;
 mod mihomo_smux;
