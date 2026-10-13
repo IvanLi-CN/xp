@@ -226,6 +226,8 @@ jobs:
       - run: bun run test
       - run: bunx --no-install playwright install --with-deps chromium
       - run: bun run test:e2e
+      - run: bun run build:demo
+      - run: bun run test:e2e:demo
       - name: cache receipt
         if: env.CACHE_PHASE != 'normal'
         working-directory: .

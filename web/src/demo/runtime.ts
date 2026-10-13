@@ -63,9 +63,18 @@ export function resetDemoModel() {
 
 function journalRoute(path: string): string {
 	// Record route shapes only: never a bearer token, user input, query or body.
-	return path
-		.replace(/\/sub\/[^/]+/, "/sub/:token")
-		.replace(/\/(users|nodes|endpoints|monitors)\/[^/]+/, "/$1/:id");
+	if (/^\/api\/sub\/[^/]+$/.test(path)) return "/api/sub/:token";
+	const resource = path.match(
+		/^\/api\/admin\/(users|nodes|endpoints|monitors)\/[^/]+$/,
+	);
+	if (resource) return `/api/admin/${resource[1]}/:id`;
+	if (
+		/^\/api\/admin\/(mesh\/config|mesh\/probes|users|nodes|endpoints|monitors)$/.test(
+			path,
+		)
+	)
+		return path;
+	return "/api/:route";
 }
 
 function failure(status: number, code: string, message: string) {
@@ -109,7 +118,7 @@ export async function handleDemoRequest(request: Request): Promise<Response> {
 		);
 	} else response = await requestApi.handle(request);
 	if (
-		requestSnapshot.generation === snapshot.generation &&
+		requestApi === api &&
 		!["GET", "HEAD", "OPTIONS"].includes(request.method)
 	) {
 		publish({

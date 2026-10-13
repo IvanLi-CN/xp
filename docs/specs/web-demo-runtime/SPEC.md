@@ -43,7 +43,7 @@ Simulated writes MUST update the formal UI and a bounded visible operation journ
 
 ### REQ-DEMO-007
 
-The standalone Demo build MUST use `/demo/` as its router and asset base, keep the live build unchanged, and supply static deep-link recovery. Root, nested direct navigation and nested refresh MUST work independently of a real API service.
+The standalone Demo build MUST use `/demo/` as its router and asset base, keep the live build unchanged, and emit `404.html` plus `_redirects` for static deep-link recovery. A supported static host MUST apply that fallback for `/demo/*`. Root, nested direct navigation and nested refresh MUST work independently of a real API service.
 
 ### REQ-DEMO-008
 

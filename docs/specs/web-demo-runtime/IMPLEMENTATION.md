@@ -7,11 +7,11 @@
 
 ## Implementation Coverage
 
-独立 Demo 运行时已替换依赖 localStorage 登录及复制页面的演示方案。正式页面、模拟传输层、结构化 Inspector、静态深链和浏览器验收共同覆盖合同。
+Demo runtime uses formal pages, mocks, Inspector, and static deep links.
 
 ## Remaining Gaps
 
-公开部署不属于本轮范围。生产静态构建仍输出较大的单入口 bundle，这是现有 formal App 的打包形态，不影响 Demo 的启动隔离和静态深链恢复。
+Public deployment is out of scope; local evidence covers static deep links.
 
 ## Verification Evidence
 
@@ -27,7 +27,7 @@
 
 Demo E2E covers routes, identity, mobile recovery, Mihomo errors, and monitoring.
 
-Static E2E builds `dist-demo` and checks nested load/refresh without a backend.
+Static E2E serves dist-demo fallback files and checks nested refresh offline.
 
 ## References
 

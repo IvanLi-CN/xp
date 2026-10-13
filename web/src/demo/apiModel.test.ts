@@ -21,4 +21,15 @@ describe("demo API model", () => {
 		expect(await write.json()).toEqual({ enabled: false });
 		expect((await read.json()).cluster_mesh_enabled).toBe(false);
 	});
+
+	it("rejects unsupported Mihomo mutations", async () => {
+		const api = createDemoApi(DEFAULT_DEMO_CONTROLS);
+		const response = await api.handle(
+			new Request("https://demo.example/api/mihomo/resources/demo-resource", {
+				method: "POST",
+			}),
+		);
+
+		expect(response.status).toBe(405);
+	});
 });

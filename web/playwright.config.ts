@@ -29,7 +29,7 @@ export default defineConfig({
 	},
 	webServer: {
 		command: useDemoBuild
-			? `bun run build:demo && bun run preview:demo -- --host 127.0.0.1 --port ${devPort}`
+			? `bun run build:demo && node scripts/demo-static-server.mjs --port ${devPort}`
 			: usePreview
 				? `bun run build && bun run preview -- --host 127.0.0.1 --port ${devPort}`
 				: `bun run dev -- --port ${devPort}`,

@@ -10,6 +10,8 @@ export const DEMO_SHARE_KEYS = [
 
 export function buildDemoShareUrl(href: string): string {
 	const url = new URL(href, "http://demo.invalid");
+	url.username = "";
+	url.password = "";
 	const search = new URLSearchParams();
 	for (const key of DEMO_SHARE_KEYS) {
 		const value = url.searchParams.get(key);

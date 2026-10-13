@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { handleDemoRequest, syncDemoControls } from "./runtime";
+import {
+	getDemoSnapshot,
+	handleDemoRequest,
+	syncDemoControls,
+} from "./runtime";
 
 const demoUrl = "https://demo.example/api/admin/users";
 
@@ -41,5 +45,16 @@ describe("demo runtime", () => {
 			new Request("https://demo.example/api/demo/unknown"),
 		);
 		expect(unknown.status).toBe(404);
+	});
+
+	it("redacts unknown mutation paths in the operation journal", async () => {
+		syncDemoControls("?demo=normal&d_network=online", true);
+		await handleDemoRequest(
+			new Request("https://demo.example/api/custom/secret-token", {
+				method: "POST",
+			}),
+		);
+
+		expect(getDemoSnapshot().operations[0]?.route).toBe("/api/:route");
 	});
 });

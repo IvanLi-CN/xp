@@ -136,6 +136,12 @@ export function createDemoApi(controls: DemoControls) {
 			}
 			const subscription = path.match(/^\/api\/sub\/([^/]+)$/);
 			if (subscription && url.searchParams.get("format") === "mihomo") {
+				if (method !== "GET")
+					return errorResponse(
+						405,
+						"method_not_allowed",
+						"Mihomo subscriptions are read-only in the Demo.",
+					);
 				const list = await mock.handle(
 					new Request(new URL("/api/admin/users", url)),
 				);
@@ -166,6 +172,12 @@ export function createDemoApi(controls: DemoControls) {
 				mesh = { ...mesh, cluster_mesh_enabled: body.enabled };
 				return jsonResponse({ enabled: mesh.cluster_mesh_enabled });
 			}
+			if (path.startsWith("/api/mihomo/resources/") && method !== "GET")
+				return errorResponse(
+					405,
+					"method_not_allowed",
+					"Mihomo resources are read-only in the Demo.",
+				);
 			if (path.startsWith("/api/mihomo/resources/"))
 				return textResponse("# Simulated resource; no upstream fetch.\n");
 			return mock.handle(request);

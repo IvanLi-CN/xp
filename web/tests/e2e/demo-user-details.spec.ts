@@ -85,3 +85,15 @@ test("demo missing Mihomo profile is a structured simulated error", async ({
 	await expect(dialog).toBeVisible();
 	await expect(dialog).toContainText("saved Mihomo profile");
 });
+
+test("demo invalid Mihomo profile rejects unsafe resources", async ({
+	page,
+}) => {
+	await page.goto(
+		`/demo/users/${userId}?demo=normal&d_profile=invalid&d_format=mihomo&d_mirror=1&d_preview=1`,
+	);
+
+	await expect(page.getByRole("dialog")).toContainText(
+		"External resource URL must be HTTPS",
+	);
+});
