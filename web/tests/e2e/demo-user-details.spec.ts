@@ -65,6 +65,22 @@ test("demo opens the formal route family without authentication", async ({
 	}
 });
 
+test("demo mutations update the formal page and redacted operation journal", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.getByRole("button", { name: "Reset token" }).click();
+	const dialog = page.getByRole("alertdialog");
+	await expect(dialog).toContainText("Reset subscription token");
+	await dialog.getByRole("button", { name: "Reset" }).click();
+
+	await expect(page.getByText(/Subscription token reset:/)).toBeVisible();
+	await page.getByRole("button", { name: "Open Demo Inspector" }).click();
+	await expect(
+		page.getByRole("complementary", { name: "Demo Inspector" }),
+	).toContainText("POST /api/admin/users/:id/reset-token · 200");
+});
+
 test("demo inspector collapses and recovers on mobile", async ({ page }) => {
 	await page.setViewportSize({ width: 393, height: 852 });
 	await page.goto(`/demo/users/${userId}?demo=normal`);

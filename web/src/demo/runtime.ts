@@ -64,6 +64,10 @@ export function resetDemoModel() {
 function journalRoute(path: string): string {
 	// Record route shapes only: never a bearer token, user input, query or body.
 	if (/^\/api\/sub\/[^/]+$/.test(path)) return "/api/sub/:token";
+	const userAction = path.match(
+		/^\/api\/admin\/(users|nodes|endpoints|monitors)\/[^/]+\/(reset-token|reset-credentials)$/,
+	);
+	if (userAction) return `/api/admin/${userAction[1]}/:id/${userAction[2]}`;
 	const resource = path.match(
 		/^\/api\/admin\/(users|nodes|endpoints|monitors)\/[^/]+$/,
 	);

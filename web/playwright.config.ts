@@ -33,6 +33,7 @@ export default defineConfig({
 			: usePreview
 				? `bun run build && bun run preview -- --host 127.0.0.1 --port ${devPort}`
 				: `bun run dev -- --port ${devPort}`,
+		timeout: 120_000,
 		url: baseURL,
 		// Avoid silently reusing an unrelated server on the same port in local runs.
 		// Opt-in via `E2E_REUSE_EXISTING_SERVER=1` when you intentionally pre-started the app.

@@ -57,4 +57,20 @@ describe("demo runtime", () => {
 
 		expect(getDemoSnapshot().operations[0]?.route).toBe("/api/:route");
 	});
+
+	it("keeps approved reset actions identifiable without user IDs", async () => {
+		syncDemoControls("?demo=normal&d_network=online", true);
+		await handleDemoRequest(
+			new Request(
+				"https://demo.example/api/admin/users/user-fixture-c/reset-token",
+				{
+					method: "POST",
+				},
+			),
+		);
+
+		expect(getDemoSnapshot().operations[0]?.route).toBe(
+			"/api/admin/users/:id/reset-token",
+		);
+	});
 });
