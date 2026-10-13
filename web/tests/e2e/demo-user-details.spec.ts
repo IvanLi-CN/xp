@@ -55,6 +55,59 @@ test("demo inspector collapses and recovers on mobile", async ({ page }) => {
 	).toBeVisible();
 });
 
+test("demo inspector stays bounded across desktop layouts", async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 1920, height: 900 });
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.getByRole("button", { name: "Open Demo Inspector" }).click();
+
+	const inspector = page.getByRole("complementary", { name: "Demo Inspector" });
+	await expect(inspector).toBeVisible();
+	const dockedBox = await inspector.boundingBox();
+	expect(dockedBox).not.toBeNull();
+	if (!dockedBox) throw new Error("Docked Inspector is not measurable");
+	expect(dockedBox.x).toBeGreaterThanOrEqual(0);
+	expect(dockedBox.y).toBeGreaterThanOrEqual(0);
+	expect(dockedBox.x + dockedBox.width).toBeLessThanOrEqual(1920);
+	expect(dockedBox.y + dockedBox.height).toBeLessThanOrEqual(900);
+
+	await page.getByRole("button", { name: "Float panel" }).click();
+	const floatingBox = await inspector.boundingBox();
+	expect(floatingBox).not.toBeNull();
+	if (!floatingBox) throw new Error("Floating Inspector is not measurable");
+	expect(floatingBox.x).toBeGreaterThanOrEqual(0);
+	expect(floatingBox.y).toBeGreaterThanOrEqual(0);
+	expect(floatingBox.x + floatingBox.width).toBeLessThanOrEqual(1920);
+	expect(floatingBox.y + floatingBox.height).toBeLessThanOrEqual(900);
+
+	await page.getByRole("button", { name: "Collapse Inspector" }).click();
+	await expect(
+		page.getByRole("button", { name: "Open Demo Inspector" }),
+	).toBeVisible();
+});
+
+test("demo control state survives client navigation and refresh", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.getByRole("button", { name: "Open Demo Inspector" }).click();
+	let documentRequests = 0;
+	page.on("request", (request) => {
+		if (request.resourceType() === "document") documentRequests += 1;
+	});
+
+	await page.getByLabel("Scene").selectOption("large");
+	await page.getByLabel("Network").selectOption("offline");
+	await expect(page).toHaveURL(/demo=large/);
+	await expect(page).toHaveURL(/d_network=offline/);
+	expect(documentRequests).toBe(0);
+
+	await page.reload();
+	await expect(page.getByLabel("Scene")).toHaveValue("large");
+	await expect(page.getByLabel("Network")).toHaveValue("offline");
+});
+
 test("demo identity switching stays on the same formal page", async ({
 	page,
 }) => {
@@ -89,6 +142,32 @@ test("demo Mihomo mirror walkthrough is URL-first and simulated", async ({
 	await expect(dialog).toContainText("/api/mihomo/resources/demo-");
 	await expect(page).toHaveURL(/d_format=mihomo/);
 	await expect(page).toHaveURL(/d_mirror=mirror/);
+});
+
+test("demo Mihomo copy state follows the selected subscription mode", async ({
+	page,
+}) => {
+	await page.goto(
+		`/demo/users/${userId}?demo=normal&d_profile=valid&d_format=mihomo&d_mirror=mirror`,
+	);
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+
+	const copyButton = page.getByRole("button", {
+		name: "Copy subscription URL",
+	});
+	await copyButton.click();
+	await expect(copyButton).toContainText("Copied");
+	const copiedUrl = await page.evaluate(() => navigator.clipboard.readText());
+	expect(copiedUrl).toContain("/api/sub/");
+	expect(copiedUrl).toContain("format=mihomo");
+	expect(copiedUrl).toContain("external_resources=mirror");
+
+	await page.getByText("Raw", { exact: true }).click();
+	await expect(
+		page.getByRole("checkbox", {
+			name: "Use XP mirror for external resources",
+		}),
+	).toHaveCount(0);
 });
 
 test("demo missing Mihomo profile is a structured simulated error", async ({
