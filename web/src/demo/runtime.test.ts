@@ -35,6 +35,23 @@ describe("demo runtime", () => {
 		expect(body.items.length).toBeGreaterThan(0);
 	});
 
+	it("rejects a pending mutation after demo controls change", async () => {
+		syncDemoControls("?demo=normal&d_network=slow", true);
+		const pending = handleDemoRequest(
+			new Request(
+				"https://demo.example/api/admin/users/user-fixture-c/reset-token",
+				{
+					method: "POST",
+				},
+			),
+		);
+		syncDemoControls("?demo=normal&d_persona=anonymous", false);
+
+		const response = await pending;
+		expect(response.status).toBe(409);
+		expect(getDemoSnapshot().operations).toHaveLength(0);
+	});
+
 	it("keeps simulated faults and unknown routes inside the mock boundary", async () => {
 		syncDemoControls("?demo=normal&d_network=error", true);
 		const failed = await handleDemoRequest(new Request(demoUrl));

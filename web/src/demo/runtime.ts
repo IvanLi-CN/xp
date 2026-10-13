@@ -104,10 +104,21 @@ export async function handleDemoRequest(request: Request): Promise<Response> {
 	const path = new URL(request.url).pathname;
 	const requestSnapshot = snapshot;
 	const requestControls = requestSnapshot.controls;
+	const requestGeneration = requestSnapshot.generation;
 	const requestApi = api;
 	const { network } = requestControls;
 	await delay(network === "slow" ? 1500 : 80, request.signal);
 	if (network === "offline") throw new TypeError("Simulated offline network.");
+	if (
+		!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
+		requestGeneration !== snapshot.generation
+	) {
+		return failure(
+			409,
+			"demo_state_changed",
+			"Demo controls changed while the request was pending.",
+		);
+	}
 	let response: Response;
 	if (network === "error")
 		response = failure(503, "demo_network_error", "Simulated backend failure.");
@@ -123,6 +134,7 @@ export async function handleDemoRequest(request: Request): Promise<Response> {
 	} else response = await requestApi.handle(request);
 	if (
 		requestApi === api &&
+		requestGeneration === snapshot.generation &&
 		!["GET", "HEAD", "OPTIONS"].includes(request.method)
 	) {
 		publish({

@@ -39,6 +39,32 @@ test("demo remains isolated from an existing live service worker", async ({
 	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
 });
 
+test("demo recovers when a legacy root worker controls the page", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.evaluate(async () => {
+		await navigator.serviceWorker.register("/__e2e_legacy_demo_worker__.js", {
+			scope: "/",
+		});
+		await navigator.serviceWorker.ready;
+		if (!navigator.serviceWorker.controller) {
+			await new Promise<void>((resolve) => {
+				navigator.serviceWorker.addEventListener(
+					"controllerchange",
+					() => resolve(),
+					{
+						once: true,
+					},
+				);
+			});
+		}
+	});
+	await page.reload();
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+	await expect(page.locator("[data-demo-runtime='mock-only']")).toBeVisible();
+});
+
 test("demo static build supports nested direct load and refresh", async ({
 	page,
 }) => {

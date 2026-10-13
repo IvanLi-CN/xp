@@ -816,7 +816,6 @@ export function UserDetailsPage() {
 			setIsApplyingAccess(false);
 		}
 	}
-
 	async function loadSubscriptionPreview(
 		nextFormat = subFormat,
 		nextMirror = useExternalResourceMirror,
@@ -831,7 +830,6 @@ export function UserDetailsPage() {
 			formatError,
 		);
 	}
-
 	function updateDemoSubscriptionSearch(
 		nextFormat: SubscriptionFormat,
 		nextMirror: boolean,
@@ -849,22 +847,25 @@ export function UserDetailsPage() {
 			replace: true,
 		});
 	}
-
 	useEffect(() => {
-		if (!isDemoRuntime() || !subscriptionToken) return;
+		if (!isDemoRuntime()) return;
 		const params = new URLSearchParams(demoSearch);
-		if (!["1", "preview"].includes(params.get("d_preview") ?? "")) return;
 		const nextFormat = params.get("d_format");
 		const format: SubscriptionFormat =
 			nextFormat === "raw" || nextFormat === "clash" || nextFormat === "mihomo"
 				? nextFormat
 				: DEFAULT_SUBSCRIPTION_FORMAT;
 		const mirror = ["1", "mirror"].includes(params.get("d_mirror") ?? "");
+		setSubFormat(format);
+		setUseExternalResourceMirror(mirror);
+		if (
+			!subscriptionToken ||
+			!["1", "preview"].includes(params.get("d_preview") ?? "")
+		)
+			return;
 		const key = `${userId}:${subscriptionToken}:${format}:${mirror}`;
 		if (demoPreviewLoadedRef.current === key) return;
 		demoPreviewLoadedRef.current = key;
-		setSubFormat(format);
-		setUseExternalResourceMirror(mirror);
 		setSubOpen(true);
 		void loadUserSubscriptionPreview(
 			subscriptionToken,
@@ -879,7 +880,6 @@ export function UserDetailsPage() {
 		subscriptionToken,
 		userId,
 	]);
-
 	async function retryAccessData() {
 		await Promise.all([
 			nodesQuery.refetch(),

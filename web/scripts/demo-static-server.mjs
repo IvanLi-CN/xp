@@ -15,6 +15,15 @@ const contentTypes = {
 	".js": "text/javascript",
 	".json": "application/json",
 };
+const legacyDemoWorkerSource = [
+	"self.addEventListener('install', (event) => event.waitUntil(self.skipWaiting()));",
+	"self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));",
+	"self.addEventListener('fetch', (event) => {",
+	"const url = new URL(event.request.url);",
+	"if (event.request.mode === 'navigate' && url.pathname.startsWith('/demo'))",
+	"event.respondWith(fetch(new URL('/index.html', url)));",
+	"});",
+].join("\n");
 
 function filePathFor(requestPath) {
 	if (requestPath === "/") return join(demoRoot, "index.html");
@@ -34,6 +43,15 @@ function filePathFor(requestPath) {
 
 createServer((request, response) => {
 	const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+	if (requestUrl.pathname === "/__e2e_legacy_demo_worker__.js") {
+		response.writeHead(200, {
+			"Cache-Control": "no-store",
+			"Content-Type": "text/javascript",
+			"Service-Worker-Allowed": "/",
+		});
+		response.end(legacyDemoWorkerSource);
+		return;
+	}
 	const filePath = filePathFor(normalize(requestUrl.pathname));
 	if (!filePath) {
 		response.writeHead(404).end();

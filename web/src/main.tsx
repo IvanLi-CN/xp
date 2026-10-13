@@ -22,7 +22,28 @@ import { createQueryClient } from "./queryClient";
 import { createAppRouter } from "./router";
 import { renderDocumentFallback } from "./runtime/documentFallback";
 
+async function recoverDemoFromLegacyServiceWorker(): Promise<boolean> {
+	if (
+		(typeof __XP_WEB_DEMO__ !== "undefined" && __XP_WEB_DEMO__) ||
+		typeof window === "undefined" ||
+		!/^\/demo(?:\/|$)/.test(window.location.pathname) ||
+		!("serviceWorker" in navigator)
+	)
+		return false;
+
+	const registrations = await navigator.serviceWorker.getRegistrations();
+	if (registrations.length === 0) return false;
+	await Promise.all(
+		registrations.map((registration) => registration.unregister()),
+	);
+	const url = new URL(window.location.href);
+	url.searchParams.set("__xp_demo_sw_recovery", String(Date.now()));
+	window.location.replace(url.toString());
+	return true;
+}
+
 async function bootstrap() {
+	if (await recoverDemoFromLegacyServiceWorker()) return;
 	const rootElement = document.getElementById("root");
 	if (!rootElement) {
 		throw new Error("Root element not found");

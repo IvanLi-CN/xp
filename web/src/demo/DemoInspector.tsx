@@ -72,12 +72,7 @@ export function DemoFrame({ children }: { children: ReactNode }) {
 	};
 	useEffect(() => {
 		syncDemoControls(search);
-		if (
-			pendingControls.current &&
-			JSON.stringify(readDemoControls(search)) ===
-				JSON.stringify(pendingControls.current)
-		)
-			pendingControls.current = null;
+		pendingControls.current = null;
 	}, [search]);
 	useEffect(() => {
 		if (previous.current.generation === snapshot.generation) return;
@@ -115,6 +110,7 @@ export function DemoFrame({ children }: { children: ReactNode }) {
 			onReset={resetDemoModel}
 			onClose={() => setOpen(false)}
 			onWalkthrough={() => {
+				pendingControls.current = null;
 				void router.navigate({
 					to: "/users/$userId",
 					params: { userId: "user-fixture-c" },
