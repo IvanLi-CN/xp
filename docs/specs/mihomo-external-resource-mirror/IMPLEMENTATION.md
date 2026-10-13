@@ -24,7 +24,7 @@
 - `src/http/tests.rs` 与路由测试模块：canonical 输出、无 profile/格式/ID 拒绝、405 缓存和路由时限。
 - `src/mihomo_resources.rs`：资源 ID、目录、流式转发、缓存禁止、错误脱敏、重定向、并发/大小限制和统一截止时间；资源路由准入与转发共用截止时间。
 - `src/mihomo_policy.rs`：节点策略文件、环境默认与 CIDR 校验。
-- `web/src/views/UserDetailsPage.test.tsx`：镜像开关只作用于 Mihomo 预览请求。
+- `web/src/views/UserDetailsPage.test.tsx`：镜像开关只作用于 Mihomo 预览与复制链接。
 
 ## Remaining Gaps
 
