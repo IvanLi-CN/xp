@@ -142,7 +142,7 @@ https://<node-origin>/api/sub/<token>?format=mihomo&external_resources=mirror
 ### VER-MIRROR-003
 
 - covers: `REQ-MIRROR-003`
-- 无、部分和完整 `geox-url` 均补齐四键；自定义上游优先，Geo 模式和更新设置不变。
+- 无 `geox-url` 时补齐四键，部分输入保持自定义上游优先；Geo 模式和更新设置不变。
 
 ### VER-MIRROR-004
 

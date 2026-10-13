@@ -111,6 +111,31 @@ proxy-providers:
         provider.get(Value::String("proxy".to_string())),
         Some(&Value::String("DIRECT".to_string()))
     );
+
+    let no_geox_yaml = build_mihomo_provider_yaml_with_node_probes_mode(
+        SEED,
+        &user("alice"),
+        &[],
+        &[],
+        &[],
+        &BTreeMap::new(),
+        &UserMihomoProfile {
+            mixin_yaml: "port: 0\n".to_string(),
+            ..UserMihomoProfile::default()
+        },
+        xp_test_fixtures::subscription_provider_system_url(),
+        MihomoExternalResourceMode::Mirror,
+        xp_test_fixtures::mihomo_mirror_base_url(),
+    )
+    .expect("mirror rendering should inject GeoX defaults");
+    let no_geox: Value = serde_yaml::from_str(&no_geox_yaml).expect("valid yaml");
+    let no_geox = no_geox
+        .get("geox-url")
+        .and_then(Value::as_mapping)
+        .expect("injected geox map");
+    for name in ["geoip", "geosite", "mmdb", "asn"] {
+        assert!(no_geox.contains_key(Value::String(name.to_string())));
+    }
 }
 
 #[test]
