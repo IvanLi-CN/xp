@@ -106,8 +106,16 @@ impl RepositoryReplicaRuntime {
                 return Ok(false);
             }
         }
+        // Publish completion on the page that commits the last dirty block. Waiting for a
+        // subsequent empty page starves v3 publication when each tick follows another write.
+        // The worker still owns the replica lock, and each digest transaction has committed.
+        self.snapshot.sequence_summary_blocks_complete = self
+            .storage
+            .repository_history_dirty_sequence_summary_blocks(1)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+            .is_empty();
         self.persist_control_state()?;
-        Ok(false)
+        Ok(self.snapshot.sequence_summary_blocks_complete)
     }
 
     pub(crate) fn sequence_summary_blocks(

@@ -11,6 +11,16 @@ The file is `${XP_DATA_DIR}/history.sqlite3.diagnostics.json`.
 
 ## Summary repair status
 
+Ready lifecycle alone does not prove that source delivery or deep verification has finished.
+
+- Compare pending segment count, last ACK time and oldest cursor across status samples.
+- Ready local standbys accept continuous backlog; failed standbys retry the primary next cycle.
+- Neither path permits another recovery apply or relaxed sequence/hash checks.
+- Incomplete v3 metadata blocks deep verification even when migration has finished.
+- The final dirty-block page must publish completion without requiring an idle tick.
+- Accept deep checks only with `summary_version=3` and `partitions_included=true`.
+- Permanent gaps still require `partial` and `replica_converged=false`.
+
 The read-only repository runtime status includes `summary_repairs`, keyed by peer node ID. Each
 entry
 exposes `pending_count`, `summary_cursor`, `pending_next_cursor`, `last_attempt_at`,

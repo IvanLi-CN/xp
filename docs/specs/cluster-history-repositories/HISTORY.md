@@ -4,6 +4,9 @@
 
 ## Decision Trace
 
+- 无条件排除本地 standby 会阻断 Ready US 的连续接收；保留 Ready 本地备用，失败后下一周期回到 primary，源 epoch 与未 ACK 原文不变。
+- 持续写入会让等待空页的摘要完成位饥饿；最后一页提交后即检查 dirty 集合并持久化完成，保留有界预算、旧 peer fallback 与永久 gap 语义。
+
 - 修复 source delivery 在公网 primary 恢复后仍沿用本地 standby 的状态循环：若选择结果是本地仓库而
   primary 是远端，worker 回退到已注册的公网 HTTPS primary，避免已前进的 source chain 在本地接收器上
   触发 `HashChainMismatch`；pending outbox、源连续性和恢复 generation 均保持不变。

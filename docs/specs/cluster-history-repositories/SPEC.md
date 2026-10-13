@@ -303,6 +303,11 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - ACK 成功时间和实际投递路径必须与 journal 删除在同一持久化边界可观察；Collector 不可达时保留
   journal，不得伪造成功或产生无界并发重试。Collector 恢复后必须按固定页继续投递并只删除有效 ACK
   所列 segment。
+- Ready 本地 standby 可按严格连续性和幂等规则接收有界 backlog；非 Ready 本地备用接收方仍不可用。
+- standby 失败后清除 primary 失效计数，下一周期重试公网 HTTPS primary；连续三次成功同样回到 primary。
+- failover 不删除未 ACK 行、不轮换 source epoch、不重新 arm recovery generation。
+- 序号块每页最多重建 16 块；最后一页提交后在 worker 锁内立即持久化完成位，不等待空闲 tick。
+- dirty block 或迁移未完成时不发布完整摘要；后续写入使受影响块失效，重启保留已提交进度。
 - 仓库磁盘达到护栏时停止历史写入但不影响 Raft、join、配置、代理或升级。
 - Retention 对内容及聚合元信息均未变化的有界页面不得删除并重写历史行或重置分区摘要；
   游标持久化、过期删除及旧行元信息回填仍须执行，实际过期删除必须使摘要失效。

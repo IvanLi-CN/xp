@@ -390,6 +390,9 @@ async fn publish_local_history_segment(
             selected_repository_id,
             &primary_repository_id,
             &state.cluster.node_id,
+            ready_repository_ids
+                .iter()
+                .any(|id| id == &state.cluster.node_id),
         );
         (primary_repository_id, selected_repository_id)
     } else {
@@ -541,8 +544,11 @@ fn avoid_local_source_fallback(
     selected_repository_id: String,
     primary_repository_id: &str,
     local_repository_id: &str,
+    local_repository_ready: bool,
 ) -> String {
-    if selected_repository_id == local_repository_id && primary_repository_id != local_repository_id
+    if !local_repository_ready
+        && selected_repository_id == local_repository_id
+        && primary_repository_id != local_repository_id
     {
         primary_repository_id.to_owned()
     } else {
