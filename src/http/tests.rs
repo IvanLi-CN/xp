@@ -5562,7 +5562,6 @@ async fn subscription_endpoint_does_not_require_auth() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
-
     let token = setup_subscription_fixtures(&tmp, &app)
         .await
         .subscription_token;
@@ -5754,7 +5753,6 @@ async fn subscription_format_mihomo_does_not_require_a_raft_leader() {
         .await
         .unwrap();
     assert_eq!(put_res.status(), StatusCode::OK);
-
     let follower_raft = no_leader_raft(store.clone(), &cluster);
     let follower_app = build_app_with_cluster_store_and_raft(
         config,
@@ -5763,7 +5761,6 @@ async fn subscription_format_mihomo_does_not_require_a_raft_leader() {
         follower_raft,
         ReconcileHandle::noop(),
     );
-
     let res = follower_app
         .oneshot(req(
             "GET",
@@ -6228,7 +6225,14 @@ async fn mihomo_mirror_query_rewrites_urls_and_rejects_non_mihomo_formats() {
         .unwrap();
     assert_eq!(arbitrary_res.status(), StatusCode::NOT_FOUND);
     assert_eq!(arbitrary_res.headers()[header::CACHE_CONTROL], "no-store");
-
+    let method_path = format!("/api/mihomo/resources/{}", "0".repeat(64));
+    let method_res = app
+        .clone()
+        .oneshot(req("POST", &method_path))
+        .await
+        .unwrap();
+    assert_eq!(method_res.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(method_res.headers()[header::CACHE_CONTROL], "no-store");
     let raw_res = app
         .oneshot(req(
             "GET",

@@ -1466,7 +1466,9 @@ pub fn build_router_with_mesh_telemetry(
         )
         .route(
             "/mihomo/resources/{resource_id}",
-            get(mihomo_resource_route::get_mihomo_resource),
+            get(mihomo_resource_route::get_mihomo_resource).layer(middleware::from_fn(
+                mihomo_resource_route::no_store_response,
+            )),
         )
         .route("/sub/{subscription_token}", get(get_subscription))
         .nest("/admin", admin)

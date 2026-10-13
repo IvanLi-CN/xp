@@ -1,10 +1,20 @@
 use axum::{
-    extract::{Extension, Path},
+    extract::{Extension, Path, Request},
+    http::{HeaderValue, header},
+    middleware::Next,
     response::Response,
 };
 
 use super::AppState;
 use crate::mihomo_resources;
+
+pub(super) async fn no_store_response(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
 
 pub(super) async fn get_mihomo_resource(
     Extension(state): Extension<AppState>,
