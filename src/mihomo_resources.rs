@@ -287,6 +287,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn proxy_rejects_the_fifth_request_for_one_resource() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/slow"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_millis(200))
+                    .set_body_string("ok"),
+            )
+            .mount(&server)
+            .await;
+        let responses = futures_util::future::join_all((0..5).map(|_| {
+            proxy_resource(
+                Url::parse(&format!("{}/slow", server.uri())).unwrap(),
+                "concurrency-test",
+                true,
+            )
+        }))
+        .await;
+        let mut rejected = 0;
+        for response in responses {
+            if response.status() == StatusCode::TOO_MANY_REQUESTS {
+                rejected += 1;
+            } else {
+                assert_eq!(response.status(), StatusCode::OK);
+                response.into_body().collect().await.unwrap();
+            }
+        }
+        assert_eq!(rejected, 1);
+    }
+
+    #[tokio::test]
     async fn resource_directory_cache_reuses_and_invalidates_by_revision() {
         let cache = ResourceDirectoryCache::new();
         let url = subscription::normalize_mihomo_external_url(FIXED_GEOX_ASSETS[0].1).unwrap();
