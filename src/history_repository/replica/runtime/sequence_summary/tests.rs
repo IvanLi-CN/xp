@@ -1,6 +1,121 @@
 use super::super::{StoredRecord, tests::load};
 
 #[test]
+fn sequence_summary_completes_each_bounded_rebuild_under_continuous_writes() {
+    let temporary = tempfile::tempdir().unwrap();
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    // Finish the empty migration, then write before every maintenance tick. There is never
+    // an idle tick that could publish completion on behalf of the preceding rebuild.
+    for _ in 0..2 {
+        runtime
+            .advance_sequence_summary_block_rebuild_page()
+            .unwrap();
+    }
+    for sequence in 0..4 {
+        let row = StoredRecord {
+            observed_at_unix_seconds: sequence,
+            received_at_unix_seconds: sequence + 1,
+            source_node_id: "source".to_owned(),
+            source_epoch: 1,
+            stream: "runtime".to_owned(),
+            sequence,
+            subject_node_id: "subject".to_owned(),
+            observer_node_id: "observer".to_owned(),
+            schema_id: "runtime.v1".to_owned(),
+            schema_version: 1,
+            record_key: sequence.to_be_bytes().to_vec(),
+            payload: b"retained".to_vec(),
+            tombstone: false,
+        };
+        runtime
+            .storage
+            .upsert_repository_history_records(&[row.sqlite_row().unwrap()])
+            .unwrap();
+        runtime.update_partition_summary_for_record(&row).unwrap();
+        let before = runtime
+            .replication_summary_for_version(None, true, Some(3))
+            .unwrap();
+        assert!(
+            before.summary_version != 3,
+            "dirty v3 metadata must not be published"
+        );
+        assert!(
+            runtime
+                .advance_sequence_summary_block_rebuild_page()
+                .unwrap()
+        );
+        let summary = runtime
+            .replication_summary_for_version(None, true, Some(3))
+            .unwrap();
+        assert_eq!(summary.summary_version, 3);
+        assert!(summary.partitions_included);
+        assert_eq!(summary.sequence_blocks[0].record_count, sequence + 1);
+        drop(runtime);
+        runtime = load(temporary.path());
+        assert!(runtime.sequence_summary_blocks_ready());
+    }
+}
+
+#[test]
+fn sequence_summary_waits_for_all_blocks_across_the_page_limit() {
+    let temporary = tempfile::tempdir().unwrap();
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    runtime.snapshot.sequence_summary_migration_complete = true;
+    let rows = (0..17_u64)
+        .map(|block| {
+            StoredRecord {
+                observed_at_unix_seconds: block,
+                received_at_unix_seconds: block + 1,
+                source_node_id: "source".to_owned(),
+                source_epoch: 1,
+                stream: "runtime".to_owned(),
+                sequence: block * 4096,
+                subject_node_id: "subject".to_owned(),
+                observer_node_id: "observer".to_owned(),
+                schema_id: "runtime.v1".to_owned(),
+                schema_version: 1,
+                record_key: block.to_be_bytes().to_vec(),
+                payload: b"retained".to_vec(),
+                tombstone: false,
+            }
+            .sqlite_row()
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .unwrap();
+    assert!(
+        !runtime
+            .advance_sequence_summary_block_rebuild_page()
+            .unwrap()
+    );
+    assert_eq!(
+        runtime
+            .replication_summary_for_version(None, true, Some(3))
+            .unwrap()
+            .summary_version,
+        1
+    );
+    assert!(
+        runtime
+            .advance_sequence_summary_block_rebuild_page()
+            .unwrap()
+    );
+    let summary = runtime
+        .replication_summary_for_version(None, true, Some(3))
+        .unwrap();
+    assert_eq!(summary.summary_version, 3);
+    assert!(summary.partitions_included);
+    assert_eq!(summary.sequence_blocks.len(), 17);
+}
+
+#[test]
 fn sequence_summary_migration_survives_late_writes_and_restart() {
     let temporary = tempfile::tempdir().unwrap();
     let mut runtime = load(temporary.path());

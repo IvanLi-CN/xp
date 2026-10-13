@@ -869,7 +869,6 @@ impl RepositoryReplicaRuntime {
         }
         primary_repository_id.to_owned()
     }
-
     pub(crate) fn record_local_source_collector_delivery(
         &mut self,
         primary_repository_id: &str,
@@ -900,6 +899,7 @@ impl RepositoryReplicaRuntime {
                     self.snapshot.local_source.standby_success_cycles = 0;
                 }
             } else {
+                self.snapshot.local_source.primary_failure_cycles = 0;
                 self.snapshot.local_source.standby_success_cycles = 0;
             }
             return self.persist_control_state();

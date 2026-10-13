@@ -15,6 +15,12 @@
 
 ### Recovery generation and sequence-block summaries
 
+- Ready local standbys remain eligible; non-Ready local fallback stays excluded.
+- A failed standby retries the registered primary next cycle without changing the source chain.
+- Three successful standby pages restore primary selection; ACK/restart tests cover both paths.
+- The final dirty-block page persists completion under the replica lock without an idle tick.
+- Continuous-write tests verify v3 publication after commit and across the page limit.
+
 - Consumed recovery generations resume the existing summary checkpoint without re-arming a
   generation or changing the source epoch. Every bounded repair attempt persists additive
   `summary_repairs` diagnostics in the existing control snapshot, including pending count/cursors,

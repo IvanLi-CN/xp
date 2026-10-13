@@ -7,6 +7,9 @@ use crate::state::history_repository::{
 };
 use ed25519_dalek::SigningKey;
 
+#[path = "tests/source_delivery.rs"]
+mod source_delivery;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn repository_storage_work_leaves_the_single_runtime_worker_available() {
     let directory = tempfile::tempdir().unwrap();
@@ -81,15 +84,15 @@ fn stale_ready_metadata_keeps_anti_entropy_incomplete() {
 #[test]
 fn local_source_fallback_retries_remote_primary() {
     assert_eq!(
-        super::avoid_local_source_fallback("local".to_owned(), "remote", "local"),
+        super::avoid_local_source_fallback("local".to_owned(), "remote", "local", false),
         "remote"
     );
     assert_eq!(
-        super::avoid_local_source_fallback("remote".to_owned(), "remote", "local"),
+        super::avoid_local_source_fallback("remote".to_owned(), "remote", "local", false),
         "remote"
     );
     assert_eq!(
-        super::avoid_local_source_fallback("local".to_owned(), "local", "local"),
+        super::avoid_local_source_fallback("local".to_owned(), "local", "local", true),
         "local"
     );
 }
