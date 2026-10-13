@@ -8763,10 +8763,10 @@ async fn get_mihomo_resource(
     Path(resource_id): Path<String>,
 ) -> Response {
     let Some(cluster_ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_ref() else {
-        return (StatusCode::NOT_FOUND, "not found\n").into_response();
+        return mihomo_resources::not_found_response();
     };
     if resource_id.len() != 64 || !resource_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return (StatusCode::NOT_FOUND, "not found\n").into_response();
+        return mihomo_resources::not_found_response();
     }
     let url = loop {
         let (revision, profiles) = {
@@ -8803,7 +8803,7 @@ async fn get_mihomo_resource(
         }
     };
     let Some(url) = url else {
-        return (StatusCode::NOT_FOUND, "not found\n").into_response();
+        return mihomo_resources::not_found_response();
     };
     mihomo_resources::proxy_resource_with_policy(url, &resource_id, &state.mihomo_resource_policy)
         .await

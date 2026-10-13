@@ -6219,8 +6219,7 @@ async fn mihomo_mirror_query_rewrites_urls_and_rejects_non_mihomo_formats() {
             .is_some_and(|message| message.contains("requires a Mihomo profile"))
     );
 
-    let arbitrary_res = app
-        .clone()
+    let arbitrary_res = app.clone()
         .oneshot(req(
             "GET",
             "/api/mihomo/resources/0000000000000000000000000000000000000000000000000000000000000000?url=https%3A%2F%2Fexample.com%2Fanything",

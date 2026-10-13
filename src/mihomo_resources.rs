@@ -138,6 +138,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn not_found_response_is_uncacheable() {
+        let response = not_found_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
+    }
+
     #[tokio::test]
     async fn proxy_streams_success_and_hides_upstream_error_bodies() {
         let server = MockServer::start().await;
@@ -189,6 +199,10 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert!(
             !body
@@ -638,10 +652,21 @@ fn error_response(status: StatusCode, code: &'static str) -> Response {
         header::CONTENT_TYPE,
         HeaderValue::from_static("text/plain; charset=utf-8"),
     );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     if status == StatusCode::TOO_MANY_REQUESTS {
         response
             .headers_mut()
             .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
     }
+    response
+}
+
+pub fn not_found_response() -> Response {
+    let mut response = (StatusCode::NOT_FOUND, "not found\n").into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
