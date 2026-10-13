@@ -52,4 +52,33 @@ describe("demo mock API", () => {
 		await expect(pending).resolves.toContain("patterns:");
 		vi.useRealTimers();
 	});
+
+	it("shows rewritten external resources in Mihomo mirror mode", async () => {
+		vi.useFakeTimers();
+		const state = createDemoState("normal");
+		const user = getDemoUser(state, fixtureCatalog.identifier.userTertiary());
+
+		const pending = fetchDemoSubscription(state, user, "mihomo", true);
+		await vi.advanceTimersByTimeAsync(240);
+
+		await expect(pending).resolves.toContain("# XP mirror mode");
+		await expect(pending).resolves.toContain(
+			"https://xp.example.net/api/mihomo/resources/demo-rules",
+		);
+		await expect(pending).resolves.toContain("proxy: DIRECT");
+		vi.useRealTimers();
+	});
+
+	it("rejects mirror mode without a saved Mihomo profile", async () => {
+		vi.useFakeTimers();
+		const state = createDemoState("normal");
+		const user = getDemoUser(state, fixtureCatalog.identifier.userQuinary());
+
+		const pending = fetchDemoSubscription(state, user, "mihomo", true);
+		const rejected = expect(pending).rejects.toThrow("saved Mihomo profile");
+		await vi.advanceTimersByTimeAsync(240);
+
+		await rejected;
+		vi.useRealTimers();
+	});
 });

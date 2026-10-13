@@ -639,7 +639,6 @@ describe("<UserDetailsPage />", () => {
 		});
 		expect(putAdminUserMihomoProfile).not.toHaveBeenCalled();
 	});
-
 	it("loads subscription preview from user tab", async () => {
 		setupMocks();
 		renderPage();
@@ -653,35 +652,9 @@ describe("<UserDetailsPage />", () => {
 		});
 		expect(await screenByText("Subscription preview")).toBeTruthy();
 	});
-
-	it("supports mihomo subscription format preview", async () => {
-		setupMocks();
-		renderPage();
-
-		const group = (await screen.findByTestId(
-			"subscription-format",
-		)) as HTMLElement;
-		const inputs = group.querySelectorAll("input");
-		expect(inputs).toHaveLength(3);
-		const mihomoInput = inputs[2];
-		if (!(mihomoInput instanceof HTMLElement)) {
-			throw new Error("Missing mihomo subscription format input");
-		}
-		fireEvent.click(mihomoInput);
-		fireEvent.click(await screenByRole("button", "Fetch"));
-
-		await waitFor(() => {
-			expect(fetchSubscription).toHaveBeenCalledWith(
-				fixtureCatalog.token.fixture254(),
-				"mihomo",
-			);
-		});
-	});
-
 	it("passes the temporary mirror mode only for mihomo subscriptions", async () => {
 		setupMocks();
 		renderPage();
-
 		const group = (await screen.findByTestId(
 			"subscription-format",
 		)) as HTMLElement;
@@ -703,8 +676,54 @@ describe("<UserDetailsPage />", () => {
 				"mirror",
 			);
 		});
+		fireEvent.click(await screenByRole("button", "Close"));
+		const formatGroup = await screen.findByTestId("subscription-format");
+		for (const format of ["Raw", "Clash"] as const) {
+			fireEvent.click(within(formatGroup).getByLabelText(format));
+			fireEvent.click(await screenByRole("button", "Fetch"));
+			await waitFor(() => {
+				expect(vi.mocked(fetchSubscription).mock.calls.at(-1)).toEqual([
+					fixtureCatalog.token.fixture254(),
+					format.toLowerCase(),
+				]);
+			});
+			fireEvent.click(await screenByRole("button", "Close"));
+		}
 	});
-
+	it("copies the selected mirror URL", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", { value: { writeText } });
+		setupMocks();
+		renderPage();
+		fireEvent.click(await screenByRole("button", "Copy subscription URL"));
+		expect(writeText).toHaveBeenCalledWith(
+			expect.not.stringContaining("external_resources=mirror"),
+		);
+		writeText.mockClear();
+		fireEvent.click(
+			within(await screen.findByTestId("subscription-format")).getByLabelText(
+				"Mihomo",
+			),
+		);
+		fireEvent.click(
+			await screenByLabel("Use XP mirror for external resources"),
+		);
+		fireEvent.click(await screenByRole("button", "Copy subscription URL"));
+		expect(writeText).toHaveBeenCalledWith(
+			expect.stringContaining("external_resources=mirror"),
+		);
+		for (const format of ["Raw", "Clash"] as const) {
+			fireEvent.click(
+				within(await screen.findByTestId("subscription-format")).getByLabelText(
+					format,
+				),
+			);
+			fireEvent.click(await screenByRole("button", "Copy subscription URL"));
+			expect(writeText).toHaveBeenLastCalledWith(
+				expect.not.stringContaining("external_resources=mirror"),
+			);
+		}
+	});
 	it("saves mihomo profile from user tab", async () => {
 		setupMocks();
 		renderPage();
@@ -727,7 +746,6 @@ describe("<UserDetailsPage />", () => {
 		});
 		expect(patchAdminUser).not.toHaveBeenCalled();
 	});
-
 	it("migrates a legacy mixed profile after the raw save is rejected", async () => {
 		setupMocks({
 			mihomoProfile: {
@@ -815,7 +833,6 @@ rules: []
 			);
 		});
 	});
-
 	it("shows node quota loading error instead of defaulting to zero", async () => {
 		setupMocks();
 		vi.mocked(fetchAdminUserNodeQuotas).mockRejectedValueOnce(
@@ -826,7 +843,6 @@ rules: []
 		expect(await screenByText("Failed to load node quotas")).toBeTruthy();
 		expect(await screenByText("node quotas unavailable")).toBeTruthy();
 	});
-
 	it("shows access data error with retry action", async () => {
 		setupMocks();
 		vi.mocked(fetchAdminEndpoints).mockRejectedValue(
@@ -843,7 +859,6 @@ rules: []
 			expect(fetchAdminEndpoints).toHaveBeenCalledTimes(2);
 		});
 	});
-
 	it("shows partial quota status warning with unreachable nodes", async () => {
 		setupMocks();
 		vi.mocked(fetchAdminUserNodeQuotaStatus).mockResolvedValueOnce({
@@ -871,7 +886,6 @@ rules: []
 			),
 		).toBeTruthy();
 	});
-
 	it("renders usage details groups and refetches when the window changes", async () => {
 		setupMocks({
 			ipUsage: {
@@ -1019,7 +1033,6 @@ rules: []
 			screen.getByRole("tab", { name: fixtureCatalog.nodeName.fixture259() }),
 		).toHaveAttribute("aria-selected", "true");
 	});
-
 	it("disambiguates usage detail node tabs when node names repeat", async () => {
 		setupMocks({
 			ipUsage: {
@@ -1096,7 +1109,6 @@ rules: []
 			}),
 		).toBeInTheDocument();
 	});
-
 	it("shows unreachable-only empty state when all usage nodes fail", async () => {
 		setupMocks({
 			ipUsage: {
@@ -1136,7 +1148,6 @@ rules: []
 			),
 		).not.toBeInTheDocument();
 	});
-
 	it("shows token-required state when admin token is missing", async () => {
 		mockReadAdminToken.mockReturnValue("");
 		setupMocks();
@@ -1146,7 +1157,6 @@ rules: []
 		expect(fetchAdminUser).not.toHaveBeenCalled();
 	});
 });
-
 async function screenByRole(role: string, name: string): Promise<HTMLElement> {
 	const { findByRole } = await import("@testing-library/react");
 	const moduleTabNames = new Set([
@@ -1160,22 +1170,18 @@ async function screenByRole(role: string, name: string): Promise<HTMLElement> {
 		role === "button" && moduleTabNames.has(name) ? "tab" : role;
 	return findByRole(document.body, resolvedRole as never, { name });
 }
-
 async function screenByLabel(label: string): Promise<HTMLElement> {
 	const { findByLabelText } = await import("@testing-library/react");
 	return findByLabelText(document.body, label);
 }
-
 async function screenByText(text: string): Promise<HTMLElement> {
 	const { findByText } = await import("@testing-library/react");
 	return findByText(document.body, text);
 }
-
 async function queryByLabel(label: string): Promise<HTMLElement | null> {
 	const { queryByLabelText } = await import("@testing-library/react");
 	return queryByLabelText(document.body, label);
 }
-
 async function queryByText(text: string): Promise<HTMLElement | null> {
 	const { queryByText } = await import("@testing-library/react");
 	return queryByText(document.body, text);

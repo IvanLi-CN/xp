@@ -135,11 +135,14 @@ Response:
 
 ## GET `/api/mihomo/resources/{resource_id}`
 
+- 外部资源镜像的长期边界见 [资源镜像 Spec][resource-mirror-spec]。
 - `resource_id` 是使用现有集群持久化密钥对规范化原 URL 做 HMAC-SHA-256 后的十六进制值。
 - 目录只包含当前 Mihomo profile 仍引用的 GeoX、规则 provider、代理 provider URL，以及 XP 固定 GeoX 资产；不接受 `url` 查询参数或其它任意上游地址。
 - 资源内容不在 XP 缓存、不写磁盘、不聚合到内存；上游响应按块流式转发。XP 施加 256 MiB、90 秒总超时、全局 32 条和单资源 4 条并发限制。
 - 初始 URL 和每个重定向目标都必须是无 userinfo 的 HTTPS；重定向在服务端最多跟随 5 次，客户端永远看不到 `Location`。
-- 集群设置 `allow_private_targets=false`（默认）时，XP 会对初始 URL 和每个重定向目标做 DNS 解析并固定到解析结果，拒绝 loopback、私网、链路本地、保留和文档地址，返回 `403 private_target_blocked`。开启后保留原有的最终目标直连语义。
+- 初始 URL 与每次重定向均执行 DNS/地址复核，连接固定到节点策略获准的结果。
+- 私网目标仅由 [节点本地 CIDR 策略][resource-private-policy] 授权；特殊地址仍拒绝。
+- 所有响应（包括成功、上游错误、限额错误和目录 miss）均带 `Cache-Control: no-store`，且不透传上游缓存元数据。
 
 Responses:
 
@@ -150,13 +153,13 @@ Responses:
 - `502`: DNS、连接、TLS 或重定向解析失败
 - `504`: 90 秒总超时
 - `508`: 第六次重定向
-- `403`: 集群策略拒绝私网、回环或链路本地目标
+- `403`: 节点策略拒绝私网、回环或其他禁止的特殊目标
 - upstream `4xx/5xx`: 保留状态码，使用 XP 固定错误体且不透传上游响应体或 `Location`
 
 ## GET `/api/admin/mihomo/resource-policy`
 
 - 需要管理员认证。
-- 返回当前集群级外部资源镜像策略：
+- 兼容入口，固定返回以下值，不代表节点当前有效 CIDR 策略：
 
 ```json
 {"allow_private_targets": false}
@@ -165,13 +168,11 @@ Responses:
 ## PUT `/api/admin/mihomo/resource-policy`
 
 - 需要管理员认证。
-- 请求体：
+- 固定返回 `410 Gone`，不得写入 Raft 或改变镜像准入策略。
+- 节点覆盖通过节点详情 policy API 管理，部署默认来自 `XP_MIHOMO_ALLOWED_PRIVATE_CIDRS`。
 
-```json
-{"allow_private_targets": true}
-```
-
-- 设置通过 Raft 持久化并立即作用于所有节点的公开镜像请求。
+[resource-mirror-spec]: ../../mihomo-external-resource-mirror/SPEC.md
+[resource-private-policy]: ../../mihomo-private-resource-cidrs/SPEC.md
 
 ## GET `/api/sub/{subscription_token}/mihomo/provider/system`
 

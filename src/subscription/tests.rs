@@ -45,6 +45,8 @@ use xp_test_fixtures::{
 fn mihomo_mirror_rewrites_external_resources_and_injects_fixed_geox_assets() {
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
+geox-url:
+  geoip: https://custom.example/geoip.dat
 rule-providers:
   ads:
     type: http
@@ -77,12 +79,22 @@ proxy-providers:
         .get("geox-url")
         .and_then(Value::as_mapping)
         .expect("fixed geox map");
-    assert!(geox.contains_key(Value::String("geoip".to_string())));
-    assert!(
-        geox.get(Value::String("geoip".to_string()))
-            .and_then(Value::as_str)
-            .is_some_and(|url| url.starts_with(xp_test_fixtures::mihomo_mirror_base_url()))
+    for name in ["geoip", "geosite", "mmdb", "asn"] {
+        assert!(
+            geox.get(Value::String(name.to_string()))
+                .and_then(Value::as_str)
+                .is_some_and(|url| url.starts_with(xp_test_fixtures::mihomo_mirror_base_url()))
+        );
+    }
+    let custom_geoip = geox
+        .get(Value::String("geoip".to_string()))
+        .and_then(Value::as_str)
+        .expect("custom geoip should be preserved through the mirror");
+    let custom_id = crate::mihomo_resources::resource_id(
+        SEED,
+        &normalize_mihomo_external_url("https://custom.example/geoip.dat").unwrap(),
     );
+    assert!(custom_geoip.ends_with(&custom_id));
     let provider = root
         .get("proxy-providers")
         .and_then(Value::as_mapping)
@@ -99,6 +111,31 @@ proxy-providers:
         provider.get(Value::String("proxy".to_string())),
         Some(&Value::String("DIRECT".to_string()))
     );
+
+    let no_geox_yaml = build_mihomo_provider_yaml_with_node_probes_mode(
+        SEED,
+        &user("alice"),
+        &[],
+        &[],
+        &[],
+        &BTreeMap::new(),
+        &UserMihomoProfile {
+            mixin_yaml: "port: 0\n".to_string(),
+            ..UserMihomoProfile::default()
+        },
+        xp_test_fixtures::subscription_provider_system_url(),
+        MihomoExternalResourceMode::Mirror,
+        xp_test_fixtures::mihomo_mirror_base_url(),
+    )
+    .expect("mirror rendering should inject GeoX defaults");
+    let no_geox: Value = serde_yaml::from_str(&no_geox_yaml).expect("valid yaml");
+    let no_geox = no_geox
+        .get("geox-url")
+        .and_then(Value::as_mapping)
+        .expect("injected geox map");
+    for name in ["geoip", "geosite", "mmdb", "asn"] {
+        assert!(no_geox.contains_key(Value::String(name.to_string())));
+    }
 }
 
 #[test]

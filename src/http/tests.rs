@@ -31,6 +31,10 @@ mod history_recovery_preflight;
 #[path = "tests/history_repository.rs"]
 mod history_repository;
 mod managed_vless_create;
+#[path = "tests/mihomo_external_resource.rs"]
+mod mihomo_external_resource;
+#[path = "tests/mihomo_resource_route.rs"]
+mod mihomo_resource_route;
 mod mihomo_smux;
 #[path = "tests/platform_assets.rs"]
 mod platform_assets;
@@ -5562,7 +5566,6 @@ async fn subscription_endpoint_does_not_require_auth() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
-
     let token = setup_subscription_fixtures(&tmp, &app)
         .await
         .subscription_token;
@@ -5754,7 +5757,6 @@ async fn subscription_format_mihomo_does_not_require_a_raft_leader() {
         .await
         .unwrap();
     assert_eq!(put_res.status(), StatusCode::OK);
-
     let follower_raft = no_leader_raft(store.clone(), &cluster);
     let follower_app = build_app_with_cluster_store_and_raft(
         config,
@@ -5763,7 +5765,6 @@ async fn subscription_format_mihomo_does_not_require_a_raft_leader() {
         follower_raft,
         ReconcileHandle::noop(),
     );
-
     let res = follower_app
         .oneshot(req(
             "GET",
@@ -6218,9 +6219,7 @@ async fn mihomo_mirror_query_rewrites_urls_and_rejects_non_mihomo_formats() {
             .as_str()
             .is_some_and(|message| message.contains("requires a Mihomo profile"))
     );
-
-    let arbitrary_res = app
-        .clone()
+    let arbitrary_res = app.clone()
         .oneshot(req(
             "GET",
             "/api/mihomo/resources/0000000000000000000000000000000000000000000000000000000000000000?url=https%3A%2F%2Fexample.com%2Fanything",
@@ -6228,7 +6227,15 @@ async fn mihomo_mirror_query_rewrites_urls_and_rejects_non_mihomo_formats() {
         .await
         .unwrap();
     assert_eq!(arbitrary_res.status(), StatusCode::NOT_FOUND);
-
+    assert_eq!(arbitrary_res.headers()[header::CACHE_CONTROL], "no-store");
+    let method_path = format!("/api/mihomo/resources/{}", "0".repeat(64));
+    let method_res = app
+        .clone()
+        .oneshot(req("POST", &method_path))
+        .await
+        .unwrap();
+    assert_eq!(method_res.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(method_res.headers()[header::CACHE_CONTROL], "no-store");
     let raw_res = app
         .oneshot(req(
             "GET",
@@ -6238,17 +6245,14 @@ async fn mihomo_mirror_query_rewrites_urls_and_rejects_non_mihomo_formats() {
         .unwrap();
     assert_eq!(raw_res.status(), StatusCode::BAD_REQUEST);
 }
-
 #[tokio::test]
 async fn admin_user_mihomo_profile_roundtrip_and_subscription_rendering() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
     set_bootstrap_node_access_host(&store, "example.com").await;
-
     let fixtures = setup_subscription_fixtures(&tmp, &app).await;
     let user_id = fixtures.user_id.clone();
     let token = fixtures.subscription_token.clone();
-
     let put_res = app
         .clone()
         .oneshot(req_authed_json(

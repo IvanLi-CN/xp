@@ -2,11 +2,12 @@
 
 use std::{
     collections::BTreeMap,
+    future::Future,
     io,
     net::SocketAddr,
     pin::Pin,
     sync::{Arc, OnceLock},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use axum::{
@@ -20,6 +21,7 @@ use hmac::{Hmac, Mac};
 use reqwest::{Client, Url};
 use sha2::Sha256;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
+use tokio::time::Instant;
 
 use crate::mihomo_policy::{self, MihomoResourcePolicy, PolicySnapshot};
 use crate::{state::UserMihomoProfile, subscription};
@@ -52,6 +54,16 @@ pub const FIXED_GEOX_ASSETS: &[(&str, &str)] = &[
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static GLOBAL_LIMIT: OnceLock<Arc<Semaphore>> = OnceLock::new();
 static RESOURCE_LIMITS: OnceLock<Mutex<BTreeMap<String, Arc<Semaphore>>>> = OnceLock::new();
+#[cfg(test)]
+static PROXY_TEST_SERIAL: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(test)]
+async fn proxy_test_serial() -> tokio::sync::MutexGuard<'static, ()> {
+    PROXY_TEST_SERIAL
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .await
+}
 
 #[derive(Default)]
 pub struct ResourceDirectoryCache {
@@ -136,14 +148,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn not_found_response_is_uncacheable() {
+        let response = not_found_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
+    }
+
     #[tokio::test]
     async fn proxy_streams_success_and_hides_upstream_error_bodies() {
+        let _serial = proxy_test_serial().await;
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/resource"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .insert_header("content-encoding", "gzip")
+                    .insert_header("cache-control", "public, max-age=3600")
+                    .insert_header("etag", "\"upstream\"")
+                    .insert_header("last-modified", "Wed, 21 Oct 2015 07:28:00 GMT")
+                    .insert_header("expires", "Wed, 21 Oct 2030 07:28:00 GMT")
                     .set_body_bytes(b"chunk-onechunk-two"),
             )
             .mount(&server)
@@ -159,6 +186,13 @@ mod tests {
             response.headers().get(header::CONTENT_ENCODING),
             Some(&HeaderValue::from_static("gzip"))
         );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
+        assert!(response.headers().get(header::ETAG).is_none());
+        assert!(response.headers().get(header::LAST_MODIFIED).is_none());
+        assert!(response.headers().get(header::EXPIRES).is_none());
         assert_eq!(
             response.into_body().collect().await.unwrap().to_bytes(),
             Bytes::from_static(b"chunk-onechunk-two")
@@ -176,6 +210,10 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert!(
             !body
@@ -184,8 +222,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn declared_payload_limit_is_checked_before_streaming() {
+        assert!(declared_payload_too_large(Some(MAX_RESOURCE_BYTES + 1)));
+        assert!(!declared_payload_too_large(Some(MAX_RESOURCE_BYTES)));
+        assert!(!declared_payload_too_large(None));
+    }
+
+    #[test]
+    fn concurrency_limits_are_bounded() {
+        let global = Semaphore::new(GLOBAL_CONCURRENCY);
+        let global_permits = (0..GLOBAL_CONCURRENCY)
+            .map(|_| global.try_acquire().expect("global permit"))
+            .collect::<Vec<_>>();
+        assert!(global.try_acquire().is_err());
+        drop(global_permits);
+
+        let resource = Semaphore::new(PER_RESOURCE_CONCURRENCY);
+        let resource_permits = (0..PER_RESOURCE_CONCURRENCY)
+            .map(|_| resource.try_acquire().expect("resource permit"))
+            .collect::<Vec<_>>();
+        assert!(resource.try_acquire().is_err());
+        drop(resource_permits);
+    }
+
     #[tokio::test]
     async fn proxy_follows_five_redirects_but_not_the_sixth() {
+        let _serial = proxy_test_serial().await;
         let server = MockServer::start().await;
         for index in 0..5 {
             Mock::given(method("GET"))
@@ -226,6 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn proxy_blocks_private_targets_when_policy_is_disabled() {
+        let _serial = proxy_test_serial().await;
         let response = proxy_resource(
             Url::parse("http://127.0.0.1:9/internal").unwrap(),
             "private-target-test",
@@ -233,6 +297,61 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn proxy_rejects_the_fifth_request_for_one_resource() {
+        let _serial = proxy_test_serial().await;
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/slow"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_millis(200))
+                    .set_body_string("ok"),
+            )
+            .mount(&server)
+            .await;
+        let responses = futures_util::future::join_all((0..5).map(|_| {
+            proxy_resource(
+                Url::parse(&format!("{}/slow", server.uri())).unwrap(),
+                "concurrency-test",
+                true,
+            )
+        }))
+        .await;
+        let mut rejected = 0;
+        for response in responses {
+            if response.status() == StatusCode::TOO_MANY_REQUESTS {
+                rejected += 1;
+            } else {
+                assert_eq!(response.status(), StatusCode::OK);
+                response.into_body().collect().await.unwrap();
+            }
+        }
+        assert_eq!(rejected, 1);
+    }
+
+    #[tokio::test]
+    async fn proxy_rejects_when_process_limit_is_full() {
+        let _serial = proxy_test_serial().await;
+        let global = GLOBAL_LIMIT
+            .get_or_init(|| Arc::new(Semaphore::new(GLOBAL_CONCURRENCY)))
+            .clone();
+        let mut permits = Vec::with_capacity(GLOBAL_CONCURRENCY);
+        for _ in 0..GLOBAL_CONCURRENCY {
+            permits.push(global.clone().acquire_owned().await.unwrap());
+        }
+        let response = proxy_resource_with_snapshot(
+            Url::parse("https://example.com/resource").unwrap(),
+            "process-concurrency-test",
+            None,
+            resource_deadline(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+        drop(permits);
     }
 
     #[tokio::test]
@@ -249,6 +368,112 @@ mod tests {
         assert_eq!(cache.lookup_cached(1, &id).await, Some(Some(url)));
         assert!(cache.lookup_cached(2, &id).await.is_none());
     }
+
+    #[test]
+    fn resource_directory_lifecycle_tracks_shared_references_and_profile_replacement() {
+        let shared_url = "https://rules.example/shared.yaml";
+        let shared_id = resource_id(
+            "cluster-key",
+            &subscription::normalize_mihomo_external_url(shared_url).unwrap(),
+        );
+        let profile = UserMihomoProfile {
+            mixin_yaml: format!(
+                "rule-providers:\n  shared:\n    type: http\n    url: {shared_url}\n"
+            ),
+            ..UserMihomoProfile::default()
+        };
+        let second_profile = profile.clone();
+
+        assert!(resolve_resource_url("cluster-key", &shared_id, &[profile.clone()]).is_some());
+        assert!(
+            resolve_resource_url(
+                "cluster-key",
+                &shared_id,
+                &[profile, second_profile.clone()]
+            )
+            .is_some()
+        );
+        assert!(resolve_resource_url("cluster-key", &shared_id, &[second_profile]).is_some());
+        assert!(resolve_resource_url("cluster-key", &shared_id, &[]).is_none());
+
+        let fixed_url = subscription::normalize_mihomo_external_url(FIXED_GEOX_ASSETS[0].1)
+            .expect("fixed GeoX URL");
+        let fixed_id = resource_id("cluster-key", &fixed_url);
+        assert!(resolve_resource_url("cluster-key", &fixed_id, &[]).is_some());
+        assert!(resolve_resource_url("other-key", &fixed_id, &[]).is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn request_timeout_maps_to_gateway_timeout() {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let result = await_upstream_response(
+            deadline,
+            std::future::pending::<Result<reqwest::Response, reqwest::Error>>(),
+        )
+        .await;
+
+        assert_eq!(
+            result.err(),
+            Some((StatusCode::GATEWAY_TIMEOUT, "upstream_timeout"))
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn streaming_timeout_is_reported_after_headers_without_rewriting_status() {
+        let global = Arc::new(Semaphore::new(1));
+        let resource = Arc::new(Semaphore::new(1));
+        let global_permit = global.clone().try_acquire_owned().unwrap();
+        let resource_permit = resource.clone().try_acquire_owned().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut body = Box::pin(limited_stream(
+            futures_util::stream::once(async {
+                Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"first"))
+            })
+            .chain(futures_util::stream::pending()),
+            deadline,
+            global_permit,
+            resource_permit,
+        ));
+
+        assert_eq!(
+            body.next().await.unwrap().unwrap(),
+            Bytes::from_static(b"first")
+        );
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let error = body.next().await.unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(body.next().await.is_none());
+        assert_eq!(global.available_permits(), 1);
+        assert_eq!(resource.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn streaming_payload_limit_terminates_after_the_limit() {
+        let global = Arc::new(Semaphore::new(1));
+        let resource = Arc::new(Semaphore::new(1));
+        let global_permit = global.clone().try_acquire_owned().unwrap();
+        let resource_permit = resource.clone().try_acquire_owned().unwrap();
+        let mut body = Box::pin(limited_stream_with_limit(
+            futures_util::stream::iter([
+                Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"123")),
+                Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"45")),
+            ]),
+            Instant::now() + Duration::from_secs(1),
+            4,
+            global_permit,
+            resource_permit,
+        ));
+
+        assert_eq!(
+            body.next().await.unwrap().unwrap(),
+            Bytes::from_static(b"123")
+        );
+        let error = body.next().await.unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(body.next().await.is_none());
+        assert_eq!(global.available_permits(), 1);
+        assert_eq!(resource.available_permits(), 1);
+    }
 }
 
 pub fn resource_id(cluster_ca_key_pem: &str, url: &Url) -> String {
@@ -257,6 +482,10 @@ pub fn resource_id(cluster_ca_key_pem: &str, url: &Url) -> String {
         .expect("HMAC accepts arbitrary cluster key bytes");
     mac.update(url.as_str().as_bytes());
     hex::encode(mac.finalize().into_bytes())
+}
+
+pub fn resource_deadline() -> Instant {
+    Instant::now() + RESOURCE_TIMEOUT
 }
 
 pub fn resolve_resource_url(
@@ -309,7 +538,7 @@ fn build_resource_client() -> Client {
 
 async fn build_public_resource_client(
     url: &Url,
-    timeout: Duration,
+    deadline: Instant,
     policy: &PolicySnapshot,
 ) -> Result<Client, (StatusCode, &'static str)> {
     let host = url
@@ -318,7 +547,7 @@ async fn build_public_resource_client(
     let port = url
         .port_or_known_default()
         .ok_or((StatusCode::BAD_GATEWAY, "upstream_unreachable"))?;
-    let lookup = tokio::time::timeout(timeout, tokio::net::lookup_host((host, port))).await;
+    let lookup = tokio::time::timeout_at(deadline, tokio::net::lookup_host((host, port))).await;
     let addrs: Vec<SocketAddr> = match lookup {
         Ok(Ok(addrs)) => addrs.collect(),
         Ok(Err(_)) => return Err((StatusCode::BAD_GATEWAY, "upstream_unreachable")),
@@ -346,8 +575,9 @@ pub async fn proxy_resource(
     resource_id_value: &str,
     allow_private_targets: bool,
 ) -> Response {
+    let deadline = resource_deadline();
     if allow_private_targets {
-        proxy_resource_with_snapshot(url, resource_id_value, None).await
+        proxy_resource_with_snapshot(url, resource_id_value, None, deadline).await
     } else {
         let snapshot = PolicySnapshot {
             deployment_default: Vec::new(),
@@ -357,7 +587,7 @@ pub async fn proxy_resource(
             status: mihomo_policy::PolicyStatus::Healthy,
             error: None,
         };
-        proxy_resource_with_snapshot(url, resource_id_value, Some(snapshot)).await
+        proxy_resource_with_snapshot(url, resource_id_value, Some(snapshot), deadline).await
     }
 }
 
@@ -366,14 +596,31 @@ pub async fn proxy_resource_with_policy(
     resource_id_value: &str,
     policy: &MihomoResourcePolicy,
 ) -> Response {
-    proxy_resource_with_snapshot(url, resource_id_value, Some(policy.snapshot().await)).await
+    proxy_resource_with_policy_until(url, resource_id_value, policy, resource_deadline()).await
+}
+
+pub async fn proxy_resource_with_policy_until(
+    url: Url,
+    resource_id_value: &str,
+    policy: &MihomoResourcePolicy,
+    deadline: Instant,
+) -> Response {
+    let snapshot = match tokio::time::timeout_at(deadline, policy.snapshot()).await {
+        Ok(snapshot) => snapshot,
+        Err(_) => return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout"),
+    };
+    proxy_resource_with_snapshot(url, resource_id_value, Some(snapshot), deadline).await
 }
 
 async fn proxy_resource_with_snapshot(
     url: Url,
     resource_id_value: &str,
     policy: Option<PolicySnapshot>,
+    deadline: Instant,
 ) -> Response {
+    if Instant::now() >= deadline {
+        return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout");
+    }
     let global = GLOBAL_LIMIT
         .get_or_init(|| Arc::new(Semaphore::new(GLOBAL_CONCURRENCY)))
         .clone();
@@ -384,7 +631,10 @@ async fn proxy_resource_with_snapshot(
 
     let resource_semaphore = {
         let limits = RESOURCE_LIMITS.get_or_init(|| Mutex::new(BTreeMap::new()));
-        let mut limits = limits.lock().await;
+        let mut limits = match tokio::time::timeout_at(deadline, limits.lock()).await {
+            Ok(limits) => limits,
+            Err(_) => return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout"),
+        };
         limits.retain(|_, semaphore| {
             semaphore.available_permits() < PER_RESOURCE_CONCURRENCY
                 || Arc::strong_count(semaphore) > 1
@@ -394,21 +644,23 @@ async fn proxy_resource_with_snapshot(
             .or_insert_with(|| Arc::new(Semaphore::new(PER_RESOURCE_CONCURRENCY)))
             .clone()
     };
+    if Instant::now() >= deadline {
+        return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout");
+    }
     let resource_permit = match resource_semaphore.try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => return error_response(StatusCode::TOO_MANY_REQUESTS, "concurrency_limit"),
     };
 
-    let deadline = Instant::now() + RESOURCE_TIMEOUT;
     let mut current = url;
     let mut redirects = 0;
     let response = loop {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+        if Instant::now() >= deadline {
             return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout");
-        };
+        }
         let client = match policy.as_ref() {
             None => CLIENT.get_or_init(build_resource_client).clone(),
-            Some(policy) => match build_public_resource_client(&current, remaining, policy).await {
+            Some(policy) => match build_public_resource_client(&current, deadline, policy).await {
                 Ok(client) => client,
                 Err((status, code)) => {
                     return error_response(status, code);
@@ -418,14 +670,9 @@ async fn proxy_resource_with_snapshot(
         let request = client
             .get(current.clone())
             .header(header::ACCEPT_ENCODING, "identity");
-        let response = match tokio::time::timeout(remaining, request.send()).await {
-            Ok(Ok(response)) => response,
-            Ok(Err(error)) if error.is_timeout() => {
-                return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout");
-            }
-            Ok(Err(_)) | Err(_) => {
-                return error_response(StatusCode::BAD_GATEWAY, "upstream_unreachable");
-            }
+        let response = match await_upstream_response(deadline, request.send()).await {
+            Ok(response) => response,
+            Err((status, code)) => return error_response(status, code),
         };
 
         if response.status().is_redirection() {
@@ -459,21 +706,16 @@ async fn proxy_resource_with_snapshot(
     if status.is_client_error() || status.is_server_error() {
         return error_response(status, "upstream_error");
     }
-    if let Some(length) = response.content_length()
-        && length > MAX_RESOURCE_BYTES
-    {
+    if declared_payload_too_large(response.content_length()) {
         return error_response(StatusCode::PAYLOAD_TOO_LARGE, "resource_too_large");
     }
 
     let mut builder = Response::builder().status(status);
+    builder = builder.header(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     for name in [
         header::CONTENT_TYPE,
         header::CONTENT_LENGTH,
         header::CONTENT_ENCODING,
-        header::CACHE_CONTROL,
-        header::ETAG,
-        header::LAST_MODIFIED,
-        header::EXPIRES,
     ] {
         if let Some(value) = response.headers().get(&name) {
             builder = builder.header(name, value);
@@ -488,6 +730,10 @@ async fn proxy_resource_with_snapshot(
     builder
         .body(Body::from_stream(stream))
         .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "response_build_failed"))
+}
+
+fn declared_payload_too_large(length: Option<u64>) -> bool {
+    length.is_some_and(|length| length > MAX_RESOURCE_BYTES)
 }
 
 type UpstreamStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
@@ -507,6 +753,22 @@ fn limited_stream(
     global_permit: OwnedSemaphorePermit,
     resource_permit: OwnedSemaphorePermit,
 ) -> impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static {
+    limited_stream_with_limit(
+        stream,
+        deadline,
+        MAX_RESOURCE_BYTES,
+        global_permit,
+        resource_permit,
+    )
+}
+
+fn limited_stream_with_limit(
+    stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+    deadline: Instant,
+    max_bytes: u64,
+    global_permit: OwnedSemaphorePermit,
+    resource_permit: OwnedSemaphorePermit,
+) -> impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static {
     let state = LimitedStream {
         stream: Box::pin(stream),
         deadline,
@@ -515,21 +777,21 @@ fn limited_stream(
         _global_permit: Some(global_permit),
         _resource_permit: Some(resource_permit),
     };
-    stream::unfold(state, |mut state| async move {
+    stream::unfold(state, move |mut state| async move {
         if state.done {
             return None;
         }
-        let Some(remaining) = state.deadline.checked_duration_since(Instant::now()) else {
+        if Instant::now() >= state.deadline {
             state.done = true;
             return Some((
                 Err(io::Error::new(io::ErrorKind::TimedOut, "upstream timeout")),
                 state,
             ));
-        };
-        match tokio::time::timeout(remaining, state.stream.next()).await {
+        }
+        match tokio::time::timeout_at(state.deadline, state.stream.next()).await {
             Ok(Some(Ok(chunk))) => {
                 state.seen = state.seen.saturating_add(chunk.len() as u64);
-                if state.seen > MAX_RESOURCE_BYTES {
+                if state.seen > max_bytes {
                     state.done = true;
                     return Some((
                         Err(io::Error::new(
@@ -557,16 +819,48 @@ fn limited_stream(
     })
 }
 
+async fn await_upstream_response<F>(
+    deadline: Instant,
+    request: F,
+) -> Result<reqwest::Response, (StatusCode, &'static str)>
+where
+    F: Future<Output = Result<reqwest::Response, reqwest::Error>>,
+{
+    match tokio::time::timeout_at(deadline, request).await {
+        Ok(Ok(response)) => Ok(response),
+        Ok(Err(error)) if error.is_timeout() => {
+            Err((StatusCode::GATEWAY_TIMEOUT, "upstream_timeout"))
+        }
+        Ok(Err(_)) => Err((StatusCode::BAD_GATEWAY, "upstream_unreachable")),
+        Err(_) => Err((StatusCode::GATEWAY_TIMEOUT, "upstream_timeout")),
+    }
+}
+
 fn error_response(status: StatusCode, code: &'static str) -> Response {
     let mut response = (status, format!("xp_mihomo_resource_error: {code}\n")).into_response();
     response.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("text/plain; charset=utf-8"),
     );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     if status == StatusCode::TOO_MANY_REQUESTS {
         response
             .headers_mut()
             .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
     }
+    response
+}
+
+pub fn upstream_timeout_response() -> Response {
+    error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout")
+}
+
+pub fn not_found_response() -> Response {
+    let mut response = (StatusCode::NOT_FOUND, "not found\n").into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }

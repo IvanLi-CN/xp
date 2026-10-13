@@ -65,6 +65,75 @@ test("demo user details follow the production user-management layout", async ({
 	await expect(dialog).toContainText("vless://");
 });
 
+test("demo user details expose the Mihomo mirror workflow", async ({
+	page,
+}) => {
+	await page.goto("/demo/login");
+	await page.getByRole("button", { name: "Enter demo" }).click();
+	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+
+	const subscriptionFormat = page.getByTestId("demo-subscription-format");
+	await subscriptionFormat.locator("label").nth(2).click();
+	const mirrorToggle = page.getByRole("checkbox", {
+		name: "Use XP mirror for external resources",
+	});
+	await expect(mirrorToggle).toBeVisible();
+	await mirrorToggle.check();
+	await page.getByRole("button", { name: "Fetch" }).click();
+
+	const dialog = page.getByRole("dialog");
+	await expect(dialog).toBeVisible();
+	await expect(
+		dialog.getByRole("checkbox", {
+			name: "Use XP mirror for external resources",
+		}),
+	).toBeChecked();
+	await expect(dialog).toContainText("# XP mirror mode");
+	await expect(dialog).toContainText(
+		"https://xp.example.net/api/mihomo/resources/demo-rules",
+	);
+
+	await dialog
+		.getByRole("checkbox", {
+			name: "Use XP mirror for external resources",
+		})
+		.uncheck();
+	await expect(
+		dialog.getByRole("checkbox", {
+			name: "Use XP mirror for external resources",
+		}),
+	).not.toBeChecked();
+	await expect(dialog).not.toContainText("# XP mirror mode");
+	await dialog.getByRole("button", { name: "Close" }).click();
+	await expect(mirrorToggle).not.toBeChecked();
+
+	await subscriptionFormat.locator("label").nth(0).click();
+	await expect(
+		page.getByRole("checkbox", {
+			name: "Use XP mirror for external resources",
+		}),
+	).toHaveCount(0);
+});
+
+test("demo mirror reports a missing Mihomo profile", async ({ page }) => {
+	await page.goto("/demo/login");
+	await page.getByRole("button", { name: "Enter demo" }).click();
+	await page.goto(`/demo/users/${fixtureCatalog.identifier.userQuinary()}`);
+
+	const subscriptionFormat = page.getByTestId("demo-subscription-format");
+	await subscriptionFormat.locator("label").nth(2).click();
+	await page
+		.getByRole("checkbox", {
+			name: "Use XP mirror for external resources",
+		})
+		.check();
+	await page.getByRole("button", { name: "Fetch" }).click();
+
+	const dialog = page.getByRole("dialog");
+	await expect(dialog).toContainText("saved Mihomo profile");
+	await expect(dialog).toContainText("Subscription preview");
+});
+
 test("resets Demo user drafts when the detail route changes", async ({
 	page,
 }) => {

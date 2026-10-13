@@ -29,6 +29,7 @@ mod api_error;
 mod embedded_ui;
 mod endpoint_requests;
 mod mesh;
+mod mihomo_resource_route;
 mod node_delete;
 mod resource_alerts;
 mod resource_history_capacity;
@@ -1463,7 +1464,12 @@ pub fn build_router_with_mesh_telemetry(
             "/sub/{subscription_token}/mihomo/provider/system",
             get(get_subscription_mihomo_provider_system),
         )
-        .route("/mihomo/resources/{resource_id}", get(get_mihomo_resource))
+        .route(
+            "/mihomo/resources/{resource_id}",
+            get(mihomo_resource_route::get_mihomo_resource).layer(middleware::from_fn(
+                mihomo_resource_route::no_store_response,
+            )),
+        )
         .route("/sub/{subscription_token}", get(get_subscription))
         .nest("/admin", admin)
         .fallback(fallback_not_found);
@@ -8756,57 +8762,6 @@ async fn get_subscription_mihomo_provider_system(
         &state.config.api_base_url,
         subscription::MihomoExternalResourceMode::Direct,
     )
-}
-
-async fn get_mihomo_resource(
-    Extension(state): Extension<AppState>,
-    Path(resource_id): Path<String>,
-) -> Response {
-    let Some(cluster_ca_key_pem) = state.cluster_ca_key_pem.as_ref().as_ref() else {
-        return (StatusCode::NOT_FOUND, "not found\n").into_response();
-    };
-    if resource_id.len() != 64 || !resource_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return (StatusCode::NOT_FOUND, "not found\n").into_response();
-    }
-    let url = loop {
-        let (revision, profiles) = {
-            let store = state.store.lock().await;
-            (
-                store.state().mihomo_resource_revision,
-                store
-                    .state()
-                    .user_mihomo_profiles
-                    .values()
-                    .cloned()
-                    .collect::<Vec<_>>(),
-            )
-        };
-        let url = match state
-            .mihomo_resource_directory
-            .lookup_cached(revision, &resource_id)
-            .await
-        {
-            Some(cached) => cached,
-            None => {
-                state
-                    .mihomo_resource_directory
-                    .rebuild_and_lookup(cluster_ca_key_pem, revision, &profiles, &resource_id)
-                    .await
-            }
-        };
-        let current_revision = {
-            let store = state.store.lock().await;
-            store.state().mihomo_resource_revision
-        };
-        if current_revision == revision {
-            break url;
-        }
-    };
-    let Some(url) = url else {
-        return (StatusCode::NOT_FOUND, "not found\n").into_response();
-    };
-    mihomo_resources::proxy_resource_with_policy(url, &resource_id, &state.mihomo_resource_policy)
-        .await
 }
 
 #[cfg(test)]
