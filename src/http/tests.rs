@@ -6227,6 +6227,7 @@ async fn mihomo_mirror_query_rewrites_urls_and_rejects_non_mihomo_formats() {
         .await
         .unwrap();
     assert_eq!(arbitrary_res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(arbitrary_res.headers()[header::CACHE_CONTROL], "no-store");
 
     let raw_res = app
         .oneshot(req(

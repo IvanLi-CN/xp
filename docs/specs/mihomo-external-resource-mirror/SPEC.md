@@ -87,6 +87,7 @@ https://<node-origin>/api/sub/<token>?format=mihomo&external_resources=mirror
 
 - XP 必须直接访问原 URL，不使用环境代理、Mesh 或客户端提供的上游 Header。
 - 内容必须逐块转发，不缓存、不写磁盘、不聚合完整响应；资源目录元数据不属于内容缓存。
+- 所有镜像响应（成功、错误和目录 miss）必须带 `Cache-Control: no-store`；不得透传上游缓存校验或过期元数据。
 - 每次请求必须限制为 `256 MiB`、`90` 秒总预算、每进程 `32` 条和单资源 `4` 条并发。
 - 服务端最多跟随 `5` 次无 userinfo 的 HTTPS 重定向，不向客户端透传 `Location`。
 - 传输中越过大小或时间上限必须终止响应流；已发送响应头后不得承诺改写 HTTP 状态码。

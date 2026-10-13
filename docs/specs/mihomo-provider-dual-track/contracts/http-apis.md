@@ -142,6 +142,7 @@ Response:
 - 初始 URL 和每个重定向目标都必须是无 userinfo 的 HTTPS；重定向在服务端最多跟随 5 次，客户端永远看不到 `Location`。
 - 初始 URL 与每次重定向均执行 DNS/地址复核，连接固定到节点策略获准的结果。
 - 私网目标仅由 [节点本地 CIDR 策略][resource-private-policy] 授权；特殊地址仍拒绝。
+- 所有响应（包括成功、上游错误、限额错误和目录 miss）均带 `Cache-Control: no-store`，且不透传上游缓存元数据。
 
 Responses:
 

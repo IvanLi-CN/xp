@@ -424,8 +424,9 @@ pub async fn proxy_resource(
     resource_id_value: &str,
     allow_private_targets: bool,
 ) -> Response {
+    let deadline = Instant::now() + RESOURCE_TIMEOUT;
     if allow_private_targets {
-        proxy_resource_with_snapshot(url, resource_id_value, None).await
+        proxy_resource_with_snapshot(url, resource_id_value, None, deadline).await
     } else {
         let snapshot = PolicySnapshot {
             deployment_default: Vec::new(),
@@ -435,7 +436,7 @@ pub async fn proxy_resource(
             status: mihomo_policy::PolicyStatus::Healthy,
             error: None,
         };
-        proxy_resource_with_snapshot(url, resource_id_value, Some(snapshot)).await
+        proxy_resource_with_snapshot(url, resource_id_value, Some(snapshot), deadline).await
     }
 }
 
@@ -444,14 +445,23 @@ pub async fn proxy_resource_with_policy(
     resource_id_value: &str,
     policy: &MihomoResourcePolicy,
 ) -> Response {
-    proxy_resource_with_snapshot(url, resource_id_value, Some(policy.snapshot().await)).await
+    let deadline = Instant::now() + RESOURCE_TIMEOUT;
+    let snapshot = match tokio::time::timeout_at(deadline, policy.snapshot()).await {
+        Ok(snapshot) => snapshot,
+        Err(_) => return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout"),
+    };
+    proxy_resource_with_snapshot(url, resource_id_value, Some(snapshot), deadline).await
 }
 
 async fn proxy_resource_with_snapshot(
     url: Url,
     resource_id_value: &str,
     policy: Option<PolicySnapshot>,
+    deadline: Instant,
 ) -> Response {
+    if Instant::now() >= deadline {
+        return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout");
+    }
     let global = GLOBAL_LIMIT
         .get_or_init(|| Arc::new(Semaphore::new(GLOBAL_CONCURRENCY)))
         .clone();
@@ -462,7 +472,10 @@ async fn proxy_resource_with_snapshot(
 
     let resource_semaphore = {
         let limits = RESOURCE_LIMITS.get_or_init(|| Mutex::new(BTreeMap::new()));
-        let mut limits = limits.lock().await;
+        let mut limits = match tokio::time::timeout_at(deadline, limits.lock()).await {
+            Ok(limits) => limits,
+            Err(_) => return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout"),
+        };
         limits.retain(|_, semaphore| {
             semaphore.available_permits() < PER_RESOURCE_CONCURRENCY
                 || Arc::strong_count(semaphore) > 1
@@ -472,12 +485,14 @@ async fn proxy_resource_with_snapshot(
             .or_insert_with(|| Arc::new(Semaphore::new(PER_RESOURCE_CONCURRENCY)))
             .clone()
     };
+    if Instant::now() >= deadline {
+        return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout");
+    }
     let resource_permit = match resource_semaphore.try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => return error_response(StatusCode::TOO_MANY_REQUESTS, "concurrency_limit"),
     };
 
-    let deadline = Instant::now() + RESOURCE_TIMEOUT;
     let mut current = url;
     let mut redirects = 0;
     let response = loop {
