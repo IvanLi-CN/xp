@@ -165,14 +165,13 @@ mod tests {
             response.headers().get(header::CONTENT_ENCODING),
             Some(&HeaderValue::from_static("gzip"))
         );
-        for name in [
-            header::CACHE_CONTROL,
-            header::ETAG,
-            header::LAST_MODIFIED,
-            header::EXPIRES,
-        ] {
-            assert!(response.headers().get(name).is_none());
-        }
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
+        assert!(response.headers().get(header::ETAG).is_none());
+        assert!(response.headers().get(header::LAST_MODIFIED).is_none());
+        assert!(response.headers().get(header::EXPIRES).is_none());
         assert_eq!(
             response.into_body().collect().await.unwrap().to_bytes(),
             Bytes::from_static(b"chunk-onechunk-two")
@@ -524,6 +523,7 @@ async fn proxy_resource_with_snapshot(
     }
 
     let mut builder = Response::builder().status(status);
+    builder = builder.header(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     for name in [
         header::CONTENT_TYPE,
         header::CONTENT_LENGTH,
