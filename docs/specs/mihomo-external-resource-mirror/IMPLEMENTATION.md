@@ -15,7 +15,7 @@
 | REQ-MIRROR-006           | `src/mihomo_resources.rs` 的 HMAC ID/目录与 HTTP 目录版本复核 |
 | REQ-MIRROR-007、009      | `src/mihomo_resources.rs` 的流式转发、限额和错误映射          |
 | REQ-MIRROR-008           | `src/mihomo_policy.rs` 与资源转发前的地址过滤/固定            |
-| REQ-MIRROR-010           | `UserDetailsPage`、`SubscriptionPreviewDialog` 与共享镜像开关 |
+| REQ-MIRROR-010           | 生产页与 Demo 的共享镜像开关                                  |
 | REQ-MIRROR-011           | XP 内的共享 HTTP 路由与节点本地策略，部署路径见 ops 文档      |
 
 已有测试覆盖：
@@ -27,6 +27,7 @@
 - `src/mihomo_resources.rs`：流式转发、缓存禁止、错误脱敏、重定向、并发/大小限制和统一截止时间；资源路由准入与转发共用截止时间。
 - `src/mihomo_policy.rs`：节点策略文件、环境默认与 CIDR 校验。
 - `web/src/views/UserDetailsPage.test.tsx`：镜像开关只作用于 Mihomo 预览与复制链接。
+- Demo mock/E2E：镜像内容、状态同步、Raw/Clash 隐藏开关与无 profile 错误态。
 
 ## Remaining Gaps
 

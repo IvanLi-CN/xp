@@ -1,3 +1,4 @@
+import type { SubscriptionFormat } from "@/api/subscription";
 import type {
 	DemoEndpoint,
 	DemoEndpointStatus,
@@ -48,6 +49,14 @@ export function shortDate(value: string | null): string {
 	}).format(new Date(value));
 }
 
-export function subscriptionUrl(token: string): string {
-	return `https://xp.example.net/api/sub/${encodeURIComponent(token)}?format=mihomo`;
+export function subscriptionUrl(
+	token: string,
+	format: SubscriptionFormat = "mihomo",
+	externalResourceMirror = false,
+): string {
+	const params = new URLSearchParams({ format });
+	if (format === "mihomo" && externalResourceMirror) {
+		params.set("external_resources", "mirror");
+	}
+	return `https://xp.example.net/api/sub/${encodeURIComponent(token)}?${params.toString()}`;
 }

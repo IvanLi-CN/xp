@@ -1,10 +1,6 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import {
-	DEFAULT_SUBSCRIPTION_FORMAT,
-	type SubscriptionFormat,
-} from "@/api/subscription";
 import { Badge } from "@/components/ui/badge";
 
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
@@ -22,6 +18,7 @@ import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
+import { SubscriptionResourceMirrorToggle } from "../components/SubscriptionResourceMirrorToggle";
 import { useToast } from "../components/Toast";
 import { buttonVariants } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
@@ -35,15 +32,10 @@ import {
 } from "../components/ui/select";
 import { useMihomoProfileDraft } from "../hooks/useMihomoProfileDraft";
 import { DemoUsersTable } from "./DemoUsersTable";
-import {
-	formatGb,
-	shortDate,
-	subscriptionUrl,
-	userStatusVariant,
-} from "./format";
-import { fetchDemoSubscription } from "./mockApi";
+import { formatGb, shortDate, userStatusVariant } from "./format";
 import { useDemo } from "./store";
 import type { DemoEndpoint, DemoUser } from "./types";
+import { useDemoSubscriptionPreview } from "./useDemoSubscriptionPreview";
 import { useDemoUserDraftNavigation } from "./useDemoUserDraftNavigation";
 
 const DEMO_PROTOCOLS = [
@@ -483,14 +475,6 @@ export function DemoUserDetailsPage() {
 	const [selectedIds, setSelectedIds] = useState<string[]>(
 		user?.endpointIds ?? [],
 	);
-	const [subscriptionFormat, setSubscriptionFormat] =
-		useState<SubscriptionFormat>(DEFAULT_SUBSCRIPTION_FORMAT);
-	const [subscriptionOpen, setSubscriptionOpen] = useState(false);
-	const [subscriptionLoading, setSubscriptionLoading] = useState(false);
-	const [subscriptionText, setSubscriptionText] = useState("");
-	const [subscriptionError, setSubscriptionError] = useState<string | null>(
-		null,
-	);
 	const [activeUsageNodeId, setActiveUsageNodeId] = useState<string | null>(
 		null,
 	);
@@ -516,6 +500,19 @@ export function DemoUserDetailsPage() {
 		user?.tier,
 	]);
 	const currentUser = user;
+	const {
+		subscriptionFormat,
+		setSubscriptionFormat,
+		subscriptionOpen,
+		setSubscriptionOpen,
+		subscriptionLoading,
+		subscriptionText,
+		subscriptionError,
+		useExternalResourceMirror,
+		fetchSubscriptionPreview,
+		handleExternalResourceMirrorChange,
+		subscriptionPreviewUrl,
+	} = useDemoSubscriptionPreview({ state, user: currentUser });
 	const mihomoProfile: AdminUserMihomoProfile | undefined = currentUser
 		? {
 				mixin_yaml: currentUser.mihomoMixinYaml,
@@ -714,27 +711,6 @@ export function DemoUserDetailsPage() {
 		usageGroups[0] ??
 		null;
 
-	async function fetchSubscriptionPreview(nextFormat = subscriptionFormat) {
-		const userForPreview = currentUser;
-		if (!userForPreview) return;
-		setSubscriptionOpen(true);
-		setSubscriptionFormat(nextFormat);
-		setSubscriptionLoading(true);
-		setSubscriptionError(null);
-		try {
-			setSubscriptionText(
-				await fetchDemoSubscription(state, userForPreview, nextFormat),
-			);
-		} catch (error) {
-			setSubscriptionError(
-				error instanceof Error ? error.message : "Failed to load subscription.",
-			);
-			setSubscriptionText("");
-		} finally {
-			setSubscriptionLoading(false);
-		}
-	}
-
 	function resetSubscriptionToken() {
 		const userForReset = currentUser;
 		if (!userForReset) return;
@@ -930,8 +906,15 @@ export function DemoUserDetailsPage() {
 								testId="demo-subscription-format"
 								value={subscriptionFormat}
 							/>
+							{subscriptionFormat === "mihomo" ? (
+								<SubscriptionResourceMirrorToggle
+									checked={useExternalResourceMirror}
+									disabled={subscriptionLoading}
+									onCheckedChange={handleExternalResourceMirrorChange}
+								/>
+							) : null}
 							<CopyButton
-								text={subscriptionUrl(user.subscriptionToken)}
+								text={subscriptionPreviewUrl}
 								label="Copy URL"
 								ariaLabel="Copy subscription URL"
 								className="self-end"
@@ -941,7 +924,6 @@ export function DemoUserDetailsPage() {
 								iconLeft={<Icon name="tabler:cloud-download" />}
 								loading={subscriptionLoading}
 								onClick={() => {
-									setSubscriptionOpen(true);
 									void fetchSubscriptionPreview(subscriptionFormat);
 								}}
 							>
@@ -949,8 +931,8 @@ export function DemoUserDetailsPage() {
 							</Button>
 						</div>
 						<div className="text-xs text-muted-foreground">
-							Preview opens in a modal. The mock output follows the current Demo
-							seed and selected endpoint access.
+							Preview opens in a modal. Mirror mode rewrites saved HTTPS
+							external resources; a missing Mihomo profile returns an error.
 						</div>
 					</div>
 
@@ -1206,12 +1188,14 @@ export function DemoUserDetailsPage() {
 			<SubscriptionPreviewDialog
 				open={subscriptionOpen}
 				onClose={() => setSubscriptionOpen(false)}
-				subscriptionUrl={subscriptionUrl(user.subscriptionToken)}
+				subscriptionUrl={subscriptionPreviewUrl}
 				format={subscriptionFormat}
 				loading={subscriptionLoading}
 				content={subscriptionText}
 				error={subscriptionError}
 				onFormatChange={fetchSubscriptionPreview}
+				externalResourceMirror={useExternalResourceMirror}
+				onExternalResourceMirrorChange={handleExternalResourceMirrorChange}
 			/>
 
 			<div className="text-xs text-muted-foreground">

@@ -184,6 +184,17 @@ https://<node-origin>/api/sub/<token>?format=mihomo&external_resources=mirror
 - covers: `REQ-MIRROR-011`
 - 静态检查 systemd、OpenRC 和官方 Docker/Compose 部署入口均运行同一 XP 路由；共享源码读取节点本地策略，且没有额外服务、内容目录或驻留下载任务。
 
+## Visual Evidence
+
+- source_type=ui_demo · target_program=mock-only · capture_scope=page · requested_viewport=1280x900
+  - state: `/demo/users/user-fixture-c` with Mihomo mirror enabled and subscription preview open.
+  - evidence_note: 工具栏与弹窗共用镜像选择；预览显示 GeoX、规则/代理 provider 镜像地址。
+  - ![Mihomo resource mirror Demo desktop](./assets/mihomo-resource-mirror-demo-desktop.png)
+- source_type=ui_demo · target_program=mock-only · capture_scope=page · requested_viewport=393x852
+  - state: `/demo/users/user-fixture-c` with Mihomo mirror enabled and subscription preview open.
+  - evidence_note: 移动预览保留开关与格式控件，YAML 在可滚动编辑区内。
+  - ![Mihomo resource mirror Demo mobile](./assets/mihomo-resource-mirror-demo-mobile.png)
+
 ## Related ADRs
 
 - [节点本地私网 CIDR 策略](../../adr/0007-node-local-mihomo-private-cidr-policy.md)

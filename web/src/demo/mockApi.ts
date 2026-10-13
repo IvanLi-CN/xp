@@ -17,6 +17,7 @@ export async function fetchDemoSubscription(
 	state: DemoState,
 	user: DemoUser,
 	format: SubscriptionFormat,
+	externalResourceMirror = false,
 ): Promise<string> {
 	await new Promise((resolve) => window.setTimeout(resolve, 240));
 
@@ -26,11 +27,43 @@ export async function fetchDemoSubscription(
 	if (assignedEndpoints.length === 0) return "# no endpoint access assigned";
 
 	if (format === "clash" || format === "mihomo") {
+		if (format === "mihomo" && externalResourceMirror) {
+			const hasMihomoProfile = [
+				user.mihomoMixinYaml,
+				user.mihomoExtraProxiesYaml,
+				user.mihomoExtraProxyProvidersYaml,
+			].some((value) => value.trim().length > 0);
+			if (!hasMihomoProfile) {
+				throw new Error(
+					"Mihomo mirror requires a saved Mihomo profile before it can rewrite external resources.",
+				);
+			}
+		}
 		const header =
 			format === "mihomo"
 				? "# provider mode preview"
 				: "# clash-compatible preview";
 		if (format === "mihomo") {
+			const mirrorLines = externalResourceMirror
+				? [
+						"# XP mirror mode",
+						"geox-url:",
+						"  geoip: https://xp.example.net/api/mihomo/resources/demo-geoip",
+						"  geosite: https://xp.example.net/api/mihomo/resources/demo-geosite",
+						"  mmdb: https://xp.example.net/api/mihomo/resources/demo-mmdb",
+						"  asn: https://xp.example.net/api/mihomo/resources/demo-asn",
+						"rule-providers:",
+						"  demo-rules:",
+						"    type: http",
+						"    url: https://xp.example.net/api/mihomo/resources/demo-rules",
+						"    proxy: DIRECT",
+						"proxy-providers:",
+						"  demo-providers:",
+						"    type: http",
+						"    url: https://xp.example.net/api/mihomo/resources/demo-providers",
+						"    proxy: DIRECT",
+					]
+				: [];
 			const proxyLines = assignedEndpoints.flatMap((endpoint) => {
 				const lines = [
 					`  - name: ${endpoint.name}`,
@@ -52,6 +85,7 @@ export async function fetchDemoSubscription(
 			});
 			return [
 				header,
+				...mirrorLines,
 				"proxies:",
 				...proxyLines,
 				"proxy-groups:",
