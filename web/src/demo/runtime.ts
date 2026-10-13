@@ -106,12 +106,16 @@ export async function handleDemoRequest(request: Request): Promise<Response> {
 	const requestControls = requestSnapshot.controls;
 	const requestGeneration = requestSnapshot.generation;
 	const requestApi = api;
+	const requestPagePath =
+		typeof window === "undefined" ? null : window.location.pathname;
 	const { network } = requestControls;
 	await delay(network === "slow" ? 1500 : 80, request.signal);
 	if (network === "offline") throw new TypeError("Simulated offline network.");
 	if (
 		!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
-		requestGeneration !== snapshot.generation
+		(requestGeneration !== snapshot.generation ||
+			(requestPagePath !== null &&
+				requestPagePath !== window.location.pathname))
 	) {
 		return failure(
 			409,

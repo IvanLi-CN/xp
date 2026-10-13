@@ -24,14 +24,21 @@ import { renderDocumentFallback } from "./runtime/documentFallback";
 
 async function recoverDemoFromLegacyServiceWorker(): Promise<boolean> {
 	if (
-		(typeof __XP_WEB_DEMO__ !== "undefined" && __XP_WEB_DEMO__) ||
 		typeof window === "undefined" ||
 		!/^\/demo(?:\/|$)/.test(window.location.pathname) ||
 		!("serviceWorker" in navigator)
 	)
 		return false;
 
-	const registrations = await navigator.serviceWorker.getRegistrations();
+	const registrations = (
+		await navigator.serviceWorker.getRegistrations()
+	).filter((registration) => {
+		const scope = new URL(registration.scope);
+		return (
+			scope.origin === window.location.origin &&
+			window.location.pathname.startsWith(scope.pathname)
+		);
+	});
 	if (registrations.length === 0) return false;
 	await Promise.all(
 		registrations.map((registration) => registration.unregister()),

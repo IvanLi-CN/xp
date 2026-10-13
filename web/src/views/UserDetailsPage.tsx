@@ -117,7 +117,6 @@ function formatInlineList(items: string[]): string {
 	if (items.length === 2) return `${items[0]} and ${items[1]}`;
 	return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
 }
-
 export function UserDetailsPage() {
 	const adminToken = readAdminToken();
 	const runtime = useAppRuntime();
@@ -181,6 +180,7 @@ export function UserDetailsPage() {
 			),
 	);
 	const demoPreviewLoadedRef = useRef<string | null>(null);
+	const demoPreviewUserIdRef = useRef(userId);
 	const {
 		currentUserIdRef,
 		deleteOpen,
@@ -844,7 +844,6 @@ export function UserDetailsPage() {
 					d_mirror: nextMirror ? "mirror" : undefined,
 					d_preview: preview ? "preview" : undefined,
 				}) as never,
-			replace: true,
 		});
 	}
 	useEffect(() => {
@@ -858,6 +857,10 @@ export function UserDetailsPage() {
 		const mirror = ["1", "mirror"].includes(params.get("d_mirror") ?? "");
 		setSubFormat(format);
 		setUseExternalResourceMirror(mirror);
+		if (demoPreviewUserIdRef.current !== userId) {
+			demoPreviewUserIdRef.current = userId;
+			demoPreviewLoadedRef.current = null;
+		}
 		if (
 			!subscriptionToken ||
 			!["1", "preview"].includes(params.get("d_preview") ?? "")
@@ -946,7 +949,6 @@ export function UserDetailsPage() {
 			setIsSavingUser(false);
 		}
 	}
-
 	function discardUserProfileDraft() {
 		if (!user) return;
 		setDisplayName(user.display_name);
@@ -960,7 +962,6 @@ export function UserDetailsPage() {
 		setResetTzOffsetMinutes(user.quota_reset.tz_offset_minutes);
 		setUserSaveError(null);
 	}
-
 	function discardAccessDraft() {
 		setAccessError(null);
 		setAccessInitForUserId(null);
@@ -1781,7 +1782,6 @@ export function UserDetailsPage() {
 						void navigate({
 							search: (current) =>
 								({ ...current, d_preview: undefined }) as never,
-							replace: true,
 						});
 					}
 				}}

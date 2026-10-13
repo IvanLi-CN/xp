@@ -98,7 +98,13 @@ export function DemoFrame({ children }: { children: ReactNode }) {
 		void router.navigate({
 			search: (current) =>
 				({ ...current, ...demoControlSearch(controls) }) as never,
-			replace: true,
+		});
+		queueMicrotask(() => {
+			if (
+				JSON.stringify(readDemoControls(router.state.location.searchStr)) !==
+				JSON.stringify(controls)
+			)
+				pendingControls.current = null;
 		});
 	};
 	const controls = (

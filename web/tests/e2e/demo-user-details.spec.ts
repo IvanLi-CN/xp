@@ -189,6 +189,29 @@ test("demo control state survives client navigation and refresh", async ({
 	await expect(page.getByLabel("Network")).toHaveValue("offline");
 });
 
+test("demo share link reproduces controls in a fresh page", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.getByRole("button", { name: "Open Demo Inspector" }).click();
+	await page.getByLabel("Scene").selectOption("large");
+	await page.getByLabel("Network").selectOption("offline");
+	await expect(page).toHaveURL(/demo=large/);
+	await expect(page).toHaveURL(/d_network=offline/);
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+	await page.getByRole("button", { name: "Copy demo link" }).click();
+
+	const sharedUrl = await page.evaluate(() => navigator.clipboard.readText());
+	const sharedPage = await page.context().newPage();
+	await sharedPage.goto(sharedUrl);
+	await expect(
+		sharedPage.getByRole("complementary", { name: "Demo Inspector" }),
+	).toBeVisible();
+	await expect(sharedPage.getByLabel("Scene")).toHaveValue("large");
+	await expect(sharedPage.getByLabel("Network")).toHaveValue("offline");
+	await sharedPage.close();
+});
+
 test("demo identity switching stays on the same formal page", async ({
 	page,
 }) => {
