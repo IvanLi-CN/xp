@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
@@ -107,11 +108,9 @@ function formatError(err: unknown): string {
 	if (err instanceof Error) return err.message;
 	return String(err);
 }
-
 function buildCellKey(nodeId: string, protocolId: string): string {
 	return `${nodeId}::${protocolId}`;
 }
-
 function formatInlineList(items: string[]): string {
 	if (items.length === 0) return "";
 	if (items.length === 1) return items[0] ?? "";
@@ -123,8 +122,9 @@ export function UserDetailsPage() {
 	const adminToken = readAdminToken();
 	const runtime = useAppRuntime();
 	const navigate = useNavigate();
-	const demoSearch =
-		typeof window === "undefined" ? "" : window.location.search;
+	const demoSearch = useRouterState({
+		select: (state) => state.location.searchStr,
+	});
 	const queryClient = useQueryClient();
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
