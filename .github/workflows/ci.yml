@@ -267,6 +267,7 @@ jobs:
             hashFiles('web/bun.lock') }}
       - run: bun install --frozen-lockfile
       - run: bunx --no-install playwright install --with-deps chromium
+      - run: bun run build-storybook
       - name: storybook and test-storybook
         run: |
           bun run storybook & SB_PID=$!

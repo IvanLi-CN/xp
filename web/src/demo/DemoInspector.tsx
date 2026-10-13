@@ -23,6 +23,7 @@ import {
 	type DemoControls,
 	buildDemoShareUrl,
 	demoControlSearch,
+	readDemoControls,
 } from "./shareState";
 
 function readPanelPreference(): boolean {
@@ -57,6 +58,7 @@ export function DemoFrame({ children }: { children: ReactNode }) {
 	const previous = useRef(snapshot);
 	const [open, setOpenState] = useState(readPanelPreference);
 	const [placement, setPlacement] = useState<"auto" | "floating">("auto");
+	const pendingControls = useRef<DemoControls | null>(null);
 	const width = useViewport();
 	const mobile = width < 768;
 	const docked = open && width >= 1800 && placement === "auto";
@@ -70,6 +72,12 @@ export function DemoFrame({ children }: { children: ReactNode }) {
 	};
 	useEffect(() => {
 		syncDemoControls(search);
+		if (
+			pendingControls.current &&
+			JSON.stringify(readDemoControls(search)) ===
+				JSON.stringify(pendingControls.current)
+		)
+			pendingControls.current = null;
 	}, [search]);
 	useEffect(() => {
 		if (previous.current.generation === snapshot.generation) return;
@@ -87,7 +95,11 @@ export function DemoFrame({ children }: { children: ReactNode }) {
 			void queryClient.invalidateQueries();
 	}, [snapshot, router, queryClient]);
 	const update = (patch: Partial<DemoControls>) => {
-		const controls = { ...snapshot.controls, ...patch };
+		const controls = {
+			...(pendingControls.current ?? readDemoControls(search)),
+			...patch,
+		};
+		pendingControls.current = controls;
 		void router.navigate({
 			search: (current) =>
 				({ ...current, ...demoControlSearch(controls) }) as never,

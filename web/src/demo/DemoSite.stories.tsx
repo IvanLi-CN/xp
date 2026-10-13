@@ -1,12 +1,28 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, userEvent, within } from "@storybook/test";
+import { useState } from "react";
 
+import { UsersPage } from "../views/UsersPage";
 import { DemoInspectorControls } from "./DemoInspector";
 import { DEFAULT_DEMO_CONTROLS } from "./shareState";
+
+function InteractiveInspector(
+	props: React.ComponentProps<typeof DemoInspectorControls>,
+) {
+	const [controls, setControls] = useState(props.controls);
+	return (
+		<DemoInspectorControls
+			{...props}
+			controls={controls}
+			onChange={(patch) => setControls((current) => ({ ...current, ...patch }))}
+		/>
+	);
+}
 
 const meta = {
 	title: "Demo/Inspector",
 	component: DemoInspectorControls,
+	render: (args) => <InteractiveInspector {...args} />,
 	parameters: {
 		layout: "centered",
 	},
@@ -67,5 +83,19 @@ export const LargeTenantOperations: Story = {
 			route: `/api/demo/action/${index + 1}`,
 			status: 200,
 		})),
+	},
+};
+
+export const FormalUsersRoute: Story = {
+	render: () => <UsersPage />,
+	parameters: {
+		layout: "fullscreen",
+		router: { initialEntry: "/users" },
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByRole("heading", { name: "Users" }),
+		).toBeInTheDocument();
 	},
 };

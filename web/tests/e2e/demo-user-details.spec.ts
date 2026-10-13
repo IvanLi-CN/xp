@@ -25,6 +25,23 @@ test("demo static build supports nested direct load and refresh", async ({
 	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
 });
 
+test("demo opens the formal route family without authentication", async ({
+	page,
+}) => {
+	for (const route of [
+		"/demo/",
+		"/demo/nodes",
+		"/demo/endpoints",
+		"/demo/quota-policy",
+		"/demo/service-config",
+		"/demo/tools",
+		"/demo/system-status",
+	]) {
+		await page.goto(`${route}?demo=normal`);
+		await expect(page).not.toHaveURL(/\/login/);
+	}
+});
+
 test("demo inspector collapses and recovers on mobile", async ({ page }) => {
 	await page.setViewportSize({ width: 393, height: 852 });
 	await page.goto(`/demo/users/${userId}?demo=normal`);
