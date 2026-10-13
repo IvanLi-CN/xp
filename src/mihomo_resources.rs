@@ -146,6 +146,10 @@ mod tests {
             .respond_with(
                 ResponseTemplate::new(200)
                     .insert_header("content-encoding", "gzip")
+                    .insert_header("cache-control", "public, max-age=3600")
+                    .insert_header("etag", "\"upstream\"")
+                    .insert_header("last-modified", "Wed, 21 Oct 2015 07:28:00 GMT")
+                    .insert_header("expires", "Wed, 21 Oct 2030 07:28:00 GMT")
                     .set_body_bytes(b"chunk-onechunk-two"),
             )
             .mount(&server)
@@ -161,6 +165,14 @@ mod tests {
             response.headers().get(header::CONTENT_ENCODING),
             Some(&HeaderValue::from_static("gzip"))
         );
+        for name in [
+            header::CACHE_CONTROL,
+            header::ETAG,
+            header::LAST_MODIFIED,
+            header::EXPIRES,
+        ] {
+            assert!(response.headers().get(name).is_none());
+        }
         assert_eq!(
             response.into_body().collect().await.unwrap().to_bytes(),
             Bytes::from_static(b"chunk-onechunk-two")
@@ -516,10 +528,6 @@ async fn proxy_resource_with_snapshot(
         header::CONTENT_TYPE,
         header::CONTENT_LENGTH,
         header::CONTENT_ENCODING,
-        header::CACHE_CONTROL,
-        header::ETAG,
-        header::LAST_MODIFIED,
-        header::EXPIRES,
     ] {
         if let Some(value) = response.headers().get(&name) {
             builder = builder.header(name, value);
