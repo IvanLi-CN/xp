@@ -1004,6 +1004,8 @@ Notes:
 
   - V3 peers explicitly request `summary_version=3`; predecessors keep v1 fallback.
   - The five-second worker rebuilds bounded pages without copying history or resetting progress.
+  - The last dirty-block page publishes completion without requiring an idle tick.
+  - Ready local standbys stay eligible; failed standbys retry the HTTPS primary next cycle.
   - Accept retained deep checks only with `partitions_included=true` and `summary_version=3`.
   - Permanent gaps still require `partial` and `replica_converged=false`.
   - Predecessor rollback cannot read v3-prefixed metadata; its deep checks must fail closed.

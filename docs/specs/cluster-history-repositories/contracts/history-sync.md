@@ -33,6 +33,11 @@ history synchronization never opens a Mesh relay. Legacy relay payloads remain
 parseable at the receive boundary for wire compatibility, but the repository
 worker never constructs or sends them.
 
+- Ready local standbys use the strict receiver and durable ACK path; non-Ready fallback is excluded.
+- A failed standby resets the primary failure count; the next cycle retries the registered primary.
+- Three successful standby pages also restore primary selection.
+- Failover never resets cursors, changes epochs, or rearms consumed recovery.
+
 Initial-backfill responses are first capped at four times the 192 KiB semantic page budget on the
 JSON wire body, and record-count overflow is rejected before typed record decoding. Pages are
 then capped at 128 records and 192 KiB. Historical-source pages use their JSON record budget;
@@ -74,6 +79,8 @@ SQLite repositories maintain v3 summaries in the existing `history.sqlite3`.
 - Forward deployment repairs metadata in place, without an extra database.
 - Mutation triggers mark affected blocks without resetting the durable migration cursor.
 - A five-second blocking worker seeds at most 4096 keys or rebuilds at most 16 blocks.
+- The final dirty-block page persists completion under the replica lock without an idle tick.
+- Dirty metadata prevents publication until rebuilt; continuous writes invalidate affected blocks.
 
 Deep verification compares retained metadata even when a permanent gap exists.
 

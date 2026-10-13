@@ -69,7 +69,10 @@
   disk and returns a storage failure; it never falls back to a potentially stale JSON snapshot.
   Canonical v3 sequence-block summaries exclude local receive time and require explicit
   `summary_version=3`; older requests retain v1 fallback. A five-second blocking worker advances
-  bounded metadata pages without resetting migration on late writes. Old metadata is rebuilt
+  bounded metadata pages without resetting migration on late writes and publishes completion on
+  the page that clears the last dirty block, without waiting for an idle tick. Ready local source
+  standbys remain eligible; a failed standby returns the next cycle to the registered public HTTPS
+  primary without changing the outbox or source epoch. Old metadata is rebuilt
   in place; predecessor rollback cannot consume v3-prefixed digests. Permanent gaps keep
   queries partial and replica convergence false even after retained-data verification.
   Repository runtime status reads exact record and segment counts from a durable singleton updated
