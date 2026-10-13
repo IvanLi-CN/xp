@@ -26,7 +26,12 @@ const legacyDemoWorkerSource = [
 ].join("\n");
 
 function filePathFor(requestPath) {
-	if (requestPath === "/") return join(demoRoot, "index.html");
+	if (
+		requestPath === "/" ||
+		requestPath === "/demo" ||
+		requestPath === "/demo/"
+	)
+		return join(demoRoot, "index.html");
 	if (requestPath.startsWith("/demo")) {
 		const relative = requestPath.slice("/demo".length) || "/";
 		const candidate = resolve(demoRoot, `.${relative}`);

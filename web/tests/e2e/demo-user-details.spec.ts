@@ -39,6 +39,19 @@ test("demo remains isolated from an existing live service worker", async ({
 	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
 });
 
+test("demo does not send API requests to a live backend", async ({ page }) => {
+	const liveApiRequests: string[] = [];
+	await page.route("**/api/**", async (route) => {
+		liveApiRequests.push(route.request().url());
+		await route.abort();
+	});
+
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+	await expect(page.locator("[data-demo-runtime='mock-only']")).toBeVisible();
+	expect(liveApiRequests).toEqual([]);
+});
+
 test("demo recovers when a legacy root worker controls the page", async ({
 	page,
 }) => {
@@ -78,16 +91,19 @@ test("demo opens the formal route family without authentication", async ({
 	page,
 }) => {
 	for (const route of [
-		"/demo/",
-		"/demo/nodes",
-		"/demo/endpoints",
-		"/demo/quota-policy",
-		"/demo/service-config",
-		"/demo/tools",
-		"/demo/system-status",
+		["/demo/", "Dashboard"],
+		["/demo/nodes", "Nodes"],
+		["/demo/endpoints", "Endpoints"],
+		["/demo/quota-policy", "Quota policy"],
+		["/demo/service-config", "服务配置"],
+		["/demo/tools", "Tools"],
+		["/demo/system-status", "System status"],
 	]) {
-		await page.goto(`${route}?demo=normal`);
+		await page.goto(`${route[0]}?demo=normal`);
 		await expect(page).not.toHaveURL(/\/login/);
+		await expect(
+			page.getByRole("heading", { name: route[1], exact: true }),
+		).toBeVisible();
 	}
 });
 
