@@ -163,7 +163,8 @@ export function createDemoApi(controls: DemoControls) {
 			}
 			if (path === "/api/admin/mesh/config" && method === "PUT") {
 				const body = (await request.json()) as { enabled: boolean };
-				return jsonResponse({ enabled: body.enabled });
+				mesh = { ...mesh, cluster_mesh_enabled: body.enabled };
+				return jsonResponse({ enabled: mesh.cluster_mesh_enabled });
 			}
 			if (path.startsWith("/api/mihomo/resources/"))
 				return textResponse("# Simulated resource; no upstream fetch.\n");

@@ -8,6 +8,20 @@ export const DEMO_SHARE_KEYS = [
 	"d_preview",
 ] as const;
 
+export function buildDemoShareUrl(href: string): string {
+	const url = new URL(href, "http://demo.invalid");
+	const search = new URLSearchParams();
+	for (const key of DEMO_SHARE_KEYS) {
+		const value = url.searchParams.get(key);
+		if (value !== null) search.set(key, value);
+	}
+	url.search = search.toString();
+	url.hash = "";
+	return url.origin === "http://demo.invalid"
+		? `${url.pathname}${url.search}`
+		: url.toString();
+}
+
 export type DemoControls = {
 	scene: "normal" | "incident" | "empty" | "large";
 	persona: "admin" | "anonymous";

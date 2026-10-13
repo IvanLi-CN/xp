@@ -19,7 +19,11 @@ import {
 	subscribeDemo,
 	syncDemoControls,
 } from "./runtime";
-import { type DemoControls, demoControlSearch } from "./shareState";
+import {
+	type DemoControls,
+	buildDemoShareUrl,
+	demoControlSearch,
+} from "./shareState";
 
 function readPanelPreference(): boolean {
 	try {
@@ -94,7 +98,7 @@ export function DemoFrame({ children }: { children: ReactNode }) {
 		<DemoInspectorControls
 			controls={snapshot.controls}
 			operations={snapshot.operations}
-			shareUrl={window.location.href}
+			shareUrl={buildDemoShareUrl(window.location.href)}
 			onChange={update}
 			onReset={resetDemoModel}
 			onClose={() => setOpen(false)}

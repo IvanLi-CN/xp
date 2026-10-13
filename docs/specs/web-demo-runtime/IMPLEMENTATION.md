@@ -16,14 +16,18 @@
 ## Verification Evidence
 
 - `bun run build:demo`
-- `E2E_BASE_URL=http://127.0.0.1:22291 E2E_REUSE_EXISTING_SERVER=1 bunx --no-install playwright test tests/e2e/demo-user-details.spec.ts tests/e2e/demo-service-monitors.spec.ts --workers=2`
+- `bun run test:e2e:demo`
+- `bun run test --run src/demo`
+- Static Demo E2E command with preview build
 - `bun run build-storybook`
 - `bun run lint`
 - `bun run typecheck`
 - `bun run check:style-budget`
 - `git diff --check`
 
-The browser suite covers direct formal user routes without a login gate, URL-first identity switching, Mihomo mirror preview, structured missing-profile errors, normal service monitoring, and incident state. The static preview was also opened directly at a nested `/demo/users/...` URL without a live API service.
+Demo E2E covers routes, identity, mobile recovery, Mihomo errors, and monitoring.
+
+Static E2E builds `dist-demo` and checks nested load/refresh without a backend.
 
 ## References
 

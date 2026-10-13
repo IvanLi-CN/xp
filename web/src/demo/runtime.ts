@@ -1,9 +1,5 @@
 import { createDemoApi } from "./apiModel";
-import {
-	isDemoRuntime,
-	readDemoAuthentication,
-	setDemoAuthentication,
-} from "./runtimeMode";
+import { isDemoRuntime, setDemoAuthentication } from "./runtimeMode";
 import {
 	DEFAULT_DEMO_CONTROLS,
 	type DemoControls,
@@ -93,20 +89,29 @@ async function delay(milliseconds: number, signal: AbortSignal) {
 
 export async function handleDemoRequest(request: Request): Promise<Response> {
 	const path = new URL(request.url).pathname;
-	const { network } = snapshot.controls;
+	const requestSnapshot = snapshot;
+	const requestControls = requestSnapshot.controls;
+	const requestApi = api;
+	const { network } = requestControls;
 	await delay(network === "slow" ? 1500 : 80, request.signal);
 	if (network === "offline") throw new TypeError("Simulated offline network.");
 	let response: Response;
 	if (network === "error")
 		response = failure(503, "demo_network_error", "Simulated backend failure.");
-	else if (path.startsWith("/api/admin/") && !readDemoAuthentication()) {
+	else if (
+		path.startsWith("/api/admin/") &&
+		requestControls.persona !== "admin"
+	) {
 		response = failure(
 			401,
 			"unauthorized",
 			"Simulated administrator authentication required.",
 		);
-	} else response = await api.handle(request);
-	if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+	} else response = await requestApi.handle(request);
+	if (
+		requestSnapshot.generation === snapshot.generation &&
+		!["GET", "HEAD", "OPTIONS"].includes(request.method)
+	) {
 		publish({
 			...snapshot,
 			operations: [

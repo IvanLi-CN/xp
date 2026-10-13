@@ -16,6 +16,28 @@ test("demo opens the formal user route without a login gate", async ({
 	await expect(page.getByTestId("subscription-format")).toBeVisible();
 });
 
+test("demo static build supports nested direct load and refresh", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal&d_profile=valid`);
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+	await page.reload();
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+});
+
+test("demo inspector collapses and recovers on mobile", async ({ page }) => {
+	await page.setViewportSize({ width: 393, height: 852 });
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.getByRole("button", { name: "Open Demo Inspector" }).click();
+	await expect(
+		page.getByRole("dialog").locator("h2:not(.sr-only)"),
+	).toBeVisible();
+	await page.getByRole("button", { name: "Collapse Inspector" }).click();
+	await expect(
+		page.getByRole("button", { name: "Open Demo Inspector" }),
+	).toBeVisible();
+});
+
 test("demo identity switching stays on the same formal page", async ({
 	page,
 }) => {

@@ -231,10 +231,6 @@
     "long_line_count": 1,
     "max_line_length": 116
   },
-  "docs/specs/web-demo-runtime/IMPLEMENTATION.md": {
-    "long_line_count": 2,
-    "max_line_length": 313
-  },
   "docs/specs/web-demo-runtime/SPEC.md": {
     "long_line_count": 19,
     "max_line_length": 397
