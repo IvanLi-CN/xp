@@ -18,29 +18,6 @@ import {
 	UI_THEME_STORAGE_KEY,
 } from "../src/components/UiPrefs";
 import { clearAdminToken, writeAdminToken } from "../src/components/auth";
-import { DemoDashboardPage } from "../src/demo/DemoDashboardPage";
-import {
-	DemoEndpointDetailsPage,
-	DemoEndpointFormPage,
-	DemoEndpointProbeRunPage,
-	DemoEndpointProbeStatsPage,
-	DemoEndpointsPage,
-} from "../src/demo/DemoEndpointsPage";
-import { DemoAppRoute, DemoLoginRoute } from "../src/demo/DemoLayout";
-import { DemoLoginPage } from "../src/demo/DemoLoginPage";
-import { DemoNodeDetailsPage, DemoNodesPage } from "../src/demo/DemoNodesPage";
-import { DemoScenariosPage } from "../src/demo/DemoScenariosPage";
-import {
-	DemoQuotaPolicyPage,
-	DemoServiceConfigPage,
-	DemoToolsPage,
-} from "../src/demo/DemoSettingsPages";
-import {
-	DemoUserDetailsPage,
-	DemoUserFormPage,
-	DemoUsersPage,
-} from "../src/demo/DemoUsersPage";
-import { clearDemoFallbackState, getDemoStorageKey } from "../src/demo/store";
 import { AppRuntimeProvider } from "../src/offline/appRuntime";
 import { createQueryClient } from "../src/queryClient";
 import { EndpointDetailsPage } from "../src/views/EndpointDetailsPage";
@@ -186,8 +163,6 @@ const preview: Preview = {
 			} else {
 				writeAdminToken(mockParams?.adminToken ?? "storybook-admin-token");
 			}
-			safeLocalStorageRemove(getDemoStorageKey());
-			clearDemoFallbackState();
 			clearStorybookNodeDeleteOperations();
 
 			const history = createMemoryHistory({
@@ -336,114 +311,6 @@ const preview: Preview = {
 				component: ToolsPage,
 			});
 
-			const demoLoginRootRoute = createRoute({
-				getParentRoute: () => rootRoute,
-				path: "/demo/login",
-				component: DemoLoginRoute,
-			});
-
-			const demoLoginPageRoute = createRoute({
-				getParentRoute: () => demoLoginRootRoute,
-				path: "/",
-				component: DemoLoginPage,
-			});
-
-			const demoAppRoute = createRoute({
-				getParentRoute: () => rootRoute,
-				path: "/demo",
-				component: DemoAppRoute,
-			});
-
-			const demoDashboardRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/",
-				component: DemoDashboardPage,
-			});
-
-			const demoNodesRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/nodes",
-				component: DemoNodesPage,
-			});
-
-			const demoNodeDetailsRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/nodes/$nodeId",
-				component: DemoNodeDetailsPage,
-			});
-
-			const demoEndpointsRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/endpoints",
-				component: DemoEndpointsPage,
-			});
-
-			const demoEndpointNewRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/endpoints/new",
-				component: DemoEndpointFormPage,
-			});
-
-			const demoEndpointDetailsRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/endpoints/$endpointId",
-				component: DemoEndpointDetailsPage,
-			});
-
-			const demoEndpointProbeRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/endpoints/$endpointId/probe",
-				component: DemoEndpointProbeStatsPage,
-			});
-
-			const demoEndpointProbeRunRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/endpoints/probe/runs/$runId",
-				component: DemoEndpointProbeRunPage,
-			});
-
-			const demoUsersRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/users",
-				component: DemoUsersPage,
-			});
-
-			const demoUserNewRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/users/new",
-				component: DemoUserFormPage,
-			});
-
-			const demoUserDetailsRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/users/$userId",
-				component: DemoUserDetailsPage,
-			});
-
-			const demoScenariosRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/scenarios",
-				component: DemoScenariosPage,
-			});
-
-			const demoQuotaPolicyRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/quota-policy",
-				component: DemoQuotaPolicyPage,
-			});
-
-			const demoServiceConfigRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/service-config",
-				component: DemoServiceConfigPage,
-			});
-
-			const demoToolsRoute = createRoute({
-				getParentRoute: () => demoAppRoute,
-				path: "/tools",
-				component: DemoToolsPage,
-			});
-
 			const nodesRouteTree = nodesRoute.addChildren([
 				nodesJoinRoute,
 				nodesRepositoriesRoute,
@@ -470,34 +337,10 @@ const preview: Preview = {
 				toolsRoute,
 			]);
 
-			const demoLoginRouteTree = demoLoginRootRoute.addChildren([
-				demoLoginPageRoute,
-			]);
-
-			const demoAppRouteTree = demoAppRoute.addChildren([
-				demoDashboardRoute,
-				demoNodesRoute,
-				demoNodeDetailsRoute,
-				demoEndpointsRoute,
-				demoEndpointNewRoute,
-				demoEndpointDetailsRoute,
-				demoEndpointProbeRoute,
-				demoEndpointProbeRunRoute,
-				demoUsersRoute,
-				demoUserNewRoute,
-				demoUserDetailsRoute,
-				demoScenariosRoute,
-				demoQuotaPolicyRoute,
-				demoServiceConfigRoute,
-				demoToolsRoute,
-			]);
-
 			const routeTree = rootRoute.addChildren([
 				storyRoute,
 				loginRoute,
 				appRouteTree,
-				demoLoginRouteTree,
-				demoAppRouteTree,
 			]);
 
 			const router = createRouter({ routeTree, history });

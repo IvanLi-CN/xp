@@ -43,6 +43,7 @@ SKIP_DIRS = {
     ".impeccable",
     ".storybook-static",
     "dist",
+    "dist-demo",
     "node_modules",
     "playwright-report",
     "storybook-static",

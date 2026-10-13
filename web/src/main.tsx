@@ -1,3 +1,4 @@
+import { QueryClientProvider } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { RouterProvider } from "@tanstack/react-router";
 import React from "react";
@@ -12,6 +13,7 @@ import {
 	installDocumentFallbackHandlers,
 } from "./components/FrameworkErrorBoundary";
 import { UiPrefsProvider } from "./components/UiPrefs";
+import { isDemoRuntime } from "./demo/runtimeMode";
 import { AppRuntimeProvider } from "./offline/appRuntime";
 import { installOfflineApiWriteGuard } from "./offline/installOfflineApiWriteGuard";
 import { createPersistOptions } from "./offline/queryPersistence";
@@ -20,45 +22,56 @@ import { createQueryClient } from "./queryClient";
 import { createAppRouter } from "./router";
 import { renderDocumentFallback } from "./runtime/documentFallback";
 
-function bootstrap() {
+async function bootstrap() {
 	const rootElement = document.getElementById("root");
 	if (!rootElement) {
 		throw new Error("Root element not found");
 	}
 
 	installDocumentFallbackHandlers(rootElement);
-	installPrimaryBackendTransport();
-	installOfflineApiWriteGuard();
-	declareServiceWorkerBuild();
+	const demo = isDemoRuntime();
+	if (demo) {
+		const { bootstrapDemoRuntime } = await import("./demo/runtime");
+		await bootstrapDemoRuntime();
+	} else {
+		installPrimaryBackendTransport();
+		installOfflineApiWriteGuard();
+		declareServiceWorkerBuild();
+	}
 
 	const queryClient = createQueryClient();
 	const router = createAppRouter();
 	const reactRoot = ReactDOM.createRoot(rootElement);
+	const application = (
+		<UiPrefsProvider>
+			<AppRuntimeProvider>
+				<PrimaryBackendProvider>
+					<RouterProvider router={router} />
+				</PrimaryBackendProvider>
+			</AppRuntimeProvider>
+		</UiPrefsProvider>
+	);
 
 	reactRoot.render(
 		<React.StrictMode>
 			<DocumentFallbackBoundary>
 				<FrameworkErrorBoundary>
-					<PersistQueryClientProvider
-						client={queryClient}
-						persistOptions={createPersistOptions()}
-					>
-						<UiPrefsProvider>
-							<AppRuntimeProvider>
-								<PrimaryBackendProvider>
-									<RouterProvider router={router} />
-								</PrimaryBackendProvider>
-							</AppRuntimeProvider>
-						</UiPrefsProvider>
-					</PersistQueryClientProvider>
+					{demo ? (
+						<QueryClientProvider client={queryClient}>
+							{application}
+						</QueryClientProvider>
+					) : (
+						<PersistQueryClientProvider
+							client={queryClient}
+							persistOptions={createPersistOptions()}
+						>
+							{application}
+						</PersistQueryClientProvider>
+					)}
 				</FrameworkErrorBoundary>
 			</DocumentFallbackBoundary>
 		</React.StrictMode>,
 	);
 }
 
-try {
-	bootstrap();
-} catch (error) {
-	renderDocumentFallback(error);
-}
+void bootstrap().catch(renderDocumentFallback);

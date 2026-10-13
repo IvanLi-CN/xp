@@ -6,6 +6,7 @@ import {
 	useContext,
 } from "react";
 
+import { isDemoRuntime } from "../demo/runtimeMode";
 import {
 	type ApiCompatibilityResult,
 	fetchApiCompatibility,
@@ -30,6 +31,7 @@ function persistedCompatibilityKey(adminToken: string): string {
 function readPersistedCompatibility(
 	adminToken: string,
 ): ApiCompatibilityResult | undefined {
+	if (isDemoRuntime()) return undefined;
 	if (typeof localStorage === "undefined") return undefined;
 	try {
 		const raw = localStorage.getItem(persistedCompatibilityKey(adminToken));
@@ -61,6 +63,7 @@ function persistCompatibility(
 	adminToken: string,
 	compatibility: ApiCompatibilityResult,
 ): void {
+	if (isDemoRuntime()) return;
 	if (typeof localStorage === "undefined") return;
 	const snapshot: PersistedCompatibility =
 		compatibility.kind === "incompatible"

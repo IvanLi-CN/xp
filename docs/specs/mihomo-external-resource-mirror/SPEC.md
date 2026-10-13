@@ -187,11 +187,11 @@ https://<node-origin>/api/sub/<token>?format=mihomo&external_resources=mirror
 ## Visual Evidence
 
 - source_type=ui_demo · target_program=mock-only · capture_scope=page · requested_viewport=1280x900
-  - state: `/demo/users/user-fixture-c` with Mihomo mirror enabled and subscription preview open.
+  - state: `/demo/users/user-fixture-c?demo=normal&d_format=mihomo&d_mirror=mirror&d_preview=preview` with Mihomo mirror enabled and subscription preview open.
   - evidence_note: 工具栏与弹窗共用镜像选择；预览显示 GeoX、规则/代理 provider 镜像地址。
   - ![Mihomo resource mirror Demo desktop](./assets/mihomo-resource-mirror-demo-desktop.png)
 - source_type=ui_demo · target_program=mock-only · capture_scope=page · requested_viewport=393x852
-  - state: `/demo/users/user-fixture-c` with Mihomo mirror enabled and subscription preview open.
+  - state: `/demo/users/user-fixture-c?demo=normal&d_format=mihomo&d_mirror=mirror&d_preview=preview` with Mihomo mirror enabled and subscription preview open.
   - evidence_note: 移动预览保留开关与格式控件，YAML 在可滚动编辑区内。
   - ![Mihomo resource mirror Demo mobile](./assets/mihomo-resource-mirror-demo-mobile.png)
 

@@ -76,6 +76,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { isDemoRuntime } from "../demo/runtimeMode";
 import { useMihomoProfileDraft } from "../hooks/useMihomoProfileDraft";
 import { useUserTimeWindowReports } from "../hooks/useUserTimeWindowReports";
 import { useAppRuntime } from "../offline/appRuntime";
@@ -122,6 +123,8 @@ export function UserDetailsPage() {
 	const adminToken = readAdminToken();
 	const runtime = useAppRuntime();
 	const navigate = useNavigate();
+	const demoSearch =
+		typeof window === "undefined" ? "" : window.location.search;
 	const queryClient = useQueryClient();
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
@@ -163,11 +166,21 @@ export function UserDetailsPage() {
 	);
 	const [isApplyingAccess, setIsApplyingAccess] = useState(false);
 	const [accessError, setAccessError] = useState<string | null>(null);
-	const [subFormat, setSubFormat] = useState<SubscriptionFormat>(
-		DEFAULT_SUBSCRIPTION_FORMAT,
+	const [subFormat, setSubFormat] = useState<SubscriptionFormat>(() => {
+		if (!isDemoRuntime()) return DEFAULT_SUBSCRIPTION_FORMAT;
+		const value = new URLSearchParams(demoSearch).get("d_format");
+		return value === "raw" || value === "clash" || value === "mihomo"
+			? value
+			: DEFAULT_SUBSCRIPTION_FORMAT;
+	});
+	const [useExternalResourceMirror, setUseExternalResourceMirror] = useState(
+		() =>
+			isDemoRuntime() &&
+			["1", "mirror"].includes(
+				new URLSearchParams(demoSearch).get("d_mirror") ?? "",
+			),
 	);
-	const [useExternalResourceMirror, setUseExternalResourceMirror] =
-		useState(false);
+	const demoPreviewLoadedRef = useRef<string | null>(null);
 	const {
 		currentUserIdRef,
 		deleteOpen,
@@ -810,6 +823,7 @@ export function UserDetailsPage() {
 	) {
 		setSubFormat(nextFormat);
 		setUseExternalResourceMirror(nextMirror);
+		updateDemoSubscriptionSearch(nextFormat, nextMirror, true);
 		await loadUserSubscriptionPreview(
 			subscriptionToken,
 			nextFormat,
@@ -817,6 +831,54 @@ export function UserDetailsPage() {
 			formatError,
 		);
 	}
+
+	function updateDemoSubscriptionSearch(
+		nextFormat: SubscriptionFormat,
+		nextMirror: boolean,
+		preview = false,
+	) {
+		if (!isDemoRuntime()) return;
+		void navigate({
+			search: (current) =>
+				({
+					...current,
+					d_format: nextFormat,
+					d_mirror: nextMirror ? "mirror" : undefined,
+					d_preview: preview ? "preview" : undefined,
+				}) as never,
+			replace: true,
+		});
+	}
+
+	useEffect(() => {
+		if (!isDemoRuntime() || !subscriptionToken) return;
+		const params = new URLSearchParams(demoSearch);
+		if (!["1", "preview"].includes(params.get("d_preview") ?? "")) return;
+		const nextFormat = params.get("d_format");
+		const format: SubscriptionFormat =
+			nextFormat === "raw" || nextFormat === "clash" || nextFormat === "mihomo"
+				? nextFormat
+				: DEFAULT_SUBSCRIPTION_FORMAT;
+		const mirror = ["1", "mirror"].includes(params.get("d_mirror") ?? "");
+		const key = `${userId}:${subscriptionToken}:${format}:${mirror}`;
+		if (demoPreviewLoadedRef.current === key) return;
+		demoPreviewLoadedRef.current = key;
+		setSubFormat(format);
+		setUseExternalResourceMirror(mirror);
+		setSubOpen(true);
+		void loadUserSubscriptionPreview(
+			subscriptionToken,
+			format,
+			mirror,
+			formatError,
+		);
+	}, [
+		demoSearch,
+		loadUserSubscriptionPreview,
+		setSubOpen,
+		subscriptionToken,
+		userId,
+	]);
 
 	async function retryAccessData() {
 		await Promise.all([
@@ -1242,7 +1304,13 @@ export function UserDetailsPage() {
 								<div className="flex flex-wrap items-end gap-3">
 									<SubscriptionFormatSegmentedControl
 										className="w-full sm:w-auto"
-										onValueChange={setSubFormat}
+										onValueChange={(value) => {
+											setSubFormat(value);
+											updateDemoSubscriptionSearch(
+												value,
+												value === "mihomo" && useExternalResourceMirror,
+											);
+										}}
 										testId="subscription-format"
 										value={subFormat}
 									/>
@@ -1251,6 +1319,7 @@ export function UserDetailsPage() {
 											checked={useExternalResourceMirror}
 											onCheckedChange={(checked) => {
 												setUseExternalResourceMirror(checked);
+												updateDemoSubscriptionSearch(subFormat, checked);
 											}}
 										/>
 									) : null}
@@ -1706,7 +1775,16 @@ export function UserDetailsPage() {
 
 			<SubscriptionPreviewDialog
 				open={isCurrentTransientState && subOpen}
-				onClose={() => setSubOpen(false)}
+				onClose={() => {
+					setSubOpen(false);
+					if (isDemoRuntime()) {
+						void navigate({
+							search: (current) =>
+								({ ...current, d_preview: undefined }) as never,
+							replace: true,
+						});
+					}
+				}}
 				subscriptionUrl={subscriptionUrl}
 				format={subFormat}
 				loading={subLoading}

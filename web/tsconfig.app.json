@@ -7,7 +7,8 @@
 		"module": "ESNext",
 		"baseUrl": ".",
 		"paths": {
-			"@/*": ["./src/*"]
+			"@/*": ["./src/*"],
+			"@xp/demo-frame": ["./src/demo/LiveDemoFrame.tsx"]
 		},
 		"types": ["vite/client", "node"],
 		"skipLibCheck": true,

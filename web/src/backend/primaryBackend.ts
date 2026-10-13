@@ -1,4 +1,5 @@
 import { resolveApiCompatibility } from "@/api/apiCompatibility";
+import { isDemoRuntime } from "../demo/runtimeMode";
 
 export const PRIMARY_BACKEND_SWITCH_TIMEOUT_MS = 60_000;
 
@@ -54,10 +55,11 @@ function getPageOrigin(): string {
 }
 
 export function isStaticWebConsole(): boolean {
-	return getPageOrigin() === STATIC_WEB_ORIGIN;
+	return !isDemoRuntime() && getPageOrigin() === STATIC_WEB_ORIGIN;
 }
 
 function readStoredProfiles(): StoredProfiles {
+	if (isDemoRuntime()) return {};
 	if (isStaticWebConsole()) return {};
 	if (typeof window === "undefined") return {};
 	try {
@@ -93,6 +95,7 @@ let state: PrimaryBackendSnapshot = readInitialState();
 let staticAllowedOrigins = new Set<string>();
 
 function writeStoredProfiles(value: StoredProfiles) {
+	if (isDemoRuntime()) return;
 	if (isStaticWebConsole() || typeof window === "undefined") return;
 	try {
 		window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));

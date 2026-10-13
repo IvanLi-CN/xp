@@ -104,6 +104,10 @@ import {
 } from "./staticFixtureMappings";
 
 export type StorybookApiMockConfig = {
+	identityFactories?: {
+		userId: () => string;
+		subscriptionToken: () => string;
+	};
 	adminToken?: string | null;
 	data?: Partial<MockStateSeed>;
 	failAdminConfig?: boolean;
@@ -1109,8 +1113,11 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 	const nextEndpointId = fixtureCatalog.identifier.createEndpointIdFactory();
 	const nextEndpointTag = fixtureCatalog.identifier.createEndpointTagFactory();
 	const nextSubscriptionToken =
+		config?.identityFactories?.subscriptionToken ??
 		fixtureCatalog.identifier.createSubscriptionTokenFactory();
-	const nextUserId = fixtureCatalog.identifier.createUserIdFactory();
+	const nextUserId =
+		config?.identityFactories?.userId ??
+		fixtureCatalog.identifier.createUserIdFactory();
 	const endpoints = merged.endpoints.map(ensureEndpointRecord);
 
 	const state: MockState = {

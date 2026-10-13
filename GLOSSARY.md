@@ -65,3 +65,25 @@ _Avoid_: Upstream origin, cluster primary
 **Mirrorable Resource**:
 An External Resource eligible for access through XP's Resource Mirror.
 _Avoid_: Any URL, proxied resource
+
+## Web Demo
+
+**Demo Runtime**:
+An explicit Web build/runtime that uses the formal XP page tree with an in-memory mock backend and never falls back to a live backend.
+_Avoid_: Demo mode query switch, fake page tree
+
+**Demo Scene**:
+A deterministic dataset and fault profile selected by the Demo URL and rebuilt in memory.
+_Avoid_: Demo fixture page, saved demo workspace
+
+**Demo Persona**:
+A simulated authentication state used to exercise the formal permission surface, such as administrator or unauthenticated.
+_Avoid_: Demo role, demo account
+
+**Demo Inspector**:
+The local-only control surface for Demo scene, persona, network, data, actions and share state.
+_Avoid_: Product settings, query-string toolbar
+
+**Demo Share State**:
+The allowlisted URL parameters that reproduce a Demo scene, persona, fault profile and product page without carrying secrets or mutation payloads.
+_Avoid_: Serialized demo state, shareable credentials

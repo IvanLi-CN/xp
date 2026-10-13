@@ -1,4 +1,8 @@
 {
+  "GLOSSARY.md": {
+    "long_line_count": 3,
+    "max_line_length": 146
+  },
   ".github/workflows/notify-release-failure.yml": {
     "long_line_count": 7,
     "max_line_length": 141
@@ -218,6 +222,22 @@
   "docs/specs/endpoint-probe-online-participants/SPEC.md": {
     "long_line_count": 8,
     "max_line_length": 154
+  },
+  "docs/specs/mihomo-external-resource-mirror/SPEC.md": {
+    "long_line_count": 2,
+    "max_line_length": 159
+  },
+  "docs/specs/web-demo-runtime/HISTORY.md": {
+    "long_line_count": 1,
+    "max_line_length": 116
+  },
+  "docs/specs/web-demo-runtime/IMPLEMENTATION.md": {
+    "long_line_count": 2,
+    "max_line_length": 313
+  },
+  "docs/specs/web-demo-runtime/SPEC.md": {
+    "long_line_count": 19,
+    "max_line_length": 397
   },
   "docs/specs/access-model-hardcut-v9/SPEC.md": {
     "long_line_count": 1,
@@ -528,7 +548,7 @@
   "web/.storybook/mocks/apiMock.ts": {
     "long_line_count": 6,
     "max_line_length": 198,
-    "source_lines": 2544
+    "source_lines": 2551
   },
   "web/package.json": {
     "long_line_count": 1,
@@ -751,27 +771,6 @@
     "long_line_count": 1,
     "max_line_length": 288
   },
-  "web/src/demo/DemoLayout.tsx": {
-    "long_line_count": 3,
-    "max_line_length": 276
-  },
-  "web/src/demo/DemoLoginPage.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 129
-  },
-  "web/src/demo/DemoSettingsPages.tsx": {
-    "long_line_count": 3,
-    "max_line_length": 169
-  },
-  "web/src/demo/DemoUsersPage.tsx": {
-    "long_line_count": 5,
-    "max_line_length": 138,
-    "source_lines": 1261
-  },
-  "web/src/demo/mockApi.ts": {
-    "long_line_count": 2,
-    "max_line_length": 151
-  },
   "web/src/styles.css": {
     "long_line_count": 5,
     "max_line_length": 270
@@ -828,7 +827,7 @@
   "web/src/views/UserDetailsPage.tsx": {
     "long_line_count": 14,
     "max_line_length": 151,
-    "source_lines": 1787
+    "source_lines": 1864
   },
   "web/src/views/UsersPage.tsx": {
     "long_line_count": 4,

@@ -12,6 +12,7 @@
 /node_modules
 /web/node_modules
 /web/dist
+/web/dist-demo
 /web/.vite
 /web/storybook-static
 /web/playwright-report

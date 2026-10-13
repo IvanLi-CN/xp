@@ -6,6 +6,9 @@
 	"scripts": {
 		"dev": "vite --host 127.0.0.1 --port 60080 --strictPort",
 		"build": "tsc -b && vite build",
+		"dev:demo": "vite --mode demo --host 127.0.0.1 --port 60080 --strictPort",
+		"build:demo": "tsc -b && vite build --mode demo",
+		"preview:demo": "vite preview --mode demo --host 127.0.0.1",
 		"preview": "vite preview",
 		"lint": "biome check .",
 		"format": "biome check --write .",

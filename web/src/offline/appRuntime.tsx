@@ -19,6 +19,7 @@ const AppRuntimeContext =
 export function AppRuntimeProvider(props: {
 	children: ReactNode;
 	initialIsOnline?: boolean;
+	onlineOverride?: boolean;
 }) {
 	const [isOnline, setIsOnline] = useState(() => {
 		if (typeof props.initialIsOnline === "boolean") {
@@ -41,16 +42,17 @@ export function AppRuntimeProvider(props: {
 		};
 	}, []);
 
+	const effectiveOnline = props.onlineOverride ?? isOnline;
 	const value = useMemo<AppRuntimeContextValue>(
 		() => ({
-			isOnline,
-			isReadOnly: !isOnline,
-			readOnlyReason: !isOnline
+			isOnline: effectiveOnline,
+			isReadOnly: !effectiveOnline,
+			readOnlyReason: !effectiveOnline
 				? "Offline read-only mode is active. Cached data remains available, " +
 					"but writes are blocked until the connection returns."
 				: null,
 		}),
-		[isOnline],
+		[effectiveOnline],
 	);
 
 	return (
