@@ -167,7 +167,7 @@ https://<node-origin>/api/sub/<token>?format=mihomo&external_resources=mirror
 ### VER-MIRROR-008
 
 - covers: `REQ-MIRROR-008`
-- 初始目标与跳转均执行节点 CIDR/DNS 准入；不获准地址不能建立连接，获准私网按策略可用。
+- 源码对初始目标和每次跳转逐跳执行节点 CIDR/DNS 准入并固定获准地址；测试验证禁止 loopback、受控跳转上限和策略过滤基础行为。
 
 ### VER-MIRROR-009
 
@@ -182,7 +182,7 @@ https://<node-origin>/api/sub/<token>?format=mihomo&external_resources=mirror
 ### VER-MIRROR-011
 
 - covers: `REQ-MIRROR-011`
-- 静态检查 systemd、OpenRC 和官方 Docker/Compose ops 合同均启动同一 XP 路由并读取节点本地策略；源码没有额外服务、内容目录或驻留下载任务。
+- 静态检查 systemd、OpenRC 和官方 Docker/Compose 部署入口均运行同一 XP 路由；共享源码读取节点本地策略，且没有额外服务、内容目录或驻留下载任务。
 
 ## Related ADRs
 

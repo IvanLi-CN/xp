@@ -655,7 +655,6 @@ describe("<UserDetailsPage />", () => {
 	it("passes the temporary mirror mode only for mihomo subscriptions", async () => {
 		setupMocks();
 		renderPage();
-
 		const group = (await screen.findByTestId(
 			"subscription-format",
 		)) as HTMLElement;
@@ -677,6 +676,19 @@ describe("<UserDetailsPage />", () => {
 				"mirror",
 			);
 		});
+		fireEvent.click(await screenByRole("button", "Close"));
+		const formatGroup = await screen.findByTestId("subscription-format");
+		for (const format of ["Raw", "Clash"] as const) {
+			fireEvent.click(within(formatGroup).getByLabelText(format));
+			fireEvent.click(await screenByRole("button", "Fetch"));
+			await waitFor(() => {
+				expect(vi.mocked(fetchSubscription).mock.calls.at(-1)).toEqual([
+					fixtureCatalog.token.fixture254(),
+					format.toLowerCase(),
+				]);
+			});
+			fireEvent.click(await screenByRole("button", "Close"));
+		}
 	});
 	it("copies the selected mirror URL", async () => {
 		const writeText = vi.fn().mockResolvedValue(undefined);
