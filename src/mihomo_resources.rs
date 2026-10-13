@@ -369,6 +369,40 @@ mod tests {
         assert!(cache.lookup_cached(2, &id).await.is_none());
     }
 
+    #[test]
+    fn resource_directory_lifecycle_tracks_shared_references_and_profile_replacement() {
+        let shared_url = "https://rules.example/shared.yaml";
+        let shared_id = resource_id(
+            "cluster-key",
+            &subscription::normalize_mihomo_external_url(shared_url).unwrap(),
+        );
+        let profile = UserMihomoProfile {
+            mixin_yaml: format!(
+                "rule-providers:\n  shared:\n    type: http\n    url: {shared_url}\n"
+            ),
+            ..UserMihomoProfile::default()
+        };
+        let second_profile = profile.clone();
+
+        assert!(resolve_resource_url("cluster-key", &shared_id, &[profile.clone()]).is_some());
+        assert!(
+            resolve_resource_url(
+                "cluster-key",
+                &shared_id,
+                &[profile, second_profile.clone()]
+            )
+            .is_some()
+        );
+        assert!(resolve_resource_url("cluster-key", &shared_id, &[second_profile]).is_some());
+        assert!(resolve_resource_url("cluster-key", &shared_id, &[]).is_none());
+
+        let fixed_url = subscription::normalize_mihomo_external_url(FIXED_GEOX_ASSETS[0].1)
+            .expect("fixed GeoX URL");
+        let fixed_id = resource_id("cluster-key", &fixed_url);
+        assert!(resolve_resource_url("cluster-key", &fixed_id, &[]).is_some());
+        assert!(resolve_resource_url("other-key", &fixed_id, &[]).is_none());
+    }
+
     #[tokio::test(start_paused = true)]
     async fn request_timeout_maps_to_gateway_timeout() {
         let deadline = Instant::now() + Duration::from_secs(1);

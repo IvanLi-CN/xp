@@ -182,7 +182,7 @@ https://<node-origin>/api/sub/<token>?format=mihomo&external_resources=mirror
 ### VER-MIRROR-011
 
 - covers: `REQ-MIRROR-011`
-- 检查各部署路径均使用 XP 同一实现与节点本地策略，不依赖额外服务或缓存。
+- 静态检查 systemd、OpenRC 和官方 Docker/Compose ops 合同均启动同一 XP 路由并读取节点本地策略；源码没有额外服务、内容目录或驻留下载任务。
 
 ## Related ADRs
 
