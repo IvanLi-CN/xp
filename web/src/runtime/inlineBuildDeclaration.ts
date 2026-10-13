@@ -9,16 +9,23 @@ export function serializeInlineScriptString(value: string): string {
 		.replace(/\u2029/g, "\\u2029");
 }
 
-export function buildDeclarationScriptSource(buildId: string): string {
+export function buildDeclarationScriptSource(
+	buildId: string,
+	declareServiceWorker = true,
+): string {
 	return [
 		inlineBootstrapFallback(buildId),
 		`window.__XP_WEB_BUILD_ID__=${serializeInlineScriptString(buildId)};`,
-		"if (navigator.serviceWorker?.controller) {",
-		"navigator.serviceWorker.controller.postMessage({",
-		'type: "XP_DECLARE_BUILD",',
-		"buildId: window.__XP_WEB_BUILD_ID__",
-		"});",
-		"}",
+		...(declareServiceWorker
+			? [
+					"if (navigator.serviceWorker?.controller) {",
+					"navigator.serviceWorker.controller.postMessage({",
+					'type: "XP_DECLARE_BUILD",',
+					"buildId: window.__XP_WEB_BUILD_ID__",
+					"});",
+					"}",
+				]
+			: []),
 	].join("");
 }
 

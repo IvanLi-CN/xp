@@ -84,7 +84,7 @@ export default defineConfig(({ mode }) => {
 	const backend = env.VITE_BACKEND_PROXY ?? "http://127.0.0.1:62416";
 	const buildId = resolveBuildId();
 	const swUpdateIntervalMs = resolveSwUpdateIntervalMs();
-	const buildDeclarationSource = buildDeclarationScriptSource(buildId);
+	const buildDeclarationSource = buildDeclarationScriptSource(buildId, !demo);
 	const buildDeclarationHash = createHash("sha256")
 		.update(buildDeclarationSource)
 		.digest("hex")
