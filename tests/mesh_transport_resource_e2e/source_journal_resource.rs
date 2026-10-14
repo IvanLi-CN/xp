@@ -477,8 +477,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
          peak_generated_segments={} peak_generated_bytes={} \
          acknowledged_segments={acknowledged_segments} acknowledged_bytes={acknowledged_bytes} \
          applied_segments={applied_segments} applied_bytes={applied_bytes}",
-        post_replay_status.metrics.peak_generated_segments,
-        post_replay_status.metrics.peak_generated_bytes
+        completed_window.peak_generated_segments, completed_window.peak_generated_bytes
     );
     assert!(
         cpu_p95 <= JOURNAL_CPU_P95_LIMIT_PERCENT,
