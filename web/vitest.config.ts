@@ -8,6 +8,7 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src"),
+			"@xp/demo-frame": path.resolve(__dirname, "./src/demo/LiveDemoFrame.tsx"),
 			"virtual:pwa-register/react": path.resolve(
 				__dirname,
 				"./src/testFixtures/pwaRegister.ts",

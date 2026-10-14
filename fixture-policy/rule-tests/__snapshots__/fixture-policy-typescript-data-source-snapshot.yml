@@ -261,6 +261,21 @@ snapshots:
       start: 26
       end: 42
   ? |
+    const fixture = { subscription_token: state.nextSubscriptionToken(payload.namespace) };
+  : labels:
+    - source: 'subscription_token: state.nextSubscriptionToken(payload.namespace)'
+      style: primary
+      start: 18
+      end: 84
+    - source: subscription_token
+      style: secondary
+      start: 18
+      end: 36
+    - source: state.nextSubscriptionToken(payload.namespace)
+      style: secondary
+      start: 38
+      end: 84
+  ? |
     const fixture = { subscription_token: user.subscription_token };
   : labels:
     - source: 'subscription_token: user.subscription_token'

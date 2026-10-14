@@ -85,6 +85,8 @@ function isSameOriginStaticRequest(request: Request): boolean {
 	return (
 		request.method === "GET" &&
 		url.origin === self.location.origin &&
+		url.pathname !== "/demo" &&
+		!url.pathname.startsWith("/demo/") &&
 		url.pathname !== "/sw.js" &&
 		!url.pathname.startsWith("/api/") &&
 		!url.pathname.startsWith("/events")

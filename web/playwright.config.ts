@@ -5,9 +5,12 @@ const baseUrlObj = new URL(baseURL);
 // Vite accepts the last `--port` flag; let E2E runs override the default 60080 safely.
 const devPort = baseUrlObj.port || "60080";
 const usePreview = process.env.E2E_USE_PREVIEW === "1";
+const useDemoBuild = process.env.E2E_DEMO_BUILD === "1";
 
 export default defineConfig({
 	testDir: "./tests/e2e",
+	testMatch: useDemoBuild ? "**/demo-*.spec.ts" : "**/*.spec.ts",
+	testIgnore: useDemoBuild ? [] : ["**/demo-*.spec.ts"],
 	timeout: 60_000,
 	expect: {
 		timeout: 5_000,
@@ -27,9 +30,12 @@ export default defineConfig({
 		viewport: { width: 1280, height: 900 },
 	},
 	webServer: {
-		command: usePreview
-			? `bun run build && bun run preview -- --host 127.0.0.1 --port ${devPort}`
-			: `bun run dev -- --port ${devPort}`,
+		command: useDemoBuild
+			? `bun run build && bun run build:demo && node scripts/demo-static-server.mjs --port ${devPort}`
+			: usePreview
+				? `bun run build && bun run preview -- --host 127.0.0.1 --port ${devPort}`
+				: `bun run dev -- --port ${devPort}`,
+		timeout: 120_000,
 		url: baseURL,
 		// Avoid silently reusing an unrelated server on the same port in local runs.
 		// Opt-in via `E2E_REUSE_EXISTING_SERVER=1` when you intentionally pre-started the app.

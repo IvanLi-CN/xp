@@ -8,9 +8,9 @@ type XpBrandLogoProps = {
 	alt?: string;
 };
 
-const markSrc = `/${iconAssets.bicolorSvg}`;
-const lockupSrc = `/${iconAssets.lockupSvg}`;
-const lockupInverseSrc = `/${iconAssets.lockupInverseSvg}`;
+const markSrc = `${import.meta.env.BASE_URL}${iconAssets.bicolorSvg}`;
+const lockupSrc = `${import.meta.env.BASE_URL}${iconAssets.lockupSvg}`;
+const lockupInverseSrc = `${import.meta.env.BASE_URL}${iconAssets.lockupInverseSvg}`;
 
 /** Uses the generated, content-versioned brand assets across app surfaces. */
 export function XpBrandLogo({

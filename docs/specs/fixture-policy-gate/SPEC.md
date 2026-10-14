@@ -7,7 +7,7 @@
 
 None
 
-## 背景 / 问题陈述
+## Context and Scope
 
 测试、Storybook 和 demo fixture 可意外携带生产派生的拓扑、遥测或凭据样式信息。质量文档
 要求这些文本源仅使用 synthetic 数据，但此前没有可重复执行的本地与 CI 门禁。
@@ -45,17 +45,17 @@ None
 - 截图、二进制、任意非结构化附件与 Git 历史。
 - 远端 required-check 或 branch-protection 设置。
 
-## 需求（Requirements）
+## Requirements
 
 ### MUST
 
-- `bun run check:fixture-policy` 必须先运行 `ast-grep test`，再运行错误级 `ast-grep scan`。
-- catalog 必须是单一 checked-in JSON 文件；其中仅允许固定的 `.test` 主机名、文档保留
+- REQ-001: `bun run check:fixture-policy` 必须先运行 `ast-grep test`，再运行错误级 `ast-grep scan`。
+- REQ-002: catalog 必须是单一 checked-in JSON 文件；其中仅允许固定的 `.test` 主机名、文档保留
   地址、测试标识、时间戳和指标。
-- data-source rule 列出的操作型字段必须使用直接 catalog adapter accessor；内联值、插值、
+- REQ-003: data-source rule 列出的操作型字段必须使用直接 catalog adapter accessor；内联值、插值、
   拼接、环境、文件、网络、反序列化和任意来源不得成为 fixture 数据输入。
-- 受保护路径不得使用 `ast-grep-ignore`。
-- catalog、adapter、scanner 版本、规则 scope 与 workflow 必须受 scoped `CODEOWNERS` 保护。
+- REQ-004: 受保护路径不得使用 `ast-grep-ignore`。
+- REQ-005: catalog、adapter、scanner 版本、规则 scope 与 workflow 必须受 scoped `CODEOWNERS` 保护。
 
 ### SHOULD
 
@@ -65,6 +65,14 @@ None
 ### COULD
 
 - 在仓库形成同类文本 fixture 时扩展显式 scan scope 和 catalog accessor。
+
+### Demo identity factory
+
+REQ-006: Demo 用户 ID 与订阅 token 可由 catalog 工厂派生：固定 catalog 前缀、固定 `-demo-` 分隔符和工厂私有递增计数。
+
+仅允许内部 `"demo"` 命名空间；默认调用保持原 catalog 序列，Demo 新建与重置不得复用种子数据或其他当前标识。
+
+此例外只适用于精确白名单中的两种工厂实现及 mock state 的命名空间调用；任意回调、请求值、环境或其他外部来源仍须拒绝。
 
 ## 功能与行为规格（Functional/Behavior Spec）
 
@@ -85,14 +93,20 @@ None
 
 None。此主题只新增开发与 CI gate，不修改产品 HTTP、持久化或运行时接口。
 
-## 验收标准（Acceptance Criteria）
+## Verification
 
-- Given 干净 checkout，When 运行 `bun run check:fixture-policy`，Then 规则测试和扫描均通过。
-- Given data-source rule 列出的字段中出现未批准域名、地址、标识、遥测或时间值，When 运行
+covers: REQ-001, REQ-002, REQ-003, REQ-004, REQ-005, REQ-006
+
+- VER-001 (REQ-001): Given 干净 checkout，When 运行 `bun run check:fixture-policy`，Then 规则测试和扫描均通过。
+- VER-002 (REQ-002, REQ-003): Given data-source rule 列出的字段中出现未批准域名、地址、标识、遥测或时间值，When 运行
   gate，Then gate 在文件/行定位处失败。
-- Given 受保护字段中的动态或外部来源，When 运行 gate，Then gate 失败。
-- Given catalog、adapter、policy 或 workflow 的修改，When 提交 PR，Then `fixture-policy`
+- VER-003 (REQ-003, REQ-004): Given 受保护字段中的未批准动态或外部来源或 suppression，When 运行 gate，Then gate 失败。
+- VER-004 (REQ-005): Given catalog、adapter、policy 或 workflow 的修改，When 提交 PR，Then `fixture-policy`
   workflow 运行，且路径由 code owner 保护。
+
+- VER-005 (REQ-006): 连续创建四个 Demo 用户、对每个用户重置两次 token，标识与所有种子和此前生成值互不冲突；新模型恢复独立初始序列。
+
+默认工厂序列及环境前缀、请求命名空间的拒绝反例同时通过。
 
 ## 非功能性验收 / 质量门槛（Quality Gates）
 
@@ -110,10 +124,6 @@ None。此主题只新增开发与 CI gate，不修改产品 HTTP、持久化或
 ## Visual Evidence
 
 PR: none
-
-## Related PRs
-
-- None
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 

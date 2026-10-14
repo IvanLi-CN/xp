@@ -6,7 +6,7 @@ describe("fixtureCatalog subscription token factory", () => {
 	it("does not reuse an active token before the catalog sequence is exhausted", () => {
 		const nextSubscriptionToken =
 			fixtureCatalog.identifier.createSubscriptionTokenFactory();
-		const tokens = Array.from({ length: 64 }, nextSubscriptionToken);
+		const tokens = Array.from({ length: 64 }, () => nextSubscriptionToken());
 
 		expect(new Set(tokens).size).toBe(tokens.length);
 		expect(nextSubscriptionToken).toThrow(

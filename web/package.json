@@ -6,6 +6,9 @@
 	"scripts": {
 		"dev": "vite --host 127.0.0.1 --port 60080 --strictPort",
 		"build": "tsc -b && vite build",
+		"dev:demo": "vite --mode demo --host 127.0.0.1 --port 60080 --strictPort",
+		"build:demo": "tsc -b && vite build --mode demo",
+		"preview:demo": "vite preview --mode demo --host 127.0.0.1",
 		"preview": "vite preview",
 		"lint": "biome check .",
 		"format": "biome check --write .",
@@ -16,6 +19,7 @@
 		"build-storybook": "storybook build",
 		"test-storybook": "test-storybook --url http://127.0.0.1:60081 --ci --browsers chromium --failOnConsole --testTimeout 60000 --maxWorkers=2",
 		"test:e2e": "playwright test",
+		"test:e2e:demo": "E2E_DEMO_BUILD=1 playwright test tests/e2e/demo-*.spec.ts",
 		"test:e2e:pwa": "E2E_USE_PREVIEW=1 playwright test tests/e2e/offline-warm-load.spec.ts",
 		"test:e2e:upgrade-runtime": "E2E_USE_PREVIEW=1 playwright test tests/e2e/upgrade-runtime.spec.ts",
 		"test:e2e:storybook": "playwright test -c playwright.storybook.config.ts"

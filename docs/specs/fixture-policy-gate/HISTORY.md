@@ -15,5 +15,7 @@
 
 ## References
 
+Web Demo 复用正式 mock 写入后，独立身份序列避免与五个种子用户冲突。工厂归属统一到 catalog，并同步精确规则白名单及拒绝反例。
+
 - `./SPEC.md`
 - `./IMPLEMENTATION.md`

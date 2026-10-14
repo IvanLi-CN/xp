@@ -1,5 +1,6 @@
 node_modules
 dist
+dist-demo
 .vite
 storybook-static
 playwright-report

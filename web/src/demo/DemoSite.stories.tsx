@@ -1,184 +1,101 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, screen, userEvent, within } from "@storybook/test";
-import { fixtureCatalog } from "../fixture-policy/catalog";
+import { expect, userEvent, within } from "@storybook/test";
+import { useState } from "react";
 
-function Empty() {
-	return <></>;
+import { UsersPage } from "../views/UsersPage";
+import { DemoInspectorControls } from "./DemoInspector";
+import { DEFAULT_DEMO_CONTROLS } from "./shareState";
+
+function InteractiveInspector(
+	props: React.ComponentProps<typeof DemoInspectorControls>,
+) {
+	const [controls, setControls] = useState(props.controls);
+	return (
+		<DemoInspectorControls
+			{...props}
+			controls={controls}
+			onChange={(patch) => setControls((current) => ({ ...current, ...patch }))}
+		/>
+	);
 }
 
 const meta = {
-	title: "Demo/Site",
-	component: Empty,
+	title: "Demo/Inspector",
+	component: DemoInspectorControls,
+	render: (args) => <InteractiveInspector {...args} />,
 	parameters: {
-		layout: "fullscreen",
-		router: {
-			initialEntry: "/demo/login",
-		},
+		layout: "centered",
 	},
-} satisfies Meta<typeof Empty>;
+	args: {
+		controls: DEFAULT_DEMO_CONTROLS,
+		operations: [],
+		shareUrl:
+			"https://xp.example/demo/users/user-fixture-c?demo=normal&d_profile=valid",
+		onChange: () => undefined,
+		onReset: () => undefined,
+		onClose: () => undefined,
+		onWalkthrough: () => undefined,
+	},
+} satisfies Meta<typeof DemoInspectorControls>;
 
 export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const MainFlow: Story = {
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
+export const Default: Story = {};
 
-		await expect(
-			await canvas.findByRole("heading", { name: "xp Demo Site" }),
-		).toBeInTheDocument();
-
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Enter demo" }),
-		);
-
-		await expect(
-			await canvas.findByRole("heading", { name: "Demo dashboard" }),
-		).toBeInTheDocument();
-		await expect(
-			await canvas.findByText(
-				"231 GiB finite used / 420 GiB, 1 unlimited user",
-			),
-		).toBeInTheDocument();
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Open demo settings" }),
-		);
-		await userEvent.click(await screen.findByRole("radio", { name: "Dark" }));
-		await expect(document.documentElement).toHaveAttribute(
-			"data-theme",
-			"xp-dark",
-		);
-		await userEvent.click(
-			await screen.findByRole("radio", { name: "Compact" }),
-		);
-		await expect(document.documentElement).toHaveAttribute(
-			"data-density",
-			"compact",
-		);
-
-		await userEvent.click(
-			await canvas.findByRole("link", { name: "New endpoint" }),
-		);
-		await expect(
-			await canvas.findByRole("heading", { name: "New endpoint" }),
-		).toBeInTheDocument();
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Create endpoint" }),
-		);
-		await expect(
-			await canvas.findByText(/endpoint-demo-01/),
-		).toBeInTheDocument();
-
-		await userEvent.click(await canvas.findByRole("link", { name: "Users" }));
-		await expect(
-			await canvas.findByRole("heading", { name: "Users" }),
-		).toBeInTheDocument();
-		await userEvent.type(await canvas.findByLabelText("Search users"), "sato");
-		await expect(
-			await canvas.findByRole("link", { name: "佐藤 未来" }),
-		).toBeInTheDocument();
-		await userEvent.click(
-			await canvas.findByRole("link", { name: "佐藤 未来" }),
-		);
-		await expect(
-			await canvas.findByRole("heading", { name: "佐藤 未来" }),
-		).toBeInTheDocument();
-		await expect(
-			await canvas.findByRole("button", { name: "Reset token" }),
-		).toBeInTheDocument();
-		await expect(
-			await canvas.findByRole("button", { name: "Reset credentials" }),
-		).toBeInTheDocument();
-		const subscriptionFormat = await canvas.findByTestId(
-			"demo-subscription-format",
-		);
-		const labels = Array.from(subscriptionFormat.querySelectorAll("label"));
-		expect(labels.map((label) => label.textContent?.trim())).toEqual([
-			"Raw",
-			"Clash",
-			"Mihomo",
-		]);
-		await userEvent.click(labels[2]);
-		await expect(
-			subscriptionFormat.querySelector('input[value="mihomo"]'),
-		).toBeChecked();
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Access" }),
-		);
-		await expect(
-			await canvas.findByRole("button", { name: "Apply access" }),
-		).toBeInTheDocument();
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Quota status" }),
-		);
-		await expect(
-			await canvas.findByText(fixtureCatalog.identifier.nodePrimary()),
-		).toBeInTheDocument();
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Usage details" }),
-		);
-		await expect(
-			await canvas.findByText(/Usage details ·/),
-		).toBeInTheDocument();
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^User$/ }),
-		);
-		await userEvent.click(await canvas.findByRole("button", { name: "Fetch" }));
-		await expect(
-			await screen.findByText("Subscription preview"),
-		).toBeInTheDocument();
-		await userEvent.click(await screen.findByRole("button", { name: "Close" }));
-
-		await userEvent.click(
-			await canvas.findByRole("link", { name: "Quota policy" }),
-		);
-		await expect(
-			await canvas.findByRole("heading", { name: "Quota policy" }),
-		).toBeInTheDocument();
-
-		await userEvent.click(
-			await canvas.findByRole("link", { name: "Service config" }),
-		);
-		await expect(
-			await canvas.findByRole("heading", { name: "Service config" }),
-		).toBeInTheDocument();
-
-		await userEvent.click(await canvas.findByRole("link", { name: "Tools" }));
-		await expect(
-			await canvas.findByRole("heading", { name: "Tools" }),
-		).toBeInTheDocument();
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Run redaction" }),
-		);
-		await expect(await canvas.findByText(/\[REDACTED\]/)).toBeInTheDocument();
-
-		await userEvent.click(
-			await canvas.findByRole("link", { name: "Endpoints" }),
-		);
-		await userEvent.click(await canvas.findByRole("link", { name: /tokyo/i }));
-		await userEvent.click(
-			await canvas.findByRole("link", { name: "Probe stats" }),
-		);
-		await expect(
-			await canvas.findByRole("heading", { name: "Endpoint probe stats" }),
-		).toBeInTheDocument();
+export const MissingProfile: Story = {
+	args: {
+		controls: { ...DEFAULT_DEMO_CONTROLS, profile: "missing" },
+		operations: [
+			{
+				id: 1,
+				method: "PUT",
+				route: "/api/admin/users/:id/subscription-mihomo-profile",
+				status: 200,
+			},
+		],
 	},
 };
 
-export const MainFlowMobile: Story = {
-	...MainFlow,
-	parameters: {
-		...MainFlow.parameters,
-		viewport: {
-			defaultViewport: "demoMobile393",
-			viewports: {
-				demoMobile393: {
-					name: "Demo mobile (393x852)",
-					styles: { width: "393px", height: "852px" },
-					type: "mobile",
-				},
-			},
+export const AnonymousIncident: Story = {
+	args: {
+		controls: {
+			...DEFAULT_DEMO_CONTROLS,
+			scene: "incident",
+			persona: "anonymous",
+			network: "error",
 		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.selectOptions(canvas.getByLabelText("Network"), "offline");
+		await expect(canvas.getByLabelText("Network")).toHaveValue("offline");
+	},
+};
+
+export const LargeTenantOperations: Story = {
+	args: {
+		controls: { ...DEFAULT_DEMO_CONTROLS, scene: "large" },
+		operations: Array.from({ length: 4 }, (_, index) => ({
+			id: index + 1,
+			method: "POST",
+			route: `/api/demo/action/${index + 1}`,
+			status: 200,
+		})),
+	},
+};
+
+export const FormalUsersRoute: Story = {
+	render: () => <UsersPage />,
+	parameters: {
+		layout: "fullscreen",
+		router: { initialEntry: "/users" },
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByRole("heading", { name: "Users" }),
+		).toBeInTheDocument();
 	},
 };

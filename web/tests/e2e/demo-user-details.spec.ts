@@ -1,127 +1,259 @@
 import { expect, test } from "@playwright/test";
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
-test("demo user details follow the production user-management layout", async ({
+const userId = fixtureCatalog.identifier.userTertiary();
+
+test("demo opens the formal user route without a login gate", async ({
 	page,
 }) => {
-	await page.goto("/demo/login");
-	await page.getByRole("button", { name: "Enter demo" }).click();
-	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+	await page.goto(`/demo/users/${userId}?demo=normal&d_profile=valid`);
 
-	await expect(
-		page.getByRole("heading", { name: "佐藤 未来", exact: true }),
-	).toBeVisible();
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
 	await expect(page.getByRole("button", { name: "Reset token" })).toBeVisible();
 	await expect(
 		page.getByRole("button", { name: "Reset credentials" }),
 	).toBeVisible();
-	await expect(page.getByRole("button", { name: "Delete user" })).toBeVisible();
-
-	await expect(page.getByText("Display name", { exact: true })).toBeVisible();
-	await expect(page.getByText("Subscription token:")).toBeVisible();
-	await expect(page.getByText("Mihomo mixin config")).toBeVisible();
-	const subscriptionFormat = page.getByTestId("demo-subscription-format");
-	await expect(subscriptionFormat.locator('input[type="radio"]')).toHaveCount(
-		3,
-	);
-	await expect(subscriptionFormat.locator('input[value="raw"]')).toBeChecked();
-	await expect(subscriptionFormat.locator('input[value="clash"]')).toHaveCount(
-		1,
-	);
-	await expect(subscriptionFormat.locator('input[value="mihomo"]')).toHaveCount(
-		1,
-	);
-	await subscriptionFormat.locator("label").nth(2).click();
-	await expect(
-		subscriptionFormat.locator('input[value="mihomo"]'),
-	).toBeChecked();
-	await subscriptionFormat.locator("label").nth(0).click();
-	await expect(subscriptionFormat.locator('input[value="raw"]')).toBeChecked();
-
-	await page.getByRole("button", { name: "Access" }).click();
-	await expect(
-		page.getByRole("button", { name: "Apply access" }),
-	).toBeVisible();
-	await expect(page.getByText("Selected endpoints:")).toBeVisible();
-	await expect(page.getByRole("table")).toContainText("VLESS");
-
-	await page.getByRole("button", { name: "Quota status" }).click();
-	await expect(
-		page.getByText(fixtureCatalog.identifier.nodePrimary()),
-	).toBeVisible();
-	await expect(
-		page.getByText(fixtureCatalog.identifier.nodeTertiary()),
-	).toBeVisible();
-
-	await page.getByRole("button", { name: "Usage details" }).click();
-	await expect(page.getByText(/Usage details ·/)).toBeVisible();
-	await expect(page.getByRole("table")).toContainText("Inbound IPs");
-
-	await page.getByRole("button", { name: "User", exact: true }).click();
-	await page.getByRole("button", { name: "Fetch" }).click();
-	const dialog = page.getByRole("dialog");
-	await expect(dialog).toBeVisible();
-	await expect(dialog.getByText("Subscription preview")).toBeVisible();
-	await expect(dialog).toContainText("vless://");
+	await expect(page.getByTestId("subscription-format")).toBeVisible();
+	const logo = page.locator("header img:visible").first();
+	await expect
+		.poll(() =>
+			logo.evaluate(
+				(image) =>
+					image instanceof HTMLImageElement &&
+					image.complete &&
+					image.naturalWidth > 0,
+			),
+		)
+		.toBe(true);
+	await expect(logo).toHaveAttribute("src", /^\/demo\/xp-logo-/);
 });
 
-test("demo user details expose the Mihomo mirror workflow", async ({
+test("demo remains isolated from an existing live service worker", async ({
 	page,
 }) => {
-	await page.goto("/demo/login");
-	await page.getByRole("button", { name: "Enter demo" }).click();
-	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
-
-	const subscriptionFormat = page.getByTestId("demo-subscription-format");
-	await subscriptionFormat.locator("label").nth(2).click();
-	const mirrorToggle = page.getByRole("checkbox", {
-		name: "Use XP mirror for external resources",
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.evaluate(async () => {
+		await navigator.serviceWorker.register("/sw.js");
+		await navigator.serviceWorker.ready;
+		if (!navigator.serviceWorker.controller) {
+			await new Promise<void>((resolve) => {
+				navigator.serviceWorker.addEventListener(
+					"controllerchange",
+					() => resolve(),
+					{
+						once: true,
+					},
+				);
+			});
+		}
 	});
-	await expect(mirrorToggle).toBeVisible();
-	await mirrorToggle.check();
-	await page.getByRole("button", { name: "Fetch" }).click();
-
-	const dialog = page.getByRole("dialog");
-	await expect(dialog).toBeVisible();
-	await expect(
-		dialog.getByRole("checkbox", {
-			name: "Use XP mirror for external resources",
+	await page.reload();
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+	expect(
+		await page.evaluate(async () => {
+			const registrations = await navigator.serviceWorker.getRegistrations();
+			return registrations.some((registration) =>
+				registration.active?.scriptURL.endsWith("/sw.js"),
+			);
 		}),
-	).toBeChecked();
-	await expect(dialog).toContainText("# XP mirror mode");
-	await expect(dialog).toContainText(
-		"https://xp.example.net/api/mihomo/resources/demo-rules",
-	);
-
-	await dialog
-		.getByRole("checkbox", {
-			name: "Use XP mirror for external resources",
-		})
-		.uncheck();
-	await expect(
-		dialog.getByRole("checkbox", {
-			name: "Use XP mirror for external resources",
-		}),
-	).not.toBeChecked();
-	await expect(dialog).not.toContainText("# XP mirror mode");
-	await dialog.getByRole("button", { name: "Close" }).click();
-	await expect(mirrorToggle).not.toBeChecked();
-
-	await subscriptionFormat.locator("label").nth(0).click();
-	await expect(
-		page.getByRole("checkbox", {
-			name: "Use XP mirror for external resources",
-		}),
-	).toHaveCount(0);
+	).toBe(true);
 });
 
-test("demo mirror reports a missing Mihomo profile", async ({ page }) => {
-	await page.goto("/demo/login");
-	await page.getByRole("button", { name: "Enter demo" }).click();
-	await page.goto(`/demo/users/${fixtureCatalog.identifier.userQuinary()}`);
+test("demo does not send API requests to a live backend", async ({ page }) => {
+	const liveApiRequests: string[] = [];
+	await page.route("**/api/**", async (route) => {
+		liveApiRequests.push(route.request().url());
+		await route.abort();
+	});
 
-	const subscriptionFormat = page.getByTestId("demo-subscription-format");
-	await subscriptionFormat.locator("label").nth(2).click();
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+	await expect(page.locator("[data-demo-runtime='mock-only']")).toBeVisible();
+	expect(liveApiRequests).toEqual([]);
+});
+
+test("demo recovers when a legacy root worker controls the page", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.evaluate(async () => {
+		await navigator.serviceWorker.register("/__e2e_legacy_demo_worker__.js", {
+			scope: "/",
+		});
+		await navigator.serviceWorker.ready;
+		if (!navigator.serviceWorker.controller) {
+			await new Promise<void>((resolve) => {
+				navigator.serviceWorker.addEventListener(
+					"controllerchange",
+					() => resolve(),
+					{
+						once: true,
+					},
+				);
+			});
+		}
+	});
+	await page.reload();
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+	await expect(page.locator("[data-demo-runtime='mock-only']")).toBeVisible();
+});
+
+test("demo static build supports nested direct load and refresh", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal&d_profile=valid`);
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+	await page.reload();
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+});
+
+test("demo opens the formal route family without authentication", async ({
+	page,
+}) => {
+	for (const route of [
+		["/demo/", "Dashboard"],
+		["/demo/nodes", "Nodes"],
+		["/demo/endpoints", "Endpoints"],
+		["/demo/quota-policy", "Quota policy"],
+		["/demo/service-config", "服务配置"],
+		["/demo/tools", "Tools"],
+		["/demo/system-status", "System status"],
+	]) {
+		await page.goto(`${route[0]}?demo=normal`);
+		await expect(page).not.toHaveURL(/\/login/);
+		await expect(
+			page.getByRole("heading", { name: route[1], exact: true }),
+		).toBeVisible();
+	}
+});
+
+test("demo mutations update the formal page and redacted operation journal", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.getByRole("button", { name: "Reset token" }).click();
+	const dialog = page.getByRole("alertdialog");
+	await expect(dialog).toContainText("Reset subscription token");
+	await dialog.getByRole("button", { name: "Reset" }).click();
+
+	await expect(page.getByText(/Subscription token reset:/)).toBeVisible();
+	await page.getByRole("button", { name: "Open Demo Inspector" }).click();
+	await expect(
+		page.getByRole("complementary", { name: "Demo Inspector" }),
+	).toContainText("POST /api/admin/users/:id/reset-token · 200");
+});
+
+test("demo inspector collapses and recovers on mobile", async ({ page }) => {
+	await page.setViewportSize({ width: 393, height: 852 });
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.getByRole("button", { name: "Open Demo Inspector" }).click();
+	await expect(
+		page.getByRole("dialog").locator("h2:not(.sr-only)"),
+	).toBeVisible();
+	await page.getByRole("button", { name: "Collapse Inspector" }).click();
+	await expect(
+		page.getByRole("button", { name: "Open Demo Inspector" }),
+	).toBeVisible();
+});
+
+test("demo inspector stays bounded across desktop layouts", async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 1920, height: 900 });
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.getByRole("button", { name: "Open Demo Inspector" }).click();
+
+	const inspector = page.getByRole("complementary", { name: "Demo Inspector" });
+	await expect(inspector).toBeVisible();
+	const dockedBox = await inspector.boundingBox();
+	expect(dockedBox).not.toBeNull();
+	if (!dockedBox) throw new Error("Docked Inspector is not measurable");
+	expect(dockedBox.x).toBeGreaterThanOrEqual(0);
+	expect(dockedBox.y).toBeGreaterThanOrEqual(0);
+	expect(dockedBox.x + dockedBox.width).toBeLessThanOrEqual(1920);
+	expect(dockedBox.y + dockedBox.height).toBeLessThanOrEqual(900);
+
+	await page.getByRole("button", { name: "Float panel" }).click();
+	const floatingBox = await inspector.boundingBox();
+	expect(floatingBox).not.toBeNull();
+	if (!floatingBox) throw new Error("Floating Inspector is not measurable");
+	expect(floatingBox.x).toBeGreaterThanOrEqual(0);
+	expect(floatingBox.y).toBeGreaterThanOrEqual(0);
+	expect(floatingBox.x + floatingBox.width).toBeLessThanOrEqual(1920);
+	expect(floatingBox.y + floatingBox.height).toBeLessThanOrEqual(900);
+
+	await page.getByRole("button", { name: "Collapse Inspector" }).click();
+	await expect(
+		page.getByRole("button", { name: "Open Demo Inspector" }),
+	).toBeVisible();
+});
+
+test("demo control state survives client navigation and refresh", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.getByRole("button", { name: "Open Demo Inspector" }).click();
+	let documentRequests = 0;
+	page.on("request", (request) => {
+		if (request.resourceType() === "document") documentRequests += 1;
+	});
+
+	await page.getByLabel("Scene").selectOption("large");
+	await page.getByLabel("Network").selectOption("offline");
+	await expect(page).toHaveURL(/demo=large/);
+	await expect(page).toHaveURL(/d_network=offline/);
+	expect(documentRequests).toBe(0);
+
+	await page.reload();
+	await expect(page.getByLabel("Scene")).toHaveValue("large");
+	await expect(page.getByLabel("Network")).toHaveValue("offline");
+});
+
+test("demo share link reproduces controls in a fresh page", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await page.getByRole("button", { name: "Open Demo Inspector" }).click();
+	await page.getByLabel("Scene").selectOption("large");
+	await page.getByLabel("Network").selectOption("offline");
+	await expect(page).toHaveURL(/demo=large/);
+	await expect(page).toHaveURL(/d_network=offline/);
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+	await page.getByRole("button", { name: "Copy demo link" }).click();
+
+	const sharedUrl = await page.evaluate(() => navigator.clipboard.readText());
+	const sharedPage = await page.context().newPage();
+	await sharedPage.goto(sharedUrl);
+	await expect(
+		sharedPage.getByRole("complementary", { name: "Demo Inspector" }),
+	).toBeVisible();
+	await expect(sharedPage.getByLabel("Scene")).toHaveValue("large");
+	await expect(sharedPage.getByLabel("Network")).toHaveValue("offline");
+	await sharedPage.close();
+});
+
+test("demo identity switching stays on the same formal page", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal&d_persona=anonymous`);
+
+	await expect(
+		page.getByRole("heading", { name: "Admin token required" }),
+	).toBeVisible();
+	await page.getByRole("button", { name: "Open Demo Inspector" }).click();
+	await page.getByLabel("Persona / authentication").selectOption("admin");
+
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+	await expect(page).toHaveURL(/d_persona=admin/);
+});
+
+test("demo Mihomo mirror walkthrough is URL-first and simulated", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal&d_profile=valid`);
+
+	const format = page.getByTestId("subscription-format");
+	await page.getByText("Mihomo", { exact: true }).last().click();
 	await page
 		.getByRole("checkbox", {
 			name: "Use XP mirror for external resources",
@@ -130,357 +262,108 @@ test("demo mirror reports a missing Mihomo profile", async ({ page }) => {
 	await page.getByRole("button", { name: "Fetch" }).click();
 
 	const dialog = page.getByRole("dialog");
-	await expect(dialog).toContainText("saved Mihomo profile");
-	await expect(dialog).toContainText("Subscription preview");
+	await expect(dialog).toContainText("XP mirror mode");
+	await expect(dialog).toContainText("/api/mihomo/resources/demo-");
+	await expect(page).toHaveURL(/d_format=mihomo/);
+	await expect(page).toHaveURL(/d_mirror=mirror/);
 });
 
-test("resets Demo user drafts when the detail route changes", async ({
+test("preview close returns to its opener and Forward restores the dialog", async ({
 	page,
 }) => {
-	await page.goto("/demo/login");
-	await page.getByRole("button", { name: "Enter demo" }).click();
-	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await expect(page.getByTestId("subscription-fetch")).toBeEnabled();
+	const openerUrl = page.url();
+	const historyLength = await page.evaluate(() => history.length);
+	await page.getByTestId("subscription-fetch").click();
+	const dialog = page.getByRole("dialog");
+	await expect(dialog).toBeVisible();
+	await expect(page).toHaveURL(/d_preview=preview/);
+	await dialog.getByText("Clash", { exact: true }).click();
+	await expect(page).toHaveURL(/d_format=clash/);
+	expect(await page.evaluate(() => history.length)).toBe(historyLength + 1);
 
-	await page
-		.getByRole("textbox", { name: "Display name" })
-		.fill("Draft from another user");
-	await page.getByRole("link", { name: "Back to users" }).click();
-	await page
-		.getByRole("alertdialog")
-		.getByRole("button", { name: "Discard and continue" })
-		.click();
-	await page.getByRole("link", { name: "Lin Chen", exact: true }).click();
+	await dialog.getByRole("button", { name: "Close", exact: true }).click();
+	await expect(dialog).not.toBeVisible();
+	await expect(page).toHaveURL(openerUrl);
+	await page.goForward();
+	await expect(page).toHaveURL(/d_preview=preview/);
+	await expect(dialog).toBeVisible();
+	await page.goBack();
+	await expect(dialog).not.toBeVisible();
+	await expect(page).toHaveURL(openerUrl);
+});
 
+test("closing a preview deep link stays on the user page without adding history", async ({
+	page,
+}) => {
+	await page.goto("/demo/nodes?demo=normal");
 	await expect(
-		page.getByRole("heading", { name: "Lin Chen", exact: true }),
+		page.getByRole("heading", { name: "Nodes", exact: true }),
 	).toBeVisible();
-	await expect(page.getByRole("textbox", { name: "Display name" })).toHaveValue(
-		"Lin Chen",
+	await page.goto(
+		`/demo/users/${userId}?demo=normal&d_format=mihomo&d_preview=preview`,
 	);
+	const dialog = page.getByRole("dialog");
+	await expect(dialog).toBeVisible();
+	const historyLength = await page.evaluate(() => history.length);
+	await dialog.getByRole("button", { name: "Close", exact: true }).click();
+	await expect(dialog).not.toBeVisible();
+	await expect(page).not.toHaveURL(/d_preview=/);
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+	expect(await page.evaluate(() => history.length)).toBe(historyLength);
+	await page.goBack();
+	await expect(
+		page.getByRole("heading", { name: "Nodes", exact: true }),
+	).toBeVisible();
 });
 
-test("expands the Mihomo editor into a persistent file workspace", async ({
+test("demo Mihomo copy state follows the selected subscription mode", async ({
 	page,
 }) => {
-	await page.goto("/demo/login");
-	await page.getByRole("button", { name: "Enter demo" }).click();
-	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
-
-	const pageUrl = page.url();
-	await page.getByRole("button", { name: "Expand editor" }).click();
-	const workspace = page.getByRole("dialog");
-	await expect(workspace).toBeVisible();
-	await expect(workspace.locator("aside")).toBeVisible();
-	await expect(workspace.locator(".cm-editor")).toHaveCount(3);
-	for (let index = 0; index < 8; index += 1) {
-		await page.keyboard.press("Tab");
-		await expect
-			.poll(() =>
-				workspace.evaluate((element) =>
-					element.contains(document.activeElement),
-				),
-			)
-			.toBe(true);
-	}
-	await page.keyboard.press("Shift+Tab");
-	await expect
-		.poll(() =>
-			workspace.evaluate((element) => element.contains(document.activeElement)),
-		)
-		.toBe(true);
-
-	const mixinEditor = workspace.locator(
-		'[data-mihomo-document="mixin_yaml"] .cm-content',
+	await page.goto(
+		`/demo/users/${userId}?demo=normal&d_profile=valid&d_format=mihomo&d_mirror=mirror`,
 	);
-	const mixinScroller = workspace.locator(
-		'[data-mihomo-document="mixin_yaml"] .cm-scroller',
-	);
-	await mixinEditor.focus();
-	await page.keyboard.press("ControlOrMeta+End");
-	const longYaml = Array.from(
-		{ length: 80 },
-		(_, index) => `proxy-${index}: value`,
-	).join("\n");
-	await page.keyboard.insertText(`\n${longYaml}\n# workspace edit`);
-	await mixinScroller.evaluate((element) => {
-		element.scrollTop = element.scrollHeight;
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+
+	const copyButton = page.getByRole("button", {
+		name: "Copy subscription URL",
 	});
-	const scrollBeforeSwitch = await mixinScroller.evaluate(
-		(element) => element.scrollTop,
-	);
-	expect(scrollBeforeSwitch).toBeGreaterThan(0);
-	await workspace.getByRole("button", { name: /extra_proxies_yaml/ }).click();
-	await workspace.getByRole("button", { name: /mixin_yaml/ }).click();
-	await expect(mixinEditor).toContainText("workspace edit");
-	await expect
-		.poll(() => mixinScroller.evaluate((element) => element.scrollTop))
-		.toBeGreaterThan(0);
+	await copyButton.click();
+	await expect(copyButton).toContainText("Copied");
+	const copiedUrl = await page.evaluate(() => navigator.clipboard.readText());
+	expect(copiedUrl).toContain("/api/sub/");
+	expect(copiedUrl).toContain("format=mihomo");
+	expect(copiedUrl).toContain("external_resources=mirror");
 
-	const extraProxiesEditor = workspace.locator(
-		'[data-mihomo-document="extra_proxies_yaml"] .cm-content',
-	);
-	await workspace.getByRole("button", { name: /extra_proxies_yaml/ }).click();
-	await extraProxiesEditor.click();
-	await page.keyboard.press("ControlOrMeta+End");
-	await page.keyboard.insertText("\n- name: workspace-extra-proxy");
-
-	const extraProvidersEditor = workspace.locator(
-		'[data-mihomo-document="extra_proxy_providers_yaml"] .cm-content',
-	);
-	await workspace
-		.getByRole("button", { name: /extra_proxy_providers_yaml/ })
-		.click();
-	await extraProvidersEditor.click();
-	await page.keyboard.press("ControlOrMeta+End");
-	await page.keyboard.insertText("\n# workspace-extra-provider");
-
-	await page.keyboard.press("ControlOrMeta+z");
-	await expect(extraProvidersEditor).not.toContainText(
-		"workspace-extra-provider",
-	);
-	await page.keyboard.press("ControlOrMeta+Shift+z");
-	await expect(extraProvidersEditor).toContainText("workspace-extra-provider");
-	await workspace.getByRole("button", { name: /extra_proxies_yaml/ }).click();
-	await expect(extraProxiesEditor).toContainText("workspace-extra-proxy");
-	await workspace.getByRole("button", { name: /mixin_yaml/ }).click();
-	await expect(mixinEditor).toContainText("workspace edit");
-	await mixinEditor.focus();
-	await page.keyboard.press("Shift+ArrowLeft");
-	await expect
-		.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ""))
-		.toBe("t");
-
-	await page.keyboard.press("Escape");
-	await expect(workspace).toBeHidden();
-	await expect(page).toHaveURL(pageUrl);
+	await page.getByText("Raw", { exact: true }).click();
 	await expect(
-		page.getByRole("button", { name: "Expand editor" }),
-	).toBeFocused();
-
-	await page.getByRole("button", { name: "Access" }).click();
-	await page.getByRole("button", { name: "User", exact: true }).click();
-	await page.getByRole("button", { name: "Expand editor" }).click();
-	const reopenedWorkspace = page.getByRole("dialog");
-	await expect(
-		reopenedWorkspace.locator(
-			'[data-mihomo-document="mixin_yaml"] .cm-content',
-		),
-	).toContainText("workspace edit");
-	await reopenedWorkspace
-		.getByRole("button", { name: "Exit expanded editor" })
-		.click();
-});
-
-test("uses the Files drawer at a narrow viewport", async ({ page }) => {
-	for (const viewport of [
-		{ width: 320, height: 852 },
-		{ width: 393, height: 852 },
-	]) {
-		await page.setViewportSize(viewport);
-		await page.goto("/demo/login");
-		await page.getByRole("button", { name: "Enter demo" }).click();
-		await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
-
-		await page.getByRole("button", { name: "Expand editor" }).click();
-		const workspace = page.getByRole("dialog").first();
-		await expect(workspace.locator("aside")).toBeHidden();
-		const surface = workspace.getByTestId("mihomo-workspace-surface");
-		const visualHeightChanged = await page.evaluate(() => {
-			const viewport = window.visualViewport;
-			if (!viewport) return false;
-			try {
-				Object.defineProperty(viewport, "height", {
-					configurable: true,
-					value: 540,
-				});
-				Object.defineProperty(viewport, "offsetTop", {
-					configurable: true,
-					value: 24,
-				});
-			} catch {
-				return false;
-			}
-			viewport.dispatchEvent(new Event("resize"));
-			viewport.dispatchEvent(new Event("scroll"));
-			return viewport.height === 540 && viewport.offsetTop === 24;
-		});
-		expect(visualHeightChanged).toBe(true);
-		await expect(surface).toHaveCSS("height", "540px");
-		await expect(workspace).toHaveCSS("top", "24px");
-		await workspace.getByRole("button", { name: "Files" }).click();
-		const files = page.getByRole("heading", { name: "Files" }).last();
-		await expect(files).toBeVisible();
-		await page
-			.getByRole("button", { name: /extra_proxy_providers_yaml/ })
-			.last()
-			.click();
-		await expect(files).toBeHidden();
-		await expect(
-			workspace.getByRole("button", { name: "Files" }),
-		).toBeFocused();
-		await expect(workspace).toContainText("extra_proxy_providers_yaml");
-	}
-});
-
-test("keeps the file tree at the desktop breakpoint", async ({ page }) => {
-	for (const viewport of [
-		{ width: 768, height: 900 },
-		{ width: 1440, height: 900 },
-	]) {
-		await page.setViewportSize(viewport);
-		await page.goto("/demo/login");
-		await page.getByRole("button", { name: "Enter demo" }).click();
-		await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
-		await page.getByRole("button", { name: "Expand editor" }).click();
-		const workspace = page.getByRole("dialog");
-		await expect(workspace.locator("aside")).toBeVisible();
-		await expect(workspace.getByRole("button", { name: "Files" })).toBeHidden();
-		await workspace
-			.getByRole("button", { name: "Exit expanded editor" })
-			.click();
-	}
-});
-
-test("keeps Mihomo profiles read-only for the viewer role", async ({
-	page,
-}) => {
-	await page.goto("/demo/login");
-	await page.getByRole("combobox", { name: "Role" }).click();
-	await page.getByRole("option", { name: "Viewer" }).click();
-	await page.getByRole("button", { name: "Enter demo" }).click();
-	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
-
-	await expect(
-		page.getByRole("button", { name: "Save configuration" }).first(),
-	).toBeDisabled();
-	await page.getByRole("button", { name: "Expand editor" }).click();
-	const workspace = page.getByRole("dialog");
-	await expect(
-		workspace.getByRole("button", { name: "Save configuration" }).first(),
-	).toBeDisabled();
-	await expect(workspace.locator(".cm-content")).toHaveCount(3);
-	await expect(
-		workspace.locator('.cm-content[contenteditable="false"]'),
-	).toHaveCount(3);
-});
-
-test("protects dirty Mihomo drafts on direct user navigation", async ({
-	page,
-}) => {
-	await page.goto("/demo/login");
-	await page.getByRole("button", { name: "Enter demo" }).click();
-	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
-
-	const editor = page.locator(
-		'[data-mihomo-document="mixin_yaml"] .cm-content',
-	);
-	await editor.click();
-	await page.keyboard.press("ControlOrMeta+End");
-	await page.keyboard.insertText("\n# dirty navigation");
-	await page.getByRole("link", { name: "Back to users" }).click();
-
-	const guard = page.getByRole("alertdialog");
-	await expect(
-		guard.getByRole("heading", {
-			name: "Unsaved Mihomo profile changes",
+		page.getByRole("checkbox", {
+			name: "Use XP mirror for external resources",
 		}),
-	).toBeVisible();
-	await guard.getByRole("button", { name: "Keep editing" }).click();
-	await expect(
-		page.getByRole("heading", { name: "佐藤 未来", exact: true }),
-	).toBeVisible();
-
-	await page.getByRole("link", { name: "Back to users" }).click();
-	await page
-		.getByRole("alertdialog")
-		.getByRole("button", { name: "Discard and continue" })
-		.click();
-	await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
+	).toHaveCount(0);
 });
 
-for (const viewport of [
-	{ width: 320, height: 852 },
-	{ width: 360, height: 800 },
-	{ width: 393, height: 852 },
-]) {
-	test(`keeps the mobile YAML editor and delete dialog within ${viewport.width}px`, async ({
-		page,
-	}) => {
-		await page.setViewportSize(viewport);
-		await page.goto("/demo/login");
-		await page.getByRole("button", { name: "Enter demo" }).click();
-		await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
-
-		const editor = page.locator(".cm-content").first();
-		await editor.click();
-		await page.keyboard.press("ControlOrMeta+A");
-		await page.keyboard.insertText(`proxy: ${"x".repeat(1200)}`);
-
-		const layout = await page.evaluate(() => ({
-			clientWidth: document.documentElement.clientWidth,
-			documentScrollWidth: document.documentElement.scrollWidth,
-			bodyScrollWidth: document.body.scrollWidth,
-			editors: [...document.querySelectorAll(".cm-editor")].map((node) => {
-				const rect = node.getBoundingClientRect();
-				return { left: rect.left, right: rect.right };
-			}),
-			scrollers: [...document.querySelectorAll(".cm-scroller")].map((node) => ({
-				clientWidth: node.clientWidth,
-				scrollWidth: node.scrollWidth,
-			})),
-		}));
-
-		expect(layout.documentScrollWidth).toBeLessThanOrEqual(layout.clientWidth);
-		expect(layout.bodyScrollWidth).toBeLessThanOrEqual(layout.clientWidth);
-		expect(
-			layout.editors.every(
-				(editorBounds) =>
-					editorBounds.left >= 0 &&
-					editorBounds.right <= layout.clientWidth + 1,
-			),
-		).toBe(true);
-		expect(layout.scrollers[0]?.scrollWidth).toBeGreaterThan(
-			layout.scrollers[0]?.clientWidth ?? 0,
-		);
-
-		await page
-			.getByRole("button", { name: "Delete user", exact: true })
-			.click();
-		const dialog = page.getByRole("alertdialog", { name: "Delete user" });
-		await expect(dialog).toBeVisible();
-		const dialogBounds = await dialog.evaluate((node) => {
-			const rect = node.getBoundingClientRect();
-			return {
-				left: rect.left,
-				right: rect.right,
-				top: rect.top,
-				bottom: rect.bottom,
-				visualWidth: window.visualViewport?.width ?? window.innerWidth,
-				visualHeight: window.visualViewport?.height ?? window.innerHeight,
-			};
-		});
-		expect(dialogBounds.left).toBeGreaterThanOrEqual(0);
-		expect(dialogBounds.right).toBeLessThanOrEqual(dialogBounds.visualWidth);
-		expect(dialogBounds.top).toBeGreaterThanOrEqual(0);
-		expect(dialogBounds.bottom).toBeLessThanOrEqual(dialogBounds.visualHeight);
-		await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-		await expect(dialog).toBeHidden();
-	});
-}
-
-test("demo service config reflects provider-only mihomo delivery", async ({
+test("demo missing Mihomo profile is a structured simulated error", async ({
 	page,
 }) => {
-	await page.goto("/demo/login");
-	await page.getByRole("button", { name: "Enter demo" }).click();
-	await page.goto("/demo/service-config");
+	await page.goto(
+		`/demo/users/${userId}?demo=normal&d_profile=missing&d_format=mihomo&d_mirror=1&d_preview=1`,
+	);
 
-	await expect(
-		page.getByRole("heading", { name: "Service config" }),
-	).toBeVisible();
-	await expect(page.getByText("provider-only")).toHaveCount(2);
-	await expect(page.getByText("format=mihomo")).toHaveCount(2);
-	await expect(page.getByText("Default subscription format")).toHaveCount(0);
-	await expect(page.getByText("Mihomo default delivery")).toHaveCount(0);
-	await expect(page.getByText("Inline proxies")).toHaveCount(0);
+	const dialog = page.getByRole("dialog");
+	await expect(dialog).toBeVisible();
+	await expect(dialog).toContainText("saved Mihomo profile");
+});
+
+test("demo invalid Mihomo profile rejects unsafe resources", async ({
+	page,
+}) => {
+	await page.goto(
+		`/demo/users/${userId}?demo=normal&d_profile=invalid&d_format=mihomo&d_mirror=1&d_preview=1`,
+	);
+
+	await expect(page.getByRole("dialog")).toContainText(
+		"External resource URL must be HTTPS",
+	);
 });

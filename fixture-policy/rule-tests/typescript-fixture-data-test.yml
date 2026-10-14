@@ -1,6 +1,8 @@
 id: fixture-policy-typescript-data-source
 valid:
   - |
+    const fixture = { subscription_token: state.nextSubscriptionToken(state.identityNamespace) };
+  - |
     function buildNodeRuntimeListItem(node) {
       return {
         node_id: node.node_id,
@@ -77,6 +79,8 @@ valid:
           : fixtureCatalog.host.tertiary(),
     };
 invalid:
+  - |
+    const fixture = { subscription_token: state.nextSubscriptionToken(payload.namespace) };
   - |
     const fixture = { host: "unapproved.fixture.test" };
   - |

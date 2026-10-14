@@ -66,6 +66,7 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 | Web PWA               | active     | complete       | [Spec][47] | -          |       |
 | Web resilience        | active     | in progress    | [Spec][48] | -          |       |
 | Web tools             | active     | complete       | [Spec][49] | -          |       |
+| Web Demo runtime      | active     | in progress    | [Spec][55] | -          |       |
 | xp-ops admin token    | active     | complete       | [Spec][50] | -          |       |
 | Control-plane relay   | superseded | retired        | [Spec][51] | [Spec][34] |       |
 | Xray ingress guard    | active     | complete       | [Spec][52] | -          |       |
@@ -126,3 +127,4 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 [52]: xray-ingress-guard/SPEC.md
 [53]: xray-stale-tcp-reclaim/SPEC.md
 [54]: mihomo-external-resource-mirror/SPEC.md
+[55]: web-demo-runtime/SPEC.md

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { isDemoRuntime } from "../demo/runtimeMode";
 import { PageState } from "./PageState";
 import { readAdminToken } from "./auth";
 
@@ -9,6 +10,8 @@ type AuthGateProps = {
 };
 
 export function AuthGate({ children, fallback }: AuthGateProps) {
+	if (isDemoRuntime()) return <>{children}</>;
+
 	const hasToken = readAdminToken().length > 0;
 
 	if (!hasToken) {

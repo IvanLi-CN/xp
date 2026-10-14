@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { isDemoRuntime } from "../demo/runtimeMode";
+
 import {
 	readPersistedQuerySnapshot,
 	writePersistedQuerySnapshot,
@@ -23,6 +25,7 @@ export function useQueryWithOfflineFallback<T, TQuery extends QueryLike<T>>(
 	queryKey: readonly unknown[],
 	query: TQuery,
 ) {
+	const offlineFallbackEnabled = !isDemoRuntime();
 	const [fallback, setFallback] = useState<PersistedSnapshot<T>>({
 		data: undefined,
 		dataUpdatedAt: null,
@@ -37,6 +40,10 @@ export function useQueryWithOfflineFallback<T, TQuery extends QueryLike<T>>(
 		!queryHasData && (query.isError || query.fetchStatus === "paused");
 
 	useEffect(() => {
+		if (!offlineFallbackEnabled) {
+			setFallback({ data: undefined, dataUpdatedAt: null });
+			return;
+		}
 		if (queryHasData) {
 			void writePersistedQuerySnapshot(
 				persistedQueryKey,
@@ -70,6 +77,7 @@ export function useQueryWithOfflineFallback<T, TQuery extends QueryLike<T>>(
 		query.dataUpdatedAt,
 		queryHasData,
 		shouldReadFallback,
+		offlineFallbackEnabled,
 	]);
 
 	return {

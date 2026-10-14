@@ -104,6 +104,7 @@ import {
 } from "./staticFixtureMappings";
 
 export type StorybookApiMockConfig = {
+	identityNamespace?: "demo";
 	adminToken?: string | null;
 	data?: Partial<MockStateSeed>;
 	failAdminConfig?: boolean;
@@ -152,8 +153,9 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 	failVersionCheck: boolean;
 	nextEndpointId: () => string;
 	nextEndpointTag: () => string;
-	nextSubscriptionToken: () => string;
-	nextUserId: () => string;
+	identityNamespace?: "demo";
+	nextSubscriptionToken: (namespace?: "demo") => string;
+	nextUserId: (namespace?: "demo") => string;
 };
 
 type MockApi = {
@@ -1121,6 +1123,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		failVersionCheck: config?.failVersionCheck ?? false,
 		nextEndpointId,
 		nextEndpointTag,
+		identityNamespace: config?.identityNamespace,
 		nextSubscriptionToken,
 		nextUserId,
 	};
@@ -2262,11 +2265,11 @@ async function handleRequest(
 		if (!payload) {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
-		const userId = state.nextUserId();
+		const userId = state.nextUserId(state.identityNamespace);
 		const user: AdminUser = {
 			user_id: userId,
 			display_name: payload.display_name,
-			subscription_token: state.nextSubscriptionToken(),
+			subscription_token: state.nextSubscriptionToken(state.identityNamespace),
 			credential_epoch: fixtureCatalog.user.credentialEpoch(),
 			priority_tier: fixtureCatalog.user.priorityTierCreated(),
 			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
@@ -2329,7 +2332,9 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "user not found");
 		}
 		const previousSubscriptionToken = user.subscription_token;
-		user.subscription_token = state.nextSubscriptionToken();
+		user.subscription_token = state.nextSubscriptionToken(
+			state.identityNamespace,
+		);
 		state.users = state.users.map((item) =>
 			item.user_id === userId ? user : item,
 		);

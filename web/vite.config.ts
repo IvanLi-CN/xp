@@ -44,6 +44,7 @@ function resolveBuildId() {
 	const ignoredDirectories = new Set([
 		"coverage",
 		"dist",
+		"dist-demo",
 		"node_modules",
 		"playwright-report",
 		"storybook-static",
@@ -78,11 +79,12 @@ function resolveSwUpdateIntervalMs() {
 }
 
 export default defineConfig(({ mode }) => {
+	const demo = mode === "demo";
 	const env = loadEnv(mode, process.cwd(), "VITE_");
 	const backend = env.VITE_BACKEND_PROXY ?? "http://127.0.0.1:62416";
 	const buildId = resolveBuildId();
 	const swUpdateIntervalMs = resolveSwUpdateIntervalMs();
-	const buildDeclarationSource = buildDeclarationScriptSource(buildId);
+	const buildDeclarationSource = buildDeclarationScriptSource(buildId, !demo);
 	const buildDeclarationHash = createHash("sha256")
 		.update(buildDeclarationSource)
 		.digest("hex")
@@ -90,12 +92,48 @@ export default defineConfig(({ mode }) => {
 	const buildDeclarationFileName = `assets/build-declaration-${buildDeclarationHash}.js`;
 
 	return {
+		base: demo ? "/demo/" : "/",
+		build: { outDir: demo ? "dist-demo" : "dist" },
 		define: {
+			__XP_WEB_DEMO__: demo,
 			__XP_WEB_BUILD_ID__: JSON.stringify(buildId),
 			__XP_WEB_PACKAGE_VERSION__: JSON.stringify(packageJson.version),
 			__XP_WEB_SW_UPDATE_INTERVAL_MS__: JSON.stringify(swUpdateIntervalMs),
 		},
 		plugins: [
+			demo && {
+				name: "xp-demo-deep-links",
+				apply: "build",
+				writeBundle() {
+					const output = path.resolve(__dirname, "dist-demo");
+					fs.copyFileSync(
+						path.join(output, "index.html"),
+						path.join(output, "404.html"),
+					);
+					fs.writeFileSync(
+						path.join(output, "_redirects"),
+						"/demo/* /demo/index.html 200\n",
+					);
+				},
+			},
+			demo && {
+				name: "xp-demo-pwa-virtual-module",
+				resolveId(source: string) {
+					return source === "virtual:pwa-register/react"
+						? "\0xp-demo-pwa-register"
+						: undefined;
+				},
+				load(id: string) {
+					if (id !== "\0xp-demo-pwa-register") return undefined;
+					return `export function useRegisterSW() {
+						return {
+							offlineReady: [false, () => {}],
+							needRefresh: [false, () => {}],
+							updateServiceWorker: async () => {},
+						};
+					}`;
+				},
+			},
 			react(),
 			tailwindcss(),
 			{
@@ -105,7 +143,7 @@ export default defineConfig(({ mode }) => {
 					return transformIndexHtmlWithExternalBuildDeclaration(
 						html,
 						buildId,
-						`/${buildDeclarationFileName}`,
+						`${demo ? "/demo/" : "/"}${buildDeclarationFileName}`,
 					);
 				},
 				generateBundle() {
@@ -218,72 +256,79 @@ export default defineConfig(({ mode }) => {
 					});
 				},
 			},
-			VitePWA({
-				registerType: "prompt",
-				injectRegister: false,
-				strategies: "injectManifest",
-				srcDir: "src",
-				filename: "sw.ts",
-				includeAssets: [
-					iconAssets.favicon,
-					iconAssets.bicolorSvg,
-					iconAssets.pinnedTabSvg,
-					iconAssets.favicon16,
-					iconAssets.favicon32,
-					iconAssets.appleTouch,
-					iconAssets.regular192,
-					iconAssets.regular512,
-					iconAssets.maskable192,
-					iconAssets.maskable512,
-					"xp-mark.png",
-					iconAssets.lockupSvg,
-					iconAssets.lockupInverseSvg,
-				],
-				manifest: {
-					name: "xp",
-					short_name: "xp",
-					start_url: "/",
-					scope: "/",
-					display: "standalone",
-					background_color: "#ffffff",
-					theme_color: "#4CB1AB",
-					icons: [
-						{
-							src: `/${iconAssets.regular192}`,
-							sizes: "192x192",
-							type: "image/png",
-							purpose: "any",
-						},
-						{
-							src: `/${iconAssets.regular512}`,
-							sizes: "512x512",
-							type: "image/png",
-							purpose: "any",
-						},
-						{
-							src: `/${iconAssets.maskable192}`,
-							sizes: "192x192",
-							type: "image/png",
-							purpose: "maskable",
-						},
-						{
-							src: `/${iconAssets.maskable512}`,
-							sizes: "512x512",
-							type: "image/png",
-							purpose: "maskable",
-						},
+			!demo &&
+				VitePWA({
+					registerType: "prompt",
+					injectRegister: false,
+					strategies: "injectManifest",
+					srcDir: "src",
+					filename: "sw.ts",
+					includeAssets: [
+						iconAssets.favicon,
+						iconAssets.bicolorSvg,
+						iconAssets.pinnedTabSvg,
+						iconAssets.favicon16,
+						iconAssets.favicon32,
+						iconAssets.appleTouch,
+						iconAssets.regular192,
+						iconAssets.regular512,
+						iconAssets.maskable192,
+						iconAssets.maskable512,
+						"xp-mark.png",
+						iconAssets.lockupSvg,
+						iconAssets.lockupInverseSvg,
 					],
-				},
-				injectManifest: {
-					globPatterns: ["**/*.{js,css,html,woff2,webmanifest}"],
-					maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-					sourcemap: true,
-				},
-			}),
+					manifest: {
+						name: "xp",
+						short_name: "xp",
+						start_url: "/",
+						scope: "/",
+						display: "standalone",
+						background_color: "#ffffff",
+						theme_color: "#4CB1AB",
+						icons: [
+							{
+								src: `/${iconAssets.regular192}`,
+								sizes: "192x192",
+								type: "image/png",
+								purpose: "any",
+							},
+							{
+								src: `/${iconAssets.regular512}`,
+								sizes: "512x512",
+								type: "image/png",
+								purpose: "any",
+							},
+							{
+								src: `/${iconAssets.maskable192}`,
+								sizes: "192x192",
+								type: "image/png",
+								purpose: "maskable",
+							},
+							{
+								src: `/${iconAssets.maskable512}`,
+								sizes: "512x512",
+								type: "image/png",
+								purpose: "maskable",
+							},
+						],
+					},
+					injectManifest: {
+						globPatterns: ["**/*.{js,css,html,woff2,webmanifest}"],
+						maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+						sourcemap: true,
+					},
+				}),
 		],
 		resolve: {
 			alias: {
 				"@": path.resolve(__dirname, "./src"),
+				"@xp/demo-frame": path.resolve(
+					__dirname,
+					demo
+						? "./src/demo/DemoInspector.tsx"
+						: "./src/demo/LiveDemoFrame.tsx",
+				),
 			},
 		},
 		server: {

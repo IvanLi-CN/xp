@@ -1,6 +1,45 @@
 id: fixture-policy-typescript-adapter-output-provenance
 valid:
   - |
+    function createSubscriptionTokenFactory() {
+      let subscriptionTokenIndex = 0;
+      let demoTokenIndex = 0;
+      return (namespace?: "demo") => {
+        if (namespace === "demo") {
+          demoTokenIndex += 1;
+          return `${catalog.identifiers.tokenPrimary}-demo-${demoTokenIndex}`;
+        }
+        const token = catalog.subscription.tokens[subscriptionTokenIndex];
+        if (!token) {
+          throw new Error("synthetic subscription token catalog exhausted");
+        }
+        subscriptionTokenIndex += 1;
+        return token;
+      };
+    }
+  - |
+    function createUserIdFactory() {
+      let userIdIndex = 0;
+      let demoUserIndex = 0;
+      const userIds = [
+        catalog.identifiers.userTertiary,
+        catalog.identifiers.userQuaternary,
+        catalog.identifiers.userQuinary,
+      ];
+      return (namespace?: "demo") => {
+        if (namespace === "demo") {
+          demoUserIndex += 1;
+          return `${catalog.identifiers.userPrimary}-demo-${demoUserIndex}`;
+        }
+        const userId = userIds[userIdIndex];
+        if (!userId) {
+          throw new Error("synthetic user ID catalog exhausted");
+        }
+        userIdIndex += 1;
+        return userId;
+      };
+    }
+  - |
     function createStringAccessors<Values extends Record<string, string>>(
       values: Values,
     ) {
@@ -57,6 +96,11 @@ valid:
       return token;
     }
 invalid:
+  - |
+    function createUserIdFactory() {
+      let demoUserIndex = 0;
+      return (namespace?: "demo") => `${process.env.USER_PREFIX}-${++demoUserIndex}`;
+    }
   - |
     const primary = () => "live.example";
   - |

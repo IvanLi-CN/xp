@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
@@ -76,6 +77,8 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { isDemoRuntime } from "../demo/runtimeMode";
+import { useDemoSubscriptionNavigation } from "../demo/useDemoSubscriptionNavigation";
 import { useMihomoProfileDraft } from "../hooks/useMihomoProfileDraft";
 import { useUserTimeWindowReports } from "../hooks/useUserTimeWindowReports";
 import { useAppRuntime } from "../offline/appRuntime";
@@ -106,22 +109,22 @@ function formatError(err: unknown): string {
 	if (err instanceof Error) return err.message;
 	return String(err);
 }
-
 function buildCellKey(nodeId: string, protocolId: string): string {
 	return `${nodeId}::${protocolId}`;
 }
-
 function formatInlineList(items: string[]): string {
 	if (items.length === 0) return "";
 	if (items.length === 1) return items[0] ?? "";
 	if (items.length === 2) return `${items[0]} and ${items[1]}`;
 	return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
 }
-
 export function UserDetailsPage() {
 	const adminToken = readAdminToken();
 	const runtime = useAppRuntime();
 	const navigate = useNavigate();
+	const demoSearch = useRouterState({
+		select: (state) => state.location.searchStr,
+	});
 	const queryClient = useQueryClient();
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
@@ -163,11 +166,20 @@ export function UserDetailsPage() {
 	);
 	const [isApplyingAccess, setIsApplyingAccess] = useState(false);
 	const [accessError, setAccessError] = useState<string | null>(null);
-	const [subFormat, setSubFormat] = useState<SubscriptionFormat>(
-		DEFAULT_SUBSCRIPTION_FORMAT,
+	const [subFormat, setSubFormat] = useState<SubscriptionFormat>(() => {
+		if (!isDemoRuntime()) return DEFAULT_SUBSCRIPTION_FORMAT;
+		const value = new URLSearchParams(demoSearch).get("d_format");
+		return value === "raw" || value === "clash" || value === "mihomo"
+			? value
+			: DEFAULT_SUBSCRIPTION_FORMAT;
+	});
+	const [useExternalResourceMirror, setUseExternalResourceMirror] = useState(
+		() =>
+			isDemoRuntime() &&
+			["1", "mirror"].includes(
+				new URLSearchParams(demoSearch).get("d_mirror") ?? "",
+			),
 	);
-	const [useExternalResourceMirror, setUseExternalResourceMirror] =
-		useState(false);
 	const {
 		currentUserIdRef,
 		deleteOpen,
@@ -803,13 +815,14 @@ export function UserDetailsPage() {
 			setIsApplyingAccess(false);
 		}
 	}
-
 	async function loadSubscriptionPreview(
 		nextFormat = subFormat,
 		nextMirror = useExternalResourceMirror,
 	) {
 		setSubFormat(nextFormat);
 		setUseExternalResourceMirror(nextMirror);
+		updateDemoSubscriptionSearch(nextFormat, nextMirror, true);
+		if (isDemoRuntime()) return;
 		await loadUserSubscriptionPreview(
 			subscriptionToken,
 			nextFormat,
@@ -817,7 +830,18 @@ export function UserDetailsPage() {
 			formatError,
 		);
 	}
-
+	const {
+		updateSearch: updateDemoSubscriptionSearch,
+		closePreview: closeSubscriptionPreview,
+	} = useDemoSubscriptionNavigation({
+		userId,
+		subscriptionToken,
+		setFormat: setSubFormat,
+		setMirror: setUseExternalResourceMirror,
+		setOpen: setSubOpen,
+		loadPreview: loadUserSubscriptionPreview,
+		formatError,
+	});
 	async function retryAccessData() {
 		await Promise.all([
 			nodesQuery.refetch(),
@@ -884,7 +908,6 @@ export function UserDetailsPage() {
 			setIsSavingUser(false);
 		}
 	}
-
 	function discardUserProfileDraft() {
 		if (!user) return;
 		setDisplayName(user.display_name);
@@ -898,7 +921,6 @@ export function UserDetailsPage() {
 		setResetTzOffsetMinutes(user.quota_reset.tz_offset_minutes);
 		setUserSaveError(null);
 	}
-
 	function discardAccessDraft() {
 		setAccessError(null);
 		setAccessInitForUserId(null);
@@ -1242,7 +1264,13 @@ export function UserDetailsPage() {
 								<div className="flex flex-wrap items-end gap-3">
 									<SubscriptionFormatSegmentedControl
 										className="w-full sm:w-auto"
-										onValueChange={setSubFormat}
+										onValueChange={(value) => {
+											setSubFormat(value);
+											updateDemoSubscriptionSearch(
+												value,
+												value === "mihomo" && useExternalResourceMirror,
+											);
+										}}
 										testId="subscription-format"
 										value={subFormat}
 									/>
@@ -1251,6 +1279,7 @@ export function UserDetailsPage() {
 											checked={useExternalResourceMirror}
 											onCheckedChange={(checked) => {
 												setUseExternalResourceMirror(checked);
+												updateDemoSubscriptionSearch(subFormat, checked);
 											}}
 										/>
 									) : null}
@@ -1706,7 +1735,7 @@ export function UserDetailsPage() {
 
 			<SubscriptionPreviewDialog
 				open={isCurrentTransientState && subOpen}
-				onClose={() => setSubOpen(false)}
+				onClose={closeSubscriptionPreview}
 				subscriptionUrl={subscriptionUrl}
 				format={subFormat}
 				loading={subLoading}
