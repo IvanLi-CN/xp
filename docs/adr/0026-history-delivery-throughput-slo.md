@@ -39,7 +39,10 @@ The throughput target is a hard delivery gate:
 4. The calculation must use monotonic counters committed with the durable
    operation: enqueue counters for generated data, ACK counters for source
    delivery, and apply counters for repository-to-repository synchronization.
-   Queue depth deltas and `last_acknowledged_at` remain diagnostic signals only.
+   Queue depth deltas and `last_acknowledged_at` remain diagnostic signals only. The metric row
+   persists `peak_generated_segments` and `peak_generated_bytes` for the highest completed
+   five-minute generated window in the current counter epoch; a later quiet window cannot weaken
+   the denominator.
 5. A release cannot pass the throughput gate until the counters, five-minute
    window calculation, and failure categories are observable through a read-only
    status surface and a deterministic red-capable test.
@@ -66,7 +69,8 @@ mutation.
 - A five-minute measurement records start/end counters, rates in both units,
   queue depth, oldest cursor, ACK age, response latency, and capacity state.
 - Runtime status exposes the last completed durable 300-second window, including start/end, segment
-  and byte deltas, milli-rates and independent source-ACK/repository-apply 10x booleans. It also
+  and byte deltas, peak generated deltas, milli-rates and independent source-ACK/repository-apply
+  10x booleans. It also
   exposes cumulative source/stream/target scopes with their own completed/current windows so
   target starvation is observable. A status response with no completed window for a required
   scope is not a pass.

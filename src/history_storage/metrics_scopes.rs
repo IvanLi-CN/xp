@@ -108,6 +108,8 @@ fn ensure_scope_row(
 struct ScopeDeliveryWindowState {
     generated_segments: u64,
     generated_bytes: u64,
+    peak_generated_segments: u64,
+    peak_generated_bytes: u64,
     acknowledged_segments: u64,
     acknowledged_bytes: u64,
     applied_segments: u64,
@@ -129,6 +131,8 @@ fn read_scope_window_state(
     transaction
         .query_row(
             "SELECT s.generated_segments, s.generated_bytes,
+                    w.completed_peak_generated_segments,
+                    w.completed_peak_generated_bytes,
                     s.acknowledged_segments, s.acknowledged_bytes,
                     s.applied_segments, s.applied_bytes,
                     w.window_started_at,
@@ -147,38 +151,48 @@ fn read_scope_window_state(
                 Ok(ScopeDeliveryWindowState {
                     generated_segments: checked_u64(row.get::<_, i64>(0)?, 0)?,
                     generated_bytes: checked_u64(row.get::<_, i64>(1)?, 1)?,
-                    acknowledged_segments: checked_u64(row.get::<_, i64>(2)?, 2)?,
-                    acknowledged_bytes: checked_u64(row.get::<_, i64>(3)?, 3)?,
-                    applied_segments: checked_u64(row.get::<_, i64>(4)?, 4)?,
-                    applied_bytes: checked_u64(row.get::<_, i64>(5)?, 5)?,
+                    peak_generated_segments: row
+                        .get::<_, Option<i64>>(2)?
+                        .map(|value| checked_u64(value, 2))
+                        .transpose()?
+                        .unwrap_or(0),
+                    peak_generated_bytes: row
+                        .get::<_, Option<i64>>(3)?
+                        .map(|value| checked_u64(value, 3))
+                        .transpose()?
+                        .unwrap_or(0),
+                    acknowledged_segments: checked_u64(row.get::<_, i64>(4)?, 4)?,
+                    acknowledged_bytes: checked_u64(row.get::<_, i64>(5)?, 5)?,
+                    applied_segments: checked_u64(row.get::<_, i64>(6)?, 6)?,
+                    applied_bytes: checked_u64(row.get::<_, i64>(7)?, 7)?,
                     generated_segments_at_start: row
-                        .get::<_, Option<i64>>(7)?
-                        .map(|value| checked_u64(value, 7))
-                        .transpose()?
-                        .unwrap_or(0),
-                    generated_bytes_at_start: row
-                        .get::<_, Option<i64>>(8)?
-                        .map(|value| checked_u64(value, 8))
-                        .transpose()?
-                        .unwrap_or(0),
-                    acknowledged_segments_at_start: row
                         .get::<_, Option<i64>>(9)?
                         .map(|value| checked_u64(value, 9))
                         .transpose()?
                         .unwrap_or(0),
-                    acknowledged_bytes_at_start: row
+                    generated_bytes_at_start: row
                         .get::<_, Option<i64>>(10)?
                         .map(|value| checked_u64(value, 10))
                         .transpose()?
                         .unwrap_or(0),
-                    applied_segments_at_start: row
+                    acknowledged_segments_at_start: row
                         .get::<_, Option<i64>>(11)?
                         .map(|value| checked_u64(value, 11))
                         .transpose()?
                         .unwrap_or(0),
-                    applied_bytes_at_start: row
+                    acknowledged_bytes_at_start: row
                         .get::<_, Option<i64>>(12)?
                         .map(|value| checked_u64(value, 12))
+                        .transpose()?
+                        .unwrap_or(0),
+                    applied_segments_at_start: row
+                        .get::<_, Option<i64>>(13)?
+                        .map(|value| checked_u64(value, 13))
+                        .transpose()?
+                        .unwrap_or(0),
+                    applied_bytes_at_start: row
+                        .get::<_, Option<i64>>(14)?
+                        .map(|value| checked_u64(value, 14))
                         .transpose()?
                         .unwrap_or(0),
                 })
@@ -274,16 +288,22 @@ fn rotate_scope_window(
         return Ok(());
     }
     let state = read_scope_window_state(transaction, source_node_id, stream, target_repository_id)?;
-    let window = RepositoryDeliveryWindow::from_deltas(
+    let generated_segments = state
+        .generated_segments
+        .saturating_sub(state.generated_segments_at_start);
+    let generated_bytes = state
+        .generated_bytes
+        .saturating_sub(state.generated_bytes_at_start);
+    let peak_generated_segments = state.peak_generated_segments.max(generated_segments);
+    let peak_generated_bytes = state.peak_generated_bytes.max(generated_bytes);
+    let window = RepositoryDeliveryWindow::from_deltas_with_peak(
         window_started_at,
         window_started_at.saturating_add(DELIVERY_RATE_WINDOW_SECONDS),
         DELIVERY_RATE_WINDOW_SECONDS,
-        state
-            .generated_segments
-            .saturating_sub(state.generated_segments_at_start),
-        state
-            .generated_bytes
-            .saturating_sub(state.generated_bytes_at_start),
+        generated_segments,
+        generated_bytes,
+        peak_generated_segments,
+        peak_generated_bytes,
         state
             .acknowledged_segments
             .saturating_sub(state.acknowledged_segments_at_start),
@@ -307,8 +327,10 @@ fn rotate_scope_window(
                  completed_acknowledged_segments = ?5,
                  completed_acknowledged_bytes = ?6,
                  completed_applied_segments = ?7,
-                 completed_applied_bytes = ?8
-             WHERE source_node_id = ?9 AND stream = ?10 AND target_repository_id = ?11",
+                 completed_applied_bytes = ?8,
+                 completed_peak_generated_segments = ?9,
+                 completed_peak_generated_bytes = ?10
+             WHERE source_node_id = ?11 AND stream = ?12 AND target_repository_id = ?13",
             rusqlite::params![
                 durable_i64(window.started_at, "scope completed window start")?,
                 durable_i64(window.ended_at, "scope completed window end")?,
@@ -327,6 +349,8 @@ fn rotate_scope_window(
                 )?,
                 durable_i64(window.applied_segments, "scope completed applied segments")?,
                 durable_i64(window.applied_bytes, "scope completed applied bytes")?,
+                durable_i64(peak_generated_segments, "scope peak generated segments")?,
+                durable_i64(peak_generated_bytes, "scope peak generated bytes")?,
                 source_node_id,
                 stream,
                 target_repository_id,
@@ -532,12 +556,13 @@ fn read_scope_window_at(
                     completed_window_started_at, completed_window_ended_at,
                     completed_generated_segments, completed_generated_bytes,
                     completed_acknowledged_segments, completed_acknowledged_bytes,
-                    completed_applied_segments, completed_applied_bytes
+                    completed_applied_segments, completed_applied_bytes,
+                    completed_peak_generated_segments, completed_peak_generated_bytes
              FROM repository_delivery_metric_scope_windows
              WHERE source_node_id = ?1 AND stream = ?2 AND target_repository_id = ?3",
             rusqlite::params![source_node_id, stream, target_repository_id],
             |row| {
-                (0..15)
+                (0..17)
                     .map(|index| row.get::<_, Option<i64>>(index))
                     .collect::<rusqlite::Result<Vec<_>>>()
             },
@@ -563,12 +588,14 @@ fn read_scope_window_at(
                   applied_segments: u64,
                   applied_bytes: u64|
      -> Option<RepositoryDeliveryWindow> {
-        Some(RepositoryDeliveryWindow::from_deltas(
+        Some(RepositoryDeliveryWindow::from_deltas_with_peak(
             started_at?,
             ended_at?,
             elapsed_seconds,
             generated_segments,
             generated_bytes,
+            values[15].unwrap_or(generated_segments),
+            values[16].unwrap_or(generated_bytes),
             acknowledged_segments,
             acknowledged_bytes,
             applied_segments,
@@ -597,17 +624,25 @@ fn read_scope_window_at(
     if now < started_at.saturating_add(DELIVERY_RATE_WINDOW_SECONDS) {
         return Ok(None);
     }
-    Ok(window(
-        Some(started_at),
-        Some(started_at.saturating_add(DELIVERY_RATE_WINDOW_SECONDS)),
+    let peak_generated_segments = values[15]
+        .unwrap_or(0)
+        .max(generated_segments.saturating_sub(values[1].unwrap_or(0)));
+    let peak_generated_bytes = values[16]
+        .unwrap_or(0)
+        .max(generated_bytes.saturating_sub(values[2].unwrap_or(0)));
+    Ok(Some(RepositoryDeliveryWindow::from_deltas_with_peak(
+        started_at,
+        started_at.saturating_add(DELIVERY_RATE_WINDOW_SECONDS),
         DELIVERY_RATE_WINDOW_SECONDS,
         generated_segments.saturating_sub(values[1].unwrap_or(0)),
         generated_bytes.saturating_sub(values[2].unwrap_or(0)),
+        peak_generated_segments,
+        peak_generated_bytes,
         acknowledged_segments.saturating_sub(values[3].unwrap_or(0)),
         acknowledged_bytes.saturating_sub(values[4].unwrap_or(0)),
         applied_segments.saturating_sub(values[5].unwrap_or(0)),
         applied_bytes.saturating_sub(values[6].unwrap_or(0)),
-    ))
+    )))
 }
 
 fn checked_u64(value: i64, column: usize) -> rusqlite::Result<u64> {

@@ -2,8 +2,11 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 
+#[path = "metrics_persistence.rs"]
+mod persistence;
 #[path = "metrics_scopes.rs"]
 mod scopes;
+use persistence::{checked_u64, read_at};
 pub(super) use scopes::{
     increment_acknowledged_scope, increment_applied_scope, increment_generated_scope,
 };
@@ -36,6 +39,10 @@ pub(crate) struct RepositoryDeliveryMetrics {
     pub(crate) generated_segments: u64,
     #[serde(default)]
     pub(crate) generated_bytes: u64,
+    #[serde(default)]
+    pub(crate) peak_generated_segments: u64,
+    #[serde(default)]
+    pub(crate) peak_generated_bytes: u64,
     #[serde(default)]
     pub(crate) acknowledged_segments: u64,
     #[serde(default)]
@@ -107,6 +114,10 @@ pub(crate) struct RepositoryDeliveryWindow {
     pub(crate) elapsed_seconds: u64,
     pub(crate) generated_segments: u64,
     pub(crate) generated_bytes: u64,
+    #[serde(default)]
+    pub(crate) peak_generated_segments: u64,
+    #[serde(default)]
+    pub(crate) peak_generated_bytes: u64,
     pub(crate) acknowledged_segments: u64,
     pub(crate) acknowledged_bytes: u64,
     pub(crate) applied_segments: u64,
@@ -128,12 +139,14 @@ pub(crate) struct RepositoryDeliveryWindow {
 
 impl RepositoryDeliveryWindow {
     #[allow(clippy::too_many_arguments)]
-    fn from_deltas(
+    fn from_deltas_with_peak(
         started_at: u64,
         ended_at: u64,
         elapsed_seconds: u64,
         generated_segments: u64,
         generated_bytes: u64,
+        peak_generated_segments: u64,
+        peak_generated_bytes: u64,
         acknowledged_segments: u64,
         acknowledged_bytes: u64,
         applied_segments: u64,
@@ -141,9 +154,9 @@ impl RepositoryDeliveryWindow {
     ) -> Self {
         let elapsed_seconds = elapsed_seconds.max(1);
         let generated_segments_per_second_milli =
-            generated_segments.saturating_mul(1_000) / elapsed_seconds;
+            peak_generated_segments.saturating_mul(1_000) / elapsed_seconds;
         let generated_bytes_per_second_milli =
-            generated_bytes.saturating_mul(1_000) / elapsed_seconds;
+            peak_generated_bytes.saturating_mul(1_000) / elapsed_seconds;
         let acknowledged_segments_per_second_milli =
             acknowledged_segments.saturating_mul(1_000) / elapsed_seconds;
         let acknowledged_bytes_per_second_milli =
@@ -151,14 +164,14 @@ impl RepositoryDeliveryWindow {
         let applied_segments_per_second_milli =
             applied_segments.saturating_mul(1_000) / elapsed_seconds;
         let applied_bytes_per_second_milli = applied_bytes.saturating_mul(1_000) / elapsed_seconds;
-        let source_ack_meets_ten_x_segments = generated_segments > 0
-            && acknowledged_segments >= generated_segments.saturating_mul(10);
-        let source_ack_meets_ten_x_bytes =
-            generated_bytes > 0 && acknowledged_bytes >= generated_bytes.saturating_mul(10);
-        let repository_apply_meets_ten_x_segments =
-            generated_segments > 0 && applied_segments >= generated_segments.saturating_mul(10);
+        let source_ack_meets_ten_x_segments = peak_generated_segments > 0
+            && acknowledged_segments >= peak_generated_segments.saturating_mul(10);
+        let source_ack_meets_ten_x_bytes = peak_generated_bytes > 0
+            && acknowledged_bytes >= peak_generated_bytes.saturating_mul(10);
+        let repository_apply_meets_ten_x_segments = peak_generated_segments > 0
+            && applied_segments >= peak_generated_segments.saturating_mul(10);
         let repository_apply_meets_ten_x_bytes =
-            generated_bytes > 0 && applied_bytes >= generated_bytes.saturating_mul(10);
+            peak_generated_bytes > 0 && applied_bytes >= peak_generated_bytes.saturating_mul(10);
         let source_ack_meets_ten_x = elapsed_seconds >= DELIVERY_RATE_WINDOW_SECONDS
             && source_ack_meets_ten_x_segments
             && source_ack_meets_ten_x_bytes;
@@ -171,6 +184,8 @@ impl RepositoryDeliveryWindow {
             elapsed_seconds,
             generated_segments,
             generated_bytes,
+            peak_generated_segments,
+            peak_generated_bytes,
             acknowledged_segments,
             acknowledged_bytes,
             applied_segments,
@@ -207,6 +222,8 @@ impl Default for RepositoryDeliveryMetrics {
         Self {
             generated_segments: 0,
             generated_bytes: 0,
+            peak_generated_segments: 0,
+            peak_generated_bytes: 0,
             acknowledged_segments: 0,
             acknowledged_bytes: 0,
             applied_segments: 0,
@@ -239,6 +256,8 @@ impl RepositoryDeliveryMetrics {
         if elapsed_seconds == 0
             || self.generated_segments < start.generated_segments
             || self.generated_bytes < start.generated_bytes
+            || self.peak_generated_segments < start.peak_generated_segments
+            || self.peak_generated_bytes < start.peak_generated_bytes
             || self.acknowledged_segments < start.acknowledged_segments
             || self.acknowledged_bytes < start.acknowledged_bytes
             || self.applied_segments < start.applied_segments
@@ -246,12 +265,16 @@ impl RepositoryDeliveryMetrics {
         {
             return None;
         }
-        Some(RepositoryDeliveryWindow::from_deltas(
+        Some(RepositoryDeliveryWindow::from_deltas_with_peak(
             0,
             elapsed_seconds,
             elapsed_seconds,
             self.generated_segments - start.generated_segments,
             self.generated_bytes - start.generated_bytes,
+            (self.peak_generated_segments - start.peak_generated_segments)
+                .max(self.generated_segments - start.generated_segments),
+            (self.peak_generated_bytes - start.peak_generated_bytes)
+                .max(self.generated_bytes - start.generated_bytes),
             self.acknowledged_segments - start.acknowledged_segments,
             self.acknowledged_bytes - start.acknowledged_bytes,
             self.applied_segments - start.applied_segments,
@@ -268,6 +291,8 @@ pub(super) fn ensure_repository_delivery_metrics(connection: &mut Connection) ->
                  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                  generated_segments INTEGER NOT NULL DEFAULT 0,
                  generated_bytes INTEGER NOT NULL DEFAULT 0,
+                 peak_generated_segments INTEGER NOT NULL DEFAULT 0,
+                 peak_generated_bytes INTEGER NOT NULL DEFAULT 0,
                  acknowledged_segments INTEGER NOT NULL DEFAULT 0,
                  acknowledged_bytes INTEGER NOT NULL DEFAULT 0,
                  applied_segments INTEGER NOT NULL DEFAULT 0,
@@ -297,7 +322,9 @@ pub(super) fn ensure_repository_delivery_metrics(connection: &mut Connection) ->
                  completed_acknowledged_segments INTEGER,
                  completed_acknowledged_bytes INTEGER,
                  completed_applied_segments INTEGER,
-                 completed_applied_bytes INTEGER
+                 completed_applied_bytes INTEGER,
+                 completed_peak_generated_segments INTEGER,
+                 completed_peak_generated_bytes INTEGER
              );
              INSERT INTO repository_delivery_metrics (singleton)
              VALUES (1)
@@ -337,6 +364,8 @@ pub(super) fn ensure_repository_delivery_metrics(connection: &mut Connection) ->
                  completed_acknowledged_bytes INTEGER,
                  completed_applied_segments INTEGER,
                  completed_applied_bytes INTEGER,
+                 completed_peak_generated_segments INTEGER,
+                 completed_peak_generated_bytes INTEGER,
                  PRIMARY KEY (source_node_id, stream, target_repository_id)
              );",
         )
@@ -353,6 +382,8 @@ pub(super) fn ensure_repository_delivery_metrics(connection: &mut Connection) ->
     for (name, definition) in [
         ("generated_segments", "INTEGER NOT NULL DEFAULT 0"),
         ("generated_bytes", "INTEGER NOT NULL DEFAULT 0"),
+        ("peak_generated_segments", "INTEGER NOT NULL DEFAULT 0"),
+        ("peak_generated_bytes", "INTEGER NOT NULL DEFAULT 0"),
         ("acknowledged_segments", "INTEGER NOT NULL DEFAULT 0"),
         ("acknowledged_bytes", "INTEGER NOT NULL DEFAULT 0"),
         ("applied_segments", "INTEGER NOT NULL DEFAULT 0"),
@@ -383,12 +414,39 @@ pub(super) fn ensure_repository_delivery_metrics(connection: &mut Connection) ->
         ("completed_acknowledged_bytes", "INTEGER"),
         ("completed_applied_segments", "INTEGER"),
         ("completed_applied_bytes", "INTEGER"),
+        ("completed_peak_generated_segments", "INTEGER"),
+        ("completed_peak_generated_bytes", "INTEGER"),
     ] {
         if !columns.contains(name) {
             transaction
                 .execute(
                     &format!(
                         "ALTER TABLE repository_delivery_metrics ADD COLUMN {name} {definition}"
+                    ),
+                    [],
+                )
+                .map_err(sqlite_error)?;
+        }
+    }
+    let mut statement = transaction
+        .prepare("PRAGMA table_info(repository_delivery_metric_scope_windows)")
+        .map_err(sqlite_error)?;
+    let scope_window_columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sqlite_error)?
+        .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()
+        .map_err(sqlite_error)?;
+    drop(statement);
+    for (name, definition) in [
+        ("completed_peak_generated_segments", "INTEGER"),
+        ("completed_peak_generated_bytes", "INTEGER"),
+    ] {
+        if !scope_window_columns.contains(name) {
+            transaction
+                .execute(
+                    &format!(
+                        "{}{} {definition}",
+                        "ALTER TABLE repository_delivery_metric_scope_windows ADD COLUMN ", name
                     ),
                     [],
                 )
@@ -479,6 +537,8 @@ fn add_counter_pair(
 struct DeliveryWindowState {
     generated_segments: u64,
     generated_bytes: u64,
+    peak_generated_segments: u64,
+    peak_generated_bytes: u64,
     acknowledged_segments: u64,
     acknowledged_bytes: u64,
     applied_segments: u64,
@@ -495,6 +555,7 @@ fn read_counter_baseline(transaction: &rusqlite::Transaction<'_>) -> Result<Deli
     transaction
         .query_row(
             "SELECT generated_segments, generated_bytes,
+                    peak_generated_segments, peak_generated_bytes,
                     acknowledged_segments, acknowledged_bytes,
                     applied_segments, applied_bytes,
                     window_started_at,
@@ -507,38 +568,40 @@ fn read_counter_baseline(transaction: &rusqlite::Transaction<'_>) -> Result<Deli
                 Ok(DeliveryWindowState {
                     generated_segments: checked_u64(row.get::<_, i64>(0)?, 0)?,
                     generated_bytes: checked_u64(row.get::<_, i64>(1)?, 1)?,
-                    acknowledged_segments: checked_u64(row.get::<_, i64>(2)?, 2)?,
-                    acknowledged_bytes: checked_u64(row.get::<_, i64>(3)?, 3)?,
-                    applied_segments: checked_u64(row.get::<_, i64>(4)?, 4)?,
-                    applied_bytes: checked_u64(row.get::<_, i64>(5)?, 5)?,
+                    peak_generated_segments: checked_u64(row.get::<_, i64>(2)?, 2)?,
+                    peak_generated_bytes: checked_u64(row.get::<_, i64>(3)?, 3)?,
+                    acknowledged_segments: checked_u64(row.get::<_, i64>(4)?, 4)?,
+                    acknowledged_bytes: checked_u64(row.get::<_, i64>(5)?, 5)?,
+                    applied_segments: checked_u64(row.get::<_, i64>(6)?, 6)?,
+                    applied_bytes: checked_u64(row.get::<_, i64>(7)?, 7)?,
                     generated_segments_at_start: row
-                        .get::<_, Option<i64>>(7)?
-                        .map(|value| checked_u64(value, 7))
-                        .transpose()?
-                        .unwrap_or(0),
-                    generated_bytes_at_start: row
-                        .get::<_, Option<i64>>(8)?
-                        .map(|value| checked_u64(value, 8))
-                        .transpose()?
-                        .unwrap_or(0),
-                    acknowledged_segments_at_start: row
                         .get::<_, Option<i64>>(9)?
                         .map(|value| checked_u64(value, 9))
                         .transpose()?
                         .unwrap_or(0),
-                    acknowledged_bytes_at_start: row
+                    generated_bytes_at_start: row
                         .get::<_, Option<i64>>(10)?
                         .map(|value| checked_u64(value, 10))
                         .transpose()?
                         .unwrap_or(0),
-                    applied_segments_at_start: row
+                    acknowledged_segments_at_start: row
                         .get::<_, Option<i64>>(11)?
                         .map(|value| checked_u64(value, 11))
                         .transpose()?
                         .unwrap_or(0),
-                    applied_bytes_at_start: row
+                    acknowledged_bytes_at_start: row
                         .get::<_, Option<i64>>(12)?
                         .map(|value| checked_u64(value, 12))
+                        .transpose()?
+                        .unwrap_or(0),
+                    applied_segments_at_start: row
+                        .get::<_, Option<i64>>(13)?
+                        .map(|value| checked_u64(value, 13))
+                        .transpose()?
+                        .unwrap_or(0),
+                    applied_bytes_at_start: row
+                        .get::<_, Option<i64>>(14)?
+                        .map(|value| checked_u64(value, 14))
                         .transpose()?
                         .unwrap_or(0),
                 })
@@ -618,16 +681,22 @@ fn rotate_window_if_elapsed(
         return Ok(());
     }
     let state = read_counter_baseline(transaction)?;
-    let window = RepositoryDeliveryWindow::from_deltas(
+    let generated_segments = state
+        .generated_segments
+        .saturating_sub(state.generated_segments_at_start);
+    let generated_bytes = state
+        .generated_bytes
+        .saturating_sub(state.generated_bytes_at_start);
+    let peak_generated_segments = state.peak_generated_segments.max(generated_segments);
+    let peak_generated_bytes = state.peak_generated_bytes.max(generated_bytes);
+    let window = RepositoryDeliveryWindow::from_deltas_with_peak(
         window_started_at,
         window_started_at.saturating_add(DELIVERY_RATE_WINDOW_SECONDS),
         DELIVERY_RATE_WINDOW_SECONDS,
-        state
-            .generated_segments
-            .saturating_sub(state.generated_segments_at_start),
-        state
-            .generated_bytes
-            .saturating_sub(state.generated_bytes_at_start),
+        generated_segments,
+        generated_bytes,
+        peak_generated_segments,
+        peak_generated_bytes,
         state
             .acknowledged_segments
             .saturating_sub(state.acknowledged_segments_at_start),
@@ -651,7 +720,11 @@ fn rotate_window_if_elapsed(
                  completed_acknowledged_segments = ?5,
                  completed_acknowledged_bytes = ?6,
                  completed_applied_segments = ?7,
-                 completed_applied_bytes = ?8
+                 completed_applied_bytes = ?8,
+                 peak_generated_segments = ?9,
+                 peak_generated_bytes = ?10,
+                 completed_peak_generated_segments = ?9,
+                 completed_peak_generated_bytes = ?10
              WHERE singleton = 1",
             rusqlite::params![
                 durable_i64(window.started_at, "completed window start")?,
@@ -665,6 +738,8 @@ fn rotate_window_if_elapsed(
                 durable_i64(window.acknowledged_bytes, "completed acknowledged bytes")?,
                 durable_i64(window.applied_segments, "completed applied segments")?,
                 durable_i64(window.applied_bytes, "completed applied bytes")?,
+                durable_i64(peak_generated_segments, "peak generated segments")?,
+                durable_i64(peak_generated_bytes, "peak generated bytes")?,
             ],
         )
         .map_err(sqlite_error)?;
@@ -784,176 +859,6 @@ fn set_progress_at(
             .map_err(sqlite_error)?;
     }
     Ok(())
-}
-
-pub(super) fn read_at(
-    connection: &Connection,
-    now_unix_seconds: Option<u64>,
-) -> Result<RepositoryDeliveryMetrics> {
-    let mut metrics = connection
-        .query_row(
-            "SELECT generated_segments, generated_bytes,
-                    acknowledged_segments, acknowledged_bytes,
-                    applied_segments, applied_bytes,
-                    source_delivery_attempts, source_delivery_successes,
-                    source_transport_errors, source_response_errors,
-                    source_response_changed,
-                    source_explicit_unavailable, source_storage_errors,
-                    last_attempt_at, last_progress_at,
-                    counter_epoch,
-                    window_started_at, window_generated_segments,
-                    window_generated_bytes, window_acknowledged_segments,
-                    window_acknowledged_bytes, window_applied_segments,
-                    window_applied_bytes,
-                    completed_window_started_at, completed_window_ended_at,
-                    completed_generated_segments, completed_generated_bytes,
-                    completed_acknowledged_segments, completed_acknowledged_bytes,
-                    completed_applied_segments, completed_applied_bytes,
-                    byte_counter_unit
-             FROM repository_delivery_metrics WHERE singleton = 1",
-            [],
-            |row| {
-                let generated_segments = checked_u64(row.get::<_, i64>(0)?, 0)?;
-                let generated_bytes = checked_u64(row.get::<_, i64>(1)?, 1)?;
-                let acknowledged_segments = checked_u64(row.get::<_, i64>(2)?, 2)?;
-                let acknowledged_bytes = checked_u64(row.get::<_, i64>(3)?, 3)?;
-                let applied_segments = checked_u64(row.get::<_, i64>(4)?, 4)?;
-                let applied_bytes = checked_u64(row.get::<_, i64>(5)?, 5)?;
-                let window_started_at = row
-                    .get::<_, Option<i64>>(16)?
-                    .map(|value| checked_u64(value, 16))
-                    .transpose()?;
-                let window =
-                    |start_column: usize,
-                     end_column: usize,
-                     elapsed_seconds: u64|
-                     -> rusqlite::Result<Option<RepositoryDeliveryWindow>> {
-                        let Some(started_at) = row
-                            .get::<_, Option<i64>>(start_column)?
-                            .map(|value| checked_u64(value, start_column))
-                            .transpose()?
-                        else {
-                            return Ok(None);
-                        };
-                        let Some(ended_at) = row
-                            .get::<_, Option<i64>>(end_column)?
-                            .map(|value| checked_u64(value, end_column))
-                            .transpose()?
-                        else {
-                            return Ok(None);
-                        };
-                        let values = [
-                            row.get::<_, Option<i64>>(25)?,
-                            row.get::<_, Option<i64>>(26)?,
-                            row.get::<_, Option<i64>>(27)?,
-                            row.get::<_, Option<i64>>(28)?,
-                            row.get::<_, Option<i64>>(29)?,
-                            row.get::<_, Option<i64>>(30)?,
-                        ];
-                        let values = values
-                            .into_iter()
-                            .enumerate()
-                            .map(|(index, value)| {
-                                value
-                                    .map(|value| checked_u64(value, 25 + index))
-                                    .transpose()
-                                    .map(|value| value.unwrap_or(0))
-                            })
-                            .collect::<rusqlite::Result<Vec<_>>>()?;
-                        Ok(Some(RepositoryDeliveryWindow::from_deltas(
-                            started_at,
-                            ended_at,
-                            elapsed_seconds,
-                            values[0],
-                            values[1],
-                            values[2],
-                            values[3],
-                            values[4],
-                            values[5],
-                        )))
-                    };
-                let last_completed_window = window(23, 24, DELIVERY_RATE_WINDOW_SECONDS)?;
-                let last_completed_window = match last_completed_window {
-                    Some(window) => Some(window),
-                    None => match (now_unix_seconds, window_started_at) {
-                        (Some(now), Some(started_at))
-                            if now >= started_at.saturating_add(DELIVERY_RATE_WINDOW_SECONDS) =>
-                        {
-                            let baselines = [
-                                row.get::<_, Option<i64>>(17)?,
-                                row.get::<_, Option<i64>>(18)?,
-                                row.get::<_, Option<i64>>(19)?,
-                                row.get::<_, Option<i64>>(20)?,
-                                row.get::<_, Option<i64>>(21)?,
-                                row.get::<_, Option<i64>>(22)?,
-                            ];
-                            let baselines = baselines
-                                .into_iter()
-                                .enumerate()
-                                .map(|(index, value)| {
-                                    value
-                                        .map(|value| checked_u64(value, 17 + index))
-                                        .transpose()
-                                        .map(|value| value.unwrap_or(0))
-                                })
-                                .collect::<rusqlite::Result<Vec<_>>>()?;
-                            Some(RepositoryDeliveryWindow::from_deltas(
-                                started_at,
-                                started_at.saturating_add(DELIVERY_RATE_WINDOW_SECONDS),
-                                DELIVERY_RATE_WINDOW_SECONDS,
-                                generated_segments.saturating_sub(baselines[0]),
-                                generated_bytes.saturating_sub(baselines[1]),
-                                acknowledged_segments.saturating_sub(baselines[2]),
-                                acknowledged_bytes.saturating_sub(baselines[3]),
-                                applied_segments.saturating_sub(baselines[4]),
-                                applied_bytes.saturating_sub(baselines[5]),
-                            ))
-                        }
-                        _ => None,
-                    },
-                };
-                Ok(RepositoryDeliveryMetrics {
-                    generated_segments,
-                    generated_bytes,
-                    acknowledged_segments,
-                    acknowledged_bytes,
-                    applied_segments,
-                    applied_bytes,
-                    source_delivery_attempts: checked_u64(row.get::<_, i64>(6)?, 6)?,
-                    source_delivery_successes: checked_u64(row.get::<_, i64>(7)?, 7)?,
-                    source_transport_errors: checked_u64(row.get::<_, i64>(8)?, 8)?,
-                    source_response_errors: checked_u64(row.get::<_, i64>(9)?, 9)?,
-                    source_response_changed: checked_u64(row.get::<_, i64>(10)?, 10)?,
-                    source_explicit_unavailable: checked_u64(row.get::<_, i64>(11)?, 11)?,
-                    source_storage_errors: checked_u64(row.get::<_, i64>(12)?, 12)?,
-                    last_attempt_at: row
-                        .get::<_, Option<i64>>(13)?
-                        .map(|value| checked_u64(value, 13))
-                        .transpose()?,
-                    last_progress_at: row
-                        .get::<_, Option<i64>>(14)?
-                        .map(|value| checked_u64(value, 14))
-                        .transpose()?,
-                    counter_epoch: checked_u64(row.get::<_, i64>(15)?, 15)?,
-                    byte_counter_unit: row.get::<_, String>(31)?,
-                    rate_window_seconds: DELIVERY_RATE_WINDOW_SECONDS,
-                    last_completed_window,
-                    delivery_scopes: Vec::new(),
-                })
-            },
-        )
-        .map_err(sqlite_error)?;
-    metrics.delivery_scopes = scopes::read_scopes(connection, now_unix_seconds)?;
-    Ok(metrics)
-}
-fn checked_u64(value: i64, column: usize) -> rusqlite::Result<u64> {
-    u64::try_from(value).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(
-            column,
-            rusqlite::types::Type::Integer,
-            Box::new(error),
-        )
-    })
 }
 
 impl HistoryStorage {

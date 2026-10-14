@@ -6,6 +6,8 @@ pub(super) fn reset_legacy_byte_counters(transaction: &rusqlite::Transaction<'_>
             "UPDATE repository_delivery_metrics
              SET generated_segments = 0,
                  generated_bytes = 0,
+                 peak_generated_segments = 0,
+                 peak_generated_bytes = 0,
                  acknowledged_segments = 0,
                  acknowledged_bytes = 0,
                  applied_segments = 0,
@@ -35,6 +37,8 @@ pub(super) fn reset_legacy_byte_counters(transaction: &rusqlite::Transaction<'_>
                  completed_acknowledged_bytes = NULL,
                  completed_applied_segments = NULL,
                  completed_applied_bytes = NULL,
+                 completed_peak_generated_segments = NULL,
+                 completed_peak_generated_bytes = NULL,
                  byte_counter_unit = 'canonical-v1'
              WHERE singleton = 1;
              DELETE FROM repository_delivery_metric_scopes;

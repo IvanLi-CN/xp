@@ -222,6 +222,21 @@ pub(super) async fn source_records(
     ]
     .into_iter()
     .collect::<Result<Vec<_>, _>>()?;
+    #[cfg(feature = "resource-fixture")]
+    if let Some(payload_bytes) = std::env::var("XP_RESOURCE_FIXTURE_PAYLOAD_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0 && *value <= MAX_SOURCE_PAYLOAD_BYTES.saturating_sub(1024))
+    {
+        live_records.push(source_record_with_key(
+            "runtime.v1",
+            &state.cluster.node_id,
+            now,
+            format!("resource-fixture:{now}").into_bytes(),
+            serde_json::json!({"fixture": "x".repeat(payload_bytes)}),
+            false,
+        )?);
+    }
     if let Some(history) = history.as_ref() {
         for user_id in &history.user_traffic_users {
             live_records.push(source_record_with_key(

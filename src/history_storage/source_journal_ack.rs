@@ -2,11 +2,11 @@ use super::source_journal::SOURCE_DELIVERY_JOURNAL_RESUME_PERCENT;
 use super::*;
 use crate::history_sync::SignedSegment;
 
-fn canonical_metric_len(wire: &[u8]) -> u64 {
+fn canonical_metric_len(wire: &[u8]) -> Option<u64> {
     SignedSegment::from_wire(wire)
         .ok()
         .and_then(|segment| segment.canonical().canonical_bytes().ok())
-        .map_or_else(|| wire.len() as u64, |bytes| bytes.len() as u64)
+        .map(|bytes| bytes.len() as u64)
 }
 
 pub(super) fn acknowledge_source_delivery_journal_inner(
@@ -67,7 +67,7 @@ pub(super) fn acknowledge_source_delivery_journal_inner(
             .iter()
             .try_fold(0_u64, |total, (_, _, wire)| {
                 total
-                    .checked_add(canonical_metric_len(wire))
+                    .checked_add(canonical_metric_len(wire).unwrap_or_default())
                     .ok_or_else(|| {
                         HistoryStorageError("acknowledged canonical byte count overflow".to_owned())
                     })
@@ -119,7 +119,9 @@ pub(super) fn acknowledge_source_delivery_journal_inner(
                 .entry((source_node_id.clone(), stream.clone()))
                 .or_default();
             entry.0 = entry.0.saturating_add(1);
-            entry.1 = entry.1.saturating_add(canonical_metric_len(wire));
+            entry.1 = entry
+                .1
+                .saturating_add(canonical_metric_len(wire).unwrap_or_default());
         }
         for ((source_node_id, stream), (segments, bytes)) in scope_counts {
             metrics::increment_acknowledged_scope(

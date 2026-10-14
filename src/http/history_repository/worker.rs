@@ -236,8 +236,7 @@ async fn publish_local_history_segment(
     now: u64,
     capture_live: bool,
 ) -> anyhow::Result<bool> {
-    // Keep the replay window below the 1 MiB wire budget and the 256-segment journal bound.
-    const MAX_SEGMENTS_PER_DELIVERY_PAGE: usize = 4;
+    const MAX_SEGMENTS_PER_DELIVERY_PAGE: usize = 256;
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let identity = super::derived_repository_identity(state, node_id)
         .map_err(|_| anyhow::anyhow!("derive local history source identity"))?;

@@ -674,41 +674,68 @@ impl HistoryStorage {
                 completed: true,
             });
         }
-        let rows = if let Some(cursor) = cursor.as_deref() {
+        let mut rows = Vec::new();
+        let mut wire_bytes = 0_usize;
+        let mut budget_exhausted = false;
+        let mut read_row = |row: &rusqlite::Row<'_>| -> Result<bool> {
+            let id = row.get::<_, String>(0).map_err(sqlite_error)?;
+            let source_node_id = row.get::<_, String>(1).map_err(sqlite_error)?;
+            let row_wire_bytes = usize::try_from(row.get::<_, i64>(2).map_err(sqlite_error)?)
+                .map_err(|_| HistoryStorageError("negative journal wire length".to_owned()))?;
+            if source_node_id.is_empty() {
+                if rows.is_empty() && row_wire_bytes > SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES {
+                    return Err(HistoryStorageError(
+                        "source delivery journal repair row exceeds wire budget".to_owned(),
+                    ));
+                }
+                if wire_bytes.saturating_add(row_wire_bytes)
+                    > SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
+                {
+                    return Ok(false);
+                }
+                wire_bytes = wire_bytes.saturating_add(row_wire_bytes);
+            }
+            rows.push((id, source_node_id));
+            Ok(true)
+        };
+        if let Some(cursor) = cursor.as_deref() {
             let mut statement = transaction
                 .prepare(
-                    "SELECT id, source_node_id
+                    "SELECT id, source_node_id, length(wire)
                      FROM source_delivery_journal
                      WHERE id > ?1
                      ORDER BY id
                      LIMIT ?2",
                 )
                 .map_err(sqlite_error)?;
-            statement
-                .query_map(
-                    params![cursor, SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-                )
-                .map_err(sqlite_error)?
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .map_err(sqlite_error)?
+            let mut query = statement
+                .query(params![cursor, SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE])
+                .map_err(sqlite_error)?;
+            while let Some(row) = query.next().map_err(sqlite_error)? {
+                if !read_row(row)? {
+                    budget_exhausted = true;
+                    break;
+                }
+            }
         } else {
             let mut statement = transaction
                 .prepare(
-                    "SELECT id, source_node_id
+                    "SELECT id, source_node_id, length(wire)
                      FROM source_delivery_journal
                      ORDER BY id
                      LIMIT ?1",
                 )
                 .map_err(sqlite_error)?;
-            statement
-                .query_map([SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-                .map_err(sqlite_error)?
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .map_err(sqlite_error)?
-        };
+            let mut query = statement
+                .query([SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE])
+                .map_err(sqlite_error)?;
+            while let Some(row) = query.next().map_err(sqlite_error)? {
+                if !read_row(row)? {
+                    budget_exhausted = true;
+                    break;
+                }
+            }
+        }
         for (id, source_node_id) in &rows {
             if !source_node_id.is_empty() {
                 continue;
@@ -746,7 +773,8 @@ impl HistoryStorage {
                 )
                 .map_err(sqlite_error)?;
         }
-        let completed = rows.len() < SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE as usize;
+        let completed =
+            !budget_exhausted && rows.len() < SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE as usize;
         let next_cursor = rows.last().map(|(id, _)| id.as_str());
         transaction
             .execute(

@@ -72,7 +72,10 @@
   apply segment/byte counters in the existing SQLite database. Counter writes share the enqueue,
   ACK, and receiver checkpoint transactions; retries and restarts are idempotent. Read-only status
   exposes the counters, attempt/failure categories, progress timestamps, and durable or elapsed
-  300-second windows for each source/stream/target scope used by the fixed 10x calculation. Source
+  300-second windows for each source/stream/target scope used by the fixed 10x calculation. The
+  durable metric row also retains the highest completed five-minute generated segment and byte
+  deltas in the current counter epoch, so a quiet current window cannot lower the denominator.
+  Source
   and replication workers run bounded 5-second ticks; each source tick has at most sixteen local
   working pages under the 1 MiB wire budget, and local receiver commits use four segments with a
   50ms yield. The remote protocol retains its 256-segment/1 MiB page bound.

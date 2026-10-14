@@ -158,6 +158,59 @@ fn legacy_wire_metric_epoch_resets_without_touching_journal_rows() {
 }
 
 #[test]
+fn malformed_legacy_wire_is_excluded_from_canonical_ack_bytes() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[23; 32]);
+    let mut runtime = load(temporary.path());
+    runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            identity(),
+            &signing_key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"malformed-wire".to_vec(),
+                b"payload".to_vec(),
+                false,
+            )],
+            0,
+        )
+        .expect("queue source segment");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let row = storage
+        .source_delivery_journal()
+        .expect("read journal")
+        .into_iter()
+        .next()
+        .expect("journal row");
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    connection
+        .execute(
+            "UPDATE source_delivery_journal SET wire = ?1 WHERE id = ?2",
+            rusqlite::params![vec![0_u8; row.wire.len()], row.id],
+        )
+        .expect("replace legacy wire with malformed payload");
+    drop(connection);
+
+    storage
+        .acknowledge_source_delivery_journal(
+            std::slice::from_ref(&row.id),
+            Some(200),
+            Some("direct"),
+        )
+        .expect("acknowledge malformed legacy wire");
+    let metrics = storage
+        .repository_delivery_metrics()
+        .expect("read canonical metrics");
+    assert_eq!(metrics.acknowledged_segments, 1);
+    assert_eq!(metrics.acknowledged_bytes, 0);
+}
+
+#[test]
 fn delivery_window_requires_both_segments_and_bytes_for_each_stage() {
     let start = crate::state::history_storage::RepositoryDeliveryMetrics::default();
     let mut end = start.clone();
@@ -191,6 +244,29 @@ fn delivery_window_requires_both_segments_and_bytes_for_each_stage() {
         .expect("valid five-minute delivery window")
         .repository_apply_meets_ten_x()
     );
+}
+
+#[test]
+fn delivery_window_uses_persisted_peak_generated_rate() {
+    let start = crate::state::history_storage::RepositoryDeliveryMetrics::default();
+    let mut end = start.clone();
+    end.generated_segments = 1;
+    end.generated_bytes = 100;
+    end.peak_generated_segments = 20;
+    end.peak_generated_bytes = 2_000;
+    end.acknowledged_segments = 100;
+    end.acknowledged_bytes = 10_000;
+    end.applied_segments = 100;
+    end.applied_bytes = 10_000;
+    let window = end
+        .window_since(
+            &start,
+            crate::state::history_storage::DELIVERY_RATE_WINDOW_SECONDS,
+        )
+        .expect("valid persisted peak window");
+    assert_eq!(window.generated_segments, 1);
+    assert_eq!(window.peak_generated_segments, 20);
+    assert!(!window.source_ack_meets_ten_x());
 }
 
 #[test]

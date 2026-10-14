@@ -50,8 +50,9 @@ Missing fields from an older peer are treated as zero and do not change v1 fallb
 
 Capture two signed public-HTTPS status samples exactly 300 seconds apart. Compute each stage as the
 counter delta divided by 300, in both segments/second and canonical bytes/second; compare against
-the highest sustained five-minute generated delta. Both source-to-ACK and repository-to-apply must
-be at least 10 times that generated rate before declaring convergence. Pending depth and ACK
+the highest sustained five-minute generated delta, exposed as `peak_generated_segments` and
+`peak_generated_bytes` in the current counter epoch. Both source-to-ACK and repository-to-apply
+must be at least 10 times that generated rate before declaring convergence. Pending depth and ACK
 timestamps are diagnostic only and cannot prove the 10x gate. A 5-second source tick is bounded to
 sixteen local working pages. Local repository commits use four segments with a 50ms yield between
 batches; each page remains below the 1 MiB wire limit and remote protocol pages retain the
@@ -84,7 +85,8 @@ The repair worker only uses the peer's registered public HTTPS `api_base_url`. A
 explicitly lists unavailable IDs may reduce `pending_count` and records `explicit_unavailable`; it
 does not alter permanent gap, `partial`, or `replica_converged=false` semantics. A segment that
 cannot fit the 256 KiB repair wire budget is reported as `storage_error` before any checkpoint or
-ACK change.
+ACK change. Legacy order repair also stops before the 1 MiB wire page budget and resumes from its
+durable cursor; malformed legacy rows do not contribute wire bytes to canonical ACK metrics.
 
 - The file is private (`0600`) and atomically replaced.
 - The serialized state is capped at 16 KiB and retains only the current in-flight operation, the

@@ -89,6 +89,8 @@
   and byte rates; pending depth alone is not a throughput claim.
 - Runtime status also exposes the completed or elapsed 300-second window for each source/stream/
   target scope, preventing aggregate progress from masking a starved target.
+- Five-minute throughput windows persist the highest generated segment and byte deltas in the
+  current counter epoch; 10x acceptance cannot be satisfied by waiting for a quieter window.
 - Byte counters now use the signed segment's canonical payload size, while wire bytes remain the
   journal capacity and page-budget unit. Existing databases migrate by resetting only the
   cumulative delivery counters, completed windows, and scoped counters into a new canonical

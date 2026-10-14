@@ -203,8 +203,10 @@ repository-apply segment/byte counters, attempt/success counts, categorized fail
 attempt/progress timestamps. Enqueue, ACK, response, gap, watermark and receiver checkpoint
 updates commit their matching counters in the same SQLite transaction; retries and restarts do
 not double count. A 300-second sample window computes each stage as `delta(counter) / 300` in
-both segments and canonical bytes. Source-to-ACK and repository-to-apply must each reach 10 times
-the peak generated rate before a delivery convergence claim is valid. A 5-second source tick may
+both segments and canonical bytes. Durable `peak_generated_segments` and
+`peak_generated_bytes` retain the highest completed five-minute generated window in the current
+counter epoch. Source-to-ACK and repository-to-apply must each reach 10 times that peak generated
+rate before a delivery convergence claim is valid. A 5-second source tick may
 run sixteen local bounded pages; local receiver commits use four segments with a 50ms yield under
 the 1 MiB wire budget, while remote protocol pages remain capped at 256 segments and 1 MiB. It
 does not enable unbounded concurrency

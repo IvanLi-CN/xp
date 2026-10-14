@@ -178,6 +178,66 @@ fn source_delivery_journal_order_repair_is_resumable() {
 }
 
 #[test]
+fn source_delivery_order_repair_respects_wire_budget_before_metadata_decode() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[19; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+    let payload = vec![7_u8; 100 * 1024];
+    for sequence in 0..11_u64 {
+        runtime
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &signing_key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    format!("budget:{sequence}").into_bytes(),
+                    payload.clone(),
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue large source segment");
+    }
+    drop(runtime);
+
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    connection
+        .execute(
+            "UPDATE source_delivery_journal
+             SET source_node_id = '', source_epoch = 0, first_sequence = 0",
+            [],
+        )
+        .expect("simulate legacy journal order columns");
+    connection
+        .execute(
+            "UPDATE source_delivery_journal_state
+             SET order_repair_cursor_id = NULL, order_repair_completed = 0
+             WHERE singleton = 1",
+            [],
+        )
+        .expect("mark journal order repair pending");
+    drop(connection);
+
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let first = storage
+        .repair_source_delivery_journal_order_page()
+        .expect("repair bounded wire page");
+    assert!(first.processed > 0);
+    assert!(first.processed < 11);
+    assert!(!first.completed);
+    let second = storage
+        .repair_source_delivery_journal_order_page()
+        .expect("repair remaining wire page");
+    assert!(second.completed);
+}
+
+#[test]
 fn source_delivery_order_repair_cycle_commits_sixteen_pages() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);
