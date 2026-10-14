@@ -78,6 +78,7 @@ import {
 	SelectValue,
 } from "../components/ui/select";
 import { isDemoRuntime } from "../demo/runtimeMode";
+import { useDemoSubscriptionNavigation } from "../demo/useDemoSubscriptionNavigation";
 import { useMihomoProfileDraft } from "../hooks/useMihomoProfileDraft";
 import { useUserTimeWindowReports } from "../hooks/useUserTimeWindowReports";
 import { useAppRuntime } from "../offline/appRuntime";
@@ -179,8 +180,6 @@ export function UserDetailsPage() {
 				new URLSearchParams(demoSearch).get("d_mirror") ?? "",
 			),
 	);
-	const demoPreviewLoadedRef = useRef<string | null>(null);
-	const demoPreviewUserIdRef = useRef(userId);
 	const {
 		currentUserIdRef,
 		deleteOpen,
@@ -823,6 +822,7 @@ export function UserDetailsPage() {
 		setSubFormat(nextFormat);
 		setUseExternalResourceMirror(nextMirror);
 		updateDemoSubscriptionSearch(nextFormat, nextMirror, true);
+		if (isDemoRuntime()) return;
 		await loadUserSubscriptionPreview(
 			subscriptionToken,
 			nextFormat,
@@ -830,59 +830,18 @@ export function UserDetailsPage() {
 			formatError,
 		);
 	}
-	function updateDemoSubscriptionSearch(
-		nextFormat: SubscriptionFormat,
-		nextMirror: boolean,
-		preview = false,
-	) {
-		if (!isDemoRuntime()) return;
-		void navigate({
-			search: (current) =>
-				({
-					...current,
-					d_format: nextFormat,
-					d_mirror: nextMirror ? "mirror" : undefined,
-					d_preview: preview ? "preview" : undefined,
-				}) as never,
-		});
-	}
-	useEffect(() => {
-		if (!isDemoRuntime()) return;
-		const params = new URLSearchParams(demoSearch);
-		const nextFormat = params.get("d_format");
-		const format: SubscriptionFormat =
-			nextFormat === "raw" || nextFormat === "clash" || nextFormat === "mihomo"
-				? nextFormat
-				: DEFAULT_SUBSCRIPTION_FORMAT;
-		const mirror = ["1", "mirror"].includes(params.get("d_mirror") ?? "");
-		setSubFormat(format);
-		setUseExternalResourceMirror(mirror);
-		if (demoPreviewUserIdRef.current !== userId) {
-			demoPreviewUserIdRef.current = userId;
-			demoPreviewLoadedRef.current = null;
-		}
-		if (
-			!subscriptionToken ||
-			!["1", "preview"].includes(params.get("d_preview") ?? "")
-		)
-			return;
-		const key = `${userId}:${subscriptionToken}:${format}:${mirror}`;
-		if (demoPreviewLoadedRef.current === key) return;
-		demoPreviewLoadedRef.current = key;
-		setSubOpen(true);
-		void loadUserSubscriptionPreview(
-			subscriptionToken,
-			format,
-			mirror,
-			formatError,
-		);
-	}, [
-		demoSearch,
-		loadUserSubscriptionPreview,
-		setSubOpen,
-		subscriptionToken,
+	const {
+		updateSearch: updateDemoSubscriptionSearch,
+		closePreview: closeSubscriptionPreview,
+	} = useDemoSubscriptionNavigation({
 		userId,
-	]);
+		subscriptionToken,
+		setFormat: setSubFormat,
+		setMirror: setUseExternalResourceMirror,
+		setOpen: setSubOpen,
+		loadPreview: loadUserSubscriptionPreview,
+		formatError,
+	});
 	async function retryAccessData() {
 		await Promise.all([
 			nodesQuery.refetch(),
@@ -1776,15 +1735,7 @@ export function UserDetailsPage() {
 
 			<SubscriptionPreviewDialog
 				open={isCurrentTransientState && subOpen}
-				onClose={() => {
-					setSubOpen(false);
-					if (isDemoRuntime()) {
-						void navigate({
-							search: (current) =>
-								({ ...current, d_preview: undefined }) as never,
-						});
-					}
-				}}
+				onClose={closeSubscriptionPreview}
 				subscriptionUrl={subscriptionUrl}
 				format={subFormat}
 				loading={subLoading}

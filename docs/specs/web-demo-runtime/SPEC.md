@@ -37,6 +37,13 @@ Inspector MUST expose structured scene, persona, network, data, actions and shar
 
 Scene, persona, network and predefined data controls MUST be URL-first, survive refresh and sharing, and update through client-side navigation without document reload. Panel visibility and placement MUST remain local-only. Simulated writes MUST remain in memory and reset on reload or explicit reset; share URLs MUST not contain entered secrets or arbitrary mutation payloads.
 
+Subscription preview MUST follow these history rules:
+
+- Back and Forward restore visibility from `d_preview`, including already cached previews.
+- Opening preview adds one entry; its format and mirror changes replace that entry.
+- Close returns to the immediately preceding opener when that entry is identifiable.
+- Otherwise, close removes `d_preview` in place and stays on the same user page.
+
 ### REQ-DEMO-006
 
 Simulated writes MUST update the formal UI and a bounded visible operation journal. Journal entries MUST record only method, fixed route identity and result, never credentials or request bodies. Demo personas MUST reflect XP's administrator/unauthenticated model rather than invent production roles.
@@ -44,6 +51,12 @@ Simulated writes MUST update the formal UI and a bounded visible operation journ
 ### REQ-DEMO-007
 
 The standalone Demo build MUST use `/demo/` as its router and asset base, keep the live build unchanged, and emit `404.html` plus `_redirects` for static deep-link recovery. A supported static host MUST apply that fallback for `/demo/*`. Root, nested direct navigation and nested refresh MUST work independently of a real API service.
+
+Correctly served Demo pages MUST preserve live and unrelated Service Worker registrations.
+
+Legacy recovery requires a controlling worker serving the live XP shell at a Demo URL.
+
+Only that controlling registration may be unregistered during legacy recovery.
 
 ### REQ-DEMO-008
 

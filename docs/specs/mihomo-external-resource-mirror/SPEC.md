@@ -195,6 +195,8 @@ https://<node-origin>/api/sub/<token>?format=mihomo&external_resources=mirror
   - evidence_note: 移动预览保留开关与格式控件，YAML 在可滚动编辑区内。
   - ![Mihomo resource mirror Demo mobile](./assets/mihomo-resource-mirror-demo-mobile.png)
 
+演示预览的关闭与返回行为遵循 [Web Demo Runtime](../web-demo-runtime/SPEC.md) 的历史合同。
+
 ## Related ADRs
 
 - [节点本地私网 CIDR 策略](../../adr/0007-node-local-mihomo-private-cidr-policy.md)

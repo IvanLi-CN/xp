@@ -9,6 +9,10 @@
 
 Demo runtime uses formal pages, mocks, Inspector, and static deep links.
 
+Preview follows URL history. Close returns to its opener; direct links close in place.
+
+Brand assets use the build base. Correct Demo pages preserve live workers.
+
 ## Remaining Gaps
 
 Public deployment is out of scope; local evidence covers static deep links.

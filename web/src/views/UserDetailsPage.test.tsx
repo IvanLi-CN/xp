@@ -44,22 +44,12 @@ import { UserDetailsPage } from "./UserDetailsPage";
 vi.mock("@tanstack/react-router", async (importOriginal) => {
 	const actual =
 		await importOriginal<typeof import("@tanstack/react-router")>();
+	const { userDetailsRouterMock } = await import(
+		"../testFixtures/userDetailsRouter"
+	);
 	return {
 		...actual,
-		Link: ({
-			children,
-			to,
-			...rest
-		}: {
-			children: React.ReactNode;
-			to?: string;
-		}) => (
-			<a href={to ?? "#"} {...rest}>
-				{children}
-			</a>
-		),
-		useNavigate: () => vi.fn(),
-		useParams: () => ({ userId: mockUserId() }),
+		...userDetailsRouterMock(mockUserId),
 	};
 });
 

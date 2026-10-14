@@ -24,25 +24,22 @@ import { renderDocumentFallback } from "./runtime/documentFallback";
 
 async function recoverDemoFromLegacyServiceWorker(): Promise<boolean> {
 	if (
+		(typeof __XP_WEB_DEMO__ !== "undefined" && __XP_WEB_DEMO__) ||
 		typeof window === "undefined" ||
 		!/^\/demo(?:\/|$)/.test(window.location.pathname) ||
 		!("serviceWorker" in navigator)
 	)
 		return false;
 
-	const registrations = (
-		await navigator.serviceWorker.getRegistrations()
-	).filter((registration) => {
-		const scope = new URL(registration.scope);
-		return (
-			scope.origin === window.location.origin &&
-			window.location.pathname.startsWith(scope.pathname)
-		);
-	});
-	if (registrations.length === 0) return false;
-	await Promise.all(
-		registrations.map((registration) => registration.unregister()),
+	// A live XP shell at a Demo URL indicates legacy navigation interception.
+	// A correctly served standalone Demo must preserve existing live workers.
+	const controller = navigator.serviceWorker.controller;
+	if (!controller) return false;
+	const registration = await navigator.serviceWorker.getRegistration(
+		window.location.href,
 	);
+	if (registration?.active?.scriptURL !== controller.scriptURL) return false;
+	await registration.unregister();
 	const url = new URL(window.location.href);
 	url.searchParams.set("__xp_demo_sw_recovery", String(Date.now()));
 	window.location.replace(url.toString());

@@ -14,6 +14,18 @@ test("demo opens the formal user route without a login gate", async ({
 		page.getByRole("button", { name: "Reset credentials" }),
 	).toBeVisible();
 	await expect(page.getByTestId("subscription-format")).toBeVisible();
+	const logo = page.locator("header img:visible").first();
+	await expect
+		.poll(() =>
+			logo.evaluate(
+				(image) =>
+					image instanceof HTMLImageElement &&
+					image.complete &&
+					image.naturalWidth > 0,
+			),
+		)
+		.toBe(true);
+	await expect(logo).toHaveAttribute("src", /^\/demo\/xp-logo-/);
 });
 
 test("demo remains isolated from an existing live service worker", async ({
@@ -37,6 +49,14 @@ test("demo remains isolated from an existing live service worker", async ({
 	});
 	await page.reload();
 	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+	expect(
+		await page.evaluate(async () => {
+			const registrations = await navigator.serviceWorker.getRegistrations();
+			return registrations.some((registration) =>
+				registration.active?.scriptURL.endsWith("/sw.js"),
+			);
+		}),
+	).toBe(true);
 });
 
 test("demo does not send API requests to a live backend", async ({ page }) => {
@@ -246,6 +266,56 @@ test("demo Mihomo mirror walkthrough is URL-first and simulated", async ({
 	await expect(dialog).toContainText("/api/mihomo/resources/demo-");
 	await expect(page).toHaveURL(/d_format=mihomo/);
 	await expect(page).toHaveURL(/d_mirror=mirror/);
+});
+
+test("preview close returns to its opener and Forward restores the dialog", async ({
+	page,
+}) => {
+	await page.goto(`/demo/users/${userId}?demo=normal`);
+	await expect(page.getByTestId("subscription-fetch")).toBeEnabled();
+	const openerUrl = page.url();
+	const historyLength = await page.evaluate(() => history.length);
+	await page.getByTestId("subscription-fetch").click();
+	const dialog = page.getByRole("dialog");
+	await expect(dialog).toBeVisible();
+	await expect(page).toHaveURL(/d_preview=preview/);
+	await dialog.getByText("Clash", { exact: true }).click();
+	await expect(page).toHaveURL(/d_format=clash/);
+	expect(await page.evaluate(() => history.length)).toBe(historyLength + 1);
+
+	await dialog.getByRole("button", { name: "Close", exact: true }).click();
+	await expect(dialog).not.toBeVisible();
+	await expect(page).toHaveURL(openerUrl);
+	await page.goForward();
+	await expect(page).toHaveURL(/d_preview=preview/);
+	await expect(dialog).toBeVisible();
+	await page.goBack();
+	await expect(dialog).not.toBeVisible();
+	await expect(page).toHaveURL(openerUrl);
+});
+
+test("closing a preview deep link stays on the user page without adding history", async ({
+	page,
+}) => {
+	await page.goto("/demo/nodes?demo=normal");
+	await expect(
+		page.getByRole("heading", { name: "Nodes", exact: true }),
+	).toBeVisible();
+	await page.goto(
+		`/demo/users/${userId}?demo=normal&d_format=mihomo&d_preview=preview`,
+	);
+	const dialog = page.getByRole("dialog");
+	await expect(dialog).toBeVisible();
+	const historyLength = await page.evaluate(() => history.length);
+	await dialog.getByRole("button", { name: "Close", exact: true }).click();
+	await expect(dialog).not.toBeVisible();
+	await expect(page).not.toHaveURL(/d_preview=/);
+	await expect(page.getByRole("heading", { name: "佐藤 未来" })).toBeVisible();
+	expect(await page.evaluate(() => history.length)).toBe(historyLength);
+	await page.goBack();
+	await expect(
+		page.getByRole("heading", { name: "Nodes", exact: true }),
+	).toBeVisible();
 });
 
 test("demo Mihomo copy state follows the selected subscription mode", async ({

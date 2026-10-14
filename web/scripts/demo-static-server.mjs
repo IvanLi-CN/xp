@@ -14,6 +14,9 @@ const contentTypes = {
 	".html": "text/html",
 	".js": "text/javascript",
 	".json": "application/json",
+	".svg": "image/svg+xml",
+	".png": "image/png",
+	".ico": "image/x-icon",
 };
 const legacyDemoWorkerSource = [
 	"self.addEventListener('install', (event) => event.waitUntil(self.skipWaiting()));",
