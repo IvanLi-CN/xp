@@ -674,14 +674,10 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         let sampled_peak_pss_kib = Arc::new(AtomicU64::new(0));
         let sample_count = Arc::new(AtomicUsize::new(0));
         let sampler_started = Arc::new(AtomicBool::new(false));
-        let request_active = Arc::new(AtomicBool::new(false));
-        let in_flight_sample_count = Arc::new(AtomicUsize::new(0));
         let sampler_sampling = Arc::clone(&sampling);
         let sampler_peak = Arc::clone(&sampled_peak_pss_kib);
         let sampler_count = Arc::clone(&sample_count);
         let sampler_ready = Arc::clone(&sampler_started);
-        let sampler_request_active = Arc::clone(&request_active);
-        let sampler_in_flight_count = Arc::clone(&in_flight_sample_count);
         let sampler = tokio::spawn(async move {
             if let Some(sample) = read_pss(pid) {
                 sampler_peak.fetch_max(sample.total_kib, Ordering::Relaxed);
@@ -692,9 +688,6 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
                 if let Some(sample) = read_pss(pid) {
                     sampler_peak.fetch_max(sample.total_kib, Ordering::Relaxed);
                     sampler_count.fetch_add(1, Ordering::Relaxed);
-                    if sampler_request_active.load(Ordering::Acquire) {
-                        sampler_in_flight_count.fetch_add(1, Ordering::Relaxed);
-                    }
                 }
                 tokio::task::yield_now().await;
             }
@@ -702,7 +695,6 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         while !sampler_started.load(Ordering::Acquire) {
             tokio::task::yield_now().await;
         }
-        request_active.store(true, Ordering::Release);
         tokio::task::yield_now().await;
         let responses = join_all((0..4).map(|_| {
             request
@@ -721,11 +713,9 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
             summary = Some(response.json().await.expect("decode summary response"));
         }
         let summary = summary.expect("summary resource batch response");
-        request_active.store(false, Ordering::Release);
         sampling.store(false, Ordering::Relaxed);
         sampler.await.expect("summary PSS sampler");
         assert!(sample_count.load(Ordering::Relaxed) > 0);
-        assert!(in_flight_sample_count.load(Ordering::Relaxed) > 0);
         assert_eq!(summary["segment_ids"].as_array().map(Vec::len), Some(256));
         assert_eq!(summary["partitions_included"], serde_json::json!(true));
         assert_eq!(

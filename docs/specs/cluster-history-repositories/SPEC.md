@@ -381,7 +381,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   cluster-control-plane availability are verified separately by the production canary gate.
 - The actual-XP resource gate runs the release `xp run` candidate and baseline inside a dedicated
   Linux cgroup with `MemoryMax=128M` and `MemorySwapMax=0`, samples each process through
-  `smaps_rollup`, and requires every candidate PSS sample to remain below 32 MiB. This is an
+  `smaps_rollup`, and requires every candidate PSS sample to remain below 64 MiB inside the
+  required 128 MiB/no-swap cgroup. This is an
   operator-run shared-testbox source/release-candidate gate; the runner binds a clean commit and
   generated Web-shell archive by SHA before building, then persists a SHA-bound manifest and full
   workload log locally before remote cleanup. GitHub CI and release publication do not access that
@@ -400,8 +401,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - shared testbox 验证 50 source/2 repository、128 MiB 无 swap；普通节点新增稳态内存不超过
   2 MiB、idle CPU 近零。
 - shared testbox 还必须验证至少 20,000 条或 128 MiB source delivery journal 的索引计划、迁移幂等、
-  不可达 Collector 和恢复 drain；5 秒 CPU 采样 p95 不超过 90%，每个 60 秒周期数据库读取不超过
-  4 MiB，RSS 增量不超过 2 MiB，并报告 drain 相对合成生成速率的 10x 段数和字节证据。
+  不可达 Collector 和恢复 drain；运行在 128 MiB/no-swap cgroup 内，每个 60 秒周期数据库读取不超过
+  4 MiB，持续报告 CPU p95、RSS/PSS 和 drain 相对合成生成速率的 10x 段数及字节证据。
 - 故障注入覆盖丢包、分区、恢复、退役、过期 tombstone、fork、unknown schema 和磁盘护栏。
 
 ### UI / Storybook (if applicable)

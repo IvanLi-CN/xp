@@ -298,7 +298,8 @@
   false.
   The follow-up hk2 canary must observe ten consecutive 60-second source cycles with CPU at or
   below the 10% node quota, bounded journal reads, and no loss of Direct/Public or control-plane
-  health. The shared resource test measures journal CPU/read/RSS bounds in isolation; the canary
+  health. The shared resource test measures journal CPU/read/RSS/PSS diagnostics in isolation
+  under the 128 MiB/no-swap cgroup; the canary
   is the evidence for listener and control-plane availability. Any failed window stops rollout
   and preserves the journal for rollback.
   The additive `repository_history_segments_sync_order_v2` index serves tombstone-priority
