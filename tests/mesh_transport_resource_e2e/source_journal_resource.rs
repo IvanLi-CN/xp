@@ -134,9 +134,10 @@ fn signed_fixture_wire(
     signed.signature = signature;
     let wire = signed.encode_to_vec();
     let mut segment_hash = Sha256::new();
-    segment_hash.update(canonical_wire);
+    let canonical_len = canonical_wire.len();
+    segment_hash.update(&canonical_wire);
     segment_hash.update(&signed.signature);
-    (wire, segment_hash.finalize().into(), canonical_wire.len())
+    (wire, segment_hash.finalize().into(), canonical_len)
 }
 
 fn read_process_read_bytes(pid: u32) -> u64 {
