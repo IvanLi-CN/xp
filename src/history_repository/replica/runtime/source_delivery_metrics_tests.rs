@@ -391,6 +391,34 @@ fn local_batch_receiver_commits_apply_once_and_replays_idempotently() {
     assert_eq!(metrics.applied_segments, segments.len() as u64);
     assert_eq!(metrics.applied_bytes, expected_wire_bytes);
 
+    let duplicate = vec![segments[0].clone(), segments[0].clone()];
+    collector
+        .receive_wire_batch_from_repository_with_gaps(
+            "cluster-a",
+            &duplicate,
+            &[],
+            100,
+            &["repo-a".to_owned()],
+            "repo-a",
+        )
+        .expect("duplicate source page is idempotent");
+    let metrics = crate::state::history_repository::HistoryStorage::open(collector_dir.path())
+        .repository_delivery_metrics()
+        .expect("read duplicate apply metrics");
+    assert_eq!(metrics.applied_segments, segments.len() as u64);
+    assert_eq!(metrics.applied_bytes, expected_wire_bytes);
+    let scope = metrics
+        .delivery_scopes
+        .iter()
+        .find(|scope| {
+            scope.source_node_id == "node-a"
+                && scope.stream == "runtime"
+                && scope.target_repository_id == "repo-a"
+        })
+        .expect("repo-a delivery scope");
+    assert_eq!(scope.applied_segments, segments.len() as u64);
+    assert_eq!(scope.applied_bytes, expected_wire_bytes);
+
     collector
         .receive_wire_batch_from_repository_with_gaps(
             "cluster-a",

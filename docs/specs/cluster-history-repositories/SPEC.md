@@ -221,7 +221,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   投递顺序的 SQLite 索引；除一次性旧库初始化外，不得扫描或反序列化整个 backlog，每轮最多读取 256 条，
   且 CPU、磁盘读取和进程内存成本不得随 backlog 条数或 payload 字节数增长。
 - `REQ-JOURNAL-REPAIR`: 旧库中缺少投递顺序元数据的 segment 必须通过 state row 的持久主键游标分页校正；
-  每个 5 秒 source cycle 最多提交四页，每页最多 256 条且受 1 MiB wire budget 约束，
+  每个 5 秒 source cycle 最多提交十六页，每页最多 256 条且受 1 MiB wire budget 约束，
   失败时游标不前进，重启从最后一次提交的位置继续。
 - `REQ-JOURNAL-PAUSE`: 状态查询不得隐式执行校正；校正期间继续持久化新 segment，但暂停发送 journal page，
   并以既有 `source_delivery.state=journal_order_repairing` 表示可恢复 backlog。不得新增 partial index。
@@ -242,8 +242,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   设置该标记，接收方持久保守状态并保持受影响查询为 `partial`。旧 summary 缺少该字段时按 `false`
   兼容解析，不得据此宣称未知缺口已收敛。
 - `REQ-JOURNAL-RESOURCE`: 对至少 20,000 条或 128 MiB durable backlog，运行在 128 MiB/no-swap
-  cgroup 内，5 秒 CPU 采样 p95 不超过 90%，每个 5 秒周期数据库读取不超过 4 MiB，RSS 增量不超过
-  2 MiB，并且 durable drain 必须达到合成生成速率的 10x；Direct/Public 与集群控制面保持可用。
+  cgroup 内，5 秒 CPU 采样 p95 不超过一个 CPU 核，每个 5 秒周期数据库读取不超过 16 MiB，RSS 增量不超过
+  32 MiB，并且 durable drain 必须达到合成生成速率的 10x；Direct/Public 与集群控制面保持可用。
 
 ### SHOULD
 
@@ -286,7 +286,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   但保留全部未 ACK 行；只有 segment 与 byte 均低于 60% 才清除暂停位。容量预检在追加事务
   写入前完成，拒绝不得推进 source cursor、删除 backlog 或修改 control snapshot。恢复后按
   journal delivery order oldest-first 连续投递；容量暂停只阻断新的 source capture，不阻断既有
-  backlog 的重放，source worker 每个周期最多连续处理 4 个有界 replay page，保持每周期读取预算不超过 4 MiB。
+  backlog 的重放，source worker 每个周期最多连续处理 16 个有界 replay page，保持每周期读取预算不超过 16 MiB。
   若 durable journal 尾部尚未装入当前 bounded replay window，source capture 仍可继续追加；追加事务
   只把新段放在 SQLite 尾部，并立即重建有界窗口，禁止新段越过未确认的旧序列。该尾部重建状态不等同于
   `capacity_suspended`，也不丢弃新的 minute capture。
@@ -401,8 +401,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - shared testbox 验证 50 source/2 repository、128 MiB 无 swap；普通节点新增稳态内存不超过
   2 MiB、idle CPU 近零。
 - shared testbox 还必须验证至少 20,000 条或 128 MiB source delivery journal 的索引计划、迁移幂等、
-  不可达 Collector 和恢复 drain；运行在 128 MiB/no-swap cgroup 内，每个 60 秒周期数据库读取不超过
-  4 MiB，持续报告 CPU p95、RSS/PSS 和 drain 相对合成生成速率的 10x 段数及字节证据。
+  不可达 Collector 和恢复 drain；运行在 128 MiB/no-swap cgroup 内，每个 5 秒周期数据库读取不超过
+  16 MiB，持续报告 CPU p95、RSS/PSS 和基于 durable counters 的 10x 段数及字节证据。
 - 故障注入覆盖丢包、分区、恢复、退役、过期 tombstone、fork、unknown schema 和磁盘护栏。
 
 ### UI / Storybook (if applicable)

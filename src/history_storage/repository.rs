@@ -325,6 +325,7 @@ impl HistoryStorage {
             .collect::<std::collections::BTreeMap<_, _>>();
         let mut applied_segments = 0_u64;
         let mut applied_bytes = 0_u64;
+        let mut scope_counts = std::collections::BTreeMap::<(String, String), (u64, u64)>::new();
         for row in &mutation.segments {
             let was_present = transaction
                 .query_row(
@@ -344,6 +345,11 @@ impl HistoryStorage {
                 applied_bytes = applied_bytes
                     .checked_add(wire_bytes)
                     .ok_or_else(|| HistoryStorageError("applied byte count overflow".to_owned()))?;
+                let entry = scope_counts
+                    .entry((row.source_node_id.clone(), row.stream.clone()))
+                    .or_default();
+                entry.0 = entry.0.saturating_add(1);
+                entry.1 = entry.1.saturating_add(wire_bytes);
             }
         }
         if applied_segments > 0 {
@@ -361,21 +367,6 @@ impl HistoryStorage {
                 applied_bytes,
                 applied_at,
             )?;
-            let mut scope_counts =
-                std::collections::BTreeMap::<(String, String), (u64, u64)>::new();
-            for row in mutation
-                .segments
-                .iter()
-                .filter(|row| wire_bytes_by_id.contains_key(&row.id))
-            {
-                let entry = scope_counts
-                    .entry((row.source_node_id.clone(), row.stream.clone()))
-                    .or_default();
-                entry.0 = entry.0.saturating_add(1);
-                entry.1 = entry
-                    .1
-                    .saturating_add(wire_bytes_by_id.get(&row.id).copied().unwrap_or_default());
-            }
             for ((source_node_id, stream), (segments, bytes)) in scope_counts {
                 super::metrics::increment_applied_scope(
                     &transaction,
