@@ -265,6 +265,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     let initial_metrics = initial_status.metrics;
     let mut max_cycle_read_bytes = 0_u64;
     let mut cycle_read_before = read_process_read_bytes(pid);
+    let mut cycle_started = Instant::now();
     for second in 0..JOURNAL_THROUGHPUT_SAMPLE_SECONDS {
         let started = Instant::now();
         let cpu_before = read_cpu_ticks(pid);
@@ -301,11 +302,12 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         max_rss_delta = max_rss_delta.max(read_process_rss_bytes(pid).saturating_sub(baseline_rss));
         peak_pss_kib =
             peak_pss_kib.max(read_pss(pid).expect("read source journal XP PSS").total_kib);
-        if (second + 1) % 5 == 0 {
+        if cycle_started.elapsed() >= Duration::from_secs(5) {
             let cycle_read = read_process_read_bytes(pid);
             max_cycle_read_bytes =
                 max_cycle_read_bytes.max(cycle_read.saturating_sub(cycle_read_before));
             cycle_read_before = cycle_read;
+            cycle_started = Instant::now();
         }
     }
     let replay_deadline = Instant::now() + Duration::from_secs(75);
@@ -336,7 +338,16 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         if operation_elapsed < Duration::from_secs(1) {
             sleep(Duration::from_secs(1) - operation_elapsed).await;
         }
+        if cycle_started.elapsed() >= Duration::from_secs(5) {
+            let cycle_read = read_process_read_bytes(pid);
+            max_cycle_read_bytes =
+                max_cycle_read_bytes.max(cycle_read.saturating_sub(cycle_read_before));
+            cycle_read_before = cycle_read;
+            cycle_started = Instant::now();
+        }
     }
+    let cycle_read = read_process_read_bytes(pid);
+    max_cycle_read_bytes = max_cycle_read_bytes.max(cycle_read.saturating_sub(cycle_read_before));
     stop_sampling.store(true, Ordering::Relaxed);
     sampler.await.expect("source journal PSS sampler");
     peak_pss_kib = peak_pss_kib.max(pss_peak.load(Ordering::Relaxed));
