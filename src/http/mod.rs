@@ -1535,7 +1535,11 @@ async fn admin_auth(
                 .get(crate::reverse_mesh::RELAY_URI_HEADER)
                 .and_then(|value| value.to_str().ok())
                 .is_some_and(|uri| uri.starts_with("/raft/") || uri.contains("snapshot"));
-        let limit = if req.uri().path().contains("/raft/") || relay_is_raft {
+        let limit = if req.uri().path().contains("history-repository/sync-batch") {
+            // Batch wires are base64-encoded inside the signed JSON body. Keep a route-specific
+            // envelope budget so the declared 1 MiB decoded wire limit remains usable.
+            2 * 1024 * 1024
+        } else if req.uri().path().contains("/raft/") || relay_is_raft {
             8 * 1024 * 1024
         } else {
             1024 * 1024

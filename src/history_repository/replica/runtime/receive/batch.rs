@@ -28,7 +28,11 @@ impl RepositoryReplicaRuntime {
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
             return Err(error);
         }
-        let mut mutation = PendingRepositoryMutation::default();
+        let mut mutation = PendingRepositoryMutation {
+            target_repository_id: local_repository_id.to_owned(),
+            progress_at_unix_seconds: Some(now_unix_seconds),
+            ..PendingRepositoryMutation::default()
+        };
         let mut receipts = Vec::with_capacity(segments.len());
         for segment in segments {
             let result = self.receive_wire_from_repository_inner(

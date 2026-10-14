@@ -430,7 +430,11 @@ impl RepositoryReplicaRuntime {
         if let Some(gap) = acceptance.gap() {
             self.record_epoch_rotation_gap(gap, segment.canonical().opened_at_unix_seconds());
         }
-        let mut mutation = PendingRepositoryMutation::default();
+        let mut mutation = PendingRepositoryMutation {
+            target_repository_id: local_repository_id.to_owned(),
+            progress_at_unix_seconds: Some(now_unix_seconds),
+            ..PendingRepositoryMutation::default()
+        };
         let tombstone_acknowledgements = match self.append_known_records(
             segment.canonical(),
             now_unix_seconds,

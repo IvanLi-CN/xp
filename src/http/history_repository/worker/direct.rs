@@ -210,7 +210,9 @@ async fn send_repository_request_on_path_body(
         content_type: (!body.is_empty()).then(|| "application/json".to_owned()),
         body,
         total_budget: REPOSITORY_REQUEST_BUDGET,
-        allow_ambiguous_fallback: true,
+        // History traffic is bound to the registered public HTTPS api_base_url. Ambiguous
+        // transport outcomes fail closed instead of probing Mesh or Reverse Mesh.
+        allow_ambiguous_fallback: false,
         request_id: crate::id::new_ulid_string(),
         route: InternalRoute::MeshV2,
         cluster_id: state.cluster.cluster_id.clone(),

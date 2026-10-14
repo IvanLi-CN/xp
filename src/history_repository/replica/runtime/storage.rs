@@ -9,10 +9,13 @@ impl RepositoryReplicaRuntime {
         self.delivery_metrics_dirty = true;
     }
 
-    pub(super) fn refresh_delivery_metrics_cache(&mut self) -> Result<(), RepositoryRuntimeError> {
+    pub(super) fn refresh_delivery_metrics_cache(
+        &mut self,
+        now_unix_seconds: Option<u64>,
+    ) -> Result<(), RepositoryRuntimeError> {
         self.delivery_metrics_cache = if self.uses_sqlite_history() {
             self.storage
-                .repository_delivery_metrics()
+                .repository_delivery_metrics_at(now_unix_seconds)
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
         } else {
             crate::state::history_storage::RepositoryDeliveryMetrics::default()
@@ -24,12 +27,13 @@ impl RepositoryReplicaRuntime {
 
     pub(super) fn refresh_delivery_metrics_cache_if_due(
         &mut self,
+        now_unix_seconds: Option<u64>,
     ) -> Result<(), RepositoryRuntimeError> {
         if self.delivery_metrics_dirty
             || self.delivery_metrics_refreshed_at.elapsed()
                 >= Self::DELIVERY_METRICS_REFRESH_INTERVAL
         {
-            self.refresh_delivery_metrics_cache()?;
+            self.refresh_delivery_metrics_cache(now_unix_seconds)?;
         }
         Ok(())
     }
@@ -210,6 +214,8 @@ impl RepositoryReplicaRuntime {
             return Ok(());
         }
         let mutation = RepositoryReplicaMutation {
+            target_repository_id: "migration".to_owned(),
+            progress_at_unix_seconds: None,
             records: self
                 .snapshot
                 .records

@@ -55,6 +55,15 @@ sixteen local working pages of four segments; each page remains below the 1 MiB 
 remote protocol pages retain the 256-segment/1 MiB contract. A higher cadence does not permit
 unbounded memory, concurrency, or retry work.
 
+Runtime status also returns `delivery_metrics.last_completed_window` after a durable counter event
+closes a 300-second window, or an ephemeral window when the current baseline has elapsed. It
+contains the window start/end, segment and byte deltas, milli-rates, stage-specific 10x booleans,
+and aggregate `meets_ten_x`. `delivery_scopes` separates cumulative generated, ACK and apply
+counters by source node, stream and registered target repository; each scope also exposes its
+own completed or current 300-second window, so a busy stream or target cannot hide a starved one.
+The status view is diagnostic; release acceptance still requires two signed samples and the
+real-node five-minute observation.
+
 If a consumed-generation retry has already left an exact non-permanent sequence gap, the next
 repair response may promote that same range to `source_retention_expired` when the serving peer
 proves `history_truncated=true`; this is a continuation of the existing checkpoint and should

@@ -23,9 +23,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     time::Duration,
 };
-// Keep the scheduler bounded and frequent enough for the delivery SLO. Each tick still uses
-// the fixed page and wire budgets, so this increases service opportunities without unbounded
-// in-memory batching or concurrent retries.
 const REPOSITORY_REPLICATION_INTERVAL: Duration = Duration::from_secs(5);
 const SOURCE_COLLECTION_INTERVAL: Duration = Duration::from_secs(5);
 const REPOSITORY_REQUEST_BUDGET: Duration = Duration::from_secs(15);
@@ -239,10 +236,7 @@ async fn publish_local_history_segment(
     now: u64,
     capture_live: bool,
 ) -> anyhow::Result<bool> {
-    // Keep the replay window within the one MiB wire budget while honoring the bounded
-    // 256-segment journal contract. The wire budget remains the hard memory boundary.
-    // Use a smaller working page than the protocol maximum so the replay path does not retain
-    // an entire 1 MiB wire page while a bounded SQLite mutation is committed.
+    // Keep the replay window below the 1 MiB wire budget and the 256-segment journal bound.
     const MAX_SEGMENTS_PER_DELIVERY_PAGE: usize = 4;
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let identity = super::derived_repository_identity(state, node_id)
@@ -263,10 +257,7 @@ async fn publish_local_history_segment(
         let mut runtime = state.repository_replica.lock().await;
         repository_blocking(|| -> Result<_, RepositoryRuntimeError> {
             let segments = if capture_paused {
-                // `RepositoryReplicaRuntime::load` already hydrates the first durable replay page.
-                // Re-hydrating repeats the expensive oldest-row query over a
-                // large backlog before it can deliver anything. Only load a page when the in-memory
-                // window is empty, such as after the previous page was ACKed.
+                // Load a page only when the in-memory replay window is empty.
                 let mut page = runtime.local_source_pending_segments_page_with_budget(
                     MAX_SEGMENTS_PER_DELIVERY_PAGE,
                     1024 * 1024,
@@ -409,7 +400,15 @@ async fn publish_local_history_segment(
         .iter()
         .find(|peer| peer.node_id == selected_repository_id);
     if selected_repository_id != state.cluster.node_id && selected_peer.is_none() {
+        let attempted_segments = u64::try_from(segments.len().max(gaps.len())).unwrap_or(u64::MAX);
         repository_op(&state.repository_replica, |runtime| {
+            runtime.record_local_source_delivery_attempt(SourceDeliveryAttempt {
+                now_unix_seconds: now,
+                attempts: attempted_segments,
+                successes: 0,
+                outcome: "explicit_unavailable",
+                target_repository_id: Some(selected_repository_id.clone()),
+            })?;
             runtime.record_local_source_collector_delivery(
                 &primary_repository_id,
                 &selected_repository_id,
@@ -448,8 +447,7 @@ async fn publish_local_history_segment(
                     tombstone_acknowledgements
                         .extend(receipt.tombstone_acknowledgements().iter().cloned());
                 }
-                // Keep the source page as the ACK view instead of cloning every wire a second
-                // time. Remote delivery still owns its partial-success list below.
+                // The source page is the ACK view; remote delivery owns its partial-success list.
                 delivered_local_segments = true;
             }
             Err(error) => {
@@ -500,6 +498,7 @@ async fn publish_local_history_segment(
                     attempts: attempted_segments,
                     successes: u64::try_from(acknowledged_segments.len()).unwrap_or(u64::MAX),
                     outcome: delivery_outcome,
+                    target_repository_id: Some(selected_repository_id.clone()),
                 },
             )
         })?;
@@ -512,6 +511,7 @@ async fn publish_local_history_segment(
                 attempts: attempted_segments,
                 successes: 0,
                 outcome: delivery_outcome,
+                target_repository_id: Some(selected_repository_id.clone()),
             })
         })?;
     }

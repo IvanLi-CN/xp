@@ -2,6 +2,8 @@ use super::super::*;
 
 #[derive(Default)]
 pub(crate) struct PendingRepositoryMutation {
+    pub(crate) target_repository_id: String,
+    pub(crate) progress_at_unix_seconds: Option<u64>,
     pub(crate) records: Vec<RepositoryHistoryRecordRow>,
     pub(crate) tombstones: Vec<RepositoryHistoryTombstone>,
     pub(crate) segments: Vec<RepositoryHistorySegmentRow>,
@@ -11,6 +13,8 @@ pub(crate) struct PendingRepositoryMutation {
 impl PendingRepositoryMutation {
     pub(super) fn into_storage_mutation(self) -> RepositoryReplicaMutation {
         RepositoryReplicaMutation {
+            target_repository_id: self.target_repository_id,
+            progress_at_unix_seconds: self.progress_at_unix_seconds,
             records: self.records,
             tombstones: self.tombstones,
             segments: self.segments,

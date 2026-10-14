@@ -538,7 +538,7 @@ impl RepositoryReplicaRuntime {
             runtime.snapshot.partition_summaries_complete = true;
         }
         runtime.hydrate_source_delivery_journal()?;
-        runtime.refresh_delivery_metrics_cache()?;
+        runtime.refresh_delivery_metrics_cache(None)?;
         Ok(runtime)
     }
 
@@ -708,7 +708,7 @@ impl RepositoryReplicaRuntime {
             self.snapshot.capacity.filesystem_available_bytes(),
             caller_class,
         )?;
-        self.refresh_delivery_metrics_cache_if_due()?;
+        self.refresh_delivery_metrics_cache_if_due(Some(now_unix_seconds))?;
         let storage_mode = match self.storage.mode() {
             crate::state::history_storage::HistoryStorageMode::Unavailable => "unavailable",
             _ if self.storage_degraded => "sqlite_degraded",
@@ -741,7 +741,7 @@ impl RepositoryReplicaRuntime {
                 .snapshot
                 .last_dynamic_relay_attempt_unix_seconds,
             source_delivery,
-            delivery_metrics: self.delivery_metrics_cache,
+            delivery_metrics: self.delivery_metrics_cache.clone(),
             summary_repairs: self.snapshot.summary_repair_diagnostics.clone(),
         };
         diagnostic.finish();

@@ -86,6 +86,8 @@
   most sixteen four-segment working pages while remote protocol pages retain the 256-segment and
   1 MiB wire limits. A 300-second sample must prove both delivery stages at 10x generated segment
   and byte rates; pending depth alone is not a throughput claim.
+- Runtime status also exposes the completed or elapsed 300-second window for each source/stream/
+  target scope, preventing aggregate progress from masking a starved target.
 - Original observation time, source identity and recovery generation remain unchanged.
 
 ## Key Reasons / Replacements

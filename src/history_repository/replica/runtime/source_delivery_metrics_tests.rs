@@ -46,6 +46,7 @@ fn delivery_metrics_count_generated_and_durable_ack_bytes_across_restart() {
             attempts: 3,
             successes: 2,
             outcome: "transport_error",
+            target_repository_id: None,
         })
         .expect("record source delivery attempt");
     let metrics = storage
@@ -86,7 +87,7 @@ fn delivery_metrics_count_generated_and_durable_ack_bytes_across_restart() {
 #[test]
 fn delivery_window_requires_both_segments_and_bytes_for_each_stage() {
     let start = crate::state::history_storage::RepositoryDeliveryMetrics::default();
-    let mut end = start;
+    let mut end = start.clone();
     end.generated_segments = 10;
     end.generated_bytes = 1_000;
     end.acknowledged_segments = 100;
@@ -117,6 +118,87 @@ fn delivery_window_requires_both_segments_and_bytes_for_each_stage() {
         .expect("valid five-minute delivery window")
         .repository_apply_meets_ten_x()
     );
+}
+
+#[test]
+fn runtime_status_exposes_completed_five_minute_window() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[17; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+    runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity,
+            &signing_key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"window".to_vec(),
+                b"payload".to_vec(),
+                false,
+            )],
+            0,
+        )
+        .expect("queue source segment");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let started_at = storage
+        .repository_delivery_metrics()
+        .expect("read metrics")
+        .last_progress_at
+        .expect("generated progress timestamp");
+    runtime
+        .record_local_source_delivery_attempt(SourceDeliveryAttempt {
+            now_unix_seconds: started_at
+                + crate::state::history_storage::DELIVERY_RATE_WINDOW_SECONDS,
+            attempts: 1,
+            successes: 0,
+            outcome: "transport_error",
+            target_repository_id: Some("repository-b".to_owned()),
+        })
+        .expect("rotate delivery window");
+    let metrics = storage
+        .repository_delivery_metrics_at(Some(
+            started_at + crate::state::history_storage::DELIVERY_RATE_WINDOW_SECONDS,
+        ))
+        .expect("read completed window");
+    let window = metrics
+        .last_completed_window
+        .expect("status should expose completed window");
+    assert_eq!(window.elapsed_seconds, 300);
+    assert_eq!(window.generated_segments, 1);
+    assert_eq!(window.generated_bytes, metrics.generated_bytes);
+    assert_eq!(window.acknowledged_segments, 0);
+    assert!(!window.meets_ten_x);
+    assert!(
+        metrics
+            .delivery_scopes
+            .iter()
+            .any(|scope| scope.target_repository_id.is_empty() && scope.generated_segments == 1)
+    );
+
+    let rows = storage
+        .source_delivery_journal()
+        .expect("read source journal");
+    runtime
+        .acknowledge_local_source_segment_via(&rows[0].wire, started_at + 1, "repository-b")
+        .expect("acknowledge scoped source segment");
+    let scoped_metrics = storage
+        .repository_delivery_metrics_at(Some(
+            started_at + crate::state::history_storage::DELIVERY_RATE_WINDOW_SECONDS + 1,
+        ))
+        .expect("read scoped completed window");
+    let scoped_window = scoped_metrics
+        .delivery_scopes
+        .iter()
+        .find(|scope| scope.target_repository_id == "repository-b")
+        .and_then(|scope| scope.last_completed_window)
+        .expect("status should expose scoped completed window");
+    assert_eq!(scoped_window.generated_segments, 0);
+    assert_eq!(scoped_window.acknowledged_segments, 1);
+    assert!(!scoped_window.meets_ten_x);
 }
 
 #[test]

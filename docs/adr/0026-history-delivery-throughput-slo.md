@@ -63,6 +63,11 @@ mutation.
   repository apply counters commit with the receiver checkpoint and watermark.
 - A five-minute measurement records start/end counters, rates in both units,
   queue depth, oldest cursor, ACK age, response latency, and capacity state.
+- Runtime status exposes the last completed durable 300-second window, including start/end, segment
+  and byte deltas, milli-rates and independent source-ACK/repository-apply 10x booleans. It also
+  exposes cumulative source/stream/target scopes with their own completed/current windows so
+  target starvation is observable. A status response with no completed window for a required
+  scope is not a pass.
 - A failing harness must assert the exact symptom: either stage below 10x in
   segments or bytes, a non-draining backlog, or a starved stream. It must run
   against the real delivery boundary and be fast enough for repeated diagnosis;

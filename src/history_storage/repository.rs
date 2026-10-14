@@ -118,6 +118,10 @@ pub(crate) struct RepositoryCommitOutcome {
 /// accepted rows, a deleted payload, or an orphaned segment behind.
 #[derive(Debug, Default)]
 pub(crate) struct RepositoryReplicaMutation {
+    pub(crate) target_repository_id: String,
+    /// Wall-clock time of the receiver commit. Historical segment timestamps are only a
+    /// fallback for legacy callers; throughput windows must measure processing time.
+    pub(crate) progress_at_unix_seconds: Option<u64>,
     pub(crate) records: Vec<RepositoryHistoryRecordRow>,
     pub(crate) tombstones: Vec<RepositoryHistoryTombstone>,
     pub(crate) segments: Vec<RepositoryHistorySegmentRow>,
@@ -343,18 +347,46 @@ impl HistoryStorage {
             }
         }
         if applied_segments > 0 {
-            let applied_at = mutation
-                .segments
-                .iter()
-                .filter(|row| wire_bytes_by_id.contains_key(&row.id))
-                .map(|row| row.closed_at_unix_seconds)
-                .max();
+            let applied_at = mutation.progress_at_unix_seconds.or_else(|| {
+                mutation
+                    .segments
+                    .iter()
+                    .filter(|row| wire_bytes_by_id.contains_key(&row.id))
+                    .map(|row| row.closed_at_unix_seconds)
+                    .max()
+            });
             super::metrics::increment_applied(
                 &transaction,
                 applied_segments,
                 applied_bytes,
                 applied_at,
             )?;
+            let mut scope_counts =
+                std::collections::BTreeMap::<(String, String), (u64, u64)>::new();
+            for row in mutation
+                .segments
+                .iter()
+                .filter(|row| wire_bytes_by_id.contains_key(&row.id))
+            {
+                let entry = scope_counts
+                    .entry((row.source_node_id.clone(), row.stream.clone()))
+                    .or_default();
+                entry.0 = entry.0.saturating_add(1);
+                entry.1 = entry
+                    .1
+                    .saturating_add(wire_bytes_by_id.get(&row.id).copied().unwrap_or_default());
+            }
+            for ((source_node_id, stream), (segments, bytes)) in scope_counts {
+                super::metrics::increment_applied_scope(
+                    &transaction,
+                    &source_node_id,
+                    &stream,
+                    &mutation.target_repository_id,
+                    segments,
+                    bytes,
+                    applied_at,
+                )?;
+            }
         }
         write_snapshot(&transaction, REPOSITORY_REPLICA_KEY, control_payload)?;
         transaction.commit().map_err(sqlite_error)?;

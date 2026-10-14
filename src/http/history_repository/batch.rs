@@ -8,6 +8,8 @@ use super::{
 use crate::state::history_repository::replica::RepositorySyncReceipt;
 
 pub(super) const MAX_HISTORY_SYNC_BATCH_SEGMENTS: usize = 32;
+// Internal-auth JSON serializes each wire payload as base64. The route has a dedicated 2 MiB
+// envelope limit, so the decoded batch remains bounded at 1 MiB without false 413 responses.
 pub(super) const MAX_HISTORY_SYNC_BATCH_WIRE_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

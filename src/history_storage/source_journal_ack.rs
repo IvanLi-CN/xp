@@ -24,29 +24,36 @@ pub(super) fn acknowledge_source_delivery_journal_inner(
         .collect::<Vec<_>>()
         .join(", ");
     let select_sql = format!(
-        "SELECT stream, length(wire)
+        "SELECT source_node_id, stream, length(wire)
          FROM source_delivery_journal WHERE id IN ({placeholders})"
     );
     let acknowledged_rows = transaction
         .prepare(&select_sql)
         .map_err(sqlite_error)?
         .query_map(rusqlite::params_from_iter(ids.iter()), |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         })
         .map_err(sqlite_error)?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(sqlite_error)?;
     let acknowledged_segments = u64::try_from(acknowledged_rows.len())
         .map_err(|_| HistoryStorageError("acknowledged segment count exceeds u64".to_owned()))?;
-    let acknowledged_bytes = acknowledged_rows
-        .iter()
-        .try_fold(0_u64, |total, (_, wire_len)| {
-            total
-                .checked_add(u64::try_from(*wire_len).map_err(|_| {
-                    HistoryStorageError("acknowledged wire length exceeds u64".to_owned())
-                })?)
-                .ok_or_else(|| HistoryStorageError("acknowledged byte count overflow".to_owned()))
-        })?;
+    let acknowledged_bytes =
+        acknowledged_rows
+            .iter()
+            .try_fold(0_u64, |total, (_, _, wire_len)| {
+                total
+                    .checked_add(u64::try_from(*wire_len).map_err(|_| {
+                        HistoryStorageError("acknowledged wire length exceeds u64".to_owned())
+                    })?)
+                    .ok_or_else(|| {
+                        HistoryStorageError("acknowledged byte count overflow".to_owned())
+                    })
+            })?;
     let deleted_any = acknowledged_segments > 0;
     if deleted_any {
         let delete_sql =
@@ -80,8 +87,40 @@ pub(super) fn acknowledge_source_delivery_journal_inner(
             )
             .map_err(sqlite_error)?;
         let mut stream_counts = std::collections::BTreeMap::<String, u64>::new();
-        for (stream, _) in acknowledged_rows {
-            *stream_counts.entry(stream).or_default() += 1;
+        for (_, stream, _) in &acknowledged_rows {
+            *stream_counts.entry(stream.clone()).or_default() += 1;
+        }
+        let target_repository_id = source_attempt
+            .as_ref()
+            .and_then(|attempt| attempt.target_repository_id.as_deref())
+            .or(delivery_path)
+            .unwrap_or("unknown");
+        let mut scope_counts = std::collections::BTreeMap::<(String, String), (u64, u64)>::new();
+        for (source_node_id, stream, wire_len) in &acknowledged_rows {
+            let entry = scope_counts
+                .entry((source_node_id.clone(), stream.clone()))
+                .or_default();
+            entry.0 = entry.0.saturating_add(1);
+            entry.1 = entry
+                .1
+                .saturating_add(u64::try_from(*wire_len).map_err(|_| {
+                    HistoryStorageError("acknowledged wire length exceeds u64".to_owned())
+                })?);
+        }
+        for ((source_node_id, stream), (segments, bytes)) in scope_counts {
+            metrics::increment_acknowledged_scope(
+                &transaction,
+                &source_node_id,
+                &stream,
+                target_repository_id,
+                segments,
+                bytes,
+                acknowledged_at_unix_seconds.or_else(|| {
+                    source_attempt
+                        .as_ref()
+                        .map(|attempt| attempt.now_unix_seconds)
+                }),
+            )?;
         }
         for (stream, count) in stream_counts {
             transaction
