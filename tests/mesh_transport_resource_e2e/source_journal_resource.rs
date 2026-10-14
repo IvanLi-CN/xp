@@ -397,9 +397,11 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         "delivery window must be exactly five minutes"
     );
     eprintln!(
-        "source journal window generated={} / {} bytes, peak={} / {} bytes, "
-            "ack={} / {} bytes, apply={} / {} bytes, source_ack={} / {}, "
-            "repository_apply={} / {}",
+        concat!(
+            "source journal window generated={} / {} bytes, peak={} / {} bytes, ",
+            "ack={} / {} bytes, apply={} / {} bytes, source_ack={} / {}, ",
+            "repository_apply={} / {}"
+        ),
         completed_window.generated_segments,
         completed_window.generated_bytes,
         completed_window.peak_generated_segments,
@@ -497,10 +499,16 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     );
     assert!(
         generated_segments > 0 && generated_bytes > 0,
-        "source journal durable counters did not record the real fixture enqueue path: "
-            "generated={generated_segments}/{generated_bytes}, "
-            "ack={acknowledged_segments}/{acknowledged_bytes}, "
-            "apply={applied_segments}/{applied_bytes}"
+        concat!(
+            "source journal durable counters did not record the real fixture enqueue path: ",
+            "generated={}/{}, ack={}/{}, apply={}/{}"
+        ),
+        generated_segments,
+        generated_bytes,
+        acknowledged_segments,
+        acknowledged_bytes,
+        applied_segments,
+        applied_bytes
     );
     println!("source_journal_resource_candidate_peak_pss_kib={peak_pss_kib}");
     stop_child(&mut child).await;
