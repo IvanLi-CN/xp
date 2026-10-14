@@ -380,13 +380,23 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         saw_replayed_page,
         "source journal worker must replay at least one bounded page"
     );
-    let post_replay_status =
+    let mut post_replay_status =
         request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
     let post_replay_pending = post_replay_status.pending_segments;
     assert!(
         post_replay_pending < initial_pending,
         "source journal backlog must remain drained after the replay page"
     );
+    // The final source tick can land immediately after the 300-second sampler boundary. Give
+    // its durable counter rotation a bounded moment to publish without changing the window size.
+    let completion_deadline = Instant::now() + Duration::from_secs(15);
+    while post_replay_status.metrics.last_completed_window.is_none()
+        && Instant::now() < completion_deadline
+    {
+        sleep(Duration::from_secs(1)).await;
+        post_replay_status =
+            request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+    }
     let completed_window = post_replay_status
         .metrics
         .last_completed_window
