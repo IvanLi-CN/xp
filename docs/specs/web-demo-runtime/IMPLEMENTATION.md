@@ -19,6 +19,10 @@ Fixture rules accept only the exact catalog-derived Demo factory and reject exte
 
 Vitest resolves the same live Demo frame entry as the production build.
 
+Normal E2E excludes standalone Demo cases. Demo E2E runs them against dist-demo.
+
+The Demo preferences case belongs to the Demo suite with its assertions preserved.
+
 ## Remaining Gaps
 
 Public deployment is out of scope; local evidence covers static deep links.

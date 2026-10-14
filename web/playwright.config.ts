@@ -9,6 +9,8 @@ const useDemoBuild = process.env.E2E_DEMO_BUILD === "1";
 
 export default defineConfig({
 	testDir: "./tests/e2e",
+	testMatch: useDemoBuild ? "**/demo-*.spec.ts" : "**/*.spec.ts",
+	testIgnore: useDemoBuild ? [] : ["**/demo-*.spec.ts"],
 	timeout: 60_000,
 	expect: {
 		timeout: 5_000,

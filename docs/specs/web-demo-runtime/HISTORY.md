@@ -14,6 +14,8 @@ Direct links close in place. Correctly served Demo pages preserve live workers.
 
 Demo identity generation remains catalog-owned and does not collide with seeded users.
 
+Standalone Demo E2E cases use the Demo server instead of the live development server.
+
 ## References
 
 - `./SPEC.md`
