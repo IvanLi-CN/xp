@@ -71,8 +71,9 @@ real-node five-minute observation.
 The owner-dispatched release workflow also requires an Agent VM resource attestation bound to the
 exact target SHA and workload-log SHA. The attestation commit must have the target as its only
 parent and contain only the attestation and workload log; readiness recomputes the log SHA before
-publication and requires a GitHub-verified valid repository-owner signature. The release retains the
-evidence files and commit identity as assets. The attestation must record a 300-second window,
+publication and requires a GitHub-verified valid pinned repository-owner signature from the
+owner-triggered workflow. The release retains the evidence files and commit identity as assets. The
+attestation must record a 300-second window,
 `MemoryMax=128M`, `MemorySwapMax=0`, and successful segment and canonical-byte 10x gates for both
 delivery stages. Missing, malformed, or SHA-mismatched evidence fails closed before release
 artifacts are published.

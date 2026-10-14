@@ -102,7 +102,8 @@
   300-second no-swap resource run, workload-log digest, and all four segment/byte 10x gates. The
   owner-dispatched workflow verifies an evidence commit with the target as its only parent and
   recomputes the digest from its two evidence files before publication, requiring a GitHub-verified
-  valid owner signature and retaining the evidence files and commit identity as release assets.
+  valid pinned owner signature and an owner-triggered workflow, retaining the evidence files and
+  commit identity as release assets.
 
 ## Key Reasons / Replacements
 

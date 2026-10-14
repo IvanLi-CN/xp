@@ -51,8 +51,9 @@ The throughput target is a hard delivery gate:
    commit whose only parent is the target and whose only paths are the attestation and workload
    log; readiness recomputes the digest and rejects missing, malformed, or mismatched evidence
    before Web, image, or GitHub Release publication. The commit must have a GitHub-verified valid
-   repository-owner signature, and the release retains the evidence files and commit identity as
-   assets. There is no automatic release path without that auditable evidence reference.
+   pinned repository-owner signature; the workflow is owner-triggered, and the release retains the
+   evidence files and commit identity as assets. There is no automatic release path without that
+   auditable evidence reference.
 
 The implementation keeps source and repository workers on bounded five-second
 ticks. A source tick drains at most sixteen local working pages; local receiver

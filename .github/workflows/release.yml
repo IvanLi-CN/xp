@@ -60,6 +60,8 @@ jobs:
     steps:
       - name: resolve release head sha
         run: |
+          test "${GITHUB_ACTOR,,}" = "${GITHUB_REPOSITORY_OWNER,,}"
+          test "${GITHUB_TRIGGERING_ACTOR,,}" = "${GITHUB_REPOSITORY_OWNER,,}"
           [[ "${RELEASE_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
       - name: checkout release automation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -106,6 +108,17 @@ jobs:
         run: |
           set -euo pipefail
           evidence_commit="$(cat .release-evidence/commit)"
+          trusted_fingerprint="39CE251C234BA4C727C5BEA061F8690632D072E2"
+          gnupg_home="$(mktemp -d)"
+          trap 'rm -rf "${gnupg_home}"' EXIT
+          chmod 700 "${gnupg_home}"
+          export GNUPGHOME="${gnupg_home}"
+          curl --fail --silent --show-error --location \
+            "https://github.com/${GITHUB_REPOSITORY_OWNER}.gpg" \
+            | gpg --batch --import
+          verify_output="$(git verify-commit --raw "${evidence_commit}" 2>&1)"
+          signer_fingerprint="$(awk '$2 == "VALIDSIG" {print $3; exit}' <<<"${verify_output}")"
+          test "${signer_fingerprint}" = "${trusted_fingerprint}"
           verification="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${evidence_commit}")"
           test "$(jq -r '.commit.verification.verified' <<<"${verification}")" = "true"
           test "$(jq -r '.commit.verification.reason' <<<"${verification}")" = "valid"

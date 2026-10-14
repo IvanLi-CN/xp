@@ -1296,10 +1296,12 @@ For a corrective release, an owner dispatches the `release` workflow with the ex
 `release_type`, `channel`, `expected_version`, `reason`, and the SHA of an Agent VM evidence commit.
 That evidence commit must have the target as its only parent and contain only the attestation JSON
 and workload log. The commit must also have a GitHub-verified valid signature by the repository
-owner. The workflow recomputes the log digest, publishes the evidence files and commit identity as
-release assets, then fails before tag creation if the target is not on `main`, the expected version
-does not match, evidence is malformed or mismatched, or any required workflow is missing or
-unsuccessful. This is an owner-dispatched Manual Backfill;
+owner. The workflow itself also requires the dispatch actor and re-run actor to be the repository
+owner, and verifies the pinned owner signing key with `git verify-commit`. It recomputes the log
+digest, publishes the evidence files and commit identity as release assets, then fails before tag
+creation if the target is not on `main`, the expected version does not match, evidence is malformed
+or mismatched, or any required workflow is missing or unsuccessful. This is an owner-dispatched
+Manual Backfill;
 there is no automatic release trigger without an auditable Agent VM evidence reference. Stable
 releases publish `latest`; prereleases do not. If the target commit changes a workflow file, the
 Actions `GITHUB_TOKEN` cannot create its tag; an owner must first push the exact annotated tag with a
