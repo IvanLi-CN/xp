@@ -1,5 +1,13 @@
 use super::source_journal::SOURCE_DELIVERY_JOURNAL_RESUME_PERCENT;
 use super::*;
+use crate::history_sync::SignedSegment;
+
+fn canonical_metric_len(wire: &[u8]) -> u64 {
+    SignedSegment::from_wire(wire)
+        .ok()
+        .and_then(|segment| segment.canonical().canonical_bytes().ok())
+        .map_or_else(|| wire.len() as u64, |bytes| bytes.len() as u64)
+}
 
 pub(super) fn acknowledge_source_delivery_journal_inner(
     storage: &HistoryStorage,
@@ -24,7 +32,7 @@ pub(super) fn acknowledge_source_delivery_journal_inner(
         .collect::<Vec<_>>()
         .join(", ");
     let select_sql = format!(
-        "SELECT source_node_id, stream, length(wire)
+        "SELECT source_node_id, stream, wire
          FROM source_delivery_journal WHERE id IN ({placeholders})"
     );
     let acknowledged_rows = transaction
@@ -34,7 +42,7 @@ pub(super) fn acknowledge_source_delivery_journal_inner(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
+                row.get::<_, Vec<u8>>(2)?,
             ))
         })
         .map_err(sqlite_error)?
@@ -42,16 +50,26 @@ pub(super) fn acknowledge_source_delivery_journal_inner(
         .map_err(sqlite_error)?;
     let acknowledged_segments = u64::try_from(acknowledged_rows.len())
         .map_err(|_| HistoryStorageError("acknowledged segment count exceeds u64".to_owned()))?;
-    let acknowledged_bytes =
+    let acknowledged_wire_bytes =
         acknowledged_rows
             .iter()
-            .try_fold(0_u64, |total, (_, _, wire_len)| {
+            .try_fold(0_u64, |total, (_, _, wire)| {
                 total
-                    .checked_add(u64::try_from(*wire_len).map_err(|_| {
+                    .checked_add(u64::try_from(wire.len()).map_err(|_| {
                         HistoryStorageError("acknowledged wire length exceeds u64".to_owned())
                     })?)
                     .ok_or_else(|| {
-                        HistoryStorageError("acknowledged byte count overflow".to_owned())
+                        HistoryStorageError("acknowledged wire byte count overflow".to_owned())
+                    })
+            })?;
+    let acknowledged_canonical_bytes =
+        acknowledged_rows
+            .iter()
+            .try_fold(0_u64, |total, (_, _, wire)| {
+                total
+                    .checked_add(canonical_metric_len(wire))
+                    .ok_or_else(|| {
+                        HistoryStorageError("acknowledged canonical byte count overflow".to_owned())
                     })
             })?;
     let deleted_any = acknowledged_segments > 0;
@@ -78,7 +96,7 @@ pub(super) fn acknowledge_source_delivery_journal_inner(
                             "acknowledged segment count exceeds SQLite integer".to_owned(),
                         )
                     })?,
-                    i64::try_from(acknowledged_bytes).map_err(|_| {
+                    i64::try_from(acknowledged_wire_bytes).map_err(|_| {
                         HistoryStorageError(
                             "acknowledged byte count exceeds SQLite integer".to_owned(),
                         )
@@ -96,16 +114,12 @@ pub(super) fn acknowledge_source_delivery_journal_inner(
             .or(delivery_path)
             .unwrap_or("unknown");
         let mut scope_counts = std::collections::BTreeMap::<(String, String), (u64, u64)>::new();
-        for (source_node_id, stream, wire_len) in &acknowledged_rows {
+        for (source_node_id, stream, wire) in &acknowledged_rows {
             let entry = scope_counts
                 .entry((source_node_id.clone(), stream.clone()))
                 .or_default();
             entry.0 = entry.0.saturating_add(1);
-            entry.1 = entry
-                .1
-                .saturating_add(u64::try_from(*wire_len).map_err(|_| {
-                    HistoryStorageError("acknowledged wire length exceeds u64".to_owned())
-                })?);
+            entry.1 = entry.1.saturating_add(canonical_metric_len(wire));
         }
         for ((source_node_id, stream), (segments, bytes)) in scope_counts {
             metrics::increment_acknowledged_scope(
@@ -173,7 +187,7 @@ pub(super) fn acknowledge_source_delivery_journal_inner(
         metrics::increment_acknowledged(
             &transaction,
             acknowledged_segments,
-            acknowledged_bytes,
+            acknowledged_canonical_bytes,
             acknowledged_at_unix_seconds,
         )?;
     }

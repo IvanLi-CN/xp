@@ -878,7 +878,7 @@ Notes:
   Malformed or regressing pages remain retryable failures and are never checkpointed.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
-  For ready peers, one 60-second lifecycle tick drains up to eight consecutive summary, repair, or
+  For ready peers, one 5-second source cycle drains up to sixteen consecutive summary, repair, or
   tiered export pages per peer within a shared 15-second maintenance budget. The remaining budget is
   split among peers in stable order so a slow peer cannot starve later peers. The summary cursor and
   pending repair IDs are persisted in the peer checkpoint so a restart cannot trigger an unbounded

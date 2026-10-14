@@ -3,6 +3,15 @@ use crate::state::history_repository::replica::RepositoryReplicaSegment;
 use crate::state::history_storage::SourceDeliveryAttempt;
 use sha2::Sha256;
 
+fn canonical_len(wire: &[u8]) -> u64 {
+    crate::history_sync::SignedSegment::from_wire(wire)
+        .expect("valid signed segment")
+        .canonical()
+        .canonical_bytes()
+        .expect("canonical bytes")
+        .len() as u64
+}
+
 #[test]
 fn delivery_metrics_count_generated_and_durable_ack_bytes_across_restart() {
     let temporary = tempfile::tempdir().expect("temporary directory");
@@ -32,11 +41,12 @@ fn delivery_metrics_count_generated_and_durable_ack_bytes_across_restart() {
 
     let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
     let rows = storage.source_delivery_journal().expect("read journal");
-    let generated_bytes = rows.iter().map(|row| row.wire.len() as u64).sum::<u64>();
+    let generated_bytes = rows.iter().map(|row| canonical_len(&row.wire)).sum::<u64>();
     let metrics = storage
         .repository_delivery_metrics()
         .expect("read delivery metrics");
     assert_eq!(metrics.generated_segments, 3);
+    assert_eq!(metrics.byte_counter_unit, "canonical-v1");
     assert_eq!(metrics.generated_bytes, generated_bytes);
     assert_eq!(metrics.acknowledged_segments, 0);
 
@@ -64,7 +74,7 @@ fn delivery_metrics_count_generated_and_durable_ack_bytes_across_restart() {
         .repository_delivery_metrics()
         .expect("read acknowledged metrics");
     assert_eq!(metrics.acknowledged_segments, 1);
-    assert_eq!(metrics.acknowledged_bytes, rows[0].wire.len() as u64);
+    assert_eq!(metrics.acknowledged_bytes, canonical_len(&rows[0].wire));
 
     drop(runtime);
     let _restarted = load(temporary.path());
@@ -74,13 +84,76 @@ fn delivery_metrics_count_generated_and_durable_ack_bytes_across_restart() {
     assert_eq!(metrics.generated_segments, 3);
     assert_eq!(metrics.generated_bytes, generated_bytes);
     assert_eq!(metrics.acknowledged_segments, 1);
-    assert_eq!(metrics.acknowledged_bytes, rows[0].wire.len() as u64);
+    assert_eq!(metrics.acknowledged_bytes, canonical_len(&rows[0].wire));
     assert_eq!(
         crate::state::history_repository::HistoryStorage::open(temporary.path())
             .source_delivery_journal()
             .expect("read restarted journal")
             .len(),
         2
+    );
+}
+
+#[test]
+fn legacy_wire_metric_epoch_resets_without_touching_journal_rows() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[13; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+    runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity,
+            &signing_key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"legacy-metric".to_vec(),
+                b"payload".to_vec(),
+                false,
+            )],
+            0,
+        )
+        .expect("queue source segment");
+    drop(runtime);
+
+    let database = temporary.path().join("history.sqlite3");
+    let connection = rusqlite::Connection::open(&database).expect("open history database");
+    connection
+        .execute(
+            "UPDATE repository_delivery_metrics
+             SET byte_counter_unit = 'wire-v0', generated_segments = 7,
+                 generated_bytes = 11, counter_epoch = 4
+             WHERE singleton = 1",
+            [],
+        )
+        .expect("mark legacy wire counters");
+    drop(connection);
+
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let metrics = storage
+        .repository_delivery_metrics()
+        .expect("read migrated delivery metrics");
+    assert_eq!(metrics.generated_segments, 0);
+    assert_eq!(metrics.generated_bytes, 0);
+    assert_eq!(metrics.counter_epoch, 5);
+    assert_eq!(metrics.byte_counter_unit, "canonical-v1");
+    assert!(metrics.delivery_scopes.is_empty());
+    assert_eq!(
+        storage
+            .source_delivery_journal()
+            .expect("read preserved journal")
+            .len(),
+        1
+    );
+    assert_eq!(
+        storage
+            .source_delivery_journal_summary()
+            .expect("read preserved journal state")
+            .pending_segments,
+        1
     );
 }
 
@@ -370,9 +443,9 @@ fn local_batch_receiver_commits_apply_once_and_replays_idempotently() {
             wire: segment.wire.clone(),
         })
         .collect::<Vec<_>>();
-    let expected_wire_bytes = segments
+    let expected_canonical_bytes = segments
         .iter()
-        .map(|segment| segment.wire.len() as u64)
+        .map(|segment| canonical_len(&segment.wire))
         .sum::<u64>();
     let receipts = collector
         .receive_wire_batch_from_repository_with_gaps(
@@ -389,7 +462,7 @@ fn local_batch_receiver_commits_apply_once_and_replays_idempotently() {
         .repository_delivery_metrics()
         .expect("read apply metrics");
     assert_eq!(metrics.applied_segments, segments.len() as u64);
-    assert_eq!(metrics.applied_bytes, expected_wire_bytes);
+    assert_eq!(metrics.applied_bytes, expected_canonical_bytes);
 
     let duplicate = vec![segments[0].clone(), segments[0].clone()];
     collector
@@ -406,7 +479,7 @@ fn local_batch_receiver_commits_apply_once_and_replays_idempotently() {
         .repository_delivery_metrics()
         .expect("read duplicate apply metrics");
     assert_eq!(metrics.applied_segments, segments.len() as u64);
-    assert_eq!(metrics.applied_bytes, expected_wire_bytes);
+    assert_eq!(metrics.applied_bytes, expected_canonical_bytes);
     let scope = metrics
         .delivery_scopes
         .iter()
@@ -417,7 +490,7 @@ fn local_batch_receiver_commits_apply_once_and_replays_idempotently() {
         })
         .expect("repo-a delivery scope");
     assert_eq!(scope.applied_segments, segments.len() as u64);
-    assert_eq!(scope.applied_bytes, expected_wire_bytes);
+    assert_eq!(scope.applied_bytes, expected_canonical_bytes);
 
     collector
         .receive_wire_batch_from_repository_with_gaps(
@@ -433,5 +506,5 @@ fn local_batch_receiver_commits_apply_once_and_replays_idempotently() {
         .repository_delivery_metrics()
         .expect("read replay metrics");
     assert_eq!(metrics.applied_segments, segments.len() as u64);
-    assert_eq!(metrics.applied_bytes, expected_wire_bytes);
+    assert_eq!(metrics.applied_bytes, expected_canonical_bytes);
 }

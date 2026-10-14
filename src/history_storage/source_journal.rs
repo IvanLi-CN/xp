@@ -8,6 +8,7 @@ use super::*;
 mod source_journal_write;
 
 const SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE: i64 = 256;
+pub(crate) const SOURCE_DELIVERY_JOURNAL_REPAIR_PAGES_PER_CYCLE: usize = 16;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS: usize = 20_000;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_MAX_BYTES: u64 = 128 * 1024 * 1024;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS: usize = 256;

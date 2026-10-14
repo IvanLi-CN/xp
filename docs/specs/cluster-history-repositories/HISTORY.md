@@ -89,6 +89,12 @@
   and byte rates; pending depth alone is not a throughput claim.
 - Runtime status also exposes the completed or elapsed 300-second window for each source/stream/
   target scope, preventing aggregate progress from masking a starved target.
+- Byte counters now use the signed segment's canonical payload size, while wire bytes remain the
+  journal capacity and page-budget unit. Existing databases migrate by resetting only the
+  cumulative delivery counters, completed windows, and scoped counters into a new canonical
+  counter epoch; journal rows, checkpoints, gaps, payloads, and source outbox state remain intact.
+- Source journal order repair now commits up to sixteen bounded pages per five-second source cycle,
+  preserving the durable repair cursor and pausing delivery until the repair completes.
 - Original observation time, source identity and recovery generation remain unchanged.
 
 ## Key Reasons / Replacements

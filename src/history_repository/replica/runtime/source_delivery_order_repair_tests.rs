@@ -178,6 +178,57 @@ fn source_delivery_journal_order_repair_is_resumable() {
 }
 
 #[test]
+fn source_delivery_order_repair_cycle_commits_sixteen_pages() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let page_size = 256_u64;
+    let rows = page_size * 16 + 1;
+    append_signed_source_journal_rows(
+        temporary.path(),
+        &signing_key,
+        &source_identity,
+        "runtime",
+        "runtime.v1",
+        0..rows,
+    );
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    connection
+        .execute(
+            "UPDATE source_delivery_journal
+             SET source_node_id = '', source_epoch = 0, first_sequence = 0",
+            [],
+        )
+        .expect("simulate legacy journal order columns");
+    connection
+        .execute(
+            "UPDATE source_delivery_journal_state
+             SET order_repair_cursor_id = NULL, order_repair_completed = 0
+             WHERE singleton = 1",
+            [],
+        )
+        .expect("mark journal order repair pending");
+    drop(connection);
+
+    let mut runtime = load(temporary.path());
+    let first = runtime
+        .repair_source_delivery_journal_order_pages(
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_REPAIR_PAGES_PER_CYCLE,
+        )
+        .expect("repair bounded cycle");
+    assert_eq!(first.processed, (page_size * 16) as usize);
+    assert!(!first.completed);
+    let second = runtime
+        .repair_source_delivery_journal_order_pages(
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_REPAIR_PAGES_PER_CYCLE,
+        )
+        .expect("repair final cycle");
+    assert_eq!(second.processed, 1);
+    assert!(second.completed);
+}
+
+#[test]
 fn source_delivery_order_repair_persists_new_segments_without_publishing_them() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);

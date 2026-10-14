@@ -18,6 +18,20 @@ const JOURNAL_GENERATED_BYTES_PER_SECOND: u64 = 27 * 1024;
 const JOURNAL_THROUGHPUT_MULTIPLIER: u64 = 10;
 const JOURNAL_THROUGHPUT_SAMPLE_SECONDS: u64 = 5 * 60;
 
+#[derive(Debug, Clone)]
+struct DeliveryWindowSnapshot {
+    elapsed_seconds: u64,
+    source_ack_meets_ten_x: bool,
+    repository_apply_meets_ten_x: bool,
+    meets_ten_x: bool,
+}
+
+#[derive(Debug, Clone)]
+struct DeliveryScopeSnapshot {
+    target_repository_id: String,
+    last_completed_window: Option<DeliveryWindowSnapshot>,
+}
+
 #[derive(Clone, PartialEq, prost::Message)]
 struct FixtureCursor {
     #[prost(string, tag = "1")]
@@ -77,7 +91,7 @@ fn signed_fixture_wire(
     sequence: u64,
     payload: &[u8],
     previous_hash: Option<[u8; 32]>,
-) -> (Vec<u8>, [u8; 32]) {
+) -> (Vec<u8>, [u8; 32], usize) {
     let record = FixtureRecord {
         schema_id: "runtime.v1".to_owned(),
         schema_version: 1,
@@ -122,7 +136,7 @@ fn signed_fixture_wire(
     let mut segment_hash = Sha256::new();
     segment_hash.update(canonical_wire);
     segment_hash.update(&signed.signature);
-    (wire, segment_hash.finalize().into())
+    (wire, segment_hash.finalize().into(), canonical_wire.len())
 }
 
 fn read_process_read_bytes(pid: u32) -> u64 {
@@ -367,6 +381,38 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         post_replay_pending < initial_pending,
         "source journal backlog must remain drained after the replay page"
     );
+    let completed_window = post_replay_status
+        .metrics
+        .last_completed_window
+        .as_ref()
+        .expect("status must expose the completed 300-second delivery window");
+    assert_eq!(
+        completed_window.elapsed_seconds, JOURNAL_THROUGHPUT_SAMPLE_SECONDS,
+        "delivery window must be exactly five minutes"
+    );
+    assert!(
+        completed_window.source_ack_meets_ten_x
+            && completed_window.repository_apply_meets_ten_x
+            && completed_window.meets_ten_x,
+        "aggregate completed delivery window must meet the ten-x gate"
+    );
+    let scoped_window = post_replay_status
+        .metrics
+        .delivery_scopes
+        .iter()
+        .find(|scope| scope.target_repository_id == cluster.node_id)
+        .and_then(|scope| scope.last_completed_window.as_ref())
+        .expect("status must expose the local target scope completed window");
+    assert_eq!(
+        scoped_window.elapsed_seconds,
+        JOURNAL_THROUGHPUT_SAMPLE_SECONDS
+    );
+    assert!(
+        scoped_window.source_ack_meets_ten_x
+            && scoped_window.repository_apply_meets_ten_x
+            && scoped_window.meets_ten_x,
+        "local target scope must meet the ten-x gate"
+    );
     cpu_percentages.sort_by(f64::total_cmp);
     let p95_index = (cpu_percentages.len().saturating_sub(1) * 95) / 100;
     let cpu_p95 = cpu_percentages[p95_index];
@@ -453,6 +499,8 @@ struct SourceDeliveryMetricsSnapshot {
     acknowledged_bytes: u64,
     applied_segments: u64,
     applied_bytes: u64,
+    last_completed_window: Option<DeliveryWindowSnapshot>,
+    delivery_scopes: Vec<DeliveryScopeSnapshot>,
 }
 
 #[derive(Debug, Clone)]
@@ -508,6 +556,34 @@ async fn request_source_status(
             .unwrap_or_default()
     );
     let metrics = &status["delivery_metrics"];
+    let parse_window = |value: &serde_json::Value| {
+        (!value.is_null()).then(|| DeliveryWindowSnapshot {
+            elapsed_seconds: value["elapsed_seconds"]
+                .as_u64()
+                .expect("delivery window elapsed seconds"),
+            source_ack_meets_ten_x: value["source_ack_meets_ten_x"]
+                .as_bool()
+                .expect("source ACK ten-x result"),
+            repository_apply_meets_ten_x: value["repository_apply_meets_ten_x"]
+                .as_bool()
+                .expect("repository apply ten-x result"),
+            meets_ten_x: value["meets_ten_x"]
+                .as_bool()
+                .expect("delivery ten-x result"),
+        })
+    };
+    let delivery_scopes = metrics["delivery_scopes"]
+        .as_array()
+        .expect("delivery scope metrics")
+        .iter()
+        .map(|scope| DeliveryScopeSnapshot {
+            target_repository_id: scope["target_repository_id"]
+                .as_str()
+                .expect("delivery scope target")
+                .to_owned(),
+            last_completed_window: parse_window(&scope["last_completed_window"]),
+        })
+        .collect();
     SourceStatusSnapshot {
         pending_segments: status["source_delivery"]["pending_segments"]
             .as_u64()
@@ -531,6 +607,8 @@ async fn request_source_status(
             applied_bytes: metrics["applied_bytes"]
                 .as_u64()
                 .expect("applied byte counter"),
+            last_completed_window: parse_window(&metrics["last_completed_window"]),
+            delivery_scopes,
         },
     }
 }
@@ -561,7 +639,10 @@ fn append_generated_fixture_segment(
     identity: &[u8],
     sequence: u64,
 ) {
-    let (wire, _) = signed_fixture_wire(
+    // Seed durable, signed rows for the 20,000-segment/128 MiB replay gate. The enqueue
+    // transaction path is covered by source_delivery_metrics_tests; this fixture keeps the
+    // long resource soak deterministic without producing 20,000 records through HTTP.
+    let (wire, _, canonical_len) = signed_fixture_wire(
         signing_key,
         &cluster.cluster_id,
         &cluster.node_id,
@@ -570,6 +651,7 @@ fn append_generated_fixture_segment(
         None,
     );
     let wire_len = i64::try_from(wire.len()).expect("generated fixture wire length");
+    let canonical_len = i64::try_from(canonical_len).expect("generated fixture canonical length");
     let connection = rusqlite::Connection::open(data_dir.join("history.sqlite3"))
         .expect("open source journal for generated fixture");
     let transaction = connection
@@ -608,9 +690,19 @@ fn append_generated_fixture_segment(
              SET generated_segments = generated_segments + 1,
                  generated_bytes = generated_bytes + ?1
              WHERE singleton = 1",
-            [wire_len],
+            [canonical_len],
         )
         .expect("update generated delivery counters");
+    transaction
+        .execute(
+            "UPDATE repository_delivery_metric_scopes
+             SET generated_segments = generated_segments + 1,
+                 generated_bytes = generated_bytes + ?1
+             WHERE source_node_id = ?2
+               AND stream = 'runtime'",
+            rusqlite::params![canonical_len, cluster.node_id],
+        )
+        .expect("update generated delivery scope counters");
     transaction
         .commit()
         .expect("commit generated fixture transaction");
@@ -655,7 +747,7 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
             .unchecked_transaction()
             .expect("begin source journal backlog transaction");
         for sequence in batch_start..(batch_start + 256).min(20_000) {
-            let (wire, segment_hash) = signed_fixture_wire(
+            let (wire, segment_hash, _) = signed_fixture_wire(
                 &signing_key,
                 &cluster.cluster_id,
                 &cluster.node_id,
@@ -702,6 +794,53 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
             [],
         )
         .expect("record source journal stream backlog");
+    let window_started_at = chrono::Utc::now().timestamp();
+    connection
+        .execute(
+            "UPDATE repository_delivery_metrics
+             SET window_started_at = ?1,
+                 window_generated_segments = 0,
+                 window_generated_bytes = 0,
+                 window_acknowledged_segments = 0,
+                 window_acknowledged_bytes = 0,
+                 window_applied_segments = 0,
+                 window_applied_bytes = 0,
+                 completed_window_started_at = NULL,
+                 completed_window_ended_at = NULL,
+                 completed_generated_segments = NULL,
+                 completed_generated_bytes = NULL,
+                 completed_acknowledged_segments = NULL,
+                 completed_acknowledged_bytes = NULL,
+                 completed_applied_segments = NULL,
+                 completed_applied_bytes = NULL
+             WHERE singleton = 1",
+            [window_started_at],
+        )
+        .expect("seed source journal five-minute window");
+    for target_repository_id in ["", cluster.node_id.as_str()] {
+        connection
+            .execute(
+                "INSERT OR REPLACE INTO repository_delivery_metric_scopes
+                 (source_node_id, stream, target_repository_id,
+                  generated_segments, generated_bytes,
+                  acknowledged_segments, acknowledged_bytes,
+                  applied_segments, applied_bytes)
+                 VALUES (?1, 'runtime', ?2, 0, 0, 0, 0, 0, 0)",
+                rusqlite::params![cluster.node_id, target_repository_id],
+            )
+            .expect("seed source journal delivery scope");
+        connection
+            .execute(
+                "INSERT OR REPLACE INTO repository_delivery_metric_scope_windows
+                 (source_node_id, stream, target_repository_id,
+                  window_started_at, window_generated_segments, window_generated_bytes,
+                  window_acknowledged_segments, window_acknowledged_bytes,
+                  window_applied_segments, window_applied_bytes)
+                 VALUES (?1, 'runtime', ?2, ?3, 0, 0, 0, 0, 0, 0)",
+                rusqlite::params![cluster.node_id, target_repository_id, window_started_at],
+            )
+            .expect("seed source journal scope window");
+    }
     let state_payload = connection
         .query_row(
             "SELECT payload FROM history_snapshots WHERE key = 'persistent_state'",

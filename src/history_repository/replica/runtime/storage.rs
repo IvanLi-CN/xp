@@ -229,7 +229,7 @@ impl RepositoryReplicaRuntime {
                 .iter()
                 .map(StoredSegment::sqlite_row)
                 .collect::<Result<Vec<_>, _>>()?,
-            applied_wire_segments: Vec::new(),
+            applied_canonical_segments: Vec::new(),
         };
         let mut migrated_snapshot = self.snapshot.clone();
         migrated_snapshot.records.clear();

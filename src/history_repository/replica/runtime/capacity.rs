@@ -28,12 +28,19 @@ impl RepositoryReplicaRuntime {
             wire: wire.to_vec(),
         };
         if self.uses_sqlite_history() {
-            let wire_len = u64::try_from(wire.len())
-                .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?;
             mutation.segments.push(segment.sqlite_row()?);
+            let canonical_len = u64::try_from(
+                SignedSegment::from_wire(wire)
+                    .map_err(RepositoryRuntimeError::from)?
+                    .canonical()
+                    .canonical_bytes()
+                    .map_err(RepositoryRuntimeError::from)?
+                    .len(),
+            )
+            .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?;
             mutation
-                .applied_wire_segments
-                .push((segment.id.clone(), wire_len));
+                .applied_canonical_segments
+                .push((segment.id.clone(), canonical_len));
             return Ok(());
         }
         if !self

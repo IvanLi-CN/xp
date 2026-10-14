@@ -42,6 +42,8 @@ The read-only repository status also exposes durable `delivery_metrics`. The cou
 and monotonic within `counter_epoch`: `generated_segments`/`generated_bytes` measure source enqueue,
 `acknowledged_segments`/`acknowledged_bytes` measure durable source ACK, and
 `applied_segments`/`applied_bytes` measure repository receiver commits. The status includes source
+`byte_counter_unit=canonical-v1`; these byte counters exclude the signature, while wire bytes remain
+the journal capacity and page-budget unit. The status includes source
 attempts, successes, `transport_error`, `response_error`, `response_changed`,
 `explicit_unavailable`, and `storage_error` counters plus `last_attempt_at` and `last_progress_at`.
 Missing fields from an older peer are treated as zero and do not change v1 fallback behavior.

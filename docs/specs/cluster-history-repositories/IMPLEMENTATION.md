@@ -138,7 +138,7 @@
   for historical-source pages and the sender's canonical segment bytes for Ready-tiered pages. It
   validates each cursor family for length, format, forward progress and stable snapshot/export state
   before persisting a checkpoint; malformed or regressing pages remain retryable failures. For a
-  ready peer, each worker tick drains up to eight consecutive summary, repair, or tiered export
+  ready peer, each worker tick drains up to sixteen consecutive summary, repair, or tiered export
   pages per peer within a shared 15-second maintenance budget. The remaining budget is split among
   peers in stable order so a slow peer cannot starve later peers. The summary cursor and pending
   repair IDs are part of the durable peer checkpoint, so a restart resumes the same page instead of
@@ -296,7 +296,7 @@
   Summary responses carry the additive `history_truncated` marker. A peer persists the marker when
   observed and keeps its affected queries partial; summaries from older peers omit it and decode as
   false.
-  The follow-up hk2 canary must observe ten consecutive 60-second source cycles with CPU at or
+  The follow-up hk2 canary must observe ten consecutive 300-second throughput windows with CPU at
   below the 10% node quota, bounded journal reads, and no loss of Direct/Public or control-plane
   health. The shared resource test measures journal CPU/read/RSS/PSS diagnostics in isolation
   under the 128 MiB/no-swap cgroup; the canary

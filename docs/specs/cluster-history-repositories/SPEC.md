@@ -303,7 +303,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   返回 wire 总量最多 1 MiB，其 CPU、磁盘读取和进程内存成本不得随 backlog 条数或 payload
   字节数增长。
 - 旧库中缺少投递顺序元数据的 segment 必须通过 `source_delivery_journal_state` 的持久主键游标
-  分页校正；每个 60 秒 source collection cycle 最多提交一页 256 条，校正失败时游标不前进，
+  分页校正；每个 5 秒 source cycle 最多提交十六页 256 条，校正失败时游标不前进，
   重启从最后一次提交的位置继续。状态查询不得隐式执行校正；校正期间继续持久化新 segment，
   但暂停发送 journal page，并以既有 `source_delivery.state=journal_order_repairing` 表示可恢复
   backlog。不得为此新增 partial index，因为建立它本身会扫描整个 journal。
@@ -354,11 +354,12 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - Given source segment 已在目标 repository 持久化，When tombstone ACK fanout 暂时失败，Then
   目标仍返回签名 receipt，fanout 记录并重试，不把已落盘投递转换成 5xx。
 - VER-JOURNAL-BOUNDED covers: REQ-JOURNAL-BOUNDED and REQ-JOURNAL-RESOURCE.
-  A 128 MiB backlog has no full wire decode or temporary sort; each cycle reads one fixed page,
+  A 128 MiB backlog has no full wire decode or temporary sort; each cycle reads a fixed page,
   while the isolated journal run does not exercise the Direct/Public or cluster control-plane
   listeners; those availability properties remain release-canary gates.
 - VER-JOURNAL-REPAIR covers: REQ-JOURNAL-REPAIR and REQ-JOURNAL-PAUSE.
-  One source cycle commits at most one repair page and pauses delivery while repair is incomplete.
+  One source cycle commits at most sixteen repair pages and pauses delivery while repair is
+  incomplete.
   A failed cycle preserves the previous cursor and a restart resumes from that cursor.
 - VER-JOURNAL-ACK covers: REQ-JOURNAL-ACK.
   A successful ACK updates acknowledgement time and path only when deletion removes real rows;

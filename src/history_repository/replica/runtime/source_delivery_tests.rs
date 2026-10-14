@@ -59,7 +59,13 @@ fn syncing_tombstone_receipt_is_deferred_until_repository_is_ready() {
         .repository_delivery_metrics()
         .expect("read repository apply metrics");
     assert_eq!(metrics.applied_segments, 1);
-    assert_eq!(metrics.applied_bytes, queued[0].wire.len() as u64);
+    let canonical_bytes = crate::history_sync::SignedSegment::from_wire(&queued[0].wire)
+        .expect("decode queued tombstone")
+        .canonical()
+        .canonical_bytes()
+        .expect("encode queued tombstone canonical bytes")
+        .len() as u64;
+    assert_eq!(metrics.applied_bytes, canonical_bytes);
 }
 
 #[test]

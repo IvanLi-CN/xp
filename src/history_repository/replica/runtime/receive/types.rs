@@ -7,7 +7,7 @@ pub(crate) struct PendingRepositoryMutation {
     pub(crate) records: Vec<RepositoryHistoryRecordRow>,
     pub(crate) tombstones: Vec<RepositoryHistoryTombstone>,
     pub(crate) segments: Vec<RepositoryHistorySegmentRow>,
-    pub(crate) applied_wire_segments: Vec<(String, u64)>,
+    pub(crate) applied_canonical_segments: Vec<(String, u64)>,
 }
 
 impl PendingRepositoryMutation {
@@ -18,7 +18,7 @@ impl PendingRepositoryMutation {
             records: self.records,
             tombstones: self.tombstones,
             segments: self.segments,
-            applied_wire_segments: self.applied_wire_segments,
+            applied_canonical_segments: self.applied_canonical_segments,
         }
     }
 }

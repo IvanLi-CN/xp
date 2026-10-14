@@ -463,8 +463,8 @@ impl RepositoryReplicaRuntime {
             sink.records.append(&mut mutation.records);
             sink.tombstones.append(&mut mutation.tombstones);
             sink.segments.append(&mut mutation.segments);
-            sink.applied_wire_segments
-                .append(&mut mutation.applied_wire_segments);
+            sink.applied_canonical_segments
+                .append(&mut mutation.applied_canonical_segments);
             self.snapshot.receiver = Some(
                 self.receiver
                     .as_ref()

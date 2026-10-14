@@ -197,7 +197,8 @@ beneficial and is released incrementally after acknowledgement. Below the
 existing 256 MiB filesystem safety guard, a Source enters explicit capture
 suspension rather than creating a cursor, acknowledgement, or permanent gap.
 
-The delivery status is additive and durable. It exposes cumulative generated, durable-ACK, and
+The delivery status is additive and durable. It exposes `byte_counter_unit=canonical-v1` together
+with cumulative generated, durable-ACK, and
 repository-apply segment/byte counters, attempt/success counts, categorized failures, and the last
 attempt/progress timestamps. Enqueue, ACK, response, gap, watermark and receiver checkpoint
 updates commit their matching counters in the same SQLite transaction; retries and restarts do

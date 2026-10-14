@@ -62,8 +62,11 @@ pub(super) fn spawn_local_source_worker(state: AppState) {
             ticker.tick().await;
             let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
             let mut runtime = state.repository_replica.lock().await;
-            let repair_result =
-                super::repository_blocking(|| runtime.repair_source_delivery_journal_order_page());
+            let repair_result = super::repository_blocking(|| {
+                runtime.repair_source_delivery_journal_order_pages(
+                    crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_REPAIR_PAGES_PER_CYCLE,
+                )
+            });
             drop(runtime);
             if let Err(error) = repair_result {
                 tracing::debug!(

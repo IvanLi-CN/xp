@@ -125,9 +125,9 @@ pub(crate) struct RepositoryReplicaMutation {
     pub(crate) records: Vec<RepositoryHistoryRecordRow>,
     pub(crate) tombstones: Vec<RepositoryHistoryTombstone>,
     pub(crate) segments: Vec<RepositoryHistorySegmentRow>,
-    /// Wire sizes are supplied only for newly received segments. Local migrations leave this
-    /// empty so they do not inflate repository delivery throughput counters.
-    pub(crate) applied_wire_segments: Vec<(String, u64)>,
+    /// Canonical payload sizes are supplied only for newly received segments. Local migrations
+    /// leave this empty so they do not inflate repository delivery throughput counters.
+    pub(crate) applied_canonical_segments: Vec<(String, u64)>,
 }
 
 fn sqlite_nullable_integer(value: rusqlite::types::ValueRef<'_>) -> Option<Option<i64>> {
@@ -318,8 +318,8 @@ impl HistoryStorage {
         for row in &mutation.records {
             upsert_repository_history_record(&transaction, row)?;
         }
-        let wire_bytes_by_id = mutation
-            .applied_wire_segments
+        let canonical_bytes_by_id = mutation
+            .applied_canonical_segments
             .iter()
             .cloned()
             .collect::<std::collections::BTreeMap<_, _>>();
@@ -337,19 +337,19 @@ impl HistoryStorage {
                 .map_err(sqlite_error)?
                 .is_some();
             upsert_repository_history_segment(&transaction, row)?;
-            if !was_present && wire_bytes_by_id.contains_key(&row.id) {
+            if !was_present && canonical_bytes_by_id.contains_key(&row.id) {
                 applied_segments = applied_segments.checked_add(1).ok_or_else(|| {
                     HistoryStorageError("applied segment count overflow".to_owned())
                 })?;
-                let wire_bytes = wire_bytes_by_id[&row.id];
+                let canonical_bytes = canonical_bytes_by_id[&row.id];
                 applied_bytes = applied_bytes
-                    .checked_add(wire_bytes)
+                    .checked_add(canonical_bytes)
                     .ok_or_else(|| HistoryStorageError("applied byte count overflow".to_owned()))?;
                 let entry = scope_counts
                     .entry((row.source_node_id.clone(), row.stream.clone()))
                     .or_default();
                 entry.0 = entry.0.saturating_add(1);
-                entry.1 = entry.1.saturating_add(wire_bytes);
+                entry.1 = entry.1.saturating_add(canonical_bytes);
             }
         }
         if applied_segments > 0 {
@@ -357,7 +357,7 @@ impl HistoryStorage {
                 mutation
                     .segments
                     .iter()
-                    .filter(|row| wire_bytes_by_id.contains_key(&row.id))
+                    .filter(|row| canonical_bytes_by_id.contains_key(&row.id))
                     .map(|row| row.closed_at_unix_seconds)
                     .max()
             });

@@ -9,6 +9,11 @@ pub(super) use scopes::{
 };
 
 pub(crate) const DELIVERY_RATE_WINDOW_SECONDS: u64 = 5 * 60;
+const CANONICAL_BYTE_COUNTER_UNIT: &str = "canonical-v1";
+
+fn default_byte_counter_unit() -> String {
+    CANONICAL_BYTE_COUNTER_UNIT.to_owned()
+}
 
 fn default_delivery_rate_window_seconds() -> u64 {
     DELIVERY_RATE_WINDOW_SECONDS
@@ -25,6 +30,8 @@ pub(crate) struct SourceDeliveryAttempt {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct RepositoryDeliveryMetrics {
+    /// Byte counters use the signed segment's canonical payload, excluding the signature. Wire
+    /// bytes remain the page/capacity unit and are reported separately by source status.
     #[serde(default)]
     pub(crate) generated_segments: u64,
     #[serde(default)]
@@ -57,6 +64,8 @@ pub(crate) struct RepositoryDeliveryMetrics {
     pub(crate) last_progress_at: Option<u64>,
     #[serde(default)]
     pub(crate) counter_epoch: u64,
+    #[serde(default = "default_byte_counter_unit")]
+    pub(crate) byte_counter_unit: String,
     #[serde(default = "default_delivery_rate_window_seconds")]
     pub(crate) rate_window_seconds: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -212,6 +221,7 @@ impl Default for RepositoryDeliveryMetrics {
             last_attempt_at: None,
             last_progress_at: None,
             counter_epoch: 0,
+            byte_counter_unit: CANONICAL_BYTE_COUNTER_UNIT.to_owned(),
             rate_window_seconds: DELIVERY_RATE_WINDOW_SECONDS,
             last_completed_window: None,
             delivery_scopes: Vec::new(),
@@ -269,6 +279,7 @@ pub(super) fn ensure_repository_delivery_metrics(connection: &mut Connection) ->
                  source_response_changed INTEGER NOT NULL DEFAULT 0,
                  source_explicit_unavailable INTEGER NOT NULL DEFAULT 0,
                  source_storage_errors INTEGER NOT NULL DEFAULT 0,
+                 byte_counter_unit TEXT NOT NULL DEFAULT 'canonical-v1',
                  last_attempt_at INTEGER,
                  last_progress_at INTEGER,
                  counter_epoch INTEGER NOT NULL DEFAULT 1,
@@ -353,6 +364,7 @@ pub(super) fn ensure_repository_delivery_metrics(connection: &mut Connection) ->
         ("source_response_changed", "INTEGER NOT NULL DEFAULT 0"),
         ("source_explicit_unavailable", "INTEGER NOT NULL DEFAULT 0"),
         ("source_storage_errors", "INTEGER NOT NULL DEFAULT 0"),
+        ("byte_counter_unit", "TEXT NOT NULL DEFAULT 'wire-v0'"),
         ("last_attempt_at", "INTEGER"),
         ("last_progress_at", "INTEGER"),
         ("counter_epoch", "INTEGER NOT NULL DEFAULT 1"),
@@ -382,6 +394,16 @@ pub(super) fn ensure_repository_delivery_metrics(connection: &mut Connection) ->
                 )
                 .map_err(sqlite_error)?;
         }
+    }
+    let byte_counter_unit = transaction
+        .query_row(
+            "SELECT byte_counter_unit FROM repository_delivery_metrics WHERE singleton = 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(sqlite_error)?;
+    if byte_counter_unit != CANONICAL_BYTE_COUNTER_UNIT {
+        super::metrics_migration::reset_legacy_byte_counters(&transaction)?;
     }
     transaction.commit().map_err(sqlite_error)
 }
@@ -786,7 +808,8 @@ pub(super) fn read_at(
                     completed_window_started_at, completed_window_ended_at,
                     completed_generated_segments, completed_generated_bytes,
                     completed_acknowledged_segments, completed_acknowledged_bytes,
-                    completed_applied_segments, completed_applied_bytes
+                    completed_applied_segments, completed_applied_bytes,
+                    byte_counter_unit
              FROM repository_delivery_metrics WHERE singleton = 1",
             [],
             |row| {
@@ -912,6 +935,7 @@ pub(super) fn read_at(
                         .map(|value| checked_u64(value, 14))
                         .transpose()?,
                     counter_epoch: checked_u64(row.get::<_, i64>(15)?, 15)?,
+                    byte_counter_unit: row.get::<_, String>(31)?,
                     rate_window_seconds: DELIVERY_RATE_WINDOW_SECONDS,
                     last_completed_window,
                     delivery_scopes: Vec::new(),

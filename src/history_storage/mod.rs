@@ -25,6 +25,7 @@ pub(crate) const MESH_TELEMETRY_KEY: &str = "mesh_telemetry";
 pub(crate) const REPOSITORY_REPLICA_KEY: &str = "repository_replica";
 mod counts;
 mod metrics;
+mod metrics_migration;
 mod repository;
 mod source_journal;
 mod source_journal_ack;
@@ -45,8 +46,9 @@ pub(crate) use repository::{
 pub(crate) use source_journal::{
     SOURCE_DELIVERY_JOURNAL_MAX_BYTES, SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS,
     SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS, SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
-    SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT, SourceDeliveryJournalPage,
-    SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow, SourceDeliveryJournalSummary,
+    SOURCE_DELIVERY_JOURNAL_REPAIR_PAGES_PER_CYCLE, SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT,
+    SourceDeliveryJournalPage, SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow,
+    SourceDeliveryJournalSummary,
 };
 pub(crate) use startup::HistoryStorageMode;
 #[cfg(test)]
