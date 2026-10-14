@@ -368,7 +368,9 @@
   digest. It must identify the 300-second window, 128 MiB/no-swap limits, and all four segment/
   byte 10x gates; missing or mismatched evidence fails closed before artifact publication. The
   owner-dispatched release accepts an evidence commit with exactly the target as its only parent
-  and exactly the attestation plus workload log as its paths, then recomputes the log digest.
+  and exactly the attestation plus workload log as its paths, then recomputes the log digest and
+  requires a GitHub-verified valid owner signature. The evidence files and commit identity are
+  retained as release assets.
 - Fixed retained-range deep verification under writes remains a delivery gate after CI and release.
 
 ## Recovery validation

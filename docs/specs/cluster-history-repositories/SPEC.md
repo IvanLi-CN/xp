@@ -398,7 +398,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   GitHub Release publication; CI and release workflows cannot synthesize this evidence. The
   release workflow is owner-dispatched and accepts an evidence commit whose only parent is the
   target commit and whose only paths are the attestation and the workload log; readiness
-  recomputes the log digest from those files.
+  recomputes the log digest from those files and requires a GitHub-verified valid signature by the
+  repository owner. The release retains the evidence files and commit identity as release assets.
 
 ## Resource and Quality Constraints
 

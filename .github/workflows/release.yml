@@ -99,6 +99,31 @@ jobs:
             > .release-evidence/evidence.json
           git show "${evidence_commit}:agent-vm-resource.log" > .release-evidence/workload.log
           echo "${evidence_commit}" > .release-evidence/commit
+      - name: verify signed Agent VM evidence commit
+        if: steps.intent.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          evidence_commit="$(cat .release-evidence/commit)"
+          verification="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${evidence_commit}")"
+          test "$(jq -r '.commit.verification.verified' <<<"${verification}")" = "true"
+          test "$(jq -r '.commit.verification.reason' <<<"${verification}")" = "valid"
+          test "$(jq -r '.author.login // empty' <<<"${verification}")" = \
+            "${GITHUB_REPOSITORY_OWNER}"
+          test "$(jq -r '.committer.login // empty' <<<"${verification}")" = \
+            "${GITHUB_REPOSITORY_OWNER}"
+          {
+            echo "evidence_commit=${evidence_commit}"
+            echo "verified_author=$(jq -r '.author.login' <<<"${verification}")"
+            echo "verified_committer=$(jq -r '.committer.login' <<<"${verification}")"
+          } > .release-evidence/manifest.txt
+          {
+            echo "- evidence_commit: ${evidence_commit}"
+            echo "- evidence_signature: GitHub verified/valid"
+            echo "- evidence_author: $(jq -r '.author.login' <<<"${verification}")"
+            echo "- evidence_committer: $(jq -r '.committer.login' <<<"${verification}")"
+          } >> "${GITHUB_STEP_SUMMARY}"
       - name: verify target workflow readiness
         if: steps.intent.outputs.should_release == 'true'
         env:
@@ -173,6 +198,12 @@ jobs:
         if: steps.intent.outputs.should_release == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with: {name: "release-automation-${{ github.run_id }}", path: Dockerfile}
+      - name: preserve Agent VM evidence
+        if: steps.intent.outputs.should_release == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: "agent-vm-evidence-${{ github.run_id }}"
+          path: .release-evidence
 
   build:
     needs: prepare
@@ -284,6 +315,18 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with: {pattern: "*-${{ github.run_id }}-*", path: release, merge-multiple: true}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: "agent-vm-evidence-${{ github.run_id }}"
+          path: release/evidence
+      - name: include Agent VM evidence in release assets
+        run: |
+          set -euo pipefail
+          cp release/evidence/commit release/agent-vm-evidence-commit.txt
+          cp release/evidence/manifest.txt release/agent-vm-evidence-manifest.txt
+          cp release/evidence/evidence.json release/agent-vm-resource-evidence.json
+          cp release/evidence/workload.log release/agent-vm-resource.log
+          rm -rf release/evidence
       - run: cd release && sha256sum -- *-linux-* > checksums.txt && sha256sum --check checksums.txt
       - uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd
         with:
