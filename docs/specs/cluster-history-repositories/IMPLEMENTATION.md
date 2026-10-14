@@ -165,11 +165,12 @@
 - Repository segment pages are ordered by tombstone phase and the signed source cursor, rather
   than by content hash. Existing databases persist `order_repair_cursor_id` and
   `order_repair_completed` in the source journal state row. A source collection cycle repairs at
-  most 256 rows by primary-key order, decoding `wire` only for rows whose source metadata is still
-  empty; the cursor, metadata and epoch high-water are committed together. A failed page leaves
-  the previous cursor intact and the next process resumes from it. Ordinary status, epoch and page
-  reads never start repair, and no partial index is created because its initial build would scan
-  the complete journal. While repair is incomplete, new signed rows are persisted but are not
+  most sixteen pages, each bounded to 256 rows and the 1 MiB wire budget, by primary-key order,
+  decoding `wire` only for rows whose source metadata is still empty; the cursor, metadata and
+  epoch high-water are committed together. A failed page leaves the previous cursor intact and
+  the next process resumes from it. Ordinary status, epoch and page reads never start repair, and
+  no partial index is created because its initial build would scan the complete journal. While
+  repair is incomplete, new signed rows are persisted but are not
   offered to a collector; status reports `journal_order_repairing` with the durable backlog count.
   The repair preserves each signed payload and does not rebuild the database or run a full
   `VACUUM`.
