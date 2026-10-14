@@ -1,3 +1,4 @@
+pub(super) mod batch;
 mod summary;
 use axum::body::Body;
 use axum::http::{StatusCode, header};
@@ -82,7 +83,7 @@ struct AdminHistoryRepositoryItem {
     runtime: Option<RepositoryRuntimeStatus>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct RepositorySyncRequest {
     identity: RepositoryNodeIdentity,
     wire_base64: String,

@@ -24,10 +24,15 @@ pub(crate) const NODE_HISTORY_KEY: &str = "node_history";
 pub(crate) const MESH_TELEMETRY_KEY: &str = "mesh_telemetry";
 pub(crate) const REPOSITORY_REPLICA_KEY: &str = "repository_replica";
 mod counts;
+mod metrics;
 mod repository;
 mod source_journal;
+mod source_journal_ack;
 mod source_journal_tail;
 mod startup;
+#[cfg(test)]
+pub(crate) use metrics::DELIVERY_RATE_WINDOW_SECONDS;
+pub(crate) use metrics::{RepositoryDeliveryMetrics, SourceDeliveryAttempt};
 #[cfg(test)]
 use repository::segment_phase_sql;
 #[allow(unused_imports)]
@@ -515,7 +520,8 @@ fn ensure_schema(connection: &mut Connection) -> Result<()> {
         .execute_batch(SEQUENCE_SUMMARY_SCHEMA)
         .map_err(sqlite_error)?;
     repository::ensure_sequence_summary_digest_version(connection)?;
-    counts::ensure_repository_history_counts(connection)
+    counts::ensure_repository_history_counts(connection)?;
+    metrics::ensure_repository_delivery_metrics(connection)
 }
 
 fn ensure_repository_history_segment_columns(connection: &Connection) -> Result<()> {

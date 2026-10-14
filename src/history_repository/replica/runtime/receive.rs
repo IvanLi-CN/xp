@@ -1,21 +1,9 @@
 use super::*;
 
-#[derive(Default)]
-pub(crate) struct PendingRepositoryMutation {
-    pub(crate) records: Vec<RepositoryHistoryRecordRow>,
-    pub(crate) tombstones: Vec<RepositoryHistoryTombstone>,
-    pub(crate) segments: Vec<RepositoryHistorySegmentRow>,
-}
-
-impl PendingRepositoryMutation {
-    pub(super) fn into_storage_mutation(self) -> RepositoryReplicaMutation {
-        RepositoryReplicaMutation {
-            records: self.records,
-            tombstones: self.tombstones,
-            segments: self.segments,
-        }
-    }
-}
+mod batch;
+mod types;
+pub(crate) use types::PendingRepositoryMutation;
+use types::RepositoryWireRequest;
 
 fn tombstone_acknowledgements_for_segment(
     segment: &crate::history_sync::CanonicalSegment,
@@ -57,20 +45,6 @@ fn tombstone_acknowledgements_for_segment(
     Ok(acknowledgements)
 }
 
-struct RepositoryWireRequest<'a> {
-    cluster_id: &'a str,
-    identity: &'a RepositoryNodeIdentity,
-    wire: &'a [u8],
-    now_unix_seconds: u64,
-    ready_repositories: &'a [String],
-    local_repository_id: &'a str,
-    allow_retained_anchor: bool,
-    rollback_snapshot: Option<RepositoryReplicaSnapshot>,
-    discard_gap_evidence_on_error: bool,
-    allow_retained_sequence_gap: bool,
-    retained_anchor_checkpoint: Option<RetainedAnchorCheckpointUpdate>,
-}
-
 impl RepositoryReplicaRuntime {
     pub(crate) fn receive_wire(
         &mut self,
@@ -98,19 +72,22 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
-        self.receive_wire_from_repository_inner(RepositoryWireRequest {
-            cluster_id,
-            identity,
-            wire,
-            now_unix_seconds,
-            ready_repositories,
-            local_repository_id,
-            allow_retained_anchor: false,
-            rollback_snapshot: None,
-            discard_gap_evidence_on_error: false,
-            allow_retained_sequence_gap: false,
-            retained_anchor_checkpoint: None,
-        })
+        self.receive_wire_from_repository_inner(
+            RepositoryWireRequest {
+                cluster_id,
+                identity,
+                wire,
+                now_unix_seconds,
+                ready_repositories,
+                local_repository_id,
+                allow_retained_anchor: false,
+                rollback_snapshot: None,
+                discard_gap_evidence_on_error: false,
+                allow_retained_sequence_gap: false,
+                retained_anchor_checkpoint: None,
+            },
+            None,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -132,19 +109,22 @@ impl RepositoryReplicaRuntime {
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
             return Err(error);
         }
-        let result = self.receive_wire_from_repository_inner(RepositoryWireRequest {
-            cluster_id,
-            identity,
-            wire,
-            now_unix_seconds,
-            ready_repositories,
-            local_repository_id,
-            allow_retained_anchor: false,
-            rollback_snapshot: Some(previous_snapshot.clone()),
-            discard_gap_evidence_on_error: true,
-            allow_retained_sequence_gap: false,
-            retained_anchor_checkpoint: None,
-        });
+        let result = self.receive_wire_from_repository_inner(
+            RepositoryWireRequest {
+                cluster_id,
+                identity,
+                wire,
+                now_unix_seconds,
+                ready_repositories,
+                local_repository_id,
+                allow_retained_anchor: false,
+                rollback_snapshot: Some(previous_snapshot.clone()),
+                discard_gap_evidence_on_error: true,
+                allow_retained_sequence_gap: false,
+                retained_anchor_checkpoint: None,
+            },
+            None,
+        );
         match result {
             Ok(receipt) => Ok(receipt),
             Err(error) => {
@@ -174,19 +154,22 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
-        self.receive_wire_from_repository_inner(RepositoryWireRequest {
-            cluster_id,
-            identity,
-            wire,
-            now_unix_seconds,
-            ready_repositories,
-            local_repository_id,
-            allow_retained_anchor: true,
-            rollback_snapshot: None,
-            discard_gap_evidence_on_error: false,
-            allow_retained_sequence_gap: false,
-            retained_anchor_checkpoint: None,
-        })
+        self.receive_wire_from_repository_inner(
+            RepositoryWireRequest {
+                cluster_id,
+                identity,
+                wire,
+                now_unix_seconds,
+                ready_repositories,
+                local_repository_id,
+                allow_retained_anchor: true,
+                rollback_snapshot: None,
+                discard_gap_evidence_on_error: false,
+                allow_retained_sequence_gap: false,
+                retained_anchor_checkpoint: None,
+            },
+            None,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -235,19 +218,22 @@ impl RepositoryReplicaRuntime {
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
             return Err(error);
         }
-        let result = self.receive_wire_from_repository_inner(RepositoryWireRequest {
-            cluster_id,
-            identity,
-            wire,
-            now_unix_seconds,
-            ready_repositories,
-            local_repository_id,
-            allow_retained_anchor: true,
-            rollback_snapshot: Some(previous_snapshot.clone()),
-            discard_gap_evidence_on_error: true,
-            allow_retained_sequence_gap,
-            retained_anchor_checkpoint,
-        });
+        let result = self.receive_wire_from_repository_inner(
+            RepositoryWireRequest {
+                cluster_id,
+                identity,
+                wire,
+                now_unix_seconds,
+                ready_repositories,
+                local_repository_id,
+                allow_retained_anchor: true,
+                rollback_snapshot: Some(previous_snapshot.clone()),
+                discard_gap_evidence_on_error: true,
+                allow_retained_sequence_gap,
+                retained_anchor_checkpoint,
+            },
+            None,
+        );
         match result {
             Ok(receipt) => Ok(receipt),
             Err(error) => {
@@ -271,6 +257,7 @@ impl RepositoryReplicaRuntime {
     fn receive_wire_from_repository_inner(
         &mut self,
         request: RepositoryWireRequest<'_>,
+        mutation_sink: Option<&mut PendingRepositoryMutation>,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
         let RepositoryWireRequest {
             cluster_id,
@@ -391,7 +378,7 @@ impl RepositoryReplicaRuntime {
                     } else if records_gap {
                         self.record_gap(segment.canonical(), true);
                     }
-                    if records_gap {
+                    if records_gap && mutation_sink.is_none() {
                         self.persist_control_state()?;
                     }
                 } else {
@@ -400,7 +387,7 @@ impl RepositoryReplicaRuntime {
                     } else if records_gap {
                         self.record_gap(segment.canonical(), true);
                     }
-                    if records_gap || expired_tombstones {
+                    if (records_gap || expired_tombstones) && mutation_sink.is_none() {
                         self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
                     }
                 }
@@ -411,7 +398,17 @@ impl RepositoryReplicaRuntime {
             // A peer can report an already repaired gap during anti-entropy. The segment is
             // still authoritative evidence that its covered cursor range is present locally.
             self.clear_repaired_gaps(segment.canonical());
-            self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
+            if mutation_sink.is_none() {
+                self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
+            } else {
+                self.snapshot.receiver = Some(
+                    self.receiver
+                        .as_ref()
+                        .expect("receiver initialized")
+                        .checkpoint()?,
+                );
+                self.snapshot.tombstones = self.tombstones.checkpoint();
+            }
             let acknowledgements = ready_repositories
                 .iter()
                 .any(|repository_id| repository_id == local_repository_id)
@@ -458,12 +455,34 @@ impl RepositoryReplicaRuntime {
         // current pass without starving the rest of the retained window.
         self.reopen_retention_compaction_for_late_record(segment.canonical());
         self.snapshot.last_verified_unix_seconds = Some(now_unix_seconds);
-        self.persist_or_restore_with_mutation(&previous_receiver, &previous_snapshot, mutation)?;
-        // Retention is a separate, retryable maintenance pass. It must never make a just-accepted
-        // segment half durable with its control checkpoint.
-        if let Err(error) = self.prune_retention(now_unix_seconds) {
-            self.storage_degraded = true;
-            tracing::warn!(error = %error, "history retention maintenance deferred after receive");
+        if let Some(sink) = mutation_sink {
+            sink.records.append(&mut mutation.records);
+            sink.tombstones.append(&mut mutation.tombstones);
+            sink.segments.append(&mut mutation.segments);
+            sink.applied_wire_segments
+                .append(&mut mutation.applied_wire_segments);
+            self.snapshot.receiver = Some(
+                self.receiver
+                    .as_ref()
+                    .expect("receiver initialized")
+                    .checkpoint()?,
+            );
+            self.snapshot.tombstones = self.tombstones.checkpoint();
+        } else {
+            self.persist_or_restore_with_mutation(
+                &previous_receiver,
+                &previous_snapshot,
+                mutation,
+            )?;
+            // Retention is a separate, retryable maintenance pass. It must never make a
+            // just-accepted segment half durable with its control checkpoint.
+            if let Err(error) = self.prune_retention(now_unix_seconds) {
+                self.storage_degraded = true;
+                tracing::warn!(
+                    error = %error,
+                    "history retention maintenance deferred after receive"
+                );
+            }
         }
         Ok(sync_receipt(
             acceptance,

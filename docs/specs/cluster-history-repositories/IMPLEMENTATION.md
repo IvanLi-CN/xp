@@ -68,6 +68,13 @@
   explicit-unavailable, no-progress and storage outcomes remain visible after restart. The serving
   repair endpoint rejects a retained segment that cannot fit the 256 KiB response budget before
   issuing a response identity.
+- Source journal and repository receiver status persist cumulative generated, durable-ACK, and
+  apply segment/byte counters in the existing SQLite database. Counter writes share the enqueue,
+  ACK, and receiver checkpoint transactions; retries and restarts are idempotent. Read-only status
+  exposes the counters, attempt/failure categories, and progress timestamps for the fixed 300-second
+  10x calculation. Source and replication workers run bounded 5-second ticks; each source tick has
+  at most sixteen local four-segment working pages under the 1 MiB wire budget, while the remote
+  protocol retains its 256-segment/1 MiB page bound.
 - If the first consumed-generation retry recorded a non-permanent sequence gap, a later
   `history_truncated=true` response can prove that exact range is permanently expired. The receiver
   promotes only that previously observed range, accepts the anchor atomically, and continues the
@@ -343,7 +350,11 @@
 - Aggregate acceptance must bind the final integration SHA after all serialized Wave PRs land.
 - Production 101 summary repair still requires the merged release and a live observation proving the
   pending set drains to zero; the diagnostic path alone does not mark a repository ready.
-- Production recovery still requires signed next-generation apply and five minutes of stable Ready.
+- Production recovery still requires the signed consumed-generation checkpoint continuation and five
+  minutes of stable Ready; a consumed generation must never be re-armed.
+- Production delivery still requires two 300-second counter windows proving source-to-ACK and
+  repository-to-apply capacity at 10x the peak generated segment and byte rates. Queue depth alone
+  is not acceptance evidence.
 - Fixed retained-range deep verification under writes remains a delivery gate after CI and release.
 
 ## Recovery validation

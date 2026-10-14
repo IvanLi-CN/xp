@@ -39,7 +39,7 @@ fn ready_local_standby_drains_durable_backlog_and_retries_remote_primary() {
     drop(runtime);
     let mut runtime = RepositoryReplicaRuntime::load(storage.clone()).unwrap();
     for now in 200..203 {
-        let selected = super::super::avoid_local_source_fallback(
+        let selected = super::super::source_delivery::avoid_local_source_fallback(
             runtime.local_source_collector("remote", Some("local")),
             "remote",
             "local",

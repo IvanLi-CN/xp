@@ -85,6 +85,7 @@ pub(crate) async fn preserve_history_truncated(
 pub(crate) enum RepositoryDirectError {
     Transport(anyhow::Error),
     Application(anyhow::Error),
+    Unsupported(anyhow::Error),
     RepairResponseChanged,
 }
 
@@ -101,7 +102,9 @@ impl RepositoryDirectError {
 impl std::fmt::Display for RepositoryDirectError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Transport(error) | Self::Application(error) => error.fmt(formatter),
+            Self::Transport(error) | Self::Application(error) | Self::Unsupported(error) => {
+                error.fmt(formatter)
+            }
             Self::RepairResponseChanged => REPAIR_RESPONSE_CHANGED_MESSAGE.fmt(formatter),
         }
     }
@@ -255,6 +258,13 @@ async fn send_repository_request_on_path_body(
             .unwrap_or_else(|| String::from_utf8_lossy(&body).into_owned());
         if is_repair_response_changed_error(code, &detail) {
             return Err(RepositoryDirectError::RepairResponseChanged);
+        }
+        if path_and_query == "/api/admin/_internal/history-repository/sync-batch"
+            && matches!(status.as_u16(), 404 | 405 | 501)
+        {
+            return Err(RepositoryDirectError::Unsupported(anyhow::anyhow!(
+                "repository peer does not support sync batch with {status}: {detail}"
+            )));
         }
         return Err(RepositoryDirectError::Application(anyhow::anyhow!(
             "repository peer rejected request with {status}: {detail}"

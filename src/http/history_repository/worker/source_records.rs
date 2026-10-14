@@ -6,7 +6,7 @@ const MAX_PATH_HEALTH_SOURCE_PEERS: usize = 16;
 const MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER: usize = 1;
 
 pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::Result<()> {
-    const MAX_PAGES_PER_CYCLE: usize = 4;
+    const MAX_PAGES_PER_CYCLE: usize = 16;
     let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
     let (ready_repository_ids, peers) = match super::ready_repository_peers(state).await {
         Ok(value) => value,

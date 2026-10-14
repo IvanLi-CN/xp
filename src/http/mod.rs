@@ -38,25 +38,6 @@ mod resource_monitoring;
 mod stale_learner_retirement;
 mod status_events;
 mod unreachable_voter_eviction;
-use mesh::{
-    MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_mesh_health,
-    admin_internal_mesh_preflight, admin_internal_raft_client_write, admin_internal_reverse_probe,
-    admin_internal_reverse_relay, admin_run_mesh_probes, admin_update_mesh_config,
-    send_mesh_internal_capability_read, send_mesh_internal_read, send_mesh_internal_request,
-    send_mesh_internal_stream_read, spawn_mesh_probe_worker, spawn_reverse_assignment_worker,
-    spawn_reverse_link_probe_worker,
-};
-use node_delete::AdminNodeDeletePreviewEndpoint;
-use resource_alerts::admin_get_alerts_response;
-use resource_monitoring::{
-    admin_get_node_resources, admin_get_node_resources_history, admin_get_node_resources_recent,
-    admin_get_resource_policy, admin_internal_get_local_node_resources,
-    admin_internal_get_local_node_resources_history,
-    admin_internal_get_local_node_resources_recent, admin_list_nodes_resources,
-    admin_put_resource_policy,
-};
-use status_events::StatusEventsHub;
-
 use crate::{
     admin_token::{AdminTokenHash, AdminTokenVerifier, AdminTokenVerifyError},
     cloudflared_supervisor::CloudflaredHealthHandle,
@@ -133,6 +114,24 @@ use crate::{
     },
     xray_supervisor::{XrayHealthHandle, XrayStatus},
 };
+use mesh::{
+    MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_mesh_health,
+    admin_internal_mesh_preflight, admin_internal_raft_client_write, admin_internal_reverse_probe,
+    admin_internal_reverse_relay, admin_run_mesh_probes, admin_update_mesh_config,
+    send_mesh_internal_capability_read, send_mesh_internal_read, send_mesh_internal_request,
+    send_mesh_internal_stream_read, spawn_mesh_probe_worker, spawn_reverse_assignment_worker,
+    spawn_reverse_link_probe_worker,
+};
+use node_delete::AdminNodeDeletePreviewEndpoint;
+use resource_alerts::admin_get_alerts_response;
+use resource_monitoring::{
+    admin_get_node_resources, admin_get_node_resources_history, admin_get_node_resources_recent,
+    admin_get_resource_policy, admin_internal_get_local_node_resources,
+    admin_internal_get_local_node_resources_history,
+    admin_internal_get_local_node_resources_recent, admin_list_nodes_resources,
+    admin_put_resource_policy,
+};
+use status_events::StatusEventsHub;
 mod bounded_json;
 mod browser_cors;
 mod capabilities;
@@ -1133,6 +1132,10 @@ pub fn build_router_with_mesh_telemetry(
         .route(
             "/_internal/history-repository/sync",
             post(history_repository::admin_internal_receive_history_repository_segment),
+        )
+        .route(
+            "/_internal/history-repository/sync-batch",
+            post(history_repository::batch::admin_internal_receive_history_repository_batch),
         )
         .route(
             "/_internal/history-repository/sync-gaps",

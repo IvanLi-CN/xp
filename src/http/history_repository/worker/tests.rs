@@ -84,15 +84,30 @@ fn stale_ready_metadata_keeps_anti_entropy_incomplete() {
 #[test]
 fn local_source_fallback_retries_remote_primary() {
     assert_eq!(
-        super::avoid_local_source_fallback("local".to_owned(), "remote", "local", false),
+        super::source_delivery::avoid_local_source_fallback(
+            "local".to_owned(),
+            "remote",
+            "local",
+            false,
+        ),
         "remote"
     );
     assert_eq!(
-        super::avoid_local_source_fallback("remote".to_owned(), "remote", "local", false),
+        super::source_delivery::avoid_local_source_fallback(
+            "remote".to_owned(),
+            "remote",
+            "local",
+            false,
+        ),
         "remote"
     );
     assert_eq!(
-        super::avoid_local_source_fallback("local".to_owned(), "local", "local", true),
+        super::source_delivery::avoid_local_source_fallback(
+            "local".to_owned(),
+            "local",
+            "local",
+            true,
+        ),
         "local"
     );
 }

@@ -36,6 +36,25 @@ SQLite database, WAL and diagnostic file before any restart. Do not re-apply a c
 generation, delete source outbox rows, increase quota, create a second database, or run full
 `VACUUM` as a diagnostic shortcut.
 
+## Delivery throughput
+
+The read-only repository status also exposes durable `delivery_metrics`. The counters are cumulative
+and monotonic within `counter_epoch`: `generated_segments`/`generated_bytes` measure source enqueue,
+`acknowledged_segments`/`acknowledged_bytes` measure durable source ACK, and
+`applied_segments`/`applied_bytes` measure repository receiver commits. The status includes source
+attempts, successes, `transport_error`, `response_error`, `response_changed`,
+`explicit_unavailable`, and `storage_error` counters plus `last_attempt_at` and `last_progress_at`.
+Missing fields from an older peer are treated as zero and do not change v1 fallback behavior.
+
+Capture two signed public-HTTPS status samples exactly 300 seconds apart. Compute each stage as the
+counter delta divided by 300, in both segments/second and canonical bytes/second; compare against
+the highest sustained five-minute generated delta. Both source-to-ACK and repository-to-apply must
+be at least 10 times that generated rate before declaring convergence. Pending depth and ACK
+timestamps are diagnostic only and cannot prove the 10x gate. A 5-second source tick is bounded to
+sixteen local working pages of four segments; each page remains below the 1 MiB wire limit and
+remote protocol pages retain the 256-segment/1 MiB contract. A higher cadence does not permit
+unbounded memory, concurrency, or retry work.
+
 If a consumed-generation retry has already left an exact non-permanent sequence gap, the next
 repair response may promote that same range to `source_retention_expired` when the serving peer
 proves `history_truncated=true`; this is a continuation of the existing checkpoint and should

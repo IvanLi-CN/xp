@@ -221,13 +221,19 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   投递顺序的 SQLite 索引；除一次性旧库初始化外，不得扫描或反序列化整个 backlog，每轮最多读取 256 条，
   且 CPU、磁盘读取和进程内存成本不得随 backlog 条数或 payload 字节数增长。
 - `REQ-JOURNAL-REPAIR`: 旧库中缺少投递顺序元数据的 segment 必须通过 state row 的持久主键游标分页校正；
-  每个 60 秒 source cycle 最多提交一页 256 条，失败时游标不前进，重启从最后一次提交的位置继续。
+  每个 5 秒 source cycle 最多提交四页，每页最多 256 条且受 1 MiB wire budget 约束，
+  失败时游标不前进，重启从最后一次提交的位置继续。
 - `REQ-JOURNAL-PAUSE`: 状态查询不得隐式执行校正；校正期间继续持久化新 segment，但暂停发送 journal page，
   并以既有 `source_delivery.state=journal_order_repairing` 表示可恢复 backlog。不得新增 partial index。
 - `REQ-JOURNAL-ACK`: ACK 成功时间和实际投递路径必须与 journal 删除在同一持久化边界可观察；ACK 只可删除
   真实确认的 segment，未确认 payload、cursor 与 epoch high-water 不得被前推或改写。
 - `REQ-JOURNAL-COLLECTOR`: Collector 暂时不可达是正常输入，只形成可恢复 backlog，不得伪造成功或产生无界
   并发重试；Collector 恢复后必须按固定页继续投递并只删除有效 ACK 所列 segment。
+- `REQ-JOURNAL-THROUGHPUT`: source journal 必须在现有 SQLite `history.sqlite3` 中持久化单调
+  generated、durable ACK 和 repository apply 的段数/字节累计计数，以及尝试、成功、失败分类、最近尝试
+  和进度时间；enqueue、ACK、receiver checkpoint/watermark 必须与各自计数器在同一事务提交，旧 peer
+  缺少字段时按零值降级。连续两个只读 status 样本的 5 分钟窗口必须以 `delta(counter) / 300` 计算，
+  source→ACK 与 repository→apply 均同时满足段数和字节数至少为生成峰值的 10 倍后，才可宣称吞吐门禁通过。
 - `REQ-JOURNAL-GAP-ORDER`: source delivery 发送 pending segment 时，bounded gap page 必须优先包含
   该页首段直接前置的 permanent gap，再以持久化 gap cursor 填充剩余名额；页面仍最多 64 个 gap，
   不得推进 gap cursor、source cursor 或 ACK 边界之外的任何数据。这保证 gap 轮转不会长期阻塞
@@ -236,7 +242,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   设置该标记，接收方持久保守状态并保持受影响查询为 `partial`。旧 summary 缺少该字段时按 `false`
   兼容解析，不得据此宣称未知缺口已收敛。
 - `REQ-JOURNAL-RESOURCE`: 对至少 20,000 条或 128 MiB durable backlog，5 秒 CPU 采样 p95 不超过 9%，
-  每个 60 秒周期数据库读取不超过 4 MiB，RSS 增量不超过 2 MiB，且 Direct/Public 与集群控制面保持可用。
+  每个 5 秒周期数据库读取不超过 4 MiB，RSS 增量不超过 2 MiB，且 Direct/Public 与集群控制面保持可用。
 
 ### SHOULD
 

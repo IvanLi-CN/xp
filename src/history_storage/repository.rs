@@ -121,6 +121,9 @@ pub(crate) struct RepositoryReplicaMutation {
     pub(crate) records: Vec<RepositoryHistoryRecordRow>,
     pub(crate) tombstones: Vec<RepositoryHistoryTombstone>,
     pub(crate) segments: Vec<RepositoryHistorySegmentRow>,
+    /// Wire sizes are supplied only for newly received segments. Local migrations leave this
+    /// empty so they do not inflate repository delivery throughput counters.
+    pub(crate) applied_wire_segments: Vec<(String, u64)>,
 }
 
 fn sqlite_nullable_integer(value: rusqlite::types::ValueRef<'_>) -> Option<Option<i64>> {
@@ -311,8 +314,47 @@ impl HistoryStorage {
         for row in &mutation.records {
             upsert_repository_history_record(&transaction, row)?;
         }
+        let wire_bytes_by_id = mutation
+            .applied_wire_segments
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut applied_segments = 0_u64;
+        let mut applied_bytes = 0_u64;
         for row in &mutation.segments {
+            let was_present = transaction
+                .query_row(
+                    "SELECT 1 FROM repository_history_segments WHERE id = ?1",
+                    [&row.id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .is_some();
             upsert_repository_history_segment(&transaction, row)?;
+            if !was_present && wire_bytes_by_id.contains_key(&row.id) {
+                applied_segments = applied_segments.checked_add(1).ok_or_else(|| {
+                    HistoryStorageError("applied segment count overflow".to_owned())
+                })?;
+                let wire_bytes = wire_bytes_by_id[&row.id];
+                applied_bytes = applied_bytes
+                    .checked_add(wire_bytes)
+                    .ok_or_else(|| HistoryStorageError("applied byte count overflow".to_owned()))?;
+            }
+        }
+        if applied_segments > 0 {
+            let applied_at = mutation
+                .segments
+                .iter()
+                .filter(|row| wire_bytes_by_id.contains_key(&row.id))
+                .map(|row| row.closed_at_unix_seconds)
+                .max();
+            super::metrics::increment_applied(
+                &transaction,
+                applied_segments,
+                applied_bytes,
+                applied_at,
+            )?;
         }
         write_snapshot(&transaction, REPOSITORY_REPLICA_KEY, control_payload)?;
         transaction.commit().map_err(sqlite_error)?;

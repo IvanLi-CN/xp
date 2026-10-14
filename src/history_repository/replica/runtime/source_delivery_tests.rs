@@ -2,7 +2,6 @@ use super::super::StoredRecord;
 use super::*;
 
 include!("source_delivery_large_backlog_tests.rs");
-use crate::state::history_repository::replica::RepositoryReplicaSegment;
 use sha2::Sha256;
 
 #[test]
@@ -55,6 +54,12 @@ fn syncing_tombstone_receipt_is_deferred_until_repository_is_ready() {
         )
         .expect("ready collector replays tombstone acknowledgement");
     assert_eq!(ready_receipt.tombstone_acknowledgements().len(), 1);
+
+    let metrics = crate::state::history_repository::HistoryStorage::open(collector_dir.path())
+        .repository_delivery_metrics()
+        .expect("read repository apply metrics");
+    assert_eq!(metrics.applied_segments, 1);
+    assert_eq!(metrics.applied_bytes, queued[0].wire.len() as u64);
 }
 
 #[test]
@@ -144,122 +149,6 @@ fn source_journal_summary_keeps_only_the_oldest_wire() {
     assert_eq!(summary.pending_segments, rows.len());
     assert_eq!(summary.pending_bytes, expected_bytes);
     assert_eq!(summary.oldest.expect("oldest row").id, expected_oldest_id);
-}
-
-#[test]
-fn source_delivery_journal_state_tracks_upserts_and_ack_path() {
-    let temporary = tempfile::tempdir().expect("temporary directory");
-    let signing_key = SigningKey::from_bytes(&[11; 32]);
-    let source_identity = identity();
-    let mut runtime = load(temporary.path());
-    for sequence in 0..3_u64 {
-        runtime
-            .queue_local_source_segment(
-                "cluster-a",
-                source_identity.clone(),
-                &signing_key,
-                vec![SyncRecord::new(
-                    "node-a",
-                    "node-a",
-                    "runtime.v1",
-                    1,
-                    format!("runtime:{sequence}").into_bytes(),
-                    vec![u8::try_from(sequence + 1).unwrap(); 1024],
-                    false,
-                )],
-                sequence,
-            )
-            .expect("queue source segment");
-    }
-
-    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
-    let rows = storage.source_delivery_journal().expect("read journal");
-    let expected_bytes = rows.iter().map(|row| row.wire.len() as u64).sum::<u64>();
-    storage
-        .append_source_delivery_journal(&rows)
-        .expect("upsert journal rows");
-    let summary = storage
-        .source_delivery_journal_summary()
-        .expect("summarize upserted journal");
-    assert_eq!(summary.pending_segments, rows.len());
-    assert_eq!(summary.pending_bytes, expected_bytes);
-
-    runtime
-        .acknowledge_local_source_segment_via(&rows[0].wire, 200, "direct")
-        .expect("acknowledge journal row");
-    let summary = storage
-        .source_delivery_journal_summary()
-        .expect("summarize acknowledged journal");
-    assert_eq!(summary.pending_segments, rows.len() - 1);
-    assert_eq!(
-        summary.pending_bytes,
-        expected_bytes - rows[0].wire.len() as u64
-    );
-    assert_eq!(summary.last_acknowledged_at, Some(200));
-    assert_eq!(summary.last_delivery_path.as_deref(), Some("direct"));
-
-    storage
-        .acknowledge_source_delivery_journal(
-            &[hex::encode(Sha256::digest(&rows[0].wire))],
-            Some(300),
-            Some("dynamic_relay"),
-        )
-        .expect("repeat acknowledgement is idempotent");
-    let summary = storage
-        .source_delivery_journal_summary()
-        .expect("summarize repeated acknowledgement");
-    assert_eq!(summary.last_acknowledged_at, Some(200));
-    assert_eq!(summary.last_delivery_path.as_deref(), Some("direct"));
-}
-
-#[test]
-fn source_delivery_batch_ack_removes_page_in_one_checkpoint() {
-    let temporary = tempfile::tempdir().expect("temporary directory");
-    let signing_key = SigningKey::from_bytes(&[11; 32]);
-    let source_identity = identity();
-    let mut runtime = load(temporary.path());
-    for sequence in 0..3_u64 {
-        runtime
-            .queue_local_source_segment(
-                "cluster-a",
-                source_identity.clone(),
-                &signing_key,
-                vec![SyncRecord::new(
-                    "node-a",
-                    "node-a",
-                    "runtime.v1",
-                    1,
-                    format!("runtime:{sequence}").into_bytes(),
-                    b"sample".to_vec(),
-                    false,
-                )],
-                sequence,
-            )
-            .expect("queue source segment");
-    }
-
-    let rows = crate::state::history_repository::HistoryStorage::open(temporary.path())
-        .source_delivery_journal()
-        .expect("read journal");
-    let page = rows
-        .iter()
-        .map(|row| RepositoryReplicaSegment {
-            identity: row.identity.clone(),
-            wire: row.wire.clone(),
-        })
-        .collect::<Vec<_>>();
-    runtime
-        .acknowledge_local_source_segments_via(&page, 200, "direct")
-        .expect("acknowledge source page");
-
-    let summary = crate::state::history_repository::HistoryStorage::open(temporary.path())
-        .source_delivery_journal_summary()
-        .expect("summarize acknowledged page");
-    assert_eq!(summary.pending_segments, 0);
-    assert_eq!(summary.pending_bytes, 0);
-    assert_eq!(summary.last_acknowledged_at, Some(200));
-    assert_eq!(summary.last_delivery_path.as_deref(), Some("direct"));
-    assert!(runtime.local_source_pending_segments().is_empty());
 }
 
 #[test]

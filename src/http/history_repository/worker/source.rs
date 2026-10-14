@@ -148,6 +148,39 @@ pub(super) async fn receive_local_source_segment(
     Ok(())
 }
 
+pub(super) async fn receive_local_source_segments(
+    state: &AppState,
+    segments: &[RepositoryReplicaSegment],
+    gaps: &[RepositoryReplicaGap],
+    ready_repository_ids: &[String],
+    now: u64,
+) -> anyhow::Result<Vec<crate::state::history_repository::replica::RepositorySyncReceipt>> {
+    const MAX_LOCAL_BATCH_SEGMENTS: usize = 4;
+    const LOCAL_BATCH_YIELD: Duration = Duration::from_millis(500);
+    let batch_count = segments.len().div_ceil(MAX_LOCAL_BATCH_SEGMENTS);
+    let mut receipts = Vec::with_capacity(segments.len());
+    for (batch_index, batch) in segments.chunks(MAX_LOCAL_BATCH_SEGMENTS).enumerate() {
+        let batch_gaps = if batch_index == 0 { gaps } else { &[] };
+        let mut runtime = state.repository_replica.lock().await;
+        let batch_receipts = super::repository_blocking(|| {
+            runtime.receive_wire_batch_from_repository_with_gaps(
+                &state.cluster.cluster_id,
+                batch,
+                batch_gaps,
+                now,
+                ready_repository_ids,
+                &state.cluster.node_id,
+            )
+        })?;
+        drop(runtime);
+        receipts.extend(batch_receipts);
+        if batch_index + 1 < batch_count {
+            tokio::time::sleep(LOCAL_BATCH_YIELD).await;
+        }
+    }
+    Ok(receipts)
+}
+
 pub(super) fn source_record(
     schema_id: &str,
     node_id: &str,

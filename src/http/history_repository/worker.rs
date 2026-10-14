@@ -1,7 +1,5 @@
 use super::super::AppState;
-use super::{
-    RepositoryRepairRequest, RepositorySyncRequest, RepositoryTombstoneAcknowledgementRequest,
-};
+use super::{RepositoryRepairRequest, RepositoryTombstoneAcknowledgementRequest};
 use crate::{
     control_plane_mesh::MeshPeerTarget,
     history_sync::{CanonicalSegment, Cursor, RelayKeypair, SyncRecord},
@@ -12,9 +10,10 @@ use crate::{
         identity::RepositoryNodeId,
         replica::{
             ReplicaWork, RepositoryRepairBatch, RepositoryReplicaSummary, RepositoryRuntimeError,
-            RepositorySyncReceipt, RepositoryTombstoneAcknowledgement, rendezvous_collectors,
+            RepositoryTombstoneAcknowledgement, rendezvous_collectors,
         },
     },
+    state::history_storage::SourceDeliveryAttempt,
 };
 use axum::http::Method;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -24,8 +23,11 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     time::Duration,
 };
-const REPOSITORY_REPLICATION_INTERVAL: Duration = Duration::from_secs(5 * 60);
-const SOURCE_COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
+// Keep the scheduler bounded and frequent enough for the delivery SLO. Each tick still uses
+// the fixed page and wire budgets, so this increases service opportunities without unbounded
+// in-memory batching or concurrent retries.
+const REPOSITORY_REPLICATION_INTERVAL: Duration = Duration::from_secs(5);
+const SOURCE_COLLECTION_INTERVAL: Duration = Duration::from_secs(5);
 const REPOSITORY_REQUEST_BUDGET: Duration = Duration::from_secs(15);
 const MAX_REPOSITORY_PEERS_PER_CYCLE: usize = 4;
 const READY_STABILITY_WINDOW: Duration = Duration::from_secs(5 * 60);
@@ -40,6 +42,7 @@ mod ready_peers;
 mod repair;
 mod sequence_summary;
 mod source;
+mod source_delivery;
 mod source_records;
 #[cfg(test)]
 mod tests;
@@ -71,8 +74,8 @@ use repair::remove_unavailable_repair_segment_ids;
 #[cfg(test)]
 pub(super) use source::should_fanout_tombstone_acknowledgements;
 use source::{
-    receive_local_source_segment, repair_legacy_tombstone_metadata, source_record,
-    source_record_with_key, source_record_with_key_for_subject,
+    receive_local_source_segment, receive_local_source_segments, repair_legacy_tombstone_metadata,
+    source_record, source_record_with_key, source_record_with_key_for_subject,
 };
 use source_records::{SourceRecordBatch, source_records, source_records_with_deletions};
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
@@ -236,9 +239,11 @@ async fn publish_local_history_segment(
     now: u64,
     capture_live: bool,
 ) -> anyhow::Result<bool> {
-    // Keep the replay window small enough for the PSS budget while allowing a suspended
-    // backlog to make useful progress on every source cycle.
-    const MAX_SEGMENTS_PER_DELIVERY_PAGE: usize = 8;
+    // Keep the replay window within the one MiB wire budget while honoring the bounded
+    // 256-segment journal contract. The wire budget remains the hard memory boundary.
+    // Use a smaller working page than the protocol maximum so the replay path does not retain
+    // an entire 1 MiB wire page while a bounded SQLite mutation is committed.
+    const MAX_SEGMENTS_PER_DELIVERY_PAGE: usize = 4;
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let identity = super::derived_repository_identity(state, node_id)
         .map_err(|_| anyhow::anyhow!("derive local history source identity"))?;
@@ -386,7 +391,7 @@ async fn publish_local_history_segment(
             .lock()
             .await
             .local_source_collector(&primary_repository_id, assignment.standby());
-        let selected_repository_id = avoid_local_source_fallback(
+        let selected_repository_id = source_delivery::avoid_local_source_fallback(
             selected_repository_id,
             &primary_repository_id,
             &state.cluster.node_id,
@@ -419,8 +424,11 @@ async fn publish_local_history_segment(
         return Ok(false);
     }
     let mut delivery_succeeded = true;
+    let attempted_segments;
+    let mut delivery_outcome = "success";
     let mut tombstone_acknowledgements = Vec::new();
     let mut delivered_segments = Vec::new();
+    let mut delivered_local_segments = false;
     if segments.is_empty() {
         delivery_succeeded = if let Some(selected_peer) = selected_peer {
             super::gaps::deliver_source_gaps(state, selected_peer, identity.clone(), gaps.clone())
@@ -430,61 +438,52 @@ async fn publish_local_history_segment(
             true
         };
     }
-    for (index, segment) in segments.iter().enumerate() {
-        let segment_gaps = if index == 0 { gaps.as_slice() } else { &[] };
-        if selected_repository_id == state.cluster.node_id {
-            if let Err(error) = receive_local_source_segment(
-                state,
-                segment,
-                segment_gaps,
-                ready_repository_ids,
-                now,
-            )
+    if selected_repository_id == state.cluster.node_id {
+        attempted_segments = u64::try_from(segments.len()).unwrap_or(u64::MAX);
+        match receive_local_source_segments(state, &segments, &gaps, ready_repository_ids, now)
             .await
-            {
+        {
+            Ok(receipts) => {
+                for receipt in receipts {
+                    tombstone_acknowledgements
+                        .extend(receipt.tombstone_acknowledgements().iter().cloned());
+                }
+                // Keep the source page as the ACK view instead of cloning every wire a second
+                // time. Remote delivery still owns its partial-success list below.
+                delivered_local_segments = true;
+            }
+            Err(error) => {
                 delivery_succeeded = false;
+                delivery_outcome = "storage_error";
                 tracing::warn!(
                     repository = selected_repository_id,
                     error = %error,
-                    "local history source segment remains queued for retry"
+                    "local history source segments remain queued for retry"
                 );
-                break;
-            } else {
-                delivered_segments.push(segment.clone());
-            }
-        } else {
-            let body = serde_json::to_vec(&RepositorySyncRequest::with_wire(
-                segment.identity.clone(),
-                &segment.wire,
-                segment_gaps.to_vec(),
-            )?)?;
-            match repository_direct_request::<RepositorySyncReceipt>(
-                state,
-                selected_peer.expect("remote source delivery requires a peer"),
-                Method::POST,
-                "/api/admin/_internal/history-repository/sync",
-                body,
-            )
-            .await
-            {
-                Ok(receipt) => {
-                    tombstone_acknowledgements
-                        .extend(receipt.tombstone_acknowledgements().iter().cloned());
-                    delivered_segments.push(segment.clone());
-                }
-                Err(error) => {
-                    delivery_succeeded = false;
-                    tracing::debug!(
-                        repository = selected_repository_id,
-                        error = %error,
-                        "history source segment remains queued for retry"
-                    );
-                    break;
-                }
             }
         }
+    } else {
+        let peer = selected_peer.expect("remote source delivery requires a peer");
+        let remote_delivery = source_delivery::deliver_remote_source_segments(
+            state,
+            peer,
+            &selected_repository_id,
+            &segments,
+            &gaps,
+        )
+        .await?;
+        attempted_segments = remote_delivery.attempted_segments;
+        delivery_succeeded = remote_delivery.delivery_succeeded;
+        delivery_outcome = remote_delivery.delivery_outcome;
+        delivered_segments = remote_delivery.delivered_segments;
+        tombstone_acknowledgements = remote_delivery.tombstone_acknowledgements;
     }
-    if !delivered_segments.is_empty() {
+    let acknowledged_segments = if delivered_local_segments {
+        segments.as_slice()
+    } else {
+        delivered_segments.as_slice()
+    };
+    if !acknowledged_segments.is_empty() {
         let delivery_path = if selected_repository_id == state.cluster.node_id {
             "local"
         } else {
@@ -492,15 +491,32 @@ async fn publish_local_history_segment(
         };
         let mut runtime = state.repository_replica.lock().await;
         repository_blocking(|| {
-            runtime.acknowledge_local_source_segments_via_without_hydrating(
-                &delivered_segments,
+            runtime.acknowledge_local_source_segments_via_without_hydrating_with_metrics(
+                acknowledged_segments,
                 now,
                 delivery_path,
+                SourceDeliveryAttempt {
+                    now_unix_seconds: now,
+                    attempts: attempted_segments,
+                    successes: u64::try_from(acknowledged_segments.len()).unwrap_or(u64::MAX),
+                    outcome: delivery_outcome,
+                },
             )
         })?;
     }
+    if acknowledged_segments.is_empty() && attempted_segments > 0 {
+        let mut runtime = state.repository_replica.lock().await;
+        repository_blocking(|| {
+            runtime.record_local_source_delivery_attempt(SourceDeliveryAttempt {
+                now_unix_seconds: now,
+                attempts: attempted_segments,
+                successes: 0,
+                outcome: delivery_outcome,
+            })
+        })?;
+    }
     if (segments.is_empty() && delivery_succeeded && !gaps.is_empty())
-        || !delivered_segments.is_empty()
+        || !acknowledged_segments.is_empty()
     {
         let mut runtime = state.repository_replica.lock().await;
         repository_blocking(|| runtime.commit_local_source_gap_page(&gaps))?;
@@ -540,21 +556,6 @@ async fn publish_local_history_segment(
     Ok(delivery_succeeded)
 }
 
-fn avoid_local_source_fallback(
-    selected_repository_id: String,
-    primary_repository_id: &str,
-    local_repository_id: &str,
-    local_repository_ready: bool,
-) -> String {
-    if !local_repository_ready
-        && selected_repository_id == local_repository_id
-        && primary_repository_id != local_repository_id
-    {
-        primary_repository_id.to_owned()
-    } else {
-        selected_repository_id
-    }
-}
 async fn sync_local_repository_capacity(state: &AppState) -> anyhow::Result<()> {
     let mut runtime = state.repository_replica.lock().await;
     let capacity = repository_blocking(|| runtime.runtime_capacity())?;

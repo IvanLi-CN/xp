@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -34,6 +37,7 @@ use paths::PeerDirectPathState;
 use source::LocalSourceState;
 
 mod error;
+mod source_metrics;
 mod status;
 mod summary_repair;
 
@@ -465,6 +469,9 @@ pub(crate) struct RepositoryReplicaRuntime {
     receiver: Option<SegmentReceiver>,
     tombstones: TombstoneLedger,
     storage_degraded: bool,
+    delivery_metrics_cache: crate::state::history_storage::RepositoryDeliveryMetrics,
+    delivery_metrics_dirty: bool,
+    delivery_metrics_refreshed_at: Instant,
     #[cfg(test)]
     capacity_override: Option<(u64, u64)>,
 }
@@ -503,6 +510,10 @@ impl RepositoryReplicaRuntime {
             receiver,
             tombstones,
             storage_degraded: false,
+            delivery_metrics_cache:
+                crate::state::history_storage::RepositoryDeliveryMetrics::default(),
+            delivery_metrics_dirty: true,
+            delivery_metrics_refreshed_at: Instant::now(),
             #[cfg(test)]
             capacity_override: None,
         };
@@ -527,6 +538,7 @@ impl RepositoryReplicaRuntime {
             runtime.snapshot.partition_summaries_complete = true;
         }
         runtime.hydrate_source_delivery_journal()?;
+        runtime.refresh_delivery_metrics_cache()?;
         Ok(runtime)
     }
 
@@ -537,6 +549,10 @@ impl RepositoryReplicaRuntime {
             receiver: None,
             tombstones: TombstoneLedger::new(TOMBSTONE_HORIZON_SECONDS),
             storage_degraded: false,
+            delivery_metrics_cache:
+                crate::state::history_storage::RepositoryDeliveryMetrics::default(),
+            delivery_metrics_dirty: false,
+            delivery_metrics_refreshed_at: Instant::now(),
             #[cfg(test)]
             capacity_override: None,
         }
@@ -692,6 +708,7 @@ impl RepositoryReplicaRuntime {
             self.snapshot.capacity.filesystem_available_bytes(),
             caller_class,
         )?;
+        self.refresh_delivery_metrics_cache_if_due()?;
         let storage_mode = match self.storage.mode() {
             crate::state::history_storage::HistoryStorageMode::Unavailable => "unavailable",
             _ if self.storage_degraded => "sqlite_degraded",
@@ -724,6 +741,7 @@ impl RepositoryReplicaRuntime {
                 .snapshot
                 .last_dynamic_relay_attempt_unix_seconds,
             source_delivery,
+            delivery_metrics: self.delivery_metrics_cache,
             summary_repairs: self.snapshot.summary_repair_diagnostics.clone(),
         };
         diagnostic.finish();

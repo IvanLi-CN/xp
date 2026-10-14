@@ -385,7 +385,7 @@ impl RepositoryReplicaRuntime {
             .collect::<Vec<_>>();
         if !legacy_rows.is_empty() {
             self.storage
-                .append_source_delivery_journal(&legacy_rows)
+                .restore_source_delivery_journal(&legacy_rows)
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         }
         // Keep an unacknowledged replay page stable across failed delivery cycles. A new page is
