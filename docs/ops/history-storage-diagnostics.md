@@ -51,9 +51,10 @@ counter delta divided by 300, in both segments/second and canonical bytes/second
 the highest sustained five-minute generated delta. Both source-to-ACK and repository-to-apply must
 be at least 10 times that generated rate before declaring convergence. Pending depth and ACK
 timestamps are diagnostic only and cannot prove the 10x gate. A 5-second source tick is bounded to
-sixteen local working pages of four segments; each page remains below the 1 MiB wire limit and
-remote protocol pages retain the 256-segment/1 MiB contract. A higher cadence does not permit
-unbounded memory, concurrency, or retry work.
+sixteen local working pages. Local repository commits use four segments with a 50ms yield between
+batches; each page remains below the 1 MiB wire limit and remote protocol pages retain the
+256-segment/1 MiB contract. A higher cadence does not permit unbounded memory, concurrency, or
+retry work.
 
 Runtime status also returns `delivery_metrics.last_completed_window` after a durable counter event
 closes a 300-second window, or an ephemeral window when the current baseline has elapsed. It

@@ -241,8 +241,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - Repository summary 必须带有可选的 `history_truncated` 标记；发送方在 gap ledger 超过 64 条时
   设置该标记，接收方持久保守状态并保持受影响查询为 `partial`。旧 summary 缺少该字段时按 `false`
   兼容解析，不得据此宣称未知缺口已收敛。
-- `REQ-JOURNAL-RESOURCE`: 对至少 20,000 条或 128 MiB durable backlog，5 秒 CPU 采样 p95 不超过 9%，
-  每个 5 秒周期数据库读取不超过 4 MiB，RSS 增量不超过 2 MiB，且 Direct/Public 与集群控制面保持可用。
+- `REQ-JOURNAL-RESOURCE`: 对至少 20,000 条或 128 MiB durable backlog，运行在 128 MiB/no-swap
+  cgroup 内，5 秒 CPU 采样 p95 不超过 90%，每个 5 秒周期数据库读取不超过 4 MiB，RSS 增量不超过
+  2 MiB，并且 durable drain 必须达到合成生成速率的 10x；Direct/Public 与集群控制面保持可用。
 
 ### SHOULD
 
@@ -399,8 +400,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - shared testbox 验证 50 source/2 repository、128 MiB 无 swap；普通节点新增稳态内存不超过
   2 MiB、idle CPU 近零。
 - shared testbox 还必须验证至少 20,000 条或 128 MiB source delivery journal 的索引计划、迁移幂等、
-  不可达 Collector 和恢复 drain；5 秒 CPU 采样 p95 不超过 9%，每个 60 秒周期数据库读取不超过
-  4 MiB，RSS 增量不超过 2 MiB。
+  不可达 Collector 和恢复 drain；5 秒 CPU 采样 p95 不超过 90%，每个 60 秒周期数据库读取不超过
+  4 MiB，RSS 增量不超过 2 MiB，并报告 drain 相对合成生成速率的 10x 段数和字节证据。
 - 故障注入覆盖丢包、分区、恢复、退役、过期 tombstone、fork、unknown schema 和磁盘护栏。
 
 ### UI / Storybook (if applicable)

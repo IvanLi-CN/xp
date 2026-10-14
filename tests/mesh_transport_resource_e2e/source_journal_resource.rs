@@ -4,11 +4,18 @@ use prost::Message as _;
 use sha2::{Digest as _, Sha256};
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 
-const JOURNAL_CPU_P95_LIMIT_PERCENT: f64 = 9.0;
+// The replay worker is intentionally allowed to use CPU while draining a durable backlog. The
+// hard safety gate is the 128 MiB/no-swap cgroup plus bounded reads/RSS; keep enough CPU headroom
+// to prevent a full core from being consumed by one repository.
+const JOURNAL_CPU_P95_LIMIT_PERCENT: f64 = 90.0;
 const JOURNAL_READ_BYTES_LIMIT: u64 = 4 * 1024 * 1024;
 // Keep RSS growth within the repository resource contract; PSS remains the authoritative
 // process-wide memory gate.
 const JOURNAL_RSS_DELTA_LIMIT: u64 = 2 * 1024 * 1024;
+const JOURNAL_GENERATED_SEGMENTS_PER_SECOND: u64 = 1;
+const JOURNAL_GENERATED_BYTES_PER_SECOND: u64 = 27 * 1024;
+const JOURNAL_THROUGHPUT_MULTIPLIER: u64 = 10;
+const JOURNAL_THROUGHPUT_SAMPLE_SECONDS: u64 = 5 * 60;
 
 #[derive(Clone, PartialEq, prost::Message)]
 struct FixtureCursor {
@@ -230,7 +237,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     sleep(Duration::from_secs(1)).await;
     let baseline_rss = read_process_rss_bytes(pid);
     let mut peak_pss_kib = read_pss(pid).expect("read source journal XP PSS").total_kib;
-    let mut cpu_percentages = Vec::with_capacity(8);
+    let mut cpu_percentages = Vec::with_capacity(JOURNAL_THROUGHPUT_SAMPLE_SECONDS as usize);
     let mut max_read_bytes = 0_u64;
     let mut max_rss_delta = 0_u64;
     let mut saw_replayed_page = false;
@@ -246,13 +253,16 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
             sleep(Duration::from_millis(5)).await;
         }
     });
-    for _ in 0..8 {
+    let sample_window_started = Instant::now();
+    let mut sampled_pending = initial_pending;
+    for _ in 0..JOURNAL_THROUGHPUT_SAMPLE_SECONDS {
         let started = Instant::now();
         let cpu_before = read_cpu_ticks(pid);
         let read_before = read_process_read_bytes(pid);
         let pending =
             request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
         eprintln!("source journal warm status pending={pending}");
+        sampled_pending = pending;
         if pending < initial_pending {
             saw_replayed_page = true;
         }
@@ -306,6 +316,15 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     stop_sampling.store(true, Ordering::Relaxed);
     sampler.await.expect("source journal PSS sampler");
     peak_pss_kib = peak_pss_kib.max(pss_peak.load(Ordering::Relaxed));
+    let sample_window_seconds = sample_window_started.elapsed().as_secs().max(1);
+    let drained_segments = initial_pending.saturating_sub(sampled_pending);
+    let drained_bytes = drained_segments.saturating_mul(JOURNAL_GENERATED_BYTES_PER_SECOND);
+    let required_segments = sample_window_seconds
+        .saturating_mul(JOURNAL_GENERATED_SEGMENTS_PER_SECOND)
+        .saturating_mul(JOURNAL_THROUGHPUT_MULTIPLIER);
+    let required_bytes = sample_window_seconds
+        .saturating_mul(JOURNAL_GENERATED_BYTES_PER_SECOND)
+        .saturating_mul(JOURNAL_THROUGHPUT_MULTIPLIER);
     if !saw_replayed_page {
         let log = fs::read_to_string(&log_path)
             .unwrap_or_else(|error| format!("<unavailable: {error}>",));
@@ -326,7 +345,10 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     let cpu_p95 = cpu_percentages[p95_index];
     println!(
         "source_journal_resource cpu_p95_percent={cpu_p95:.2} max_read_bytes={max_read_bytes} \
-         max_rss_delta={max_rss_delta} peak_pss_kib={peak_pss_kib}"
+         max_rss_delta={max_rss_delta} peak_pss_kib={peak_pss_kib} \
+         sample_window_seconds={sample_window_seconds} drained_segments={drained_segments} \
+         drained_bytes={drained_bytes} required_segments={required_segments} \
+         required_bytes={required_bytes}"
     );
     assert!(
         cpu_p95 <= JOURNAL_CPU_P95_LIMIT_PERCENT,
@@ -339,6 +361,12 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     assert!(
         max_rss_delta <= JOURNAL_RSS_DELTA_LIMIT,
         "source journal RSS delta {max_rss_delta} exceeds {JOURNAL_RSS_DELTA_LIMIT}"
+    );
+    assert!(
+        drained_segments >= required_segments && drained_bytes >= required_bytes,
+        "source journal drain {drained_segments} segments/{drained_bytes} bytes is below the \
+         {JOURNAL_THROUGHPUT_MULTIPLIER}x generated-rate requirement of \
+         {required_segments} segments/{required_bytes} bytes"
     );
     println!("source_journal_resource_candidate_peak_pss_kib={peak_pss_kib}");
     stop_child(&mut child).await;

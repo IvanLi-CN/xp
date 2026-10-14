@@ -412,6 +412,47 @@ fn add_counter(transaction: &rusqlite::Transaction<'_>, column: &str, value: u64
     Ok(())
 }
 
+fn add_counter_pair(
+    transaction: &rusqlite::Transaction<'_>,
+    first_column: &str,
+    first_value: u64,
+    second_column: &str,
+    second_value: u64,
+) -> Result<()> {
+    if first_value == 0 && second_value == 0 {
+        return Ok(());
+    }
+    let first_value = i64::try_from(first_value).map_err(|_| {
+        HistoryStorageError(format!(
+            "delivery metric {first_column} exceeds SQLite integer"
+        ))
+    })?;
+    let second_value = i64::try_from(second_value).map_err(|_| {
+        HistoryStorageError(format!(
+            "delivery metric {second_column} exceeds SQLite integer"
+        ))
+    })?;
+    let updated = transaction
+        .execute(
+            &format!(
+                "UPDATE repository_delivery_metrics
+                 SET {first_column} = {first_column} + ?1,
+                     {second_column} = {second_column} + ?2
+                 WHERE singleton = 1
+                   AND {first_column} <= 9223372036854775807 - ?1
+                   AND {second_column} <= 9223372036854775807 - ?2"
+            ),
+            rusqlite::params![first_value, second_value],
+        )
+        .map_err(sqlite_error)?;
+    if updated != 1 {
+        return Err(HistoryStorageError(format!(
+            "delivery metric {first_column}/{second_column} exceeds SQLite integer"
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy)]
 struct DeliveryWindowState {
     generated_segments: u64,
@@ -420,7 +461,6 @@ struct DeliveryWindowState {
     acknowledged_bytes: u64,
     applied_segments: u64,
     applied_bytes: u64,
-    started_at: Option<u64>,
     generated_segments_at_start: u64,
     generated_bytes_at_start: u64,
     acknowledged_segments_at_start: u64,
@@ -449,10 +489,6 @@ fn read_counter_baseline(transaction: &rusqlite::Transaction<'_>) -> Result<Deli
                     acknowledged_bytes: checked_u64(row.get::<_, i64>(3)?, 3)?,
                     applied_segments: checked_u64(row.get::<_, i64>(4)?, 4)?,
                     applied_bytes: checked_u64(row.get::<_, i64>(5)?, 5)?,
-                    started_at: row
-                        .get::<_, Option<i64>>(6)?
-                        .map(|value| checked_u64(value, 6))
-                        .transpose()?,
                     generated_segments_at_start: row
                         .get::<_, Option<i64>>(7)?
                         .map(|value| checked_u64(value, 7))
@@ -532,8 +568,19 @@ fn rotate_window_if_elapsed(
     let Some(progress_at) = progress_at else {
         return Ok(());
     };
-    let state = read_counter_baseline(transaction)?;
-    let Some(window_started_at) = state.started_at else {
+    let window_started_at = transaction
+        .query_row(
+            "SELECT window_started_at
+             FROM repository_delivery_metrics WHERE singleton = 1",
+            [],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .map_err(sqlite_error)?
+        .map(|value| checked_u64(value, 0))
+        .transpose()
+        .map_err(sqlite_error)?;
+    let Some(window_started_at) = window_started_at else {
+        let state = read_counter_baseline(transaction)?;
         return set_window_baseline(
             transaction,
             progress_at,
@@ -548,6 +595,7 @@ fn rotate_window_if_elapsed(
     if progress_at < window_started_at.saturating_add(DELIVERY_RATE_WINDOW_SECONDS) {
         return Ok(());
     }
+    let state = read_counter_baseline(transaction)?;
     let window = RepositoryDeliveryWindow::from_deltas(
         window_started_at,
         window_started_at.saturating_add(DELIVERY_RATE_WINDOW_SECONDS),
@@ -617,8 +665,13 @@ pub(super) fn increment_generated(
     progress_at: Option<u64>,
 ) -> Result<()> {
     rotate_window_if_elapsed(transaction, progress_at)?;
-    add_counter(transaction, "generated_segments", segments)?;
-    add_counter(transaction, "generated_bytes", bytes)?;
+    add_counter_pair(
+        transaction,
+        "generated_segments",
+        segments,
+        "generated_bytes",
+        bytes,
+    )?;
     set_progress_at(transaction, progress_at)
 }
 
@@ -629,8 +682,13 @@ pub(super) fn increment_acknowledged(
     progress_at: Option<u64>,
 ) -> Result<()> {
     rotate_window_if_elapsed(transaction, progress_at)?;
-    add_counter(transaction, "acknowledged_segments", segments)?;
-    add_counter(transaction, "acknowledged_bytes", bytes)?;
+    add_counter_pair(
+        transaction,
+        "acknowledged_segments",
+        segments,
+        "acknowledged_bytes",
+        bytes,
+    )?;
     set_progress_at(transaction, progress_at)
 }
 
@@ -641,8 +699,13 @@ pub(super) fn increment_applied(
     progress_at: Option<u64>,
 ) -> Result<()> {
     rotate_window_if_elapsed(transaction, progress_at)?;
-    add_counter(transaction, "applied_segments", segments)?;
-    add_counter(transaction, "applied_bytes", bytes)?;
+    add_counter_pair(
+        transaction,
+        "applied_segments",
+        segments,
+        "applied_bytes",
+        bytes,
+    )?;
     set_progress_at(transaction, progress_at)
 }
 

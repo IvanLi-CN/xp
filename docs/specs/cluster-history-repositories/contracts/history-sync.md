@@ -204,8 +204,9 @@ updates commit their matching counters in the same SQLite transaction; retries a
 not double count. A 300-second sample window computes each stage as `delta(counter) / 300` in
 both segments and canonical bytes. Source-to-ACK and repository-to-apply must each reach 10 times
 the peak generated rate before a delivery convergence claim is valid. A 5-second source tick may
-run sixteen local bounded pages of four segments under the 1 MiB wire budget, while remote
-protocol pages remain capped at 256 segments and 1 MiB. It does not enable unbounded concurrency
+run sixteen local bounded pages; local receiver commits use four segments with a 50ms yield under
+the 1 MiB wire budget, while remote protocol pages remain capped at 256 segments and 1 MiB. It
+does not enable unbounded concurrency
 or alter sequence, retention, generation, gap, quota or public-HTTPS path rules.
 Runtime status also returns the last completed or elapsed window for each source/stream/target
 scope, so the 10x claim cannot be inferred from another stream's aggregate progress. Missing

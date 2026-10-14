@@ -45,10 +45,12 @@ The throughput target is a hard delivery gate:
    status surface and a deterministic red-capable test.
 
 The implementation keeps source and repository workers on bounded five-second
-ticks. A source tick drains at most sixteen four-segment working pages; every
-page remains below the one MiB wire budget and remote protocol pages retain
-the 256-segment/1 MiB contract. This bounds resident memory while batching
-local SQLite commits. Cadence does not permit unbounded concurrency, alter
+ticks. A source tick drains at most sixteen local working pages; local receiver
+commits use four segments with a 50ms yield between batches, while every page
+remains below the one MiB wire budget and remote protocol pages retain the
+256-segment/1 MiB contract. This bounds resident memory while removing the old
+500ms local cadence that prevented the apply stage from maintaining 10x
+headroom. Cadence does not permit unbounded concurrency, alter
 sequence ordering, or bypass the public HTTPS path. Enqueue, ACK and receiver
 checkpoint counters commit in the same SQLite transaction as their durable
 mutation.

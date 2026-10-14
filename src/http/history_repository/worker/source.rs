@@ -155,8 +155,10 @@ pub(super) async fn receive_local_source_segments(
     ready_repository_ids: &[String],
     now: u64,
 ) -> anyhow::Result<Vec<crate::state::history_repository::replica::RepositorySyncReceipt>> {
+    // Keep local apply bounded while avoiding the old four-segment/500ms cadence, which capped
+    // repository apply below the source's required ten-times headroom during backlog recovery.
     const MAX_LOCAL_BATCH_SEGMENTS: usize = 4;
-    const LOCAL_BATCH_YIELD: Duration = Duration::from_millis(500);
+    const LOCAL_BATCH_YIELD: Duration = Duration::from_millis(50);
     let batch_count = segments.len().div_ceil(MAX_LOCAL_BATCH_SEGMENTS);
     let mut receipts = Vec::with_capacity(segments.len());
     for (batch_index, batch) in segments.chunks(MAX_LOCAL_BATCH_SEGMENTS).enumerate() {

@@ -74,8 +74,8 @@
   exposes the counters, attempt/failure categories, progress timestamps, and durable or elapsed
   300-second windows for each source/stream/target scope used by the fixed 10x calculation. Source
   and replication workers run bounded 5-second ticks; each source tick has at most sixteen local
-  four-segment working pages under the 1 MiB wire budget, while the remote protocol retains its
-  256-segment/1 MiB page bound.
+  working pages under the 1 MiB wire budget, and local receiver commits use four segments with a
+  50ms yield. The remote protocol retains its 256-segment/1 MiB page bound.
 - If the first consumed-generation retry recorded a non-permanent sequence gap, a later
   `history_truncated=true` response can prove that exact range is permanently expired. The receiver
   promotes only that previously observed range, accepts the anchor atomically, and continues the

@@ -83,8 +83,9 @@
   repository-apply counters. Counters commit with their journal or receiver state, remain additive
   for old peers, and expose categorized transport, response, unavailable and storage failures.
   Source and repository workers use bounded 5-second scheduling. Local source delivery drains at
-  most sixteen four-segment working pages while remote protocol pages retain the 256-segment and
-  1 MiB wire limits. A 300-second sample must prove both delivery stages at 10x generated segment
+  most sixteen local working pages; local receiver commits use four segments with a 50ms yield
+  while remote protocol pages retain the 256-segment and 1 MiB wire limits. A 300-second sample
+  must prove both delivery stages at 10x generated segment
   and byte rates; pending depth alone is not a throughput claim.
 - Runtime status also exposes the completed or elapsed 300-second window for each source/stream/
   target scope, preventing aggregate progress from masking a starved target.
