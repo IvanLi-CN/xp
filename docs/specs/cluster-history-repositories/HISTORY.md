@@ -98,6 +98,8 @@
 - Source journal order repair now commits up to sixteen bounded pages per five-second source cycle,
   preserving the durable repair cursor and pausing delivery until the repair completes.
 - Original observation time, source identity and recovery generation remain unchanged.
+- Release readiness now fails closed without an exact-target Agent VM attestation recording the
+  300-second no-swap resource run, workload-log digest, and all four segment/byte 10x gates.
 
 ## Key Reasons / Replacements
 

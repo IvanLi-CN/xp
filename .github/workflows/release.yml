@@ -29,6 +29,10 @@ on:
         description: Short non-sensitive reason for the manual backfill
         required: true
         type: string
+      resource_evidence_json:
+        description: JSON Agent VM attestation for this exact target SHA
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -83,6 +87,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          XP_AGENT_VM_RESOURCE_EVIDENCE: ${{ inputs.resource_evidence_json || '' }}
         run: python3 .github/scripts/release_readiness.py
       - name: summary (release intent)
         if: always()

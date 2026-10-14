@@ -68,6 +68,15 @@ own completed or current 300-second window, so a busy stream or target cannot hi
 The status view is diagnostic; release acceptance still requires two signed samples and the
 real-node five-minute observation.
 
+The release workflow also requires an Agent VM resource attestation bound to the exact target SHA
+and workload-log SHA. The attestation must record a 300-second window, `MemoryMax=128M`,
+`MemorySwapMax=0`, and successful segment and canonical-byte 10x gates for both delivery stages.
+Missing, malformed, or SHA-mismatched evidence fails closed before release artifacts are published.
+The attestation fields are `schema=xp-history-throughput-v1`, `target_sha`, `log_sha`,
+`window_seconds=300`, `memory_limit_mib=128`, `swap_limit_mib=0`, and four boolean gates:
+`source_ack_meets_ten_x_segments`, `source_ack_meets_ten_x_bytes`,
+`repository_apply_meets_ten_x_segments`, and `repository_apply_meets_ten_x_bytes`.
+
 If a consumed-generation retry has already left an exact non-permanent sequence gap, the next
 repair response may promote that same range to `source_retention_expired` when the serving peer
 proves `history_truncated=true`; this is a continuation of the existing checkpoint and should

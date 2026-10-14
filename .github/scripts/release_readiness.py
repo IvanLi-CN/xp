@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -22,6 +23,8 @@ FAILURE_CONCLUSIONS = {
     "stale",
     "neutral",
 }
+
+RESOURCE_EVIDENCE_SCHEMA = "xp-history-throughput-v1"
 
 
 class ReadinessError(RuntimeError):
@@ -137,6 +140,38 @@ def evaluate(payload: Any, target_sha: str) -> tuple[str, str]:
     return "ready", "all_required_workflows_success"
 
 
+def validate_resource_evidence(raw: str | None, target_sha: str) -> str:
+    """Require an Agent VM attestation before any release artifact is published."""
+    if not raw:
+        raise ReadinessError("agent_vm_resource_evidence_missing")
+    try:
+        evidence = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ReadinessError("agent_vm_resource_evidence_invalid_json") from exc
+    if not isinstance(evidence, dict):
+        raise ReadinessError("agent_vm_resource_evidence_invalid_shape")
+    if evidence.get("schema") != RESOURCE_EVIDENCE_SCHEMA:
+        raise ReadinessError("agent_vm_resource_evidence_schema_mismatch")
+    if evidence.get("target_sha") != target_sha:
+        raise ReadinessError("agent_vm_resource_evidence_sha_mismatch")
+    log_sha = evidence.get("log_sha")
+    if not isinstance(log_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", log_sha):
+        raise ReadinessError("agent_vm_resource_evidence_log_sha_invalid")
+    if evidence.get("window_seconds") != 300:
+        raise ReadinessError("agent_vm_resource_evidence_window_invalid")
+    if evidence.get("memory_limit_mib") != 128 or evidence.get("swap_limit_mib") != 0:
+        raise ReadinessError("agent_vm_resource_evidence_resource_limit_invalid")
+    required_gates = (
+        "source_ack_meets_ten_x_segments",
+        "source_ack_meets_ten_x_bytes",
+        "repository_apply_meets_ten_x_segments",
+        "repository_apply_meets_ten_x_bytes",
+    )
+    if any(evidence.get(gate) is not True for gate in required_gates):
+        raise ReadinessError("agent_vm_resource_evidence_ten_x_gate_failed")
+    return f"agent_vm_resource_evidence_verified:{log_sha}"
+
+
 def load_payload(api: GitHubApi, repository: str, fixture: str | None) -> Any:
     if fixture:
         with open(fixture, encoding="utf-8") as handle:
@@ -153,10 +188,21 @@ def run() -> int:
     parser.add_argument("--api-root", default=os.environ.get("GITHUB_API_URL", "https://api.github.com"))
     parser.add_argument("--sha", default=os.environ.get("RELEASE_HEAD_SHA", ""))
     parser.add_argument("--fixture")
+    parser.add_argument(
+        "--resource-evidence",
+        default=os.environ.get("XP_AGENT_VM_RESOURCE_EVIDENCE", ""),
+        help="JSON attestation emitted from the Agent VM resource gate",
+    )
     args = parser.parse_args()
     if not args.sha or len(args.sha) != 40:
         print("release-readiness: invalid target SHA", file=sys.stderr)
         return 1
+    try:
+        resource_detail = validate_resource_evidence(args.resource_evidence, args.sha)
+    except ReadinessError as exc:
+        print(f"release-readiness: {exc}", file=sys.stderr)
+        return 1
+    print(f"release-readiness: {resource_detail}")
 
     timeout = max(0, int(os.environ.get("RELEASE_READINESS_TIMEOUT_SECONDS", "1800")))
     interval = max(1, int(os.environ.get("RELEASE_READINESS_POLL_SECONDS", "10")))

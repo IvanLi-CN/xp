@@ -358,12 +358,15 @@
   pending set drains to zero; the diagnostic path alone does not mark a repository ready.
 - Production recovery still requires the signed consumed-generation checkpoint continuation and five
   minutes of stable Ready; a consumed generation must never be re-armed.
-- Production delivery still requires two 300-second counter windows proving source-to-ACK and
-  repository-to-apply capacity at 10x the peak generated segment and byte rates. Queue depth alone
-  is not acceptance evidence.
+- Production delivery still requires a continuous 300-second counter window, bounded by two
+  read-only status samples, proving both source-to-ACK and repository-to-apply capacity at 10x the
+  peak generated segment and byte rates. Queue depth alone is not acceptance evidence.
 - The Agent VM runner must compile both the candidate binary and the resource workload with the
   `resource-fixture` feature so the bounded live enqueue fixture is exercised; a runtime
   environment variable alone is not sufficient to enable a Cargo feature.
+- Release readiness requires a JSON Agent VM attestation bound to the exact target SHA and log
+  digest. It must identify the 300-second window, 128 MiB/no-swap limits, and all four segment/
+  byte 10x gates; missing or mismatched evidence fails closed before artifact publication.
 - Fixed retained-range deep verification under writes remains a delivery gate after CI and release.
 
 ## Recovery validation

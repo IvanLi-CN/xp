@@ -46,6 +46,9 @@ The throughput target is a hard delivery gate:
 5. A release cannot pass the throughput gate until the counters, five-minute
    window calculation, and failure categories are observable through a read-only
    status surface and a deterministic red-capable test.
+6. Artifact publication additionally requires a JSON Agent VM attestation bound to the exact
+   release target SHA and workload-log digest. The release readiness check rejects missing,
+   malformed, or mismatched evidence before Web, image, or GitHub Release publication.
 
 The implementation keeps source and repository workers on bounded five-second
 ticks. A source tick drains at most sixteen local working pages; local receiver
