@@ -13,6 +13,12 @@ Preview follows URL history. Close returns to its opener; direct links close in 
 
 Brand assets use the build base. Correct Demo pages preserve live workers.
 
+Catalog factories own Demo user IDs and tokens; each model has an isolated sequence.
+
+Fixture rules accept only the exact catalog-derived Demo factory and reject external namespaces.
+
+Vitest resolves the same live Demo frame entry as the production build.
+
 ## Remaining Gaps
 
 Public deployment is out of scope; local evidence covers static deep links.

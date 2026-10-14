@@ -127,6 +127,20 @@ snapshots:
       start: 0
       end: 111
   ? |
+    function createUserIdFactory() {
+      let demoUserIndex = 0;
+      return (namespace?: "demo") => `${process.env.USER_PREFIX}-${++demoUserIndex}`;
+    }
+  : labels:
+    - source: |-
+        function createUserIdFactory() {
+          let demoUserIndex = 0;
+          return (namespace?: "demo") => `${process.env.USER_PREFIX}-${++demoUserIndex}`;
+        }
+      style: primary
+      start: 0
+      end: 141
+  ? |
     function injectedHost() {
       return "live.example";
     }

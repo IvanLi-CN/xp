@@ -26,6 +26,8 @@ adapter 均不得使用 `ast-grep-ignore`；新增操作型 fixture 值必须先
 
 ## Related Changes
 
+Demo 用户与 token 工厂使用 catalog 前缀及会话私有计数；规则精确校验实现和内部命名空间调用。回归覆盖默认序列、连续创建与重置，并拒绝环境前缀及请求命名空间。
+
 - `fixture-policy/`
 - `web/src/fixture-policy/catalog.ts`
 - `test-fixtures/`

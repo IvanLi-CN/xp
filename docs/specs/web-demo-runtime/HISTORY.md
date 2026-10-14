@@ -12,6 +12,8 @@ Owner clarification establishes opener-aware close and URL restoration on Back a
 
 Direct links close in place. Correctly served Demo pages preserve live workers.
 
+Demo identity generation remains catalog-owned and does not collide with seeded users.
+
 ## References
 
 - `./SPEC.md`

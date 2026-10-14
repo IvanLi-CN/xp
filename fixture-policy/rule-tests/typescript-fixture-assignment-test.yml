@@ -1,6 +1,8 @@
 id: fixture-policy-typescript-assignment-source
 valid:
   - |
+    user.subscription_token = state.nextSubscriptionToken(state.identityNamespace);
+  - |
     report.start_at = fixtureCatalog.timestamp.baseline();
   - |
     report.total_bytes = null;
@@ -9,6 +11,8 @@ valid:
   - |
     user.subscription_token = state.nextSubscriptionToken();
 invalid:
+  - |
+    user.subscription_token = state.nextSubscriptionToken(payload.namespace);
   - |
     report.start_at = "unapproved-timestamp";
   - |

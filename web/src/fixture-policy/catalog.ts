@@ -61,7 +61,12 @@ const fixtureHostLists = createListAccessors(
 
 function createSubscriptionTokenFactory() {
 	let subscriptionTokenIndex = 0;
-	return () => {
+	let demoTokenIndex = 0;
+	return (namespace?: "demo") => {
+		if (namespace === "demo") {
+			demoTokenIndex += 1;
+			return `${catalog.identifiers.tokenPrimary}-demo-${demoTokenIndex}`;
+		}
 		const token = catalog.subscription.tokens[subscriptionTokenIndex];
 		if (!token) {
 			throw new Error("synthetic subscription token catalog exhausted");
@@ -99,12 +104,17 @@ function createEndpointTagFactory() {
 
 function createUserIdFactory() {
 	let userIdIndex = 0;
+	let demoUserIndex = 0;
 	const userIds = [
 		catalog.identifiers.userTertiary,
 		catalog.identifiers.userQuaternary,
 		catalog.identifiers.userQuinary,
 	];
-	return () => {
+	return (namespace?: "demo") => {
+		if (namespace === "demo") {
+			demoUserIndex += 1;
+			return `${catalog.identifiers.userPrimary}-demo-${demoUserIndex}`;
+		}
 		const userId = userIds[userIdIndex];
 		if (!userId) {
 			throw new Error("synthetic user ID catalog exhausted");

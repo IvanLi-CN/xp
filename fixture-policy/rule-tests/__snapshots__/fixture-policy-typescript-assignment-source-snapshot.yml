@@ -150,3 +150,18 @@ snapshots:
       style: secondary
       start: 19
       end: 38
+  ? |
+    user.subscription_token = state.nextSubscriptionToken(payload.namespace);
+  : labels:
+    - source: user.subscription_token = state.nextSubscriptionToken(payload.namespace)
+      style: primary
+      start: 0
+      end: 72
+    - source: user.subscription_token
+      style: secondary
+      start: 0
+      end: 23
+    - source: state.nextSubscriptionToken(payload.namespace)
+      style: secondary
+      start: 26
+      end: 72

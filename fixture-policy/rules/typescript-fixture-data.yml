@@ -35,6 +35,7 @@ rule:
             - pattern: state.nextEndpointId()
             - pattern: state.nextEndpointTag()
             - pattern: state.nextSubscriptionToken()
+            - pattern: state.nextSubscriptionToken(state.identityNamespace)
             - pattern: state.nextUserId()
             - all:
                 - pattern: nextSubscriptionToken()

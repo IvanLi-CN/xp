@@ -90,6 +90,45 @@ rule:
                     };
                   }
               - pattern: |
+                  function createSubscriptionTokenFactory() {
+                    let subscriptionTokenIndex = 0;
+                    let demoTokenIndex = 0;
+                    return (namespace?: "demo") => {
+                      if (namespace === "demo") {
+                        demoTokenIndex += 1;
+                        return `${catalog.identifiers.tokenPrimary}-demo-${demoTokenIndex}`;
+                      }
+                      const token = catalog.subscription.tokens[subscriptionTokenIndex];
+                      if (!token) {
+                        throw new Error("synthetic subscription token catalog exhausted");
+                      }
+                      subscriptionTokenIndex += 1;
+                      return token;
+                    };
+                  }
+              - pattern: |
+                  function createUserIdFactory() {
+                    let userIdIndex = 0;
+                    let demoUserIndex = 0;
+                    const userIds = [
+                      catalog.identifiers.userTertiary,
+                      catalog.identifiers.userQuaternary,
+                      catalog.identifiers.userQuinary,
+                    ];
+                    return (namespace?: "demo") => {
+                      if (namespace === "demo") {
+                        demoUserIndex += 1;
+                        return `${catalog.identifiers.userPrimary}-demo-${demoUserIndex}`;
+                      }
+                      const userId = userIds[userIdIndex];
+                      if (!userId) {
+                        throw new Error("synthetic user ID catalog exhausted");
+                      }
+                      userIdIndex += 1;
+                      return userId;
+                    };
+                  }
+              - pattern: |
                   function nextMeshPeerNodeId() {
                     const nodeId = meshPeerNodeIds[meshPeerNodeIdIndex % meshPeerNodeIds.length];
                     meshPeerNodeIdIndex += 1;
@@ -110,7 +149,9 @@ rule:
         - has:
             field: parameters
             not:
-              pattern: ()
+              any:
+                - pattern: ()
+                - pattern: '(namespace?: "demo")'
         - not:
             inside:
               stopBy: end

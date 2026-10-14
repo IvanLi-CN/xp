@@ -65,12 +65,8 @@ export function createDemoApi(controls: DemoControls) {
 					}),
 		});
 	}
-	let sequence = 0;
 	const mock = createMockApi({
-		identityFactories: {
-			userId: () => `demo-created-user-${++sequence}`,
-			subscriptionToken: () => `demo-subscription-${++sequence}`,
-		},
+		identityNamespace: "demo",
 		failNodeRuntimeNodeIds:
 			controls.scene === "incident" ? [fixtureCatalog.nodeId.fixture36()] : [],
 		data: {
