@@ -1,10 +1,6 @@
 name: release
 
 on:
-  workflow_run:
-    workflows: [ci]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       head_sha:
@@ -29,8 +25,10 @@ on:
         description: Short non-sensitive reason for the manual backfill
         required: true
         type: string
-      resource_evidence_json:
-        description: JSON Agent VM attestation for this exact target SHA
+      resource_evidence_ref:
+        description: >-
+          Evidence commit SHA whose only parent is head_sha and which contains the Agent VM log
+          and attestation
         required: true
         type: string
 
@@ -42,21 +40,16 @@ permissions:
   pull-requests: read
 
 env:
-  RELEASE_HEAD_SHA: >-
-    ${{ github.event_name == 'workflow_dispatch' && inputs.head_sha ||
-    github.event.workflow_run.head_sha }}
+  RELEASE_HEAD_SHA: ${{ inputs.head_sha }}
 
 concurrency:
-  group: >-
-    release-${{ github.event_name == 'workflow_dispatch' && inputs.head_sha ||
-    github.event.workflow_run.head_sha }}
+  group: release-${{ inputs.head_sha }}
   cancel-in-progress: false
 
 jobs:
   prepare:
     if: >-
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push') || github.event_name == 'workflow_dispatch'
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       should_release: ${{ steps.intent.outputs.should_release }}
@@ -75,20 +68,46 @@ jobs:
         id: intent
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && 'manual' || 'auto' }}
+          RELEASE_MODE: manual
           WORKFLOW_RUN_SHA: ${{ env.RELEASE_HEAD_SHA }}
-          RELEASE_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_type || '' }}
-          RELEASE_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || '' }}
-          EXPECTED_VERSION: ${{ inputs.expected_version || '' }}
-          RELEASE_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.reason || '' }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          RELEASE_REASON: ${{ inputs.reason }}
         run: bash .github/scripts/release-intent.sh
+      - name: checkout Agent VM evidence commit
+        if: steps.intent.outputs.should_release == 'true'
+        env:
+          EVIDENCE_REF: ${{ inputs.resource_evidence_ref }}
+        run: |
+          set -euo pipefail
+          [[ "${EVIDENCE_REF}" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin "${EVIDENCE_REF}"
+          evidence_commit="$(git rev-parse "${EVIDENCE_REF}^{commit}")"
+          parents=( $(git rev-list --parents -n1 "${evidence_commit}") )
+          test "${#parents[@]}" -eq 2
+          test "${parents[1]}" = "${RELEASE_HEAD_SHA}"
+          mapfile -t evidence_paths < <(
+            git diff-tree --no-commit-id --name-only -r "${evidence_commit}"
+          )
+          test "${#evidence_paths[@]}" -eq 2
+          test "${evidence_paths[0]}" = "agent-vm-resource-evidence.json"
+          test "${evidence_paths[1]}" = "agent-vm-resource.log"
+          mkdir -p .release-evidence
+          git show \
+            "${evidence_commit}:agent-vm-resource-evidence.json" \
+            > .release-evidence/evidence.json
+          git show "${evidence_commit}:agent-vm-resource.log" > .release-evidence/workload.log
+          echo "${evidence_commit}" > .release-evidence/commit
       - name: verify target workflow readiness
         if: steps.intent.outputs.should_release == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          XP_AGENT_VM_RESOURCE_EVIDENCE: ${{ inputs.resource_evidence_json || '' }}
-        run: python3 .github/scripts/release_readiness.py
+        run: >-
+          python3 .github/scripts/release_readiness.py
+          --resource-evidence-file .release-evidence/evidence.json
+          --resource-log-file .release-evidence/workload.log
       - name: summary (release intent)
         if: always()
         run: |
@@ -110,9 +129,7 @@ jobs:
           IS_PRERELEASE: ${{ steps.intent.outputs.is_prerelease }}
         run: .github/scripts/compute-version.sh
       - name: verify expected backfill version
-        if: >-
-          steps.intent.outputs.should_release == 'true' &&
-          github.event_name == 'workflow_dispatch'
+        if: steps.intent.outputs.should_release == 'true'
         run: test "${{ steps.version.outputs.version }}" = "${{ inputs.expected_version }}"
       - name: prepare docker image tags
         id: image
@@ -163,8 +180,7 @@ jobs:
     uses: ./.github/workflows/release-build.yml
     with:
       target_sha: >-
-        ${{ github.event_name == 'workflow_dispatch' && inputs.head_sha ||
-        github.event.workflow_run.head_sha }}
+        ${{ inputs.head_sha }}
       build_version: ${{ needs.prepare.outputs.version }}
       artifact_prefix: release-${{ github.run_id }}
       cache_scope: release

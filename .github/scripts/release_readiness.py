@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import sys
 import time
@@ -172,6 +174,30 @@ def validate_resource_evidence(raw: str | None, target_sha: str) -> str:
     return f"agent_vm_resource_evidence_verified:{log_sha}"
 
 
+def validate_resource_evidence_files(
+    evidence_path: str | os.PathLike[str],
+    log_path: str | os.PathLike[str],
+    target_sha: str,
+) -> str:
+    """Validate the attestation and the immutable workload log it names."""
+    evidence_file = Path(evidence_path)
+    log_file = Path(log_path)
+    try:
+        raw = evidence_file.read_text(encoding="utf-8")
+        log_bytes = log_file.read_bytes()
+    except OSError as exc:
+        raise ReadinessError("agent_vm_resource_evidence_files_unreadable") from exc
+    detail = validate_resource_evidence(raw, target_sha)
+    evidence = json.loads(raw)
+    actual_log_sha = hashlib.sha256(log_bytes).hexdigest()
+    if evidence["log_sha"] != actual_log_sha:
+        raise ReadinessError("agent_vm_resource_evidence_log_sha_mismatch")
+    log_text = log_bytes.decode("utf-8", errors="replace")
+    if "test result: ok" not in log_text or "source_journal_resource" not in log_text:
+        raise ReadinessError("agent_vm_resource_evidence_log_incomplete")
+    return detail
+
+
 def load_payload(api: GitHubApi, repository: str, fixture: str | None) -> Any:
     if fixture:
         with open(fixture, encoding="utf-8") as handle:
@@ -188,17 +214,24 @@ def run() -> int:
     parser.add_argument("--api-root", default=os.environ.get("GITHUB_API_URL", "https://api.github.com"))
     parser.add_argument("--sha", default=os.environ.get("RELEASE_HEAD_SHA", ""))
     parser.add_argument("--fixture")
-    parser.add_argument(
-        "--resource-evidence",
-        default=os.environ.get("XP_AGENT_VM_RESOURCE_EVIDENCE", ""),
-        help="JSON attestation emitted from the Agent VM resource gate",
-    )
+    parser.add_argument("--resource-evidence")
+    parser.add_argument("--resource-evidence-file")
+    parser.add_argument("--resource-log-file")
     args = parser.parse_args()
     if not args.sha or len(args.sha) != 40:
         print("release-readiness: invalid target SHA", file=sys.stderr)
         return 1
     try:
-        resource_detail = validate_resource_evidence(args.resource_evidence, args.sha)
+        if args.resource_evidence_file or args.resource_log_file:
+            if not args.resource_evidence_file or not args.resource_log_file:
+                raise ReadinessError("agent_vm_resource_evidence_files_incomplete")
+            resource_detail = validate_resource_evidence_files(
+                args.resource_evidence_file,
+                args.resource_log_file,
+                args.sha,
+            )
+        else:
+            resource_detail = validate_resource_evidence(args.resource_evidence, args.sha)
     except ReadinessError as exc:
         print(f"release-readiness: {exc}", file=sys.stderr)
         return 1

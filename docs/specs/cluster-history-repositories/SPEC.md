@@ -395,7 +395,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   A release readiness check must receive a JSON attestation bound to the exact target SHA, the
   Agent VM log digest, the 300-second window, the 128 MiB/no-swap limits, and all four segment/byte
   10x results. Missing, malformed, or mismatched attestation fails closed before image, Web, or
-  GitHub Release publication; CI and release workflows cannot synthesize this evidence.
+  GitHub Release publication; CI and release workflows cannot synthesize this evidence. The
+  release workflow is owner-dispatched and accepts an evidence commit whose only parent is the
+  target commit and whose only paths are the attestation and the workload log; readiness
+  recomputes the log digest from those files.
 
 ## Resource and Quality Constraints
 

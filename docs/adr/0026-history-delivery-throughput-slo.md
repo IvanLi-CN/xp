@@ -47,8 +47,11 @@ The throughput target is a hard delivery gate:
    window calculation, and failure categories are observable through a read-only
    status surface and a deterministic red-capable test.
 6. Artifact publication additionally requires a JSON Agent VM attestation bound to the exact
-   release target SHA and workload-log digest. The release readiness check rejects missing,
-   malformed, or mismatched evidence before Web, image, or GitHub Release publication.
+   release target SHA and workload-log digest. The owner-dispatched release receives an evidence
+   commit whose only parent is the target and whose only paths are the attestation and workload
+   log; readiness recomputes the digest and rejects missing, malformed, or mismatched evidence
+   before Web, image, or GitHub Release publication. There is no automatic release path without
+   that auditable evidence reference.
 
 The implementation keeps source and repository workers on bounded five-second
 ticks. A source tick drains at most sixteen local working pages; local receiver

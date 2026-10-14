@@ -366,7 +366,9 @@
   environment variable alone is not sufficient to enable a Cargo feature.
 - Release readiness requires a JSON Agent VM attestation bound to the exact target SHA and log
   digest. It must identify the 300-second window, 128 MiB/no-swap limits, and all four segment/
-  byte 10x gates; missing or mismatched evidence fails closed before artifact publication.
+  byte 10x gates; missing or mismatched evidence fails closed before artifact publication. The
+  owner-dispatched release accepts an evidence commit with exactly the target as its only parent
+  and exactly the attestation plus workload log as its paths, then recomputes the log digest.
 - Fixed retained-range deep verification under writes remains a delivery gate after CI and release.
 
 ## Recovery validation

@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 sys.dont_write_bytecode = True
@@ -147,6 +149,17 @@ class ReadinessTests(unittest.TestCase):
         with self.assertRaises(readiness.ReadinessError):
             readiness.validate_resource_evidence(json.dumps(invalid), sha)
 
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_path = Path(directory) / "evidence.json"
+            log_path = Path(directory) / "workload.log"
+            log_path.write_text("source_journal_resource\ntest result: ok\n", encoding="utf-8")
+            valid["log_sha"] = hashlib.sha256(log_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(valid), encoding="utf-8")
+            self.assertIn(
+                "agent_vm_resource_evidence_verified",
+                readiness.validate_resource_evidence_files(evidence_path, log_path, sha),
+            )
+
     def test_missing_and_failed_runs_are_distinguished(self) -> None:
         sha = "c" * 40
         payload = {"workflow_runs": [
@@ -200,11 +213,20 @@ class ReadinessTests(unittest.TestCase):
 class WorkflowIntegrationTests(unittest.TestCase):
     def test_release_workflow_exposes_backfill_contract(self) -> None:
         workflow = (Path(__file__).parents[1] / "workflows" / "release.yml").read_text()
-        for input_name in ("head_sha", "release_type", "channel", "expected_version", "reason", "resource_evidence_json"):
+        for input_name in (
+            "head_sha",
+            "release_type",
+            "channel",
+            "expected_version",
+            "reason",
+            "resource_evidence_ref",
+        ):
             self.assertIn(f"      {input_name}:", workflow)
         self.assertIn("release_readiness.py", workflow)
-        self.assertIn("XP_AGENT_VM_RESOURCE_EVIDENCE", workflow)
-        self.assertIn("resource_evidence_json:\n        description:", workflow)
+        self.assertIn("agent-vm-resource-evidence.json", workflow)
+        self.assertIn("agent-vm-resource.log", workflow)
+        self.assertNotIn("workflow_run:", workflow)
+        self.assertIn("resource_evidence_ref:\n        description:", workflow)
         self.assertIn("        required: true\n        type: string", workflow)
         self.assertIn("verify expected backfill version", workflow)
         self.assertIn("uses: ./.github/workflows/release-build.yml", workflow)

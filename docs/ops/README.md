@@ -1293,13 +1293,15 @@ published only after the target SHA has successful `ci`, `fixture-policy`, and `
 on `main`.
 
 For a corrective release, an owner dispatches the `release` workflow with the exact merged `head_sha`,
-`release_type`, `channel`, `expected_version`, and a short non-sensitive `reason`. The workflow fails
-before tag creation if the target is not on `main`, the expected version does not match, or any
-required workflow is missing or unsuccessful. This is a Manual Backfill, not a replacement for the
-normal merge-time intent path. Stable releases publish `latest`; prereleases do not. If the target
-commit changes a workflow file, the Actions `GITHUB_TOKEN` cannot create its tag; an owner must first
-push the exact annotated tag with a credential that has workflow scope, after which the workflow's
-idempotent tag step reuses it.
+`release_type`, `channel`, `expected_version`, `reason`, and the SHA of an Agent VM evidence commit.
+That evidence commit must have the target as its only parent and contain only the attestation JSON
+and workload log. The workflow recomputes the log digest, then fails before tag creation if the
+target is not on `main`, the expected version does not match, evidence is malformed or mismatched,
+or any required workflow is missing or unsuccessful. This is an owner-dispatched Manual Backfill;
+there is no automatic release trigger without an auditable Agent VM evidence reference. Stable
+releases publish `latest`; prereleases do not. If the target commit changes a workflow file, the
+Actions `GITHUB_TOKEN` cannot create its tag; an owner must first push the exact annotated tag with a
+credential that has workflow scope, after which the workflow's idempotent tag step reuses it.
 
 ### CI and release performance acceptance
 

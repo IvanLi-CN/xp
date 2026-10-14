@@ -99,7 +99,9 @@
   preserving the durable repair cursor and pausing delivery until the repair completes.
 - Original observation time, source identity and recovery generation remain unchanged.
 - Release readiness now fails closed without an exact-target Agent VM attestation recording the
-  300-second no-swap resource run, workload-log digest, and all four segment/byte 10x gates.
+  300-second no-swap resource run, workload-log digest, and all four segment/byte 10x gates. The
+  owner-dispatched workflow verifies an evidence commit with the target as its only parent and
+  recomputes the digest from its two evidence files before publication.
 
 ## Key Reasons / Replacements
 
