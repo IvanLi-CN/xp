@@ -23,6 +23,10 @@ Normal E2E excludes standalone Demo cases. Demo E2E runs them against dist-demo.
 
 The Demo preferences case belongs to the Demo suite with its assertions preserved.
 
+The web-demo workflow builds Storybook and tests standalone Demo on PRs and main.
+
+The E2E server builds Demo once. Shared CI and its performance acceptance stay unchanged.
+
 ## Remaining Gaps
 
 Public deployment is out of scope; local evidence covers static deep links.

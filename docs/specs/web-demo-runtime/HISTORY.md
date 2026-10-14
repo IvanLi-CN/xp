@@ -16,6 +16,12 @@ Demo identity generation remains catalog-owned and does not collide with seeded 
 
 Standalone Demo E2E cases use the Demo server instead of the live development server.
 
+Owner-approved CI separation puts Demo and Storybook builds in web-demo and restores shared CI.
+
+The prior performance run failed the cold Rust and warm Web budgets; it is not a pass.
+
+Rust performance work remains a separate follow-up.
+
 ## References
 
 - `./SPEC.md`
