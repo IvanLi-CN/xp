@@ -360,6 +360,9 @@
 - Production delivery still requires two 300-second counter windows proving source-to-ACK and
   repository-to-apply capacity at 10x the peak generated segment and byte rates. Queue depth alone
   is not acceptance evidence.
+- The Agent VM runner must compile both the candidate binary and the resource workload with the
+  `resource-fixture` feature so the bounded live enqueue fixture is exercised; a runtime
+  environment variable alone is not sufficient to enable a Cargo feature.
 - Fixed retained-range deep verification under writes remains a delivery gate after CI and release.
 
 ## Recovery validation

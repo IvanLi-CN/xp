@@ -116,3 +116,6 @@ outbox rows, run full `VACUUM`, or use Mesh/Reverse Mesh for history traffic.
 The existing status API now has additive durable counters used to build a bounded
 rate view. Production evidence still requires a red-capable loop, Agent VM
 resource validation, and a fresh acceptance window before any convergence claim.
+The Agent VM resource runner compiles the candidate XP binary and resource workload
+with the `resource-fixture` feature; the workload's environment variable cannot
+enable that Cargo feature at runtime.
