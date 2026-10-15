@@ -1,6 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use super::{LocalSourceState, LocalSourceStreamState, RepositoryReplicaRuntime};
+use super::{
+    LocalSourceState, LocalSourceStreamState, RepositoryReplicaRuntime, StoredGap, StoredSegment,
+};
 use crate::history_sync::{CanonicalSegment, Cursor, SignedSegment, SyncRecord};
 use crate::state::history_repository::identity::{
     Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey,
@@ -313,6 +315,81 @@ fn local_source_delivery_bridges_an_existing_retention_gap_once() {
             && gap.last_sequence == 2
             && gap.reason.as_deref() == Some("source_retention_expired")
     }));
+}
+
+#[test]
+fn local_source_page_splits_when_retained_gap_evidence_reaches_the_limit() {
+    let temporary = tempfile::tempdir().expect("repository directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = RepositoryNodeIdentity::new(
+        RepositoryNodeId::try_from("node-a".to_owned()).expect("node id"),
+        Ed25519PublicKey::from_bytes(key.verifying_key().to_bytes()).expect("public key"),
+        X25519PublicKey::from_bytes([12; 32]).expect("relay key"),
+    )
+    .expect("identity");
+    let mut runtime = RepositoryReplicaRuntime::empty(
+        crate::state::history_repository::HistoryStorage::open(temporary.path()),
+    );
+    runtime.snapshot.local_source.epoch = 7;
+    runtime.snapshot.gaps = (0..65)
+        .map(|index| StoredGap {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: format!("retained-{index:02}"),
+            first_sequence: 0,
+            last_sequence: 0,
+            start_unix_seconds: 0,
+            end_unix_seconds: 1,
+            permanent: true,
+            reason: Some("source_retention_expired".to_owned()),
+        })
+        .collect();
+
+    for index in 0..65 {
+        let stream = format!("retained-{index:02}");
+        let signed = CanonicalSegment::new(
+            "cluster-a",
+            Cursor::new("node-a", 7, &stream, 1).expect("cursor"),
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                format!("retained-{index}").into_bytes(),
+                b"sample".to_vec(),
+                false,
+            )],
+            None,
+            1,
+            1,
+        )
+        .expect("segment")
+        .sign(&key)
+        .expect("signature");
+        let wire = signed.wire_bytes().expect("wire");
+        runtime.snapshot.local_source.streams.insert(
+            stream,
+            LocalSourceStreamState {
+                next_sequence: 2,
+                pending: VecDeque::from([StoredSegment {
+                    id: format!("retained-{index}"),
+                    closed_at_unix_seconds: 1,
+                    identity: source_identity.clone(),
+                    wire,
+                }]),
+                ..LocalSourceStreamState::default()
+            },
+        );
+    }
+
+    let page = runtime.local_source_pending_segments_page_with_budget(256, 1024 * 1024);
+    assert_eq!(page.len(), 64);
+    assert_eq!(
+        runtime
+            .local_source_gaps_for_segments("node-a", &page)
+            .len(),
+        64
+    );
 }
 
 #[test]

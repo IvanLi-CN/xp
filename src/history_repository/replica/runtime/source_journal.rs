@@ -7,6 +7,9 @@ use std::collections::BTreeSet;
 
 use super::*;
 
+const MAX_SOURCE_GAPS_PER_REQUEST: usize = 64;
+type LocalSourceGapIdentity = (String, u64, String, u64, u64, bool, Option<String>);
+
 #[path = "source_journal_ack.rs"]
 mod source_journal_ack;
 
@@ -82,7 +85,6 @@ impl RepositoryReplicaRuntime {
         source_node_id: &str,
         pending_segments: &[RepositoryReplicaSegment],
     ) -> Vec<RepositoryReplicaGap> {
-        const MAX_SOURCE_GAPS_PER_REQUEST: usize = 64;
         // A retained source stream may resume immediately after a durable retention gap. The
         // receiver needs that existing evidence on the first delivery page to advance its
         // chain once; otherwise ordinary source delivery rejects the signed anchor forever.
@@ -221,6 +223,50 @@ impl RepositoryReplicaRuntime {
             })
     }
 
+    fn local_source_gap_identities_for_segment(
+        &self,
+        segment: &RepositoryReplicaSegment,
+    ) -> Vec<LocalSourceGapIdentity> {
+        let Ok(signed) = SignedSegment::from_wire(&segment.wire) else {
+            return Vec::new();
+        };
+        let cursor = signed.canonical().first_cursor();
+        let mut identities = Vec::with_capacity(2);
+        if let Some(gap) = self.retained_anchor_gap_for_segment(cursor.source_node_id(), segment) {
+            identities.push((
+                gap.source_node_id,
+                gap.source_epoch,
+                gap.stream,
+                gap.first_sequence,
+                gap.last_sequence,
+                gap.permanent,
+                gap.reason,
+            ));
+        }
+        if let Some((key, gap)) =
+            self.snapshot
+                .local_source
+                .backpressure_gaps
+                .iter()
+                .find(|(key, gap)| {
+                    super::backpressure_gap_stream(key) == cursor.stream()
+                        && gap.source_epoch == cursor.source_epoch()
+                        && gap.last_sequence.checked_add(1) == Some(cursor.sequence())
+                })
+        {
+            identities.push((
+                cursor.source_node_id().to_owned(),
+                gap.source_epoch,
+                super::backpressure_gap_stream(key).to_owned(),
+                gap.first_sequence,
+                gap.last_sequence,
+                true,
+                None,
+            ));
+        }
+        identities
+    }
+
     pub(crate) fn commit_local_source_gap_page(
         &mut self,
         gaps: &[RepositoryReplicaGap],
@@ -295,6 +341,10 @@ impl RepositoryReplicaRuntime {
         let mut page = Vec::new();
         let mut wire_bytes = 0_usize;
         let mut offsets = vec![0_usize; ordered_streams.len()];
+        // Gap evidence is carried once on the first request. Stop before adding a segment that
+        // would require a 65th evidence entry, while retaining the larger page for ordinary
+        // segments that do not consume the gap budget.
+        let mut gap_identities = BTreeSet::new();
         loop {
             if page.len() == max_segments {
                 break;
@@ -308,12 +358,24 @@ impl RepositoryReplicaRuntime {
                 if next_wire_bytes > max_wire_bytes {
                     continue;
                 }
-                wire_bytes = next_wire_bytes;
-                offsets[index] += 1;
-                page.push(RepositoryReplicaSegment {
+                let candidate = RepositoryReplicaSegment {
                     identity: pending.identity.clone(),
                     wire: pending.wire.clone(),
-                });
+                };
+                let candidate_gap_identities =
+                    self.local_source_gap_identities_for_segment(&candidate);
+                let new_gap_count = candidate_gap_identities
+                    .iter()
+                    .filter(|identity| !gap_identities.contains(*identity))
+                    .count();
+                if gap_identities.len().saturating_add(new_gap_count) > MAX_SOURCE_GAPS_PER_REQUEST
+                {
+                    continue;
+                }
+                wire_bytes = next_wire_bytes;
+                offsets[index] += 1;
+                gap_identities.extend(candidate_gap_identities);
+                page.push(candidate);
                 added = true;
                 if page.len() == max_segments {
                     break;
