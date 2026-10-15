@@ -1,0 +1,12 @@
+{
+  "schema": "xp-history-throughput-v1",
+  "target_sha": "5c16d5e2551da7303b00e66cf974db2bd0d1234e",
+  "log_sha": "947d56a9d4d71ef5456c7b92ddb4e55f9adfe9f6322718605cd525612b6af312",
+  "window_seconds": 300,
+  "memory_limit_mib": 128,
+  "swap_limit_mib": 0,
+  "source_ack_meets_ten_x_segments": true,
+  "source_ack_meets_ten_x_bytes": true,
+  "repository_apply_meets_ten_x_segments": true,
+  "repository_apply_meets_ten_x_bytes": true
+}
