@@ -20,6 +20,10 @@ Ready lifecycle alone does not prove that source delivery or deep verification h
 - The final dirty-block page must publish completion without requiring an idle tick.
 - Accept deep checks only with `summary_version=3` and `partitions_included=true`.
 - Permanent gaps still require `partial` and `replica_converged=false`.
+- A repeated `HashChainMismatch` at the first segment after a retained source boundary indicates a
+  stale gap page. The fixed path carries the already durable adjacent `source_retention_expired`
+  gap once; do not re-apply a consumed generation, edit the gap ledger, delete the outbox, or relax
+  hash checks while diagnosing it.
 
 The read-only repository runtime status includes `summary_repairs`, keyed by peer node ID. Each
 entry
@@ -78,9 +82,20 @@ attestation must record a 300-second window,
 delivery stages. Missing, malformed, or SHA-mismatched evidence fails closed before release
 artifacts are published.
 The attestation fields are `schema=xp-history-throughput-v1`, `target_sha`, `log_sha`,
-`window_seconds=300`, `memory_limit_mib=128`, `swap_limit_mib=0`, and four boolean gates:
-`source_ack_meets_ten_x_segments`, `source_ack_meets_ten_x_bytes`,
-`repository_apply_meets_ten_x_segments`, and `repository_apply_meets_ten_x_bytes`.
+`window_seconds=300`, `memory_limit_mib=128`, `swap_limit_mib=0`, the observed
+`sample_window_seconds`, `generated_segments`, `generated_bytes`, `peak_generated_segments`,
+`peak_generated_bytes`, `acknowledged_segments`, `acknowledged_bytes`, `applied_segments`, and
+`applied_bytes`, plus four boolean gates: `source_ack_meets_ten_x_segments`,
+`source_ack_meets_ten_x_bytes`, `repository_apply_meets_ten_x_segments`, and
+`repository_apply_meets_ten_x_bytes`. Readiness compares every numeric field with the immutable
+workload log and recomputes the four gates from the observed peak-generated counters.
+
+The evidence log must explicitly pass both workloads:
+
+- `xp_source_delivery_journal_memory_e2e`
+- `xp_repository_summary_memory_e2e`
+
+Missing, ignored or failed workloads block publication. Any failed test result also blocks it.
 
 If a consumed-generation retry has already left an exact non-permanent sequence gap, the next
 repair response may promote that same range to `source_retention_expired` when the serving peer

@@ -62,7 +62,10 @@
   canonical payload revision is persisted in the control snapshot and marks predecessor v3
   blocks dirty once, so an upgrade cannot publish stale pre-normalization digests. Explicit v3
   query negotiation preserves the v1 path for older peers.
-  Retained verification with permanent gaps never sets complete-history convergence.
+  Retained verification with permanent gaps never sets complete-history convergence. Source pages
+  preserve tombstone-first ordering; retained-gap evidence for a later anchor is merged from the
+  first request before the ordered page applies, so the later matching segment can advance its
+  declared range without moving a tombstone ahead of the page.
 - Summary repair continuation persists per-peer diagnostics in the same control snapshot. Consumed
   generations resume their pending IDs without re-arming; transport, response-change,
   explicit-unavailable, no-progress and storage outcomes remain visible after restart. The serving
@@ -288,6 +291,15 @@
   whose end sequence immediately precedes a segment on that page, then fills the remaining slots
   from the persisted rotating gap cursor. This preserves the 64-gap bound and cursor ordering while
   preventing a pending segment from being rejected indefinitely behind gap-page rotation.
+  The predecessor may be an existing durable `source_retention_expired` gap rather than a local
+  backpressure gap. If a retained anchor is present later in a rotated page, the source keeps
+  tombstone-first ordering and puts the matching retained evidence on the first request; the
+  receiver merges it before applying the ordered page, then advances that declared range once at the
+  later matching anchor. It is included only when its source, epoch, stream and end sequence exactly
+  match a pending segment; retries remain idempotent and later segments stay hash-chain strict. The
+  source never creates or removes gap evidence as part of this delivery page.
+  Page construction stops before a 65th distinct retained or required backpressure gap evidence
+  entry; ordinary segments that consume no evidence continue to use the 256-segment bound.
   The receiver canonicalizes duplicate evidence for one source range, with permanent evidence taking
   precedence. When its 64-entry ledger is full, incoming permanent ranges come first, followed by
   existing permanent evidence, then incoming recoverable ranges and older recoverable evidence. This

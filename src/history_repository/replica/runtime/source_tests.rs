@@ -1,7 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use super::{LocalSourceState, LocalSourceStreamState, RepositoryReplicaRuntime};
-use crate::history_sync::{CanonicalSegment, Cursor, SyncRecord};
+use super::{
+    LocalSourceState, LocalSourceStreamState, RepositoryReplicaRuntime, StoredGap, StoredSegment,
+};
+use crate::history_sync::{CanonicalSegment, Cursor, SignedSegment, SyncRecord};
 use crate::state::history_repository::identity::{
     Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey,
 };
@@ -167,6 +169,226 @@ fn backpressure_gap_page_prioritizes_the_gap_before_the_pending_segment() {
     assert!(
         gaps.iter()
             .any(|gap| (gap.first_sequence, gap.last_sequence) == (120, 129))
+    );
+}
+
+#[test]
+fn local_source_delivery_bridges_an_existing_retention_gap_once() {
+    let temporary = tempfile::tempdir().expect("repository directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = RepositoryNodeIdentity::new(
+        RepositoryNodeId::try_from("node-a".to_owned()).expect("node id"),
+        Ed25519PublicKey::from_bytes(key.verifying_key().to_bytes()).expect("public key"),
+        X25519PublicKey::from_bytes([12; 32]).expect("relay key"),
+    )
+    .expect("identity");
+    let mut runtime = RepositoryReplicaRuntime::load(
+        crate::state::history_repository::HistoryStorage::open(temporary.path()),
+    )
+    .expect("runtime");
+
+    let first = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", 7, "runtime", 0).expect("cursor"),
+        vec![SyncRecord::new(
+            "node-a",
+            "node-a",
+            "runtime.v1",
+            1,
+            b"first".to_vec(),
+            b"sample".to_vec(),
+            false,
+        )],
+        None,
+        10,
+        11,
+    )
+    .expect("segment")
+    .sign(&key)
+    .expect("signature");
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &source_identity,
+            &first.wire_bytes().expect("wire"),
+            11,
+        )
+        .expect("seed receiver chain");
+    runtime
+        .merge_replica_gaps_in_memory(&[
+            crate::state::history_repository::replica::RepositoryReplicaGap {
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "runtime".to_owned(),
+                first_sequence: 1,
+                last_sequence: 2,
+                start_unix_seconds: 0,
+                end_unix_seconds: 12,
+                permanent: true,
+                reason: Some("source_retention_expired".to_owned()),
+            },
+        ])
+        .expect("retain source gap evidence");
+    runtime.snapshot.local_source.epoch = 7;
+    runtime.snapshot.local_source.streams.insert(
+        "runtime".to_owned(),
+        LocalSourceStreamState {
+            next_sequence: 3,
+            previous_segment_hash: Some([7; 32]),
+            ..LocalSourceStreamState::default()
+        },
+    );
+
+    runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity.clone(),
+            &key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"after-gap".to_vec(),
+                b"sample".to_vec(),
+                false,
+            )],
+            13,
+        )
+        .expect("queue source segment")
+        .expect("pending source segment");
+    runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity.clone(),
+            &key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"tombstone".to_vec(),
+                b"sample".to_vec(),
+                true,
+            )],
+            14,
+        )
+        .expect("queue tombstone source segment");
+    let page = runtime.local_source_pending_segments_page();
+    assert_eq!(page.len(), 2);
+    assert_eq!(
+        SignedSegment::from_wire(&page[0].wire)
+            .expect("decode first page segment")
+            .canonical()
+            .first_cursor()
+            .stream(),
+        "tombstone"
+    );
+    let gaps = runtime.local_source_gaps_for_segments("node-a", &page);
+    assert_eq!(gaps.len(), 1);
+    assert_eq!((gaps[0].first_sequence, gaps[0].last_sequence), (1, 2));
+    assert_eq!(gaps[0].reason.as_deref(), Some("source_retention_expired"));
+
+    runtime.snapshot.gaps[0].reason = Some("fork_detected".to_owned());
+    assert!(
+        runtime
+            .local_source_gaps_for_segments("node-a", &page)
+            .is_empty()
+    );
+    runtime.snapshot.gaps[0].reason = Some("source_retention_expired".to_owned());
+
+    let receipts = runtime
+        .receive_wire_batch_from_repository_with_gaps(
+            "cluster-a",
+            &page,
+            &gaps,
+            14,
+            &["local".to_owned()],
+            "local",
+        )
+        .expect("tombstone-first page preserves retained anchor evidence");
+    assert_eq!(receipts.len(), 2);
+    assert!(runtime.snapshot.gaps.iter().any(|gap| {
+        gap.source_node_id == "node-a"
+            && gap.stream == "runtime"
+            && gap.first_sequence == 1
+            && gap.last_sequence == 2
+            && gap.reason.as_deref() == Some("source_retention_expired")
+    }));
+}
+
+#[test]
+fn local_source_page_splits_when_retained_gap_evidence_reaches_the_limit() {
+    let temporary = tempfile::tempdir().expect("repository directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = RepositoryNodeIdentity::new(
+        RepositoryNodeId::try_from("node-a".to_owned()).expect("node id"),
+        Ed25519PublicKey::from_bytes(key.verifying_key().to_bytes()).expect("public key"),
+        X25519PublicKey::from_bytes([12; 32]).expect("relay key"),
+    )
+    .expect("identity");
+    let mut runtime = RepositoryReplicaRuntime::empty(
+        crate::state::history_repository::HistoryStorage::open(temporary.path()),
+    );
+    runtime.snapshot.local_source.epoch = 7;
+    runtime.snapshot.gaps = (0..65)
+        .map(|index| StoredGap {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: format!("retained-{index:02}"),
+            first_sequence: 0,
+            last_sequence: 0,
+            start_unix_seconds: 0,
+            end_unix_seconds: 1,
+            permanent: true,
+            reason: Some("source_retention_expired".to_owned()),
+        })
+        .collect();
+
+    for index in 0..65 {
+        let stream = format!("retained-{index:02}");
+        let signed = CanonicalSegment::new(
+            "cluster-a",
+            Cursor::new("node-a", 7, &stream, 1).expect("cursor"),
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                format!("retained-{index}").into_bytes(),
+                b"sample".to_vec(),
+                false,
+            )],
+            None,
+            1,
+            1,
+        )
+        .expect("segment")
+        .sign(&key)
+        .expect("signature");
+        let wire = signed.wire_bytes().expect("wire");
+        runtime.snapshot.local_source.streams.insert(
+            stream,
+            LocalSourceStreamState {
+                next_sequence: 2,
+                pending: VecDeque::from([StoredSegment {
+                    id: format!("retained-{index}"),
+                    closed_at_unix_seconds: 1,
+                    identity: source_identity.clone(),
+                    wire,
+                }]),
+                ..LocalSourceStreamState::default()
+            },
+        );
+    }
+
+    let page = runtime.local_source_pending_segments_page_with_budget(256, 1024 * 1024);
+    assert_eq!(page.len(), 64);
+    assert_eq!(
+        runtime
+            .local_source_gaps_for_segments("node-a", &page)
+            .len(),
+        64
     );
 }
 

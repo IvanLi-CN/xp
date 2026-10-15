@@ -7,6 +7,9 @@ use std::collections::BTreeSet;
 
 use super::*;
 
+const MAX_SOURCE_GAPS_PER_REQUEST: usize = 64;
+type LocalSourceGapIdentity = (String, u64, String, u64, u64, bool, Option<String>);
+
 #[path = "source_journal_ack.rs"]
 mod source_journal_ack;
 
@@ -82,7 +85,20 @@ impl RepositoryReplicaRuntime {
         source_node_id: &str,
         pending_segments: &[RepositoryReplicaSegment],
     ) -> Vec<RepositoryReplicaGap> {
-        const MAX_SOURCE_GAPS_PER_REQUEST: usize = 64;
+        // A retained source stream may resume immediately after a durable retention gap. The
+        // receiver needs that existing evidence on the first delivery page to advance its
+        // chain once; otherwise ordinary source delivery rejects the signed anchor forever.
+        let mut retained_anchor_gaps = Vec::new();
+        for segment in pending_segments {
+            let Some(gap) = self.retained_anchor_gap_for_segment(source_node_id, segment) else {
+                continue;
+            };
+            if retained_anchor_gaps.len() < MAX_SOURCE_GAPS_PER_REQUEST
+                && !retained_anchor_gaps.contains(&gap)
+            {
+                retained_anchor_gaps.push(gap);
+            }
+        }
         let keys = self
             .snapshot
             .local_source
@@ -92,7 +108,7 @@ impl RepositoryReplicaRuntime {
             .collect::<Vec<_>>();
         if keys.is_empty() {
             self.snapshot.local_source.backpressure_gap_cursor = None;
-            return Vec::new();
+            return retained_anchor_gaps;
         }
         // Keep the gap immediately before each pending segment in the bounded page so a receiver
         // can advance its signed chain without waiting for a full rotation of the gap cursor.
@@ -122,7 +138,10 @@ impl RepositoryReplicaRuntime {
             .as_ref()
             .and_then(|cursor| keys.iter().position(|key| key == cursor))
             .map_or(0, |index| (index + 1) % keys.len());
-        let page_len = keys.len().min(MAX_SOURCE_GAPS_PER_REQUEST);
+        let retained_gap_slots = retained_anchor_gaps.len().min(MAX_SOURCE_GAPS_PER_REQUEST);
+        let page_len = keys
+            .len()
+            .min(MAX_SOURCE_GAPS_PER_REQUEST.saturating_sub(retained_gap_slots));
         let mut selected_keys = Vec::with_capacity(page_len);
         // The worker attaches the gap page to its first segment only. Preserve that segment's
         // predecessor even when many later pending segments contribute lexicographically earlier
@@ -149,9 +168,9 @@ impl RepositoryReplicaRuntime {
                 selected_keys.push(key.clone());
             }
         }
-        selected_keys
+        retained_anchor_gaps
             .into_iter()
-            .filter_map(|key| {
+            .chain(selected_keys.into_iter().filter_map(|key| {
                 self.snapshot
                     .local_source
                     .backpressure_gaps
@@ -167,8 +186,85 @@ impl RepositoryReplicaRuntime {
                         permanent: true,
                         reason: None,
                     })
-            })
+            }))
             .collect()
+    }
+
+    fn retained_anchor_gap_for_segment(
+        &self,
+        source_node_id: &str,
+        segment: &RepositoryReplicaSegment,
+    ) -> Option<RepositoryReplicaGap> {
+        let signed = SignedSegment::from_wire(&segment.wire).ok()?;
+        let cursor = signed.canonical().first_cursor();
+        self.snapshot
+            .gaps
+            .iter()
+            .filter(|gap| {
+                gap.permanent
+                    && gap.reason.as_deref() == Some("source_retention_expired")
+                    && gap.source_node_id == source_node_id
+                    && gap.source_node_id == cursor.source_node_id()
+                    && gap.source_epoch == cursor.source_epoch()
+                    && gap.stream == cursor.stream()
+                    && gap.last_sequence.checked_add(1) == Some(cursor.sequence())
+            })
+            .max_by_key(|gap| (gap.first_sequence, gap.last_sequence))
+            .map(|gap| RepositoryReplicaGap {
+                source_node_id: gap.source_node_id.clone(),
+                source_epoch: gap.source_epoch,
+                stream: gap.stream.clone(),
+                first_sequence: gap.first_sequence,
+                last_sequence: gap.last_sequence,
+                start_unix_seconds: gap.start_unix_seconds,
+                end_unix_seconds: gap.end_unix_seconds,
+                permanent: gap.permanent,
+                reason: gap.reason.clone(),
+            })
+    }
+
+    fn local_source_gap_identities_for_segment(
+        &self,
+        segment: &RepositoryReplicaSegment,
+    ) -> Vec<LocalSourceGapIdentity> {
+        let Ok(signed) = SignedSegment::from_wire(&segment.wire) else {
+            return Vec::new();
+        };
+        let cursor = signed.canonical().first_cursor();
+        let mut identities = Vec::with_capacity(2);
+        if let Some(gap) = self.retained_anchor_gap_for_segment(cursor.source_node_id(), segment) {
+            identities.push((
+                gap.source_node_id,
+                gap.source_epoch,
+                gap.stream,
+                gap.first_sequence,
+                gap.last_sequence,
+                gap.permanent,
+                gap.reason,
+            ));
+        }
+        if let Some((key, gap)) =
+            self.snapshot
+                .local_source
+                .backpressure_gaps
+                .iter()
+                .find(|(key, gap)| {
+                    super::backpressure_gap_stream(key) == cursor.stream()
+                        && gap.source_epoch == cursor.source_epoch()
+                        && gap.last_sequence.checked_add(1) == Some(cursor.sequence())
+                })
+        {
+            identities.push((
+                cursor.source_node_id().to_owned(),
+                gap.source_epoch,
+                super::backpressure_gap_stream(key).to_owned(),
+                gap.first_sequence,
+                gap.last_sequence,
+                true,
+                None,
+            ));
+        }
+        identities
     }
 
     pub(crate) fn commit_local_source_gap_page(
@@ -245,6 +341,10 @@ impl RepositoryReplicaRuntime {
         let mut page = Vec::new();
         let mut wire_bytes = 0_usize;
         let mut offsets = vec![0_usize; ordered_streams.len()];
+        // Gap evidence is carried once on the first request. Stop before adding a segment that
+        // would require a 65th evidence entry, while retaining the larger page for ordinary
+        // segments that do not consume the gap budget.
+        let mut gap_identities = BTreeSet::new();
         loop {
             if page.len() == max_segments {
                 break;
@@ -258,12 +358,24 @@ impl RepositoryReplicaRuntime {
                 if next_wire_bytes > max_wire_bytes {
                     continue;
                 }
-                wire_bytes = next_wire_bytes;
-                offsets[index] += 1;
-                page.push(RepositoryReplicaSegment {
+                let candidate = RepositoryReplicaSegment {
                     identity: pending.identity.clone(),
                     wire: pending.wire.clone(),
-                });
+                };
+                let candidate_gap_identities =
+                    self.local_source_gap_identities_for_segment(&candidate);
+                let new_gap_count = candidate_gap_identities
+                    .iter()
+                    .filter(|identity| !gap_identities.contains(*identity))
+                    .count();
+                if gap_identities.len().saturating_add(new_gap_count) > MAX_SOURCE_GAPS_PER_REQUEST
+                {
+                    continue;
+                }
+                wire_bytes = next_wire_bytes;
+                offsets[index] += 1;
+                gap_identities.extend(candidate_gap_identities);
+                page.push(candidate);
                 added = true;
                 if page.len() == max_segments {
                     break;

@@ -195,6 +195,68 @@ def validate_resource_evidence_files(
     log_text = log_bytes.decode("utf-8", errors="replace")
     if "test result: ok" not in log_text or "source_journal_resource" not in log_text:
         raise ReadinessError("agent_vm_resource_evidence_log_incomplete")
+    if re.search(r"^test result: FAILED\b", log_text, re.MULTILINE) or re.search(
+        r"^test [^\n]+ \.\.\. FAILED\b", log_text, re.MULTILINE
+    ):
+        raise ReadinessError("agent_vm_resource_evidence_workload_failed")
+    for workload in (
+        "xp_source_delivery_journal_memory_e2e",
+        "xp_repository_summary_memory_e2e",
+    ):
+        if not re.search(
+            rf"^test {re.escape(workload)} \.\.\. ok$", log_text, re.MULTILINE
+        ):
+            raise ReadinessError(f"agent_vm_resource_evidence_workload_incomplete:{workload}")
+    metric_line = next(
+        (
+            line
+            for line in log_text.splitlines()
+            if line.startswith("source_journal_resource ")
+        ),
+        None,
+    )
+    if metric_line is None:
+        raise ReadinessError("agent_vm_resource_evidence_metrics_missing")
+    metric_fields = (
+        "sample_window_seconds",
+        "generated_segments",
+        "generated_bytes",
+        "peak_generated_segments",
+        "peak_generated_bytes",
+        "acknowledged_segments",
+        "acknowledged_bytes",
+        "applied_segments",
+        "applied_bytes",
+    )
+    metrics: dict[str, int] = {}
+    for field in metric_fields:
+        match = re.search(rf"(?:^|\s){re.escape(field)}=(\d+)(?:\s|$)", metric_line)
+        if match is None:
+            raise ReadinessError(f"agent_vm_resource_evidence_metric_missing:{field}")
+        value = int(match.group(1))
+        evidence_value = evidence.get(field)
+        if not isinstance(evidence_value, int) or isinstance(evidence_value, bool):
+            raise ReadinessError(f"agent_vm_resource_evidence_metric_invalid:{field}")
+        if evidence_value != value:
+            raise ReadinessError(f"agent_vm_resource_evidence_metric_mismatch:{field}")
+        metrics[field] = value
+    if metrics["sample_window_seconds"] < 300:
+        raise ReadinessError("agent_vm_resource_evidence_window_observed_invalid")
+    if metrics["peak_generated_segments"] == 0 or metrics["peak_generated_bytes"] == 0:
+        raise ReadinessError("agent_vm_resource_evidence_generation_missing")
+    computed_gates = {
+        "source_ack_meets_ten_x_segments": metrics["acknowledged_segments"]
+        >= metrics["peak_generated_segments"] * 10,
+        "source_ack_meets_ten_x_bytes": metrics["acknowledged_bytes"]
+        >= metrics["peak_generated_bytes"] * 10,
+        "repository_apply_meets_ten_x_segments": metrics["applied_segments"]
+        >= metrics["peak_generated_segments"] * 10,
+        "repository_apply_meets_ten_x_bytes": metrics["applied_bytes"]
+        >= metrics["peak_generated_bytes"] * 10,
+    }
+    for field, computed in computed_gates.items():
+        if evidence.get(field) is not computed:
+            raise ReadinessError(f"agent_vm_resource_evidence_gate_mismatch:{field}")
     return detail
 
 
