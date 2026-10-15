@@ -171,6 +171,109 @@ fn backpressure_gap_page_prioritizes_the_gap_before_the_pending_segment() {
 }
 
 #[test]
+fn local_source_delivery_bridges_an_existing_retention_gap_once() {
+    let temporary = tempfile::tempdir().expect("repository directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = RepositoryNodeIdentity::new(
+        RepositoryNodeId::try_from("node-a".to_owned()).expect("node id"),
+        Ed25519PublicKey::from_bytes(key.verifying_key().to_bytes()).expect("public key"),
+        X25519PublicKey::from_bytes([12; 32]).expect("relay key"),
+    )
+    .expect("identity");
+    let mut runtime = RepositoryReplicaRuntime::load(
+        crate::state::history_repository::HistoryStorage::open(temporary.path()),
+    )
+    .expect("runtime");
+
+    let first = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", 7, "runtime", 0).expect("cursor"),
+        vec![SyncRecord::new(
+            "node-a",
+            "node-a",
+            "runtime.v1",
+            1,
+            b"first".to_vec(),
+            b"sample".to_vec(),
+            false,
+        )],
+        None,
+        10,
+        11,
+    )
+    .expect("segment")
+    .sign(&key)
+    .expect("signature");
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &source_identity,
+            &first.wire_bytes().expect("wire"),
+            11,
+        )
+        .expect("seed receiver chain");
+    runtime
+        .merge_replica_gaps_in_memory(&[
+            crate::state::history_repository::replica::RepositoryReplicaGap {
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "runtime".to_owned(),
+                first_sequence: 1,
+                last_sequence: 2,
+                start_unix_seconds: 0,
+                end_unix_seconds: 12,
+                permanent: true,
+                reason: Some("source_retention_expired".to_owned()),
+            },
+        ])
+        .expect("retain source gap evidence");
+    runtime.snapshot.local_source.epoch = 7;
+    runtime.snapshot.local_source.streams.insert(
+        "runtime".to_owned(),
+        LocalSourceStreamState {
+            next_sequence: 3,
+            previous_segment_hash: Some([7; 32]),
+            ..LocalSourceStreamState::default()
+        },
+    );
+
+    let pending = runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity.clone(),
+            &key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"after-gap".to_vec(),
+                b"sample".to_vec(),
+                false,
+            )],
+            13,
+        )
+        .expect("queue source segment")
+        .expect("pending source segment");
+    let gaps = runtime.local_source_gaps_for_segments("node-a", std::slice::from_ref(&pending));
+    assert_eq!(gaps.len(), 1);
+    assert_eq!((gaps[0].first_sequence, gaps[0].last_sequence), (1, 2));
+    assert_eq!(gaps[0].reason.as_deref(), Some("source_retention_expired"));
+
+    runtime
+        .receive_wire_from_repository_with_gaps(
+            "cluster-a",
+            &source_identity,
+            &pending.wire,
+            &gaps,
+            14,
+            &["local".to_owned()],
+            "local",
+        )
+        .expect("retained anchor after the existing gap is accepted");
+}
+
+#[test]
 fn backpressure_gap_page_keeps_the_first_pending_predecessor_after_the_limit() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());

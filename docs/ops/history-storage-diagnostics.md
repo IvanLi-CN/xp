@@ -20,6 +20,10 @@ Ready lifecycle alone does not prove that source delivery or deep verification h
 - The final dirty-block page must publish completion without requiring an idle tick.
 - Accept deep checks only with `summary_version=3` and `partitions_included=true`.
 - Permanent gaps still require `partial` and `replica_converged=false`.
+- A repeated `HashChainMismatch` at the first segment after a retained source boundary indicates a
+  stale gap page. The fixed path carries the already durable adjacent `source_retention_expired`
+  gap once; do not re-apply a consumed generation, edit the gap ledger, delete the outbox, or relax
+  hash checks while diagnosing it.
 
 The read-only repository runtime status includes `summary_repairs`, keyed by peer node ID. Each
 entry

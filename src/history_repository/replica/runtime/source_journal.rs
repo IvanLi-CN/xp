@@ -83,6 +83,36 @@ impl RepositoryReplicaRuntime {
         pending_segments: &[RepositoryReplicaSegment],
     ) -> Vec<RepositoryReplicaGap> {
         const MAX_SOURCE_GAPS_PER_REQUEST: usize = 64;
+        // A retained source stream may resume immediately after a durable retention gap. The
+        // receiver needs that existing evidence on the first delivery page to advance its
+        // chain once; otherwise ordinary source delivery rejects the signed anchor forever.
+        let retained_anchor_gap = pending_segments.first().and_then(|segment| {
+            let signed = SignedSegment::from_wire(&segment.wire).ok()?;
+            let cursor = signed.canonical().first_cursor();
+            self.snapshot
+                .gaps
+                .iter()
+                .filter(|gap| {
+                    gap.permanent
+                        && gap.source_node_id == source_node_id
+                        && gap.source_node_id == cursor.source_node_id()
+                        && gap.source_epoch == cursor.source_epoch()
+                        && gap.stream == cursor.stream()
+                        && gap.last_sequence.checked_add(1) == Some(cursor.sequence())
+                })
+                .max_by_key(|gap| (gap.first_sequence, gap.last_sequence))
+                .map(|gap| RepositoryReplicaGap {
+                    source_node_id: gap.source_node_id.clone(),
+                    source_epoch: gap.source_epoch,
+                    stream: gap.stream.clone(),
+                    first_sequence: gap.first_sequence,
+                    last_sequence: gap.last_sequence,
+                    start_unix_seconds: gap.start_unix_seconds,
+                    end_unix_seconds: gap.end_unix_seconds,
+                    permanent: gap.permanent,
+                    reason: gap.reason.clone(),
+                })
+        });
         let keys = self
             .snapshot
             .local_source
@@ -92,7 +122,7 @@ impl RepositoryReplicaRuntime {
             .collect::<Vec<_>>();
         if keys.is_empty() {
             self.snapshot.local_source.backpressure_gap_cursor = None;
-            return Vec::new();
+            return retained_anchor_gap.into_iter().collect();
         }
         // Keep the gap immediately before each pending segment in the bounded page so a receiver
         // can advance its signed chain without waiting for a full rotation of the gap cursor.
@@ -122,7 +152,10 @@ impl RepositoryReplicaRuntime {
             .as_ref()
             .and_then(|cursor| keys.iter().position(|key| key == cursor))
             .map_or(0, |index| (index + 1) % keys.len());
-        let page_len = keys.len().min(MAX_SOURCE_GAPS_PER_REQUEST);
+        let retained_gap_slots = usize::from(retained_anchor_gap.is_some());
+        let page_len = keys
+            .len()
+            .min(MAX_SOURCE_GAPS_PER_REQUEST.saturating_sub(retained_gap_slots));
         let mut selected_keys = Vec::with_capacity(page_len);
         // The worker attaches the gap page to its first segment only. Preserve that segment's
         // predecessor even when many later pending segments contribute lexicographically earlier
@@ -149,9 +182,9 @@ impl RepositoryReplicaRuntime {
                 selected_keys.push(key.clone());
             }
         }
-        selected_keys
+        retained_anchor_gap
             .into_iter()
-            .filter_map(|key| {
+            .chain(selected_keys.into_iter().filter_map(|key| {
                 self.snapshot
                     .local_source
                     .backpressure_gaps
@@ -167,7 +200,7 @@ impl RepositoryReplicaRuntime {
                         permanent: true,
                         reason: None,
                     })
-            })
+            }))
             .collect()
     }
 

@@ -20,6 +20,9 @@
 - Follow-up 修复让同一 consumed checkpoint 在首次锚点尝试留下精确非永久 sequence gap 后，
   仅凭 source 的 `history_truncated=true` 封存该已观测范围并继续当前 pending page；未知或
   新范围仍 fail closed，不会重新 arm generation 或创建第二次 handoff。
+- 修复 source delivery 在已持久化 `source_retention_expired` 边界后的首段拒绝：首个待投递页可携带与
+  该 segment 精确相邻的既有永久 gap，接收端只跨越这一次已审计范围，后续页继续严格校验；不新增、删除
+  或改写 gap，不改变 source epoch、outbox、generation 或 `partial` 语义。
 - 后续生产观察发现保留窗口会在延迟重试期间继续前移。新增有界、独立摘要绑定的
   `retained_stream_boundaries`，只有源端声明的最小保留序号与首个返回 segment 精确相等时，
   consumed checkpoint 才能原地封存新证据范围；v1 `response_id` 和旧 peer fallback 保持不变。
