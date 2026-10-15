@@ -6,7 +6,7 @@ const MAX_PATH_HEALTH_SOURCE_PEERS: usize = 16;
 const MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER: usize = 1;
 
 pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::Result<()> {
-    const MAX_PAGES_PER_CYCLE: usize = 4;
+    const MAX_PAGES_PER_CYCLE: usize = 16;
     let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
     let (ready_repository_ids, peers) = match super::ready_repository_peers(state).await {
         Ok(value) => value,
@@ -222,6 +222,21 @@ pub(super) async fn source_records(
     ]
     .into_iter()
     .collect::<Result<Vec<_>, _>>()?;
+    #[cfg(feature = "resource-fixture")]
+    if let Some(payload_bytes) = std::env::var("XP_RESOURCE_FIXTURE_PAYLOAD_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0 && *value <= MAX_SOURCE_PAYLOAD_BYTES.saturating_sub(1024))
+    {
+        live_records.push(source_record_with_key(
+            "runtime.v1",
+            &state.cluster.node_id,
+            now,
+            format!("resource-fixture:{now}").into_bytes(),
+            serde_json::json!({"fixture": "x".repeat(payload_bytes)}),
+            false,
+        )?);
+    }
     if let Some(history) = history.as_ref() {
         for user_id in &history.user_traffic_users {
             live_records.push(source_record_with_key(

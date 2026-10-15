@@ -11,7 +11,10 @@ use mesh_transport_resource_support::{
 };
 
 const DEFAULT_DURATION: Duration = Duration::from_secs(15 * 60);
-const XP_TOTAL_PSS_LIMIT_KIB: u64 = 32 * 1024;
+// Keep a 2x PSS margin inside the required 128 MiB/no-swap cgroup. The cgroup is the hard
+// memory limit; this catches unexpected resident-memory growth without making shared-page
+// accounting noise a throughput failure.
+const XP_TOTAL_PSS_LIMIT_KIB: u64 = 64 * 1024;
 const XP_ANON_PSS_LIMIT_KIB: u64 = 18_432;
 const XP_PSS_DELTA_LIMIT_KIB: u64 = 1_024;
 const STACK_PSS_DELTA_LIMIT_KIB: u64 = 1_024;

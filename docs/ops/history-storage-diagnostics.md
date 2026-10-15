@@ -36,6 +36,52 @@ SQLite database, WAL and diagnostic file before any restart. Do not re-apply a c
 generation, delete source outbox rows, increase quota, create a second database, or run full
 `VACUUM` as a diagnostic shortcut.
 
+## Delivery throughput
+
+The read-only repository status also exposes durable `delivery_metrics`. The counters are cumulative
+and monotonic within `counter_epoch`: `generated_segments`/`generated_bytes` measure source enqueue,
+`acknowledged_segments`/`acknowledged_bytes` measure durable source ACK, and
+`applied_segments`/`applied_bytes` measure repository receiver commits. The status includes source
+`byte_counter_unit=canonical-v1`; these byte counters exclude the signature, while wire bytes remain
+the journal capacity and page-budget unit. The status includes source
+attempts, successes, `transport_error`, `response_error`, `response_changed`,
+`explicit_unavailable`, and `storage_error` counters plus `last_attempt_at` and `last_progress_at`.
+Missing fields from an older peer are treated as zero and do not change v1 fallback behavior.
+
+Capture two signed public-HTTPS status samples exactly 300 seconds apart. Compute each stage as the
+counter delta divided by 300, in both segments/second and canonical bytes/second; compare against
+the highest sustained five-minute generated delta, exposed as `peak_generated_segments` and
+`peak_generated_bytes` in the current counter epoch. Both source-to-ACK and repository-to-apply
+must be at least 10 times that generated rate before declaring convergence. Pending depth and ACK
+timestamps are diagnostic only and cannot prove the 10x gate. A 5-second source tick is bounded to
+sixteen local working pages. Local repository commits use four segments with a 50ms yield between
+batches; each page remains below the 1 MiB wire limit and remote protocol pages retain the
+256-segment/1 MiB contract. A higher cadence does not permit unbounded memory, concurrency, or
+retry work.
+
+Runtime status also returns `delivery_metrics.last_completed_window` after a durable counter event
+closes a 300-second window, or an ephemeral window when the current baseline has elapsed. It
+contains the window start/end, segment and byte deltas, milli-rates, stage-specific 10x booleans,
+and aggregate `meets_ten_x`. `delivery_scopes` separates cumulative generated, ACK and apply
+counters by source node, stream and registered target repository; each scope also exposes its
+own completed or current 300-second window, so a busy stream or target cannot hide a starved one.
+The status view is diagnostic; release acceptance still requires two signed samples and the
+real-node five-minute observation.
+
+The owner-dispatched release workflow also requires an Agent VM resource attestation bound to the
+exact target SHA and workload-log SHA. The attestation commit must have the target as its only
+parent and contain only the attestation and workload log; readiness recomputes the log SHA before
+publication and requires a GitHub-verified valid pinned repository-owner signature from the
+owner-triggered workflow. The release retains the evidence files and commit identity as assets. The
+attestation must record a 300-second window,
+`MemoryMax=128M`, `MemorySwapMax=0`, and successful segment and canonical-byte 10x gates for both
+delivery stages. Missing, malformed, or SHA-mismatched evidence fails closed before release
+artifacts are published.
+The attestation fields are `schema=xp-history-throughput-v1`, `target_sha`, `log_sha`,
+`window_seconds=300`, `memory_limit_mib=128`, `swap_limit_mib=0`, and four boolean gates:
+`source_ack_meets_ten_x_segments`, `source_ack_meets_ten_x_bytes`,
+`repository_apply_meets_ten_x_segments`, and `repository_apply_meets_ten_x_bytes`.
+
 If a consumed-generation retry has already left an exact non-permanent sequence gap, the next
 repair response may promote that same range to `source_retention_expired` when the serving peer
 proves `history_truncated=true`; this is a continuation of the existing checkpoint and should
@@ -53,7 +99,8 @@ The repair worker only uses the peer's registered public HTTPS `api_base_url`. A
 explicitly lists unavailable IDs may reduce `pending_count` and records `explicit_unavailable`; it
 does not alter permanent gap, `partial`, or `replica_converged=false` semantics. A segment that
 cannot fit the 256 KiB repair wire budget is reported as `storage_error` before any checkpoint or
-ACK change.
+ACK change. Legacy order repair also stops before the 1 MiB wire page budget and resumes from its
+durable cursor; malformed legacy rows do not contribute wire bytes to canonical ACK metrics.
 
 - The file is private (`0600`) and atomically replaced.
 - The serialized state is capped at 16 KiB and retains only the current in-flight operation, the

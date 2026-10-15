@@ -118,9 +118,16 @@ pub(crate) struct RepositoryCommitOutcome {
 /// accepted rows, a deleted payload, or an orphaned segment behind.
 #[derive(Debug, Default)]
 pub(crate) struct RepositoryReplicaMutation {
+    pub(crate) target_repository_id: String,
+    /// Wall-clock time of the receiver commit. Historical segment timestamps are only a
+    /// fallback for legacy callers; throughput windows must measure processing time.
+    pub(crate) progress_at_unix_seconds: Option<u64>,
     pub(crate) records: Vec<RepositoryHistoryRecordRow>,
     pub(crate) tombstones: Vec<RepositoryHistoryTombstone>,
     pub(crate) segments: Vec<RepositoryHistorySegmentRow>,
+    /// Canonical payload sizes are supplied only for newly received segments. Local migrations
+    /// leave this empty so they do not inflate repository delivery throughput counters.
+    pub(crate) applied_canonical_segments: Vec<(String, u64)>,
 }
 
 fn sqlite_nullable_integer(value: rusqlite::types::ValueRef<'_>) -> Option<Option<i64>> {
@@ -311,8 +318,66 @@ impl HistoryStorage {
         for row in &mutation.records {
             upsert_repository_history_record(&transaction, row)?;
         }
+        let canonical_bytes_by_id = mutation
+            .applied_canonical_segments
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut applied_segments = 0_u64;
+        let mut applied_bytes = 0_u64;
+        let mut scope_counts = std::collections::BTreeMap::<(String, String), (u64, u64)>::new();
         for row in &mutation.segments {
+            let was_present = transaction
+                .query_row(
+                    "SELECT 1 FROM repository_history_segments WHERE id = ?1",
+                    [&row.id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .is_some();
             upsert_repository_history_segment(&transaction, row)?;
+            if !was_present && canonical_bytes_by_id.contains_key(&row.id) {
+                applied_segments = applied_segments.checked_add(1).ok_or_else(|| {
+                    HistoryStorageError("applied segment count overflow".to_owned())
+                })?;
+                let canonical_bytes = canonical_bytes_by_id[&row.id];
+                applied_bytes = applied_bytes
+                    .checked_add(canonical_bytes)
+                    .ok_or_else(|| HistoryStorageError("applied byte count overflow".to_owned()))?;
+                let entry = scope_counts
+                    .entry((row.source_node_id.clone(), row.stream.clone()))
+                    .or_default();
+                entry.0 = entry.0.saturating_add(1);
+                entry.1 = entry.1.saturating_add(canonical_bytes);
+            }
+        }
+        if applied_segments > 0 {
+            let applied_at = mutation.progress_at_unix_seconds.or_else(|| {
+                mutation
+                    .segments
+                    .iter()
+                    .filter(|row| canonical_bytes_by_id.contains_key(&row.id))
+                    .map(|row| row.closed_at_unix_seconds)
+                    .max()
+            });
+            super::metrics::increment_applied(
+                &transaction,
+                applied_segments,
+                applied_bytes,
+                applied_at,
+            )?;
+            for ((source_node_id, stream), (segments, bytes)) in scope_counts {
+                super::metrics::increment_applied_scope(
+                    &transaction,
+                    &source_node_id,
+                    &stream,
+                    &mutation.target_repository_id,
+                    segments,
+                    bytes,
+                    applied_at,
+                )?;
+            }
         }
         write_snapshot(&transaction, REPOSITORY_REPLICA_KEY, control_payload)?;
         transaction.commit().map_err(sqlite_error)?;

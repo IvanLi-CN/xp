@@ -442,7 +442,11 @@ impl RepositoryReplicaRuntime {
             return Err(RepositoryRuntimeError::WriteStopped(availability));
         }
         let previous_snapshot = self.snapshot.clone();
-        let mut mutation = PendingRepositoryMutation::default();
+        let mut mutation = PendingRepositoryMutation {
+            target_repository_id: local_repository_id.to_owned(),
+            progress_at_unix_seconds: Some(now_unix_seconds),
+            ..PendingRepositoryMutation::default()
+        };
         for record in records {
             let observed_at_unix_seconds = record.observed_at_unix_seconds;
             let cursor = ReplicaCursor::new(

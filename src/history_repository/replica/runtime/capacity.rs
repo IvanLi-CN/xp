@@ -29,6 +29,18 @@ impl RepositoryReplicaRuntime {
         };
         if self.uses_sqlite_history() {
             mutation.segments.push(segment.sqlite_row()?);
+            let canonical_len = u64::try_from(
+                SignedSegment::from_wire(wire)
+                    .map_err(RepositoryRuntimeError::from)?
+                    .canonical()
+                    .canonical_bytes()
+                    .map_err(RepositoryRuntimeError::from)?
+                    .len(),
+            )
+            .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?;
+            mutation
+                .applied_canonical_segments
+                .push((segment.id.clone(), canonical_len));
             return Ok(());
         }
         if !self

@@ -3,6 +3,41 @@ use super::*;
 const PARTITION_SUMMARY_REBUILD_PAGE_SIZE: usize = 32;
 
 impl RepositoryReplicaRuntime {
+    const DELIVERY_METRICS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
+    pub(super) fn mark_delivery_metrics_dirty(&mut self) {
+        self.delivery_metrics_dirty = true;
+    }
+
+    pub(super) fn refresh_delivery_metrics_cache(
+        &mut self,
+        now_unix_seconds: Option<u64>,
+    ) -> Result<(), RepositoryRuntimeError> {
+        self.delivery_metrics_cache = if self.uses_sqlite_history() {
+            self.storage
+                .repository_delivery_metrics_at(now_unix_seconds)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+        } else {
+            crate::state::history_storage::RepositoryDeliveryMetrics::default()
+        };
+        self.delivery_metrics_dirty = false;
+        self.delivery_metrics_refreshed_at = Instant::now();
+        Ok(())
+    }
+
+    pub(super) fn refresh_delivery_metrics_cache_if_due(
+        &mut self,
+        now_unix_seconds: Option<u64>,
+    ) -> Result<(), RepositoryRuntimeError> {
+        if self.delivery_metrics_dirty
+            || self.delivery_metrics_refreshed_at.elapsed()
+                >= Self::DELIVERY_METRICS_REFRESH_INTERVAL
+        {
+            self.refresh_delivery_metrics_cache(now_unix_seconds)?;
+        }
+        Ok(())
+    }
+
     fn partition_summary_map(
         &self,
     ) -> BTreeMap<(String, u64, String, u32), super::RepositoryPartitionSummary> {
@@ -179,6 +214,8 @@ impl RepositoryReplicaRuntime {
             return Ok(());
         }
         let mutation = RepositoryReplicaMutation {
+            target_repository_id: "migration".to_owned(),
+            progress_at_unix_seconds: None,
             records: self
                 .snapshot
                 .records
@@ -192,6 +229,7 @@ impl RepositoryReplicaRuntime {
                 .iter()
                 .map(StoredSegment::sqlite_row)
                 .collect::<Result<Vec<_>, _>>()?,
+            applied_canonical_segments: Vec::new(),
         };
         let mut migrated_snapshot = self.snapshot.clone();
         migrated_snapshot.records.clear();
@@ -232,7 +270,10 @@ impl RepositoryReplicaRuntime {
         result: Result<T, E>,
     ) -> Result<T, RepositoryRuntimeError> {
         match result {
-            Ok(value) => Ok(value),
+            Ok(value) => {
+                self.mark_delivery_metrics_dirty();
+                Ok(value)
+            }
             Err(error) => {
                 let message = error.to_string();
                 if self.uses_sqlite_history() && message != "source delivery journal capacity guard"

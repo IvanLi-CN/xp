@@ -385,7 +385,7 @@ impl RepositoryReplicaRuntime {
             .collect::<Vec<_>>();
         if !legacy_rows.is_empty() {
             self.storage
-                .append_source_delivery_journal(&legacy_rows)
+                .restore_source_delivery_journal(&legacy_rows)
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         }
         // Keep an unacknowledged replay page stable across failed delivery cycles. A new page is
@@ -625,6 +625,27 @@ impl RepositoryReplicaRuntime {
         self.storage
             .repair_source_delivery_journal_order_page()
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+    }
+
+    pub(crate) fn repair_source_delivery_journal_order_pages(
+        &mut self,
+        max_pages: usize,
+    ) -> Result<SourceDeliveryJournalRepairProgress, RepositoryRuntimeError> {
+        let mut processed = 0_usize;
+        for _ in 0..max_pages.max(1) {
+            let progress = self.repair_source_delivery_journal_order_page()?;
+            processed = processed.saturating_add(progress.processed);
+            if progress.completed || progress.processed == 0 {
+                return Ok(SourceDeliveryJournalRepairProgress {
+                    processed,
+                    completed: progress.completed,
+                });
+            }
+        }
+        Ok(SourceDeliveryJournalRepairProgress {
+            processed,
+            completed: false,
+        })
     }
 
     pub(crate) fn persist_control_state_with_journal(

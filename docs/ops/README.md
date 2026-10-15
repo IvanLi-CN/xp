@@ -878,7 +878,7 @@ Notes:
   Malformed or regressing pages remain retryable failures and are never checkpointed.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
-  For ready peers, one 60-second lifecycle tick drains up to eight consecutive summary, repair, or
+  For ready peers, one 5-second source cycle drains up to sixteen consecutive summary, repair, or
   tiered export pages per peer within a shared 15-second maintenance budget. The remaining budget is
   split among peers in stable order so a slow peer cannot starve later peers. The summary cursor and
   pending repair IDs are persisted in the peer checkpoint so a restart cannot trigger an unbounded
@@ -1293,13 +1293,19 @@ published only after the target SHA has successful `ci`, `fixture-policy`, and `
 on `main`.
 
 For a corrective release, an owner dispatches the `release` workflow with the exact merged `head_sha`,
-`release_type`, `channel`, `expected_version`, and a short non-sensitive `reason`. The workflow fails
-before tag creation if the target is not on `main`, the expected version does not match, or any
-required workflow is missing or unsuccessful. This is a Manual Backfill, not a replacement for the
-normal merge-time intent path. Stable releases publish `latest`; prereleases do not. If the target
-commit changes a workflow file, the Actions `GITHUB_TOKEN` cannot create its tag; an owner must first
-push the exact annotated tag with a credential that has workflow scope, after which the workflow's
-idempotent tag step reuses it.
+`release_type`, `channel`, `expected_version`, `reason`, and the SHA of an Agent VM evidence commit.
+That evidence commit must have the target as its only parent and contain only the attestation JSON
+and workload log. The commit must also have a GitHub-verified valid signature by the repository
+owner. The workflow itself also requires the dispatch actor and re-run actor to be the repository
+owner, and verifies the pinned owner signing key with `git verify-commit`. It recomputes the log
+digest, publishes the evidence files and commit identity as release assets, then fails before tag
+creation if the target is not on `main`, the expected version does not match, evidence is malformed
+or mismatched, or any required workflow is missing or unsuccessful. This is an owner-dispatched
+Manual Backfill;
+there is no automatic release trigger without an auditable Agent VM evidence reference. Stable
+releases publish `latest`; prereleases do not. If the target commit changes a workflow file, the
+Actions `GITHUB_TOKEN` cannot create its tag; an owner must first push the exact annotated tag with a
+credential that has workflow scope, after which the workflow's idempotent tag step reuses it.
 
 ### CI and release performance acceptance
 

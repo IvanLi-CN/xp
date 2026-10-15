@@ -68,6 +68,17 @@
   explicit-unavailable, no-progress and storage outcomes remain visible after restart. The serving
   repair endpoint rejects a retained segment that cannot fit the 256 KiB response budget before
   issuing a response identity.
+- Source journal and repository receiver status persist cumulative generated, durable-ACK, and
+  apply segment/byte counters in the existing SQLite database. Counter writes share the enqueue,
+  ACK, and receiver checkpoint transactions; retries and restarts are idempotent. Read-only status
+  exposes the counters, attempt/failure categories, progress timestamps, and durable or elapsed
+  300-second windows for each source/stream/target scope used by the fixed 10x calculation. The
+  durable metric row also retains the highest completed five-minute generated segment and byte
+  deltas in the current counter epoch, so a quiet current window cannot lower the denominator.
+  Source
+  and replication workers run bounded 5-second ticks; each source tick has at most sixteen local
+  working pages under the 1 MiB wire budget, and local receiver commits use four segments with a
+  50ms yield. The remote protocol retains its 256-segment/1 MiB page bound.
 - If the first consumed-generation retry recorded a non-permanent sequence gap, a later
   `history_truncated=true` response can prove that exact range is permanently expired. The receiver
   promotes only that previously observed range, accepts the anchor atomically, and continues the
@@ -130,7 +141,7 @@
   for historical-source pages and the sender's canonical segment bytes for Ready-tiered pages. It
   validates each cursor family for length, format, forward progress and stable snapshot/export state
   before persisting a checkpoint; malformed or regressing pages remain retryable failures. For a
-  ready peer, each worker tick drains up to eight consecutive summary, repair, or tiered export
+  ready peer, each worker tick drains up to sixteen consecutive summary, repair, or tiered export
   pages per peer within a shared 15-second maintenance budget. The remaining budget is split among
   peers in stable order so a slow peer cannot starve later peers. The summary cursor and pending
   repair IDs are part of the durable peer checkpoint, so a restart resumes the same page instead of
@@ -154,11 +165,12 @@
 - Repository segment pages are ordered by tombstone phase and the signed source cursor, rather
   than by content hash. Existing databases persist `order_repair_cursor_id` and
   `order_repair_completed` in the source journal state row. A source collection cycle repairs at
-  most 256 rows by primary-key order, decoding `wire` only for rows whose source metadata is still
-  empty; the cursor, metadata and epoch high-water are committed together. A failed page leaves
-  the previous cursor intact and the next process resumes from it. Ordinary status, epoch and page
-  reads never start repair, and no partial index is created because its initial build would scan
-  the complete journal. While repair is incomplete, new signed rows are persisted but are not
+  most sixteen pages, each bounded to 256 rows and the 1 MiB wire budget, by primary-key order,
+  decoding `wire` only for rows whose source metadata is still empty; the cursor, metadata and
+  epoch high-water are committed together. A failed page leaves the previous cursor intact and
+  the next process resumes from it. Ordinary status, epoch and page reads never start repair, and
+  no partial index is created because its initial build would scan the complete journal. While
+  repair is incomplete, new signed rows are persisted but are not
   offered to a collector; status reports `journal_order_repairing` with the durable backlog count.
   The repair preserves each signed payload and does not rebuild the database or run a full
   `VACUUM`.
@@ -288,9 +300,10 @@
   Summary responses carry the additive `history_truncated` marker. A peer persists the marker when
   observed and keeps its affected queries partial; summaries from older peers omit it and decode as
   false.
-  The follow-up hk2 canary must observe ten consecutive 60-second source cycles with CPU at or
+  The follow-up hk2 canary must observe ten consecutive 300-second throughput windows with CPU at
   below the 10% node quota, bounded journal reads, and no loss of Direct/Public or control-plane
-  health. The shared resource test measures journal CPU/read/RSS bounds in isolation; the canary
+  health. The shared resource test measures journal CPU/read/RSS/PSS diagnostics in isolation
+  under the 128 MiB/no-swap cgroup; the canary
   is the evidence for listener and control-plane availability. Any failed window stops rollout
   and preserves the journal for rollback.
   The additive `repository_history_segments_sync_order_v2` index serves tombstone-priority
@@ -343,7 +356,21 @@
 - Aggregate acceptance must bind the final integration SHA after all serialized Wave PRs land.
 - Production 101 summary repair still requires the merged release and a live observation proving the
   pending set drains to zero; the diagnostic path alone does not mark a repository ready.
-- Production recovery still requires signed next-generation apply and five minutes of stable Ready.
+- Production recovery still requires the signed consumed-generation checkpoint continuation and five
+  minutes of stable Ready; a consumed generation must never be re-armed.
+- Production delivery still requires a continuous 300-second counter window, bounded by two
+  read-only status samples, proving both source-to-ACK and repository-to-apply capacity at 10x the
+  peak generated segment and byte rates. Queue depth alone is not acceptance evidence.
+- The Agent VM runner must compile both the candidate binary and the resource workload with the
+  `resource-fixture` feature so the bounded live enqueue fixture is exercised; a runtime
+  environment variable alone is not sufficient to enable a Cargo feature.
+- Release readiness requires a JSON Agent VM attestation bound to the exact target SHA and log
+  digest. It must identify the 300-second window, 128 MiB/no-swap limits, and all four segment/
+  byte 10x gates; missing or mismatched evidence fails closed before artifact publication. The
+  owner-dispatched release accepts an evidence commit with exactly the target as its only parent
+  and exactly the attestation plus workload log as its paths, then recomputes the log digest and
+  requires an owner-triggered workflow and a GitHub-verified valid signature from the pinned owner
+  signing key. The evidence files and commit identity are retained as release assets.
 - Fixed retained-range deep verification under writes remains a delivery gate after CI and release.
 
 ## Recovery validation

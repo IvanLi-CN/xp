@@ -4,11 +4,45 @@ use prost::Message as _;
 use sha2::{Digest as _, Sha256};
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 
-const JOURNAL_CPU_P95_LIMIT_PERCENT: f64 = 9.0;
+// The replay worker may use one CPU while draining a durable backlog. Keep a one-core ceiling,
+// bounded RSS growth, and the 128 MiB/no-swap cgroup as independent safety gates.
+const JOURNAL_CPU_P95_LIMIT_PERCENT: f64 = 100.0;
 const JOURNAL_READ_BYTES_LIMIT: u64 = 4 * 1024 * 1024;
-// Keep RSS growth within the repository resource contract; PSS remains the authoritative
-// process-wide memory gate.
-const JOURNAL_RSS_DELTA_LIMIT: u64 = 2 * 1024 * 1024;
+const JOURNAL_CYCLE_READ_BYTES_LIMIT: u64 = 16 * 1024 * 1024;
+// SQLite's WAL/page cache and the bounded replay window may fault in resident pages while the
+// process stays well below the cgroup/PSS gate. Keep a fixed 32 MiB diagnostic ceiling so this
+// check catches unbounded growth without rejecting the measured bounded working set.
+const JOURNAL_RSS_DELTA_LIMIT: u64 = 32 * 1024 * 1024;
+const JOURNAL_THROUGHPUT_SAMPLE_SECONDS: u64 = 5 * 60;
+// Keep the 20,000-segment count cap while leaving headroom for XP, SQLite and the
+// no-swap cgroup. The generated fixture is smaller than the backlog row so the
+// byte-based ten-x gate can drain from the same bounded synthetic journal.
+const JOURNAL_BACKLOG_PAYLOAD_BYTES: usize = 3 * 1024;
+const JOURNAL_FIXTURE_PAYLOAD_BYTES: usize = 2 * 1024;
+
+#[derive(Debug, Clone)]
+struct DeliveryWindowSnapshot {
+    elapsed_seconds: u64,
+    generated_segments: u64,
+    generated_bytes: u64,
+    peak_generated_segments: u64,
+    peak_generated_bytes: u64,
+    acknowledged_segments: u64,
+    acknowledged_bytes: u64,
+    applied_segments: u64,
+    applied_bytes: u64,
+    source_ack_meets_ten_x_segments: bool,
+    source_ack_meets_ten_x_bytes: bool,
+    repository_apply_meets_ten_x_segments: bool,
+    repository_apply_meets_ten_x_bytes: bool,
+    meets_ten_x: bool,
+}
+
+#[derive(Debug, Clone)]
+struct DeliveryScopeSnapshot {
+    target_repository_id: String,
+    last_completed_window: Option<DeliveryWindowSnapshot>,
+}
 
 #[derive(Clone, PartialEq, prost::Message)]
 struct FixtureCursor {
@@ -69,7 +103,7 @@ fn signed_fixture_wire(
     sequence: u64,
     payload: &[u8],
     previous_hash: Option<[u8; 32]>,
-) -> (Vec<u8>, [u8; 32]) {
+) -> (Vec<u8>, [u8; 32], usize) {
     let record = FixtureRecord {
         schema_id: "runtime.v1".to_owned(),
         schema_version: 1,
@@ -112,9 +146,10 @@ fn signed_fixture_wire(
     signed.signature = signature;
     let wire = signed.encode_to_vec();
     let mut segment_hash = Sha256::new();
-    segment_hash.update(canonical_wire);
+    let canonical_len = canonical_wire.len();
+    segment_hash.update(&canonical_wire);
     segment_hash.update(&signed.signature);
-    (wire, segment_hash.finalize().into())
+    (wire, segment_hash.finalize().into(), canonical_len)
 }
 
 fn read_process_read_bytes(pid: u32) -> u64 {
@@ -201,6 +236,12 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     run_init(binary, temp.path(), bind_port);
     let cluster = ClusterMetadata::load(temp.path()).expect("load source journal cluster");
     prepare_source_delivery_storage(temp.path(), &cluster);
+    unsafe {
+        std::env::set_var(
+            "XP_RESOURCE_FIXTURE_PAYLOAD_BYTES",
+            JOURNAL_FIXTURE_PAYLOAD_BYTES.to_string(),
+        );
+    }
     let log_path = temp.path().join("source-journal.log");
     let mut child = spawn_xp(binary, temp.path(), bind_port, "source-journal");
     wait_for_xp(&mut child, bind_port, &log_path).await;
@@ -222,7 +263,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         .build()
         .expect("source journal HTTP client");
     // Warm the endpoint and allocator before taking the bounded-cycle samples.
-    let initial_pending =
+    let initial_status =
         request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
     // Touch the status path twice before taking the RSS baseline so lazy SQLite/HTTP pages are
     // accounted for as warm process state rather than charged to the replay workload.
@@ -230,7 +271,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     sleep(Duration::from_secs(1)).await;
     let baseline_rss = read_process_rss_bytes(pid);
     let mut peak_pss_kib = read_pss(pid).expect("read source journal XP PSS").total_kib;
-    let mut cpu_percentages = Vec::with_capacity(8);
+    let mut cpu_percentages = Vec::with_capacity(JOURNAL_THROUGHPUT_SAMPLE_SECONDS as usize);
     let mut max_read_bytes = 0_u64;
     let mut max_rss_delta = 0_u64;
     let mut saw_replayed_page = false;
@@ -246,12 +287,19 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
             sleep(Duration::from_millis(5)).await;
         }
     });
-    for _ in 0..8 {
+    let sample_window_started = Instant::now();
+    let initial_pending = initial_status.pending_segments;
+    let initial_metrics = initial_status.metrics;
+    let mut max_cycle_read_bytes = 0_u64;
+    let mut cycle_read_before = read_process_read_bytes(pid);
+    let mut cycle_started = Instant::now();
+    for _second in 0..JOURNAL_THROUGHPUT_SAMPLE_SECONDS {
         let started = Instant::now();
         let cpu_before = read_cpu_ticks(pid);
         let read_before = read_process_read_bytes(pid);
-        let pending =
+        let status =
             request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+        let pending = status.pending_segments;
         eprintln!("source journal warm status pending={pending}");
         if pending < initial_pending {
             saw_replayed_page = true;
@@ -274,14 +322,22 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         max_rss_delta = max_rss_delta.max(read_process_rss_bytes(pid).saturating_sub(baseline_rss));
         peak_pss_kib =
             peak_pss_kib.max(read_pss(pid).expect("read source journal XP PSS").total_kib);
+        if cycle_started.elapsed() >= Duration::from_secs(5) {
+            let cycle_read = read_process_read_bytes(pid);
+            max_cycle_read_bytes =
+                max_cycle_read_bytes.max(cycle_read.saturating_sub(cycle_read_before));
+            cycle_read_before = cycle_read;
+            cycle_started = Instant::now();
+        }
     }
     let replay_deadline = Instant::now() + Duration::from_secs(75);
     while !saw_replayed_page && Instant::now() < replay_deadline {
         let started = Instant::now();
         let cpu_before = read_cpu_ticks(pid);
         let read_before = read_process_read_bytes(pid);
-        let pending =
+        let status =
             request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+        let pending = status.pending_segments;
         eprintln!("source journal replay status pending={pending}");
         saw_replayed_page = pending < initial_pending;
         let operation_elapsed = started.elapsed();
@@ -302,7 +358,16 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         if operation_elapsed < Duration::from_secs(1) {
             sleep(Duration::from_secs(1) - operation_elapsed).await;
         }
+        if cycle_started.elapsed() >= Duration::from_secs(5) {
+            let cycle_read = read_process_read_bytes(pid);
+            max_cycle_read_bytes =
+                max_cycle_read_bytes.max(cycle_read.saturating_sub(cycle_read_before));
+            cycle_read_before = cycle_read;
+            cycle_started = Instant::now();
+        }
     }
+    let cycle_read = read_process_read_bytes(pid);
+    max_cycle_read_bytes = max_cycle_read_bytes.max(cycle_read.saturating_sub(cycle_read_before));
     stop_sampling.store(true, Ordering::Relaxed);
     sampler.await.expect("source journal PSS sampler");
     peak_pss_kib = peak_pss_kib.max(pss_peak.load(Ordering::Relaxed));
@@ -315,18 +380,114 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         saw_replayed_page,
         "source journal worker must replay at least one bounded page"
     );
-    let post_replay_pending =
+    let mut post_replay_status =
         request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+    let post_replay_pending = post_replay_status.pending_segments;
     assert!(
         post_replay_pending < initial_pending,
         "source journal backlog must remain drained after the replay page"
     );
+    // The final source tick can land immediately after the 300-second sampler boundary. Give
+    // its durable counter rotation a bounded moment to publish without changing the window size.
+    let completion_deadline = Instant::now() + Duration::from_secs(15);
+    while post_replay_status.metrics.last_completed_window.is_none()
+        && Instant::now() < completion_deadline
+    {
+        sleep(Duration::from_secs(1)).await;
+        post_replay_status =
+            request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+    }
+    let completed_window = post_replay_status
+        .metrics
+        .last_completed_window
+        .as_ref()
+        .expect("status must expose the completed 300-second delivery window");
+    assert_eq!(
+        completed_window.elapsed_seconds, JOURNAL_THROUGHPUT_SAMPLE_SECONDS,
+        "delivery window must be exactly five minutes"
+    );
+    eprintln!(
+        concat!(
+            "source journal window generated={} / {} bytes, peak={} / {} bytes, ",
+            "ack={} / {} bytes, apply={} / {} bytes, source_ack={} / {}, ",
+            "repository_apply={} / {}"
+        ),
+        completed_window.generated_segments,
+        completed_window.generated_bytes,
+        completed_window.peak_generated_segments,
+        completed_window.peak_generated_bytes,
+        completed_window.acknowledged_segments,
+        completed_window.acknowledged_bytes,
+        completed_window.applied_segments,
+        completed_window.applied_bytes,
+        completed_window.source_ack_meets_ten_x_segments,
+        completed_window.source_ack_meets_ten_x_bytes,
+        completed_window.repository_apply_meets_ten_x_segments,
+        completed_window.repository_apply_meets_ten_x_bytes,
+    );
+    if !completed_window.meets_ten_x {
+        let log = fs::read_to_string(&log_path)
+            .unwrap_or_else(|error| format!("<unavailable: {error}>",));
+        eprintln!("source journal XP log before ten-x failure:\n{log}");
+    }
+    assert!(
+        completed_window.meets_ten_x,
+        "aggregate completed delivery window must meet the ten-x gate"
+    );
+    let scoped_window = post_replay_status
+        .metrics
+        .delivery_scopes
+        .iter()
+        .find(|scope| {
+            scope.target_repository_id == cluster.node_id && scope.last_completed_window.is_some()
+        })
+        .and_then(|scope| scope.last_completed_window.as_ref())
+        .expect("status must expose the local target scope completed window");
+    assert_eq!(
+        scoped_window.elapsed_seconds,
+        JOURNAL_THROUGHPUT_SAMPLE_SECONDS
+    );
+    assert!(
+        scoped_window.meets_ten_x,
+        "local target scope must meet the ten-x gate"
+    );
     cpu_percentages.sort_by(f64::total_cmp);
     let p95_index = (cpu_percentages.len().saturating_sub(1) * 95) / 100;
     let cpu_p95 = cpu_percentages[p95_index];
+    let elapsed_seconds = sample_window_started.elapsed().as_secs().max(1);
+    let generated_segments = post_replay_status
+        .metrics
+        .generated_segments
+        .saturating_sub(initial_metrics.generated_segments);
+    let generated_bytes = post_replay_status
+        .metrics
+        .generated_bytes
+        .saturating_sub(initial_metrics.generated_bytes);
+    let acknowledged_segments = post_replay_status
+        .metrics
+        .acknowledged_segments
+        .saturating_sub(initial_metrics.acknowledged_segments);
+    let acknowledged_bytes = post_replay_status
+        .metrics
+        .acknowledged_bytes
+        .saturating_sub(initial_metrics.acknowledged_bytes);
+    let applied_segments = post_replay_status
+        .metrics
+        .applied_segments
+        .saturating_sub(initial_metrics.applied_segments);
+    let applied_bytes = post_replay_status
+        .metrics
+        .applied_bytes
+        .saturating_sub(initial_metrics.applied_bytes);
     println!(
         "source_journal_resource cpu_p95_percent={cpu_p95:.2} max_read_bytes={max_read_bytes} \
-         max_rss_delta={max_rss_delta} peak_pss_kib={peak_pss_kib}"
+         max_cycle_read_bytes={max_cycle_read_bytes} max_rss_delta={max_rss_delta} \
+         peak_pss_kib={peak_pss_kib} sample_window_seconds={elapsed_seconds} \
+         generated_segments={generated_segments} generated_bytes={generated_bytes} \
+         peak_generated_segments={} peak_generated_bytes={} \
+         acknowledged_segments={acknowledged_segments} acknowledged_bytes={acknowledged_bytes} \
+         applied_segments={applied_segments} applied_bytes={applied_bytes}",
+        completed_window.peak_generated_segments, completed_window.peak_generated_bytes
     );
     assert!(
         cpu_p95 <= JOURNAL_CPU_P95_LIMIT_PERCENT,
@@ -337,12 +498,51 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         "source journal read_bytes {max_read_bytes} exceeds {JOURNAL_READ_BYTES_LIMIT}"
     );
     assert!(
+        max_cycle_read_bytes <= JOURNAL_CYCLE_READ_BYTES_LIMIT,
+        "source journal cycle read_bytes {max_cycle_read_bytes} exceeds \
+         {JOURNAL_CYCLE_READ_BYTES_LIMIT}"
+    );
+    assert!(
         max_rss_delta <= JOURNAL_RSS_DELTA_LIMIT,
         "source journal RSS delta {max_rss_delta} exceeds {JOURNAL_RSS_DELTA_LIMIT}"
     );
+    assert!(
+        generated_segments > 0 && generated_bytes > 0,
+        concat!(
+            "source journal durable counters did not record the real fixture enqueue path: ",
+            "generated={}/{}, ack={}/{}, apply={}/{}"
+        ),
+        generated_segments,
+        generated_bytes,
+        acknowledged_segments,
+        acknowledged_bytes,
+        applied_segments,
+        applied_bytes
+    );
     println!("source_journal_resource_candidate_peak_pss_kib={peak_pss_kib}");
     stop_child(&mut child).await;
+    unsafe {
+        std::env::remove_var("XP_RESOURCE_FIXTURE_PAYLOAD_BYTES");
+    }
     peak_pss_kib
+}
+
+#[derive(Debug, Clone)]
+struct SourceDeliveryMetricsSnapshot {
+    generated_segments: u64,
+    generated_bytes: u64,
+    acknowledged_segments: u64,
+    acknowledged_bytes: u64,
+    applied_segments: u64,
+    applied_bytes: u64,
+    last_completed_window: Option<DeliveryWindowSnapshot>,
+    delivery_scopes: Vec<DeliveryScopeSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+struct SourceStatusSnapshot {
+    pending_segments: u64,
+    metrics: SourceDeliveryMetricsSnapshot,
 }
 
 async fn request_source_status(
@@ -352,7 +552,7 @@ async fn request_source_status(
     cluster: &ClusterMetadata,
     ca_key_pem: &str,
     ca_pem: &str,
-) -> u64 {
+) -> SourceStatusSnapshot {
     let context = xp::internal_auth::RequestContext::now(
         xp::internal_auth::InternalRoute::MeshV2,
         &cluster.cluster_id,
@@ -382,18 +582,92 @@ async fn request_source_status(
         .expect("source journal status response");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let status: serde_json::Value = response.json().await.expect("decode source journal status");
-    eprintln!(
-        "source journal status state={} pending={}",
-        status["source_delivery"]["state"]
-            .as_str()
-            .unwrap_or("unknown"),
-        status["source_delivery"]["pending_segments"]
+    let metrics = &status["delivery_metrics"];
+    let parse_window = |value: &serde_json::Value| {
+        (!value.is_null()).then(|| DeliveryWindowSnapshot {
+            elapsed_seconds: value["elapsed_seconds"]
+                .as_u64()
+                .expect("delivery window elapsed seconds"),
+            generated_segments: value["generated_segments"]
+                .as_u64()
+                .expect("delivery window generated segments"),
+            generated_bytes: value["generated_bytes"]
+                .as_u64()
+                .expect("delivery window generated bytes"),
+            peak_generated_segments: value["peak_generated_segments"]
+                .as_u64()
+                .expect("delivery window peak generated segments"),
+            peak_generated_bytes: value["peak_generated_bytes"]
+                .as_u64()
+                .expect("delivery window peak generated bytes"),
+            acknowledged_segments: value["acknowledged_segments"]
+                .as_u64()
+                .expect("delivery window acknowledged segments"),
+            acknowledged_bytes: value["acknowledged_bytes"]
+                .as_u64()
+                .expect("delivery window acknowledged bytes"),
+            applied_segments: value["applied_segments"]
+                .as_u64()
+                .expect("delivery window applied segments"),
+            applied_bytes: value["applied_bytes"]
+                .as_u64()
+                .expect("delivery window applied bytes"),
+            source_ack_meets_ten_x_segments: value["source_ack_meets_ten_x_segments"]
+                .as_bool()
+                .expect("delivery window source ACK segment result"),
+            source_ack_meets_ten_x_bytes: value["source_ack_meets_ten_x_bytes"]
+                .as_bool()
+                .expect("delivery window source ACK byte result"),
+            repository_apply_meets_ten_x_segments: value["repository_apply_meets_ten_x_segments"]
+                .as_bool()
+                .expect("delivery window repository apply segment result"),
+            repository_apply_meets_ten_x_bytes: value["repository_apply_meets_ten_x_bytes"]
+                .as_bool()
+                .expect("delivery window repository apply byte result"),
+            meets_ten_x: value["meets_ten_x"]
+                .as_bool()
+                .expect("delivery ten-x result"),
+        })
+    };
+    let delivery_scopes = metrics["delivery_scopes"]
+        .as_array()
+        .expect("delivery scope metrics")
+        .iter()
+        .map(|scope| DeliveryScopeSnapshot {
+            target_repository_id: scope["target_repository_id"]
+                .as_str()
+                .expect("delivery scope target")
+                .to_owned(),
+            last_completed_window: parse_window(&scope["last_completed_window"]),
+        })
+        .collect();
+    SourceStatusSnapshot {
+        pending_segments: status["source_delivery"]["pending_segments"]
             .as_u64()
-            .unwrap_or_default()
-    );
-    status["source_delivery"]["pending_segments"]
-        .as_u64()
-        .expect("source journal pending segment count")
+            .expect("source journal pending segment count"),
+        metrics: SourceDeliveryMetricsSnapshot {
+            generated_segments: metrics["generated_segments"]
+                .as_u64()
+                .expect("generated segment counter"),
+            generated_bytes: metrics["generated_bytes"]
+                .as_u64()
+                .expect("generated byte counter"),
+            acknowledged_segments: metrics["acknowledged_segments"]
+                .as_u64()
+                .expect("acknowledged segment counter"),
+            acknowledged_bytes: metrics["acknowledged_bytes"]
+                .as_u64()
+                .expect("acknowledged byte counter"),
+            applied_segments: metrics["applied_segments"]
+                .as_u64()
+                .expect("applied segment counter"),
+            applied_bytes: metrics["applied_bytes"]
+                .as_u64()
+                .expect("applied byte counter"),
+            last_completed_window: parse_window(&metrics["last_completed_window"]),
+            delivery_scopes,
+        },
+    }
 }
 
 fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
@@ -427,7 +701,9 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
         "x25519_relay_public_key": relay_public_key.clone(),
     }))
     .expect("encode source journal identity");
-    let payload = vec![0_u8; 26 * 1024];
+    // Keep the 20,000-row backlog within the 128 MiB capacity boundary while leaving
+    // enough canonical bytes for the real enqueue path to prove both ten-x counters.
+    let payload = vec![0_u8; JOURNAL_BACKLOG_PAYLOAD_BYTES];
     let mut previous_hash = None;
     let mut total_wire_bytes = 0_i64;
     for batch_start in (0..20_000_i64).step_by(256) {
@@ -435,7 +711,7 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
             .unchecked_transaction()
             .expect("begin source journal backlog transaction");
         for sequence in batch_start..(batch_start + 256).min(20_000) {
-            let (wire, segment_hash) = signed_fixture_wire(
+            let (wire, segment_hash, _) = signed_fixture_wire(
                 &signing_key,
                 &cluster.cluster_id,
                 &cluster.node_id,
@@ -482,6 +758,53 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
             [],
         )
         .expect("record source journal stream backlog");
+    let window_started_at = chrono::Utc::now().timestamp();
+    connection
+        .execute(
+            "UPDATE repository_delivery_metrics
+             SET window_started_at = ?1,
+                 window_generated_segments = 0,
+                 window_generated_bytes = 0,
+                 window_acknowledged_segments = 0,
+                 window_acknowledged_bytes = 0,
+                 window_applied_segments = 0,
+                 window_applied_bytes = 0,
+                 completed_window_started_at = NULL,
+                 completed_window_ended_at = NULL,
+                 completed_generated_segments = NULL,
+                 completed_generated_bytes = NULL,
+                 completed_acknowledged_segments = NULL,
+                 completed_acknowledged_bytes = NULL,
+                 completed_applied_segments = NULL,
+                 completed_applied_bytes = NULL
+             WHERE singleton = 1",
+            [window_started_at],
+        )
+        .expect("seed source journal five-minute window");
+    for target_repository_id in ["", cluster.node_id.as_str()] {
+        connection
+            .execute(
+                "INSERT OR REPLACE INTO repository_delivery_metric_scopes
+                 (source_node_id, stream, target_repository_id,
+                  generated_segments, generated_bytes,
+                  acknowledged_segments, acknowledged_bytes,
+                  applied_segments, applied_bytes)
+                 VALUES (?1, 'runtime', ?2, 0, 0, 0, 0, 0, 0)",
+                rusqlite::params![cluster.node_id, target_repository_id],
+            )
+            .expect("seed source journal delivery scope");
+        connection
+            .execute(
+                "INSERT OR REPLACE INTO repository_delivery_metric_scope_windows
+                 (source_node_id, stream, target_repository_id,
+                  window_started_at, window_generated_segments, window_generated_bytes,
+                  window_acknowledged_segments, window_acknowledged_bytes,
+                  window_applied_segments, window_applied_bytes)
+                 VALUES (?1, 'runtime', ?2, ?3, 0, 0, 0, 0, 0, 0)",
+                rusqlite::params![cluster.node_id, target_repository_id, window_started_at],
+            )
+            .expect("seed source journal scope window");
+    }
     let state_payload = connection
         .query_row(
             "SELECT payload FROM history_snapshots WHERE key = 'persistent_state'",

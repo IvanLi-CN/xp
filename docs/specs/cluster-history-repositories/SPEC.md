@@ -69,7 +69,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   和 backlog，等待下一次有界重试，不打开历史 Mesh relay。
 - 每个 ready 仓库都保存完整并集；查询选择最完整健康 ready 仓库，响应必须带
   `complete|partial|local_only`、coverage、watermark、gap 和 skew。
-- ready peer 的每个 60 秒生命周期同步 tick 最多连续处理 8 个 summary、repair 或 tiered export page，
+- ready peer 的每个 5 秒生命周期同步 tick 最多连续处理 16 个 summary、repair 或 tiered export page，
   并共享 15 秒维护预算；多个 peer 按稳定顺序分配剩余时间片，慢 peer 不得阻塞后续 peer。
   达到页数或时间边界时必须返回 `InProgress`，从持久 checkpoint 在下一 tick 继续，不能重置
   summary cursor、pending repair IDs 或 tiered handoff 状态。
@@ -221,13 +221,19 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   投递顺序的 SQLite 索引；除一次性旧库初始化外，不得扫描或反序列化整个 backlog，每轮最多读取 256 条，
   且 CPU、磁盘读取和进程内存成本不得随 backlog 条数或 payload 字节数增长。
 - `REQ-JOURNAL-REPAIR`: 旧库中缺少投递顺序元数据的 segment 必须通过 state row 的持久主键游标分页校正；
-  每个 60 秒 source cycle 最多提交一页 256 条，失败时游标不前进，重启从最后一次提交的位置继续。
+  每个 5 秒 source cycle 最多提交十六页，每页最多 256 条且受 1 MiB wire budget 约束，
+  失败时游标不前进，重启从最后一次提交的位置继续。
 - `REQ-JOURNAL-PAUSE`: 状态查询不得隐式执行校正；校正期间继续持久化新 segment，但暂停发送 journal page，
   并以既有 `source_delivery.state=journal_order_repairing` 表示可恢复 backlog。不得新增 partial index。
 - `REQ-JOURNAL-ACK`: ACK 成功时间和实际投递路径必须与 journal 删除在同一持久化边界可观察；ACK 只可删除
   真实确认的 segment，未确认 payload、cursor 与 epoch high-water 不得被前推或改写。
 - `REQ-JOURNAL-COLLECTOR`: Collector 暂时不可达是正常输入，只形成可恢复 backlog，不得伪造成功或产生无界
   并发重试；Collector 恢复后必须按固定页继续投递并只删除有效 ACK 所列 segment。
+- `REQ-JOURNAL-THROUGHPUT`: source journal 必须在现有 SQLite `history.sqlite3` 中持久化单调
+  generated、durable ACK 和 repository apply 的段数/字节累计计数，以及尝试、成功、失败分类、最近尝试
+  和进度时间；enqueue、ACK、receiver checkpoint/watermark 必须与各自计数器在同一事务提交，旧 peer
+  缺少字段时按零值降级。连续两个只读 status 样本的 5 分钟窗口必须以 `delta(counter) / 300` 计算，
+  source→ACK 与 repository→apply 均同时满足段数和字节数至少为生成峰值的 10 倍后，才可宣称吞吐门禁通过。
 - `REQ-JOURNAL-GAP-ORDER`: source delivery 发送 pending segment 时，bounded gap page 必须优先包含
   该页首段直接前置的 permanent gap，再以持久化 gap cursor 填充剩余名额；页面仍最多 64 个 gap，
   不得推进 gap cursor、source cursor 或 ACK 边界之外的任何数据。这保证 gap 轮转不会长期阻塞
@@ -235,8 +241,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - Repository summary 必须带有可选的 `history_truncated` 标记；发送方在 gap ledger 超过 64 条时
   设置该标记，接收方持久保守状态并保持受影响查询为 `partial`。旧 summary 缺少该字段时按 `false`
   兼容解析，不得据此宣称未知缺口已收敛。
-- `REQ-JOURNAL-RESOURCE`: 对至少 20,000 条或 128 MiB durable backlog，5 秒 CPU 采样 p95 不超过 9%，
-  每个 60 秒周期数据库读取不超过 4 MiB，RSS 增量不超过 2 MiB，且 Direct/Public 与集群控制面保持可用。
+- `REQ-JOURNAL-RESOURCE`: 对至少 20,000 条或 128 MiB durable backlog，运行在 128 MiB/no-swap
+  cgroup 内，5 秒 CPU 采样 p95 不超过一个 CPU 核，每个 5 秒周期数据库读取不超过 16 MiB，RSS 增量不超过
+  32 MiB，并且 durable drain 必须达到合成生成速率的 10x；Direct/Public 与集群控制面保持可用。
 
 ### SHOULD
 
@@ -279,7 +286,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   但保留全部未 ACK 行；只有 segment 与 byte 均低于 60% 才清除暂停位。容量预检在追加事务
   写入前完成，拒绝不得推进 source cursor、删除 backlog 或修改 control snapshot。恢复后按
   journal delivery order oldest-first 连续投递；容量暂停只阻断新的 source capture，不阻断既有
-  backlog 的重放，source worker 每个周期最多连续处理 4 个有界 replay page，保持每周期读取预算不超过 4 MiB。
+  backlog 的重放，source worker 每个周期最多连续处理 16 个有界 replay page，保持每周期读取预算不超过 16 MiB。
   若 durable journal 尾部尚未装入当前 bounded replay window，source capture 仍可继续追加；追加事务
   只把新段放在 SQLite 尾部，并立即重建有界窗口，禁止新段越过未确认的旧序列。该尾部重建状态不等同于
   `capacity_suspended`，也不丢弃新的 minute capture。
@@ -296,7 +303,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   返回 wire 总量最多 1 MiB，其 CPU、磁盘读取和进程内存成本不得随 backlog 条数或 payload
   字节数增长。
 - 旧库中缺少投递顺序元数据的 segment 必须通过 `source_delivery_journal_state` 的持久主键游标
-  分页校正；每个 60 秒 source collection cycle 最多提交一页 256 条，校正失败时游标不前进，
+  分页校正；每个 5 秒 source cycle 最多提交十六页 256 条，校正失败时游标不前进，
   重启从最后一次提交的位置继续。状态查询不得隐式执行校正；校正期间继续持久化新 segment，
   但暂停发送 journal page，并以既有 `source_delivery.state=journal_order_repairing` 表示可恢复
   backlog。不得为此新增 partial index，因为建立它本身会扫描整个 journal。
@@ -347,11 +354,12 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - Given source segment 已在目标 repository 持久化，When tombstone ACK fanout 暂时失败，Then
   目标仍返回签名 receipt，fanout 记录并重试，不把已落盘投递转换成 5xx。
 - VER-JOURNAL-BOUNDED covers: REQ-JOURNAL-BOUNDED and REQ-JOURNAL-RESOURCE.
-  A 128 MiB backlog has no full wire decode or temporary sort; each cycle reads one fixed page,
+  A 128 MiB backlog has no full wire decode or temporary sort; each cycle reads a fixed page,
   while the isolated journal run does not exercise the Direct/Public or cluster control-plane
   listeners; those availability properties remain release-canary gates.
 - VER-JOURNAL-REPAIR covers: REQ-JOURNAL-REPAIR and REQ-JOURNAL-PAUSE.
-  One source cycle commits at most one repair page and pauses delivery while repair is incomplete.
+  One source cycle commits at most sixteen repair pages and pauses delivery while repair is
+  incomplete.
   A failed cycle preserves the previous cursor and a restart resumes from that cursor.
 - VER-JOURNAL-ACK covers: REQ-JOURNAL-ACK.
   A successful ACK updates acknowledgement time and path only when deletion removes real rows;
@@ -374,7 +382,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   cluster-control-plane availability are verified separately by the production canary gate.
 - The actual-XP resource gate runs the release `xp run` candidate and baseline inside a dedicated
   Linux cgroup with `MemoryMax=128M` and `MemorySwapMax=0`, samples each process through
-  `smaps_rollup`, and requires every candidate PSS sample to remain below 32 MiB. This is an
+  `smaps_rollup`, and requires every candidate PSS sample to remain below 64 MiB inside the
+  required 128 MiB/no-swap cgroup. This is an
   operator-run shared-testbox source/release-candidate gate; the runner binds a clean commit and
   generated Web-shell archive by SHA before building, then persists a SHA-bound manifest and full
   workload log locally before remote cleanup. GitHub CI and release publication do not access that
@@ -383,6 +392,15 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   128 MiB/no-swap cgroup with 257 near-limit segments and repeated summary requests; the runner's
   `XP_MESH_RESOURCE_SUMMARY_ONLY=1` mode runs this gate together with the 20,000-row source journal
   resource benchmark, while isolating both from the 50-peer comparison.
+  A release readiness check must receive a JSON attestation bound to the exact target SHA, the
+  Agent VM log digest, the 300-second window, the 128 MiB/no-swap limits, and all four segment/byte
+  10x results. Missing, malformed, or mismatched attestation fails closed before image, Web, or
+  GitHub Release publication; CI and release workflows cannot synthesize this evidence. The
+  release workflow is owner-dispatched and accepts an evidence commit whose only parent is the
+  target commit and whose only paths are the attestation and the workload log; readiness
+  recomputes the log digest from those files and requires a GitHub-verified valid signature by the
+  pinned repository-owner signing key. The workflow is owner-triggered and retains the evidence
+  files and commit identity as release assets.
 
 ## Resource and Quality Constraints
 
@@ -393,8 +411,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - shared testbox 验证 50 source/2 repository、128 MiB 无 swap；普通节点新增稳态内存不超过
   2 MiB、idle CPU 近零。
 - shared testbox 还必须验证至少 20,000 条或 128 MiB source delivery journal 的索引计划、迁移幂等、
-  不可达 Collector 和恢复 drain；5 秒 CPU 采样 p95 不超过 9%，每个 60 秒周期数据库读取不超过
-  4 MiB，RSS 增量不超过 2 MiB。
+  不可达 Collector 和恢复 drain；运行在 128 MiB/no-swap cgroup 内，每个 5 秒周期数据库读取不超过
+  16 MiB，持续报告 CPU p95、RSS/PSS 和基于 durable counters 的 10x 段数及字节证据。
 - 故障注入覆盖丢包、分区、恢复、退役、过期 tombstone、fork、unknown schema 和磁盘护栏。
 
 ### UI / Storybook (if applicable)

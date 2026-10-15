@@ -1,5 +1,7 @@
 use sha2::{Digest as _, Sha256};
 
+use crate::state::history_storage::SourceDeliveryAttempt;
+
 use super::*;
 
 impl RepositoryReplicaRuntime {
@@ -51,6 +53,22 @@ impl RepositoryReplicaRuntime {
         )
     }
 
+    pub(crate) fn acknowledge_local_source_segments_via_without_hydrating_with_metrics(
+        &mut self,
+        delivered_segments: &[RepositoryReplicaSegment],
+        acknowledged_at_unix_seconds: u64,
+        delivery_path: &str,
+        attempt: SourceDeliveryAttempt,
+    ) -> Result<(), RepositoryRuntimeError> {
+        self.acknowledge_local_source_segments_inner_with_metrics(
+            delivered_segments,
+            Some(acknowledged_at_unix_seconds),
+            Some(delivery_path),
+            false,
+            Some(attempt),
+        )
+    }
+
     fn acknowledge_local_source_segment_inner(
         &mut self,
         delivered_wire: &[u8],
@@ -62,6 +80,7 @@ impl RepositoryReplicaRuntime {
             acknowledged_at_unix_seconds,
             delivery_path,
             true,
+            None,
         )
     }
 
@@ -72,6 +91,23 @@ impl RepositoryReplicaRuntime {
         delivery_path: Option<&str>,
         hydrate_after_ack: bool,
     ) -> Result<(), RepositoryRuntimeError> {
+        self.acknowledge_local_source_segments_inner_with_metrics(
+            delivered_segments,
+            acknowledged_at_unix_seconds,
+            delivery_path,
+            hydrate_after_ack,
+            None,
+        )
+    }
+
+    fn acknowledge_local_source_segments_inner_with_metrics(
+        &mut self,
+        delivered_segments: &[RepositoryReplicaSegment],
+        acknowledged_at_unix_seconds: Option<u64>,
+        delivery_path: Option<&str>,
+        hydrate_after_ack: bool,
+        source_attempt: Option<SourceDeliveryAttempt>,
+    ) -> Result<(), RepositoryRuntimeError> {
         let delivered_wires = delivered_segments
             .iter()
             .map(|segment| segment.wire.as_slice())
@@ -81,6 +117,7 @@ impl RepositoryReplicaRuntime {
             acknowledged_at_unix_seconds,
             delivery_path,
             hydrate_after_ack,
+            source_attempt,
         )
     }
 
@@ -90,6 +127,7 @@ impl RepositoryReplicaRuntime {
         acknowledged_at_unix_seconds: Option<u64>,
         delivery_path: Option<&str>,
         hydrate_after_ack: bool,
+        source_attempt: Option<SourceDeliveryAttempt>,
     ) -> Result<(), RepositoryRuntimeError> {
         if delivered_wires.is_empty() {
             return Ok(());
@@ -148,6 +186,7 @@ impl RepositoryReplicaRuntime {
                     self.snapshot = previous_snapshot;
                     return Err(error);
                 }
+                self.mark_delivery_metrics_dirty();
             } else {
                 self.snapshot.tombstones = self.tombstones.checkpoint();
                 let control_payload = serde_json::to_vec(&self.snapshot_for_persistence())
@@ -156,20 +195,33 @@ impl RepositoryReplicaRuntime {
                     self.snapshot = previous_snapshot;
                     return Err(RepositoryRuntimeError::StateLimitExceeded);
                 }
-                if let Err(error) = self
-                    .storage
-                    .acknowledge_source_delivery_journal_with_cursor_and_control(
-                        &ids,
-                        acknowledged_at_unix_seconds,
-                        delivery_path,
-                        replay_stream_cursor.as_deref(),
-                        &control_payload,
-                    )
-                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+                let result = if let Some(attempt) = source_attempt {
+                    self.storage
+                        .acknowledge_source_delivery_journal_with_cursor_and_control_and_metrics(
+                            &ids,
+                            acknowledged_at_unix_seconds,
+                            delivery_path,
+                            replay_stream_cursor.as_deref(),
+                            &control_payload,
+                            attempt,
+                        )
+                } else {
+                    self.storage
+                        .acknowledge_source_delivery_journal_with_cursor_and_control(
+                            &ids,
+                            acknowledged_at_unix_seconds,
+                            delivery_path,
+                            replay_stream_cursor.as_deref(),
+                            &control_payload,
+                        )
+                };
+                if let Err(error) =
+                    result.map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
                 {
                     self.snapshot = previous_snapshot;
                     return Err(error);
                 }
+                self.mark_delivery_metrics_dirty();
             }
             if hydrate_after_ack {
                 self.hydrate_source_delivery_journal()?;

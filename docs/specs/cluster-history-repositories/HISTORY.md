@@ -78,7 +78,32 @@
 
 - Tiered exports now use canonical SQLite retention-start ordering and continuation.
 - Old raw-time continuations use bounded idempotent restart to prevent skipped rows.
+
+- History delivery throughput is now measured from durable cumulative generated, source-ACK and
+  repository-apply counters. Counters commit with their journal or receiver state, remain additive
+  for old peers, and expose categorized transport, response, unavailable and storage failures.
+  Source and repository workers use bounded 5-second scheduling. Local source delivery drains at
+  most sixteen local working pages; local receiver commits use four segments with a 50ms yield
+  while remote protocol pages retain the 256-segment and 1 MiB wire limits. A 300-second sample
+  must prove both delivery stages at 10x generated segment
+  and byte rates; pending depth alone is not a throughput claim.
+- Runtime status also exposes the completed or elapsed 300-second window for each source/stream/
+  target scope, preventing aggregate progress from masking a starved target.
+- Five-minute throughput windows persist the highest generated segment and byte deltas in the
+  current counter epoch; 10x acceptance cannot be satisfied by waiting for a quieter window.
+- Byte counters now use the signed segment's canonical payload size, while wire bytes remain the
+  journal capacity and page-budget unit. Existing databases migrate by resetting only the
+  cumulative delivery counters, completed windows, and scoped counters into a new canonical
+  counter epoch; journal rows, checkpoints, gaps, payloads, and source outbox state remain intact.
+- Source journal order repair now commits up to sixteen bounded pages per five-second source cycle,
+  preserving the durable repair cursor and pausing delivery until the repair completes.
 - Original observation time, source identity and recovery generation remain unchanged.
+- Release readiness now fails closed without an exact-target Agent VM attestation recording the
+  300-second no-swap resource run, workload-log digest, and all four segment/byte 10x gates. The
+  owner-dispatched workflow verifies an evidence commit with the target as its only parent and
+  recomputes the digest from its two evidence files before publication, requiring a GitHub-verified
+  valid pinned owner signature and an owner-triggered workflow, retaining the evidence files and
+  commit identity as release assets.
 
 ## Key Reasons / Replacements
 

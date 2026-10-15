@@ -3,6 +3,9 @@ name = "xp"
 version = "0.2.0"
 edition = "2024"
 
+[features]
+resource-fixture = []
+
 [dependencies]
 anyhow = "1.0"
 axum = { version = "0.8.9", features = ["json", "macros"] }

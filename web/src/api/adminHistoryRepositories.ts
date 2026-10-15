@@ -43,6 +43,44 @@ export const HistoryRepositoryMemberSchema = z.object({
 	capacity: HistoryRepositoryCapacitySchema,
 });
 
+const DeliveryWindowSchema = z.object({
+	started_at: z.number(),
+	ended_at: z.number(),
+	elapsed_seconds: z.number(),
+	generated_segments: z.number(),
+	generated_bytes: z.number(),
+	acknowledged_segments: z.number(),
+	acknowledged_bytes: z.number(),
+	applied_segments: z.number(),
+	applied_bytes: z.number(),
+	generated_segments_per_second_milli: z.number(),
+	generated_bytes_per_second_milli: z.number(),
+	acknowledged_segments_per_second_milli: z.number(),
+	acknowledged_bytes_per_second_milli: z.number(),
+	applied_segments_per_second_milli: z.number(),
+	applied_bytes_per_second_milli: z.number(),
+	source_ack_meets_ten_x_segments: z.boolean(),
+	source_ack_meets_ten_x_bytes: z.boolean(),
+	source_ack_meets_ten_x: z.boolean(),
+	repository_apply_meets_ten_x_segments: z.boolean(),
+	repository_apply_meets_ten_x_bytes: z.boolean(),
+	repository_apply_meets_ten_x: z.boolean(),
+	meets_ten_x: z.boolean(),
+});
+
+const DeliveryScopeSchema = z.object({
+	source_node_id: z.string(),
+	stream: z.string(),
+	target_repository_id: z.string(),
+	generated_segments: z.number(),
+	generated_bytes: z.number(),
+	acknowledged_segments: z.number(),
+	acknowledged_bytes: z.number(),
+	applied_segments: z.number(),
+	applied_bytes: z.number(),
+	last_completed_window: DeliveryWindowSchema.nullable().optional(),
+});
+
 export const HistoryRepositoryRuntimeSchema = z.object({
 	storage_mode: z.enum(["sqlite", "sqlite_degraded", "degraded_json"]),
 	capacity: HistoryRepositoryCapacitySchema,
@@ -54,6 +92,29 @@ export const HistoryRepositoryRuntimeSchema = z.object({
 	last_anti_entropy_unix_seconds: z.number().nullable(),
 	last_deep_verification_unix_seconds: z.number().nullable(),
 	last_dynamic_relay_attempt_unix_seconds: z.number().nullable(),
+	delivery_metrics: z
+		.object({
+			generated_segments: z.number(),
+			generated_bytes: z.number(),
+			acknowledged_segments: z.number(),
+			acknowledged_bytes: z.number(),
+			applied_segments: z.number(),
+			applied_bytes: z.number(),
+			source_delivery_attempts: z.number(),
+			source_delivery_successes: z.number(),
+			source_transport_errors: z.number(),
+			source_response_errors: z.number(),
+			source_response_changed: z.number(),
+			source_explicit_unavailable: z.number(),
+			source_storage_errors: z.number(),
+			last_attempt_at: z.number().nullable().optional(),
+			last_progress_at: z.number().nullable().optional(),
+			counter_epoch: z.number(),
+			rate_window_seconds: z.number(),
+			last_completed_window: DeliveryWindowSchema.nullable().optional(),
+			delivery_scopes: z.array(DeliveryScopeSchema).optional(),
+		})
+		.optional(),
 	source_delivery: z
 		.object({
 			state: z.enum([

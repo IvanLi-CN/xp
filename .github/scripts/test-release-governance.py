@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 sys.dont_write_bytecode = True
@@ -126,6 +128,38 @@ class ReadinessTests(unittest.TestCase):
         ]}
         self.assertEqual(readiness.evaluate(payload, sha), ("ready", "all_required_workflows_success"))
 
+    def test_agent_vm_resource_evidence_is_bound_to_target_sha(self) -> None:
+        sha = "1" * 40
+        valid = {
+            "schema": readiness.RESOURCE_EVIDENCE_SCHEMA,
+            "target_sha": sha,
+            "log_sha": "2" * 64,
+            "window_seconds": 300,
+            "memory_limit_mib": 128,
+            "swap_limit_mib": 0,
+            "source_ack_meets_ten_x_segments": True,
+            "source_ack_meets_ten_x_bytes": True,
+            "repository_apply_meets_ten_x_segments": True,
+            "repository_apply_meets_ten_x_bytes": True,
+        }
+        detail = readiness.validate_resource_evidence(json.dumps(valid), sha)
+        self.assertIn("agent_vm_resource_evidence_verified", detail)
+
+        invalid = dict(valid, target_sha="3" * 40)
+        with self.assertRaises(readiness.ReadinessError):
+            readiness.validate_resource_evidence(json.dumps(invalid), sha)
+
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_path = Path(directory) / "evidence.json"
+            log_path = Path(directory) / "workload.log"
+            log_path.write_text("source_journal_resource\ntest result: ok\n", encoding="utf-8")
+            valid["log_sha"] = hashlib.sha256(log_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(valid), encoding="utf-8")
+            self.assertIn(
+                "agent_vm_resource_evidence_verified",
+                readiness.validate_resource_evidence_files(evidence_path, log_path, sha),
+            )
+
     def test_missing_and_failed_runs_are_distinguished(self) -> None:
         sha = "c" * 40
         payload = {"workflow_runs": [
@@ -179,9 +213,27 @@ class ReadinessTests(unittest.TestCase):
 class WorkflowIntegrationTests(unittest.TestCase):
     def test_release_workflow_exposes_backfill_contract(self) -> None:
         workflow = (Path(__file__).parents[1] / "workflows" / "release.yml").read_text()
-        for input_name in ("head_sha", "release_type", "channel", "expected_version", "reason"):
+        for input_name in (
+            "head_sha",
+            "release_type",
+            "channel",
+            "expected_version",
+            "reason",
+            "resource_evidence_ref",
+        ):
             self.assertIn(f"      {input_name}:", workflow)
         self.assertIn("release_readiness.py", workflow)
+        self.assertIn("agent-vm-resource-evidence.json", workflow)
+        self.assertIn("agent-vm-resource.log", workflow)
+        self.assertIn("commit.verification.verified", workflow)
+        self.assertIn("GITHUB_TRIGGERING_ACTOR", workflow)
+        self.assertIn("git verify-commit --raw", workflow)
+        self.assertIn("39CE251C234BA4C727C5BEA061F8690632D072E2", workflow)
+        self.assertIn("agent-vm-evidence-${{ github.run_id }}", workflow)
+        self.assertIn("agent-vm-evidence-manifest.txt", workflow)
+        self.assertNotIn("workflow_run:", workflow)
+        self.assertIn("resource_evidence_ref:\n        description:", workflow)
+        self.assertIn("        required: true\n        type: string", workflow)
         self.assertIn("verify expected backfill version", workflow)
         self.assertIn("uses: ./.github/workflows/release-build.yml", workflow)
         self.assertNotIn("cargo clippy", workflow)

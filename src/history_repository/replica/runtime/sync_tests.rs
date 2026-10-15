@@ -17,6 +17,8 @@ use sha2::Digest as _;
 mod source_delivery_capacity_tests;
 #[path = "source_delivery_collector_tests.rs"]
 mod source_delivery_collector_tests;
+#[path = "source_delivery_metrics_tests.rs"]
+mod source_delivery_metrics_tests;
 #[path = "source_delivery_order_repair_tests.rs"]
 mod source_delivery_order_repair_tests;
 #[path = "source_delivery_resource_tests.rs"]
@@ -105,7 +107,6 @@ fn repair_and_relay_pages_send_tombstone_segments_first() {
             .records()[0]
             .is_tombstone()
     );
-
     let sqlite_temporary = tempfile::tempdir().expect("SQLite temporary directory");
     let mut sqlite_runtime = load(sqlite_temporary.path());
     sqlite_runtime
@@ -128,7 +129,6 @@ fn repair_and_relay_pages_send_tombstone_segments_first() {
             .is_tombstone()
     );
 }
-
 #[test]
 fn relay_repair_pages_through_the_full_bounded_segment_history_after_restart() {
     let temporary = tempfile::tempdir().expect("temporary directory");

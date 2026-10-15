@@ -197,6 +197,24 @@ beneficial and is released incrementally after acknowledgement. Below the
 existing 256 MiB filesystem safety guard, a Source enters explicit capture
 suspension rather than creating a cursor, acknowledgement, or permanent gap.
 
+The delivery status is additive and durable. It exposes `byte_counter_unit=canonical-v1` together
+with cumulative generated, durable-ACK, and
+repository-apply segment/byte counters, attempt/success counts, categorized failures, and the last
+attempt/progress timestamps. Enqueue, ACK, response, gap, watermark and receiver checkpoint
+updates commit their matching counters in the same SQLite transaction; retries and restarts do
+not double count. A 300-second sample window computes each stage as `delta(counter) / 300` in
+both segments and canonical bytes. Durable `peak_generated_segments` and
+`peak_generated_bytes` retain the highest completed five-minute generated window in the current
+counter epoch. Source-to-ACK and repository-to-apply must each reach 10 times that peak generated
+rate before a delivery convergence claim is valid. A 5-second source tick may
+run sixteen local bounded pages; local receiver commits use four segments with a 50ms yield under
+the 1 MiB wire budget, while remote protocol pages remain capped at 256 segments and 1 MiB. It
+does not enable unbounded concurrency
+or alter sequence, retention, generation, gap, quota or public-HTTPS path rules.
+Runtime status also returns the last completed or elapsed window for each source/stream/target
+scope, so the 10x claim cannot be inferred from another stream's aggregate progress. Missing
+window or scope fields on an older peer default safely and do not change v1 fallback behavior.
+
 - Mixed-stream repair pages select the first handoff allowed by the durable checkpoint. A
   preceding unrelated gap cannot preempt the armed source/epoch/stream. Completion on another
   stream preserves the generation binding and its consumed state.

@@ -8,12 +8,13 @@ use super::*;
 mod source_journal_write;
 
 const SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE: i64 = 256;
+pub(crate) const SOURCE_DELIVERY_JOURNAL_REPAIR_PAGES_PER_CYCLE: usize = 16;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS: usize = 20_000;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_MAX_BYTES: u64 = 128 * 1024 * 1024;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS: usize = 256;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES: usize = 1024 * 1024;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT: i64 = 80;
-const SOURCE_DELIVERY_JOURNAL_RESUME_PERCENT: i64 = 60;
+pub(crate) const SOURCE_DELIVERY_JOURNAL_RESUME_PERCENT: i64 = 60;
 
 pub(super) fn ensure_source_delivery_journal_columns(connection: &mut Connection) -> Result<()> {
     let transaction = connection.transaction().map_err(sqlite_error)?;
@@ -274,7 +275,7 @@ impl HistoryStorage {
             ));
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        if let Err(error) = source_journal_write::insert_journal_rows(&transaction, rows) {
+        if let Err(error) = source_journal_write::insert_journal_rows(&transaction, rows, true) {
             if error.0 == "source delivery journal capacity guard" {
                 drop(transaction);
                 mark_capacity_suspended(connection)?;
@@ -304,7 +305,33 @@ impl HistoryStorage {
             ));
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        if let Err(error) = source_journal_write::insert_journal_rows(&transaction, rows) {
+        if let Err(error) = source_journal_write::insert_journal_rows(&transaction, rows, true) {
+            if error.0 == "source delivery journal capacity guard" {
+                drop(transaction);
+                mark_capacity_suspended(connection)?;
+            }
+            return Err(error);
+        }
+        transaction.commit().map_err(sqlite_error)?;
+        finish_post_commit_maintenance(maintain_sqlite(connection));
+        Ok(())
+    }
+
+    pub(crate) fn restore_source_delivery_journal(
+        &self,
+        rows: &[SourceDeliveryJournalRow],
+    ) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Err(HistoryStorageError(
+                "source delivery journal requires SQLite".to_owned(),
+            ));
+        };
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        if let Err(error) = source_journal_write::insert_journal_rows(&transaction, rows, false) {
             if error.0 == "source delivery journal capacity guard" {
                 drop(transaction);
                 mark_capacity_suspended(connection)?;
@@ -647,41 +674,68 @@ impl HistoryStorage {
                 completed: true,
             });
         }
-        let rows = if let Some(cursor) = cursor.as_deref() {
+        let mut rows = Vec::new();
+        let mut wire_bytes = 0_usize;
+        let mut budget_exhausted = false;
+        let mut read_row = |row: &rusqlite::Row<'_>| -> Result<bool> {
+            let id = row.get::<_, String>(0).map_err(sqlite_error)?;
+            let source_node_id = row.get::<_, String>(1).map_err(sqlite_error)?;
+            let row_wire_bytes = usize::try_from(row.get::<_, i64>(2).map_err(sqlite_error)?)
+                .map_err(|_| HistoryStorageError("negative journal wire length".to_owned()))?;
+            if source_node_id.is_empty() {
+                if rows.is_empty() && row_wire_bytes > SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES {
+                    return Err(HistoryStorageError(
+                        "source delivery journal repair row exceeds wire budget".to_owned(),
+                    ));
+                }
+                if wire_bytes.saturating_add(row_wire_bytes)
+                    > SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
+                {
+                    return Ok(false);
+                }
+                wire_bytes = wire_bytes.saturating_add(row_wire_bytes);
+            }
+            rows.push((id, source_node_id));
+            Ok(true)
+        };
+        if let Some(cursor) = cursor.as_deref() {
             let mut statement = transaction
                 .prepare(
-                    "SELECT id, source_node_id
+                    "SELECT id, source_node_id, length(wire)
                      FROM source_delivery_journal
                      WHERE id > ?1
                      ORDER BY id
                      LIMIT ?2",
                 )
                 .map_err(sqlite_error)?;
-            statement
-                .query_map(
-                    params![cursor, SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-                )
-                .map_err(sqlite_error)?
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .map_err(sqlite_error)?
+            let mut query = statement
+                .query(params![cursor, SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE])
+                .map_err(sqlite_error)?;
+            while let Some(row) = query.next().map_err(sqlite_error)? {
+                if !read_row(row)? {
+                    budget_exhausted = true;
+                    break;
+                }
+            }
         } else {
             let mut statement = transaction
                 .prepare(
-                    "SELECT id, source_node_id
+                    "SELECT id, source_node_id, length(wire)
                      FROM source_delivery_journal
                      ORDER BY id
                      LIMIT ?1",
                 )
                 .map_err(sqlite_error)?;
-            statement
-                .query_map([SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-                .map_err(sqlite_error)?
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .map_err(sqlite_error)?
-        };
+            let mut query = statement
+                .query([SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE])
+                .map_err(sqlite_error)?;
+            while let Some(row) = query.next().map_err(sqlite_error)? {
+                if !read_row(row)? {
+                    budget_exhausted = true;
+                    break;
+                }
+            }
+        }
         for (id, source_node_id) in &rows {
             if !source_node_id.is_empty() {
                 continue;
@@ -719,7 +773,8 @@ impl HistoryStorage {
                 )
                 .map_err(sqlite_error)?;
         }
-        let completed = rows.len() < SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE as usize;
+        let completed =
+            !budget_exhausted && rows.len() < SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE as usize;
         let next_cursor = rows.last().map(|(id, _)| id.as_str());
         transaction
             .execute(
@@ -786,6 +841,7 @@ impl HistoryStorage {
             delivery_path,
             replay_stream_cursor,
             None,
+            None,
         )
     }
 
@@ -803,6 +859,26 @@ impl HistoryStorage {
             delivery_path,
             replay_stream_cursor,
             Some(control_payload),
+            None,
+        )
+    }
+
+    pub(crate) fn acknowledge_source_delivery_journal_with_cursor_and_control_and_metrics(
+        &self,
+        ids: &[String],
+        acknowledged_at_unix_seconds: Option<u64>,
+        delivery_path: Option<&str>,
+        replay_stream_cursor: Option<&str>,
+        control_payload: &[u8],
+        attempt: super::metrics::SourceDeliveryAttempt,
+    ) -> Result<()> {
+        self.acknowledge_source_delivery_journal_inner(
+            ids,
+            acknowledged_at_unix_seconds,
+            delivery_path,
+            replay_stream_cursor,
+            Some(control_payload),
+            Some(attempt),
         )
     }
 
@@ -813,100 +889,17 @@ impl HistoryStorage {
         delivery_path: Option<&str>,
         replay_stream_cursor: Option<&str>,
         control_payload: Option<&[u8]>,
+        source_attempt: Option<super::metrics::SourceDeliveryAttempt>,
     ) -> Result<()> {
-        if ids.is_empty() {
-            return Ok(());
-        }
-        let mut backend = self.lock_backend();
-        let Some(connection) = sqlite_connection(&mut backend)? else {
-            return Err(HistoryStorageError(
-                "source delivery journal requires SQLite".to_owned(),
-            ));
-        };
-        let transaction = connection.transaction().map_err(sqlite_error)?;
-        let mut deleted_any = false;
-        for id in ids {
-            let Some((stream, wire_len)) = transaction
-                .query_row(
-                    "SELECT stream, length(wire)
-                     FROM source_delivery_journal WHERE id = ?1",
-                    [id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-                )
-                .optional()
-                .map_err(sqlite_error)?
-            else {
-                continue;
-            };
-            let deleted = transaction
-                .execute("DELETE FROM source_delivery_journal WHERE id = ?1", [id])
-                .map_err(sqlite_error)?;
-            if deleted == 1 {
-                deleted_any = true;
-                transaction
-                    .execute(
-                        "UPDATE source_delivery_journal_state
-                         SET pending_segments = pending_segments - 1,
-                             pending_bytes = pending_bytes - ?1
-                         WHERE singleton = 1",
-                        [wire_len],
-                    )
-                    .map_err(sqlite_error)?;
-                transaction
-                    .execute(
-                        "UPDATE source_delivery_journal_stream_state
-                         SET pending_segments = pending_segments - 1
-                         WHERE stream = ?1",
-                        [&stream],
-                    )
-                    .map_err(sqlite_error)?;
-            }
-        }
-        transaction
-            .execute(
-                "UPDATE source_delivery_journal_state
-                 SET capacity_suspended = CASE
-                     WHEN pending_segments * 100 < ?1 * ?3
-                      AND pending_bytes * 100 < ?2 * ?3 THEN 0
-                     ELSE capacity_suspended END
-                 WHERE singleton = 1",
-                rusqlite::params![
-                    SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS as i64,
-                    SOURCE_DELIVERY_JOURNAL_MAX_BYTES as i64,
-                    SOURCE_DELIVERY_JOURNAL_RESUME_PERCENT,
-                ],
-            )
-            .map_err(sqlite_error)?;
-        if deleted_any && let Some(acknowledged_at) = acknowledged_at_unix_seconds {
-            transaction
-                .execute(
-                    "UPDATE source_delivery_journal_state
-                     SET last_acknowledged_at = ?1,
-                         last_delivery_path = COALESCE(?2, last_delivery_path)
-                     WHERE singleton = 1",
-                    params![
-                        durable_i64(acknowledged_at, "journal acknowledgement time")?,
-                        delivery_path,
-                    ],
-                )
-                .map_err(sqlite_error)?;
-        }
-        if deleted_any && let Some(stream) = replay_stream_cursor {
-            transaction
-                .execute(
-                    "UPDATE source_delivery_journal_state
-                     SET replay_stream_cursor = ?1
-                     WHERE singleton = 1",
-                    [stream],
-                )
-                .map_err(sqlite_error)?;
-        }
-        if deleted_any && let Some(control_payload) = control_payload {
-            super::write_snapshot(&transaction, REPOSITORY_REPLICA_KEY, control_payload)?;
-        }
-        transaction.commit().map_err(sqlite_error)?;
-        finish_post_commit_maintenance(maintain_sqlite(connection));
-        Ok(())
+        super::source_journal_ack::acknowledge_source_delivery_journal_inner(
+            self,
+            ids,
+            acknowledged_at_unix_seconds,
+            delivery_path,
+            replay_stream_cursor,
+            control_payload,
+            source_attempt,
+        )
     }
 }
 

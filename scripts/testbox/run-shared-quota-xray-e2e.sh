@@ -846,7 +846,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     --cargo-home "$TESTBOX_CARGO_HOME" \
     --slot candidate \
     --source "$candidate_resource_source" \
-    -- cargo build --release --locked --bin xp
+    -- cargo build --release --locked --features resource-fixture --bin xp
   echo "cargo_phase=resource_candidate_build duration_secs=$((SECONDS - cargo_phase_started))"
   cp "$candidate_resource_target/release/xp" "$REMOTE_RUN/xp-resource-candidate"
   if [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
@@ -880,7 +880,8 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
       --cargo-home "$TESTBOX_CARGO_HOME" \
       --slot candidate \
       --source "$candidate_resource_source" \
-      -- cargo test --release --locked --test mesh_transport_resource_e2e --no-run \
+      -- cargo test --release --locked --features resource-fixture \
+        --test mesh_transport_resource_e2e --no-run \
         --message-format=json |
       python3 -c '
 import json

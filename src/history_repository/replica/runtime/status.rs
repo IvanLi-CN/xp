@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::state::history_repository::control::RepositoryCapacity;
+use crate::state::history_storage::RepositoryDeliveryMetrics;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SourceDeliveryStatus {
@@ -82,6 +83,8 @@ pub(crate) struct RepositoryRuntimeStatus {
     pub(super) last_dynamic_relay_attempt_unix_seconds: Option<u64>,
     #[serde(default)]
     pub(super) source_delivery: SourceDeliveryStatus,
+    #[serde(default)]
+    pub(super) delivery_metrics: RepositoryDeliveryMetrics,
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub(super) summary_repairs: BTreeMap<String, SummaryRepairDiagnostic>,
