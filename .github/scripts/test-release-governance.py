@@ -166,6 +166,8 @@ class ReadinessTests(unittest.TestCase):
                 "generated_bytes=58258 peak_generated_segments=12 peak_generated_bytes=58258 "
                 "acknowledged_segments=15300 acknowledged_bytes=51237772 "
                 "applied_segments=15348 applied_bytes=51398620\n"
+                "test xp_source_delivery_journal_memory_e2e ... ok\n"
+                "test xp_repository_summary_memory_e2e ... ok\n"
                 "test result: ok\n",
                 encoding="utf-8",
             )
@@ -177,6 +179,27 @@ class ReadinessTests(unittest.TestCase):
             )
             tampered = dict(valid, acknowledged_segments=1)
             evidence_path.write_text(json.dumps(tampered), encoding="utf-8")
+            with self.assertRaises(readiness.ReadinessError):
+                readiness.validate_resource_evidence_files(evidence_path, log_path, sha)
+
+            successful_log = log_path.read_text(encoding="utf-8")
+            for workload in (
+                "xp_source_delivery_journal_memory_e2e",
+                "xp_repository_summary_memory_e2e",
+            ):
+                for result in ("FAILED", "ignored", "missing"):
+                    with self.subTest(workload=workload, result=result):
+                        marker = f"test {workload} ... ok\n"
+                        replacement = "" if result == "missing" else f"test {workload} ... {result}\n"
+                        log_path.write_text(successful_log.replace(marker, replacement), encoding="utf-8")
+                        valid["log_sha"] = hashlib.sha256(log_path.read_bytes()).hexdigest()
+                        evidence_path.write_text(json.dumps(valid), encoding="utf-8")
+                        with self.assertRaises(readiness.ReadinessError):
+                            readiness.validate_resource_evidence_files(evidence_path, log_path, sha)
+
+            log_path.write_text(successful_log + "test result: FAILED\n", encoding="utf-8")
+            valid["log_sha"] = hashlib.sha256(log_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(valid), encoding="utf-8")
             with self.assertRaises(readiness.ReadinessError):
                 readiness.validate_resource_evidence_files(evidence_path, log_path, sha)
 

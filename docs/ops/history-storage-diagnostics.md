@@ -90,6 +90,13 @@ The attestation fields are `schema=xp-history-throughput-v1`, `target_sha`, `log
 `repository_apply_meets_ten_x_bytes`. Readiness compares every numeric field with the immutable
 workload log and recomputes the four gates from the observed peak-generated counters.
 
+The evidence log must explicitly pass both workloads:
+
+- `xp_source_delivery_journal_memory_e2e`
+- `xp_repository_summary_memory_e2e`
+
+Missing, ignored or failed workloads block publication. Any failed test result also blocks it.
+
 If a consumed-generation retry has already left an exact non-permanent sequence gap, the next
 repair response may promote that same range to `source_retention_expired` when the serving peer
 proves `history_truncated=true`; this is a continuation of the existing checkpoint and should

@@ -195,6 +195,18 @@ def validate_resource_evidence_files(
     log_text = log_bytes.decode("utf-8", errors="replace")
     if "test result: ok" not in log_text or "source_journal_resource" not in log_text:
         raise ReadinessError("agent_vm_resource_evidence_log_incomplete")
+    if re.search(r"^test result: FAILED\b", log_text, re.MULTILINE) or re.search(
+        r"^test [^\n]+ \.\.\. FAILED\b", log_text, re.MULTILINE
+    ):
+        raise ReadinessError("agent_vm_resource_evidence_workload_failed")
+    for workload in (
+        "xp_source_delivery_journal_memory_e2e",
+        "xp_repository_summary_memory_e2e",
+    ):
+        if not re.search(
+            rf"^test {re.escape(workload)} \.\.\. ok$", log_text, re.MULTILINE
+        ):
+            raise ReadinessError(f"agent_vm_resource_evidence_workload_incomplete:{workload}")
     metric_line = next(
         (
             line
