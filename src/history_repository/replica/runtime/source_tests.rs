@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{LocalSourceState, LocalSourceStreamState, RepositoryReplicaRuntime};
-use crate::history_sync::{CanonicalSegment, Cursor, SyncRecord};
+use crate::history_sync::{CanonicalSegment, Cursor, SignedSegment, SyncRecord};
 use crate::state::history_repository::identity::{
     Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey,
 };
@@ -237,7 +237,7 @@ fn local_source_delivery_bridges_an_existing_retention_gap_once() {
         },
     );
 
-    let pending = runtime
+    runtime
         .queue_local_source_segment(
             "cluster-a",
             source_identity.clone(),
@@ -255,16 +255,51 @@ fn local_source_delivery_bridges_an_existing_retention_gap_once() {
         )
         .expect("queue source segment")
         .expect("pending source segment");
-    let gaps = runtime.local_source_gaps_for_segments("node-a", std::slice::from_ref(&pending));
+    runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity.clone(),
+            &key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "tombstone.v1",
+                1,
+                b"tombstone".to_vec(),
+                b"sample".to_vec(),
+                true,
+            )],
+            14,
+        )
+        .expect("queue tombstone source segment");
+    let page = runtime.local_source_pending_segments_page();
+    assert_eq!(page.len(), 2);
+    assert_eq!(
+        SignedSegment::from_wire(&page[0].wire)
+            .expect("decode first page segment")
+            .canonical()
+            .first_cursor()
+            .stream(),
+        "runtime"
+    );
+    let gaps = runtime.local_source_gaps_for_segments("node-a", &page);
     assert_eq!(gaps.len(), 1);
     assert_eq!((gaps[0].first_sequence, gaps[0].last_sequence), (1, 2));
     assert_eq!(gaps[0].reason.as_deref(), Some("source_retention_expired"));
+
+    runtime.snapshot.gaps[0].reason = Some("fork_detected".to_owned());
+    assert!(
+        runtime
+            .local_source_gaps_for_segments("node-a", &page)
+            .is_empty()
+    );
+    runtime.snapshot.gaps[0].reason = Some("source_retention_expired".to_owned());
 
     runtime
         .receive_wire_from_repository_with_gaps(
             "cluster-a",
             &source_identity,
-            &pending.wire,
+            &page[0].wire,
             &gaps,
             14,
             &["local".to_owned()],

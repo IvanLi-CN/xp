@@ -23,6 +23,9 @@
 - 修复 source delivery 在已持久化 `source_retention_expired` 边界后的首段拒绝：首个待投递页可携带与
   该 segment 精确相邻的既有永久 gap，接收端只跨越这一次已审计范围，后续页继续严格校验；不新增、删除
   或改写 gap，不改变 source epoch、outbox、generation 或 `partial` 语义。
+- 进一步限定 source bridge 只能使用 `source_retention_expired` 证据；当 tombstone 或其他 stream
+  在轮转页中排在前面时，将可桥接的保留锚点移到首位，避免 gap 元数据只应用于错误 stream；发布 readiness
+  同时把 Agent VM 日志中的实际计数器与签名 10x 声明逐项绑定，伪造或截短日志 fail closed。
 - 后续生产观察发现保留窗口会在延迟重试期间继续前移。新增有界、独立摘要绑定的
   `retained_stream_boundaries`，只有源端声明的最小保留序号与首个返回 segment 精确相等时，
   consumed checkpoint 才能原地封存新证据范围；v1 `response_id` 和旧 peer fallback 保持不变。

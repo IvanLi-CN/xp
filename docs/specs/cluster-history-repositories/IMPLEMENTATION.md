@@ -289,10 +289,12 @@
   from the persisted rotating gap cursor. This preserves the 64-gap bound and cursor ordering while
   preventing a pending segment from being rejected indefinitely behind gap-page rotation.
   The predecessor may be an existing durable `source_retention_expired` gap rather than a local
-  backpressure gap. It is included only when its source, epoch, stream and end sequence exactly
-  match the first pending segment; the receiver advances that declared range once, while retries
-  remain idempotent and later segments stay hash-chain strict. The source never creates or removes
-  gap evidence as part of this delivery page.
+  backpressure gap. If a retained anchor is present later in a rotated page, the source moves that
+  segment to the front because gap metadata applies to the first segment only. It is included only
+  when its source, epoch, stream and end sequence exactly match that first pending segment; the
+  receiver advances that declared range once, while retries remain idempotent and later segments
+  stay hash-chain strict. The source never creates or removes gap evidence as part of this delivery
+  page.
   The receiver canonicalizes duplicate evidence for one source range, with permanent evidence taking
   precedence. When its 64-entry ledger is full, incoming permanent ranges come first, followed by
   existing permanent evidence, then incoming recoverable ranges and older recoverable evidence. This

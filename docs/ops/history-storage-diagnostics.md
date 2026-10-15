@@ -82,9 +82,13 @@ attestation must record a 300-second window,
 delivery stages. Missing, malformed, or SHA-mismatched evidence fails closed before release
 artifacts are published.
 The attestation fields are `schema=xp-history-throughput-v1`, `target_sha`, `log_sha`,
-`window_seconds=300`, `memory_limit_mib=128`, `swap_limit_mib=0`, and four boolean gates:
-`source_ack_meets_ten_x_segments`, `source_ack_meets_ten_x_bytes`,
-`repository_apply_meets_ten_x_segments`, and `repository_apply_meets_ten_x_bytes`.
+`window_seconds=300`, `memory_limit_mib=128`, `swap_limit_mib=0`, the observed
+`sample_window_seconds`, `generated_segments`, `generated_bytes`, `peak_generated_segments`,
+`peak_generated_bytes`, `acknowledged_segments`, `acknowledged_bytes`, `applied_segments`, and
+`applied_bytes`, plus four boolean gates: `source_ack_meets_ten_x_segments`,
+`source_ack_meets_ten_x_bytes`, `repository_apply_meets_ten_x_segments`, and
+`repository_apply_meets_ten_x_bytes`. Readiness compares every numeric field with the immutable
+workload log and recomputes the four gates from the observed peak-generated counters.
 
 If a consumed-generation retry has already left an exact non-permanent sequence gap, the next
 repair response may promote that same range to `source_retention_expired` when the serving peer

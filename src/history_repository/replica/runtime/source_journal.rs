@@ -86,33 +86,9 @@ impl RepositoryReplicaRuntime {
         // A retained source stream may resume immediately after a durable retention gap. The
         // receiver needs that existing evidence on the first delivery page to advance its
         // chain once; otherwise ordinary source delivery rejects the signed anchor forever.
-        let retained_anchor_gap = pending_segments.first().and_then(|segment| {
-            let signed = SignedSegment::from_wire(&segment.wire).ok()?;
-            let cursor = signed.canonical().first_cursor();
-            self.snapshot
-                .gaps
-                .iter()
-                .filter(|gap| {
-                    gap.permanent
-                        && gap.source_node_id == source_node_id
-                        && gap.source_node_id == cursor.source_node_id()
-                        && gap.source_epoch == cursor.source_epoch()
-                        && gap.stream == cursor.stream()
-                        && gap.last_sequence.checked_add(1) == Some(cursor.sequence())
-                })
-                .max_by_key(|gap| (gap.first_sequence, gap.last_sequence))
-                .map(|gap| RepositoryReplicaGap {
-                    source_node_id: gap.source_node_id.clone(),
-                    source_epoch: gap.source_epoch,
-                    stream: gap.stream.clone(),
-                    first_sequence: gap.first_sequence,
-                    last_sequence: gap.last_sequence,
-                    start_unix_seconds: gap.start_unix_seconds,
-                    end_unix_seconds: gap.end_unix_seconds,
-                    permanent: gap.permanent,
-                    reason: gap.reason.clone(),
-                })
-        });
+        let retained_anchor_gap = pending_segments
+            .first()
+            .and_then(|segment| self.retained_anchor_gap_for_segment(source_node_id, segment));
         let keys = self
             .snapshot
             .local_source
@@ -202,6 +178,39 @@ impl RepositoryReplicaRuntime {
                     })
             }))
             .collect()
+    }
+
+    fn retained_anchor_gap_for_segment(
+        &self,
+        source_node_id: &str,
+        segment: &RepositoryReplicaSegment,
+    ) -> Option<RepositoryReplicaGap> {
+        let signed = SignedSegment::from_wire(&segment.wire).ok()?;
+        let cursor = signed.canonical().first_cursor();
+        self.snapshot
+            .gaps
+            .iter()
+            .filter(|gap| {
+                gap.permanent
+                    && gap.reason.as_deref() == Some("source_retention_expired")
+                    && gap.source_node_id == source_node_id
+                    && gap.source_node_id == cursor.source_node_id()
+                    && gap.source_epoch == cursor.source_epoch()
+                    && gap.stream == cursor.stream()
+                    && gap.last_sequence.checked_add(1) == Some(cursor.sequence())
+            })
+            .max_by_key(|gap| (gap.first_sequence, gap.last_sequence))
+            .map(|gap| RepositoryReplicaGap {
+                source_node_id: gap.source_node_id.clone(),
+                source_epoch: gap.source_epoch,
+                stream: gap.stream.clone(),
+                first_sequence: gap.first_sequence,
+                last_sequence: gap.last_sequence,
+                start_unix_seconds: gap.start_unix_seconds,
+                end_unix_seconds: gap.end_unix_seconds,
+                permanent: gap.permanent,
+                reason: gap.reason.clone(),
+            })
     }
 
     pub(crate) fn commit_local_source_gap_page(
@@ -305,6 +314,21 @@ impl RepositoryReplicaRuntime {
             if !added {
                 break;
             }
+        }
+        // Gap metadata is interpreted against the first segment in a source page. If a
+        // tombstone or another stream was rotated ahead of a retained anchor, move the first
+        // bridgeable segment to the front so the exact evidence is applied to its matching stream.
+        if let Some(retained_index) = page.iter().position(|segment| {
+            let Ok(signed) = SignedSegment::from_wire(&segment.wire) else {
+                return false;
+            };
+            self.retained_anchor_gap_for_segment(
+                signed.canonical().first_cursor().source_node_id(),
+                segment,
+            )
+            .is_some()
+        }) {
+            page.swap(0, retained_index);
         }
         page
     }

@@ -13,10 +13,11 @@ anchor with `HashChainMismatch` on every retry, leaving the durable outbox and A
 
 ## Decision
 
-When a bounded source page has a first pending segment, the source may include one existing
-permanent
-gap whose source node, epoch, stream, and `last_sequence + 1` exactly equal that segment's first
-cursor. The receiver advances that declared range once before normal acceptance. The gap remains in
+When a bounded source page has pending segments, the source may include one existing permanent gap
+whose source node, epoch, stream, reason (`source_retention_expired`), and `last_sequence + 1`
+exactly equal the first segment's cursor. If rotation placed another stream first, the source moves
+the matching retained-anchor segment to the front because gap metadata applies to the first segment
+only. The receiver advances that declared range once before normal acceptance. The gap remains in
 the durable ledger, no new gap is created, and no gap is deleted or rewritten. The source epoch,
 payload, outbox, recovery generation, and public HTTPS route are unchanged.
 
