@@ -217,6 +217,7 @@ jobs:
         with:
           name: "agent-vm-evidence-${{ github.run_id }}"
           path: .release-evidence
+          include-hidden-files: true
 
   build:
     needs: prepare
