@@ -67,9 +67,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   公网 HTTPS `api_base_url`；不会因配置了 Mesh endpoint 而选择、探测或回退到 Mesh/Reverse Mesh。
   source delivery 也只使用该公网 HTTPS 路径；公网传输失败时保留 durable checkpoint、outbox
   和 backlog，等待下一次有界重试，不打开历史 Mesh relay。
-- 若 source 的首个待投递 segment 紧接一个已持久化的永久 `source_retention_expired` gap，投递页必须携带
-  该既有 gap 作为一次性链锚；不得凭空创建 gap、删除 gap、改变 source epoch 或放宽后续 segment 的
-  连续性校验。
+- 若 source 页中任一待投递 segment 紧接一个已持久化的永久 `source_retention_expired` gap，投递页的
+  首个请求必须携带该既有 gap 作为一次性链锚；页面仍保持 tombstone-first 顺序，接收端先合并证据，
+  再在同一有序页处理匹配的后续 anchor。不得凭空创建 gap、删除 gap、改变 source epoch 或放宽后续
+  segment 的连续性校验。
 - 每个 ready 仓库都保存完整并集；查询选择最完整健康 ready 仓库，响应必须带
   `complete|partial|local_only`、coverage、watermark、gap 和 skew。
 - ready peer 的每个 5 秒生命周期同步 tick 最多连续处理 16 个 summary、repair 或 tiered export page，

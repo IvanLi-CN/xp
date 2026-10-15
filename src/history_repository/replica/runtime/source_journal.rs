@@ -86,9 +86,17 @@ impl RepositoryReplicaRuntime {
         // A retained source stream may resume immediately after a durable retention gap. The
         // receiver needs that existing evidence on the first delivery page to advance its
         // chain once; otherwise ordinary source delivery rejects the signed anchor forever.
-        let retained_anchor_gap = pending_segments
-            .first()
-            .and_then(|segment| self.retained_anchor_gap_for_segment(source_node_id, segment));
+        let mut retained_anchor_gaps = Vec::new();
+        for segment in pending_segments {
+            let Some(gap) = self.retained_anchor_gap_for_segment(source_node_id, segment) else {
+                continue;
+            };
+            if retained_anchor_gaps.len() < MAX_SOURCE_GAPS_PER_REQUEST
+                && !retained_anchor_gaps.contains(&gap)
+            {
+                retained_anchor_gaps.push(gap);
+            }
+        }
         let keys = self
             .snapshot
             .local_source
@@ -98,7 +106,7 @@ impl RepositoryReplicaRuntime {
             .collect::<Vec<_>>();
         if keys.is_empty() {
             self.snapshot.local_source.backpressure_gap_cursor = None;
-            return retained_anchor_gap.into_iter().collect();
+            return retained_anchor_gaps;
         }
         // Keep the gap immediately before each pending segment in the bounded page so a receiver
         // can advance its signed chain without waiting for a full rotation of the gap cursor.
@@ -128,7 +136,7 @@ impl RepositoryReplicaRuntime {
             .as_ref()
             .and_then(|cursor| keys.iter().position(|key| key == cursor))
             .map_or(0, |index| (index + 1) % keys.len());
-        let retained_gap_slots = usize::from(retained_anchor_gap.is_some());
+        let retained_gap_slots = retained_anchor_gaps.len().min(MAX_SOURCE_GAPS_PER_REQUEST);
         let page_len = keys
             .len()
             .min(MAX_SOURCE_GAPS_PER_REQUEST.saturating_sub(retained_gap_slots));
@@ -158,7 +166,7 @@ impl RepositoryReplicaRuntime {
                 selected_keys.push(key.clone());
             }
         }
-        retained_anchor_gap
+        retained_anchor_gaps
             .into_iter()
             .chain(selected_keys.into_iter().filter_map(|key| {
                 self.snapshot
@@ -314,21 +322,6 @@ impl RepositoryReplicaRuntime {
             if !added {
                 break;
             }
-        }
-        // Gap metadata is interpreted against the first segment in a source page. If a
-        // tombstone or another stream was rotated ahead of a retained anchor, move the first
-        // bridgeable segment to the front so the exact evidence is applied to its matching stream.
-        if let Some(retained_index) = page.iter().position(|segment| {
-            let Ok(signed) = SignedSegment::from_wire(&segment.wire) else {
-                return false;
-            };
-            self.retained_anchor_gap_for_segment(
-                signed.canonical().first_cursor().source_node_id(),
-                segment,
-            )
-            .is_some()
-        }) {
-            page.swap(0, retained_index);
         }
         page
     }

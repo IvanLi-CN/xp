@@ -263,7 +263,7 @@ fn local_source_delivery_bridges_an_existing_retention_gap_once() {
             vec![SyncRecord::new(
                 "node-a",
                 "node-a",
-                "tombstone.v1",
+                "runtime.v1",
                 1,
                 b"tombstone".to_vec(),
                 b"sample".to_vec(),
@@ -280,7 +280,7 @@ fn local_source_delivery_bridges_an_existing_retention_gap_once() {
             .canonical()
             .first_cursor()
             .stream(),
-        "runtime"
+        "tombstone"
     );
     let gaps = runtime.local_source_gaps_for_segments("node-a", &page);
     assert_eq!(gaps.len(), 1);
@@ -295,17 +295,24 @@ fn local_source_delivery_bridges_an_existing_retention_gap_once() {
     );
     runtime.snapshot.gaps[0].reason = Some("source_retention_expired".to_owned());
 
-    runtime
-        .receive_wire_from_repository_with_gaps(
+    let receipts = runtime
+        .receive_wire_batch_from_repository_with_gaps(
             "cluster-a",
-            &source_identity,
-            &page[0].wire,
+            &page,
             &gaps,
             14,
             &["local".to_owned()],
             "local",
         )
-        .expect("retained anchor after the existing gap is accepted");
+        .expect("tombstone-first page preserves retained anchor evidence");
+    assert_eq!(receipts.len(), 2);
+    assert!(runtime.snapshot.gaps.iter().any(|gap| {
+        gap.source_node_id == "node-a"
+            && gap.stream == "runtime"
+            && gap.first_sequence == 1
+            && gap.last_sequence == 2
+            && gap.reason.as_deref() == Some("source_retention_expired")
+    }));
 }
 
 #[test]
