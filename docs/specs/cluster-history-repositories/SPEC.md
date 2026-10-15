@@ -241,7 +241,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - `REQ-JOURNAL-GAP-ORDER`: source delivery 发送 pending segment 时，bounded gap page 必须优先包含
   该页首段直接前置的 permanent gap，再以持久化 gap cursor 填充剩余名额；页面仍最多 64 个 gap，
   不得推进 gap cursor、source cursor 或 ACK 边界之外的任何数据。这保证 gap 轮转不会长期阻塞
-  已落盘 segment 的连续投递。
+  已落盘 segment 的连续投递；若一页会需要第 65 条不同 gap 证据，发送方必须在该段之前拆页，
+  不得让缺失证据的整页永久重试。
 - Repository summary 必须带有可选的 `history_truncated` 标记；发送方在 gap ledger 超过 64 条时
   设置该标记，接收方持久保守状态并保持受影响查询为 `partial`。旧 summary 缺少该字段时按 `false`
   兼容解析，不得据此宣称未知缺口已收敛。

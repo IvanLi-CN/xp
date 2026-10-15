@@ -21,9 +21,10 @@ advances that declared range once during the same ordered page. The gap remains 
 ledger, no new gap is created, and no gap is deleted or rewritten. The source epoch, payload,
 outbox, recovery generation, and public HTTPS route are unchanged.
 
-The retained anchor consumes one slot from the existing 64-entry gap page budget. Other gaps
-continue
-to use the persisted rotating cursor. A retry after a durable segment commit is an idempotent
+The retained anchor consumes one slot from the existing 64-entry gap page budget. Page construction
+stops before a 65th distinct retained or required backpressure evidence entry, while ordinary
+segments that consume no evidence keep the 256-segment page bound. Other gaps continue to use the
+persisted rotating cursor. A retry after a durable segment commit is an idempotent
 duplicate; a retry after a failed transaction restores the prior checkpoint and can cross the same
 declared range again. All later segments and all non-adjacent ranges remain subject to ordinary
 sequence and hash-chain validation.
