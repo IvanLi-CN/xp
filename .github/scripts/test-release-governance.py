@@ -231,6 +231,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("39CE251C234BA4C727C5BEA061F8690632D072E2", workflow)
         self.assertIn("agent-vm-evidence-${{ github.run_id }}", workflow)
         self.assertIn("include-hidden-files: true", workflow)
+        self.assertIn("if-no-files-found: error", workflow)
         self.assertIn("agent-vm-evidence-manifest.txt", workflow)
         self.assertNotIn("workflow_run:", workflow)
         self.assertIn("resource_evidence_ref:\n        description:", workflow)
