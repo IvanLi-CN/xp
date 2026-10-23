@@ -1,5 +1,9 @@
 # History
 
+- 2026-10-23: managed Xray defaults moved to `GOMEMLIMIT=32MiB` and `GOGC=100`
+  across host-generated services, container launches, and upgrade backfill;
+  generated legacy `16MiB/50` values migrate while explicit operator overrides remain unchanged.
+
 - 2026-08-04: runtime-default backfill now inspects the complete systemd
   drop-in hierarchy and honors same-name masking before deciding whether an
   operator override permits migration. Managed-name collisions remain active,

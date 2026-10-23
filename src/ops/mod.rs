@@ -25,6 +25,9 @@ mod runtime_activation;
 #[cfg(test)]
 #[path = "init_runtime_defaults_tests.rs"]
 mod runtime_defaults_tests;
+#[cfg(test)]
+#[path = "init_runtime_defaults_xray_tests.rs"]
+mod runtime_defaults_xray_tests;
 mod status;
 mod tui;
 mod upgrade;
@@ -34,6 +37,11 @@ mod xp;
 mod xp_env;
 
 pub(crate) use paths::Paths;
+
+pub(crate) const MANAGED_XRAY_GOMEMLIMIT: &str = "32MiB";
+pub(crate) const MANAGED_XRAY_GOGC: &str = "100";
+pub(crate) const LEGACY_XRAY_GOMEMLIMIT: &str = "16MiB";
+pub(crate) const LEGACY_XRAY_GOGC: &str = "50";
 
 pub fn process_env_has_legacy_relay_probe_vars() -> bool {
     xp_env::process_env_has_legacy_relay_probe_vars()
