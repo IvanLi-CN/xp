@@ -144,6 +144,18 @@ fn service_lifecycle_contract() {
         concat!(
             "[Service]\n",
             "# Managed by xp-ops; use a separate drop-in for overrides\n",
+            "Environment=GOMEMLIMIT=32MiB\n",
+            "Environment=GOGC=100\n",
+        ),
+    )
+    .unwrap();
+    assert!(validate_xray_service_asset(&paths, InitSystem::Systemd).is_ok());
+
+    fs::write(
+        drop_in.join("20-xp-memory.conf"),
+        concat!(
+            "[Service]\n",
+            "# Managed by xp-ops; use a separate drop-in for overrides\n",
             "Environment=GOMEMLIMIT=16MiB\n",
             "Environment=GOGC=50\n",
         ),

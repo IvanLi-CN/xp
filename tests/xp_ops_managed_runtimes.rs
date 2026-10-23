@@ -209,6 +209,9 @@ async fn upgrade_quiesces_xp_before_openrc_runtime_activation() {
         fs::read(local_bin.join("cloudflared")).unwrap(),
         new_cloudflared
     );
+    let xray_service = fs::read_to_string(initd.join("xray")).unwrap();
+    assert!(xray_service.contains("GOMEMLIMIT=\"${GOMEMLIMIT:-32MiB}\""));
+    assert!(xray_service.contains("GOGC=\"${GOGC:-100}\""));
     assert!(
         fs::read_dir(&local_bin)
             .unwrap()

@@ -73,7 +73,7 @@ service is ready. Treat a restart command as an initiation step, then poll the s
 manager for readiness before the upgrade commits. On timeout, preserve the original error and
 run the ordinary binary and runtime rollback path.
 
-Set Xray `GOMEMLIMIT=16MiB`, `GOGC=50`, and policy level 0 `bufferSize=0`.
+Set Xray `GOMEMLIMIT=32MiB`, `GOGC=100`, and policy level 0 `bufferSize=0`.
 Set cloudflared `GOMEMLIMIT=12MiB`, `GOGC=50`, and
 `TUNNEL_MANAGEMENT_DIAGNOSTICS=false`. Host upgrades backfill these values
 through a managed systemd drop-in or an OpenRC script insertion. Upgrade only

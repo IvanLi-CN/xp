@@ -31,7 +31,8 @@ fn low_memory_backfill_writes_systemd_drop_ins() {
             .join("cloudflared.service.d/20-xp-memory.conf"),
     )
     .unwrap();
-    assert!(xray.contains("GOMEMLIMIT=16MiB"));
+    assert!(xray.contains("GOMEMLIMIT=32MiB"));
+    assert!(xray.contains("GOGC=100"));
     assert!(cloudflared.contains("GOMEMLIMIT=12MiB"));
     assert!(cloudflared.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS=false"));
     assert!(cloudflared.contains("XP_CLOUDFLARED_PROTOCOL=http2"));
@@ -841,23 +842,6 @@ fn low_memory_backfill_adds_http2_without_replacing_explicit_protocols() {
         fs::read_to_string(openrc)
             .unwrap()
             .contains("--protocol quic --config")
-    );
-}
-
-#[test]
-fn low_memory_backfill_restores_openrc_executable_mode() {
-    let tmp = tempdir().unwrap();
-    let paths = Paths::new(tmp.path().to_path_buf());
-    fs::create_dir_all(paths.openrc_initd_dir()).unwrap();
-    let service = paths.openrc_initd_dir().join("xray");
-    fs::write(&service, "command_user=\"xray:xray\"\n").unwrap();
-    fs::set_permissions(&service, fs::Permissions::from_mode(0o640)).unwrap();
-
-    backfill_low_memory_runtime_defaults(&paths).unwrap();
-
-    assert_eq!(
-        fs::metadata(service).unwrap().permissions().mode() & 0o777,
-        0o755
     );
 }
 

@@ -559,6 +559,14 @@ fn build_runtime_env_forwards_vless_canary_and_default_endpoint_settings() {
         Some("53843")
     );
     assert_eq!(
+        runtime_env.get("XP_XRAY_GOMEMLIMIT").map(String::as_str),
+        Some("32MiB")
+    );
+    assert_eq!(
+        runtime_env.get("XP_XRAY_GOGC").map(String::as_str),
+        Some("100")
+    );
+    assert_eq!(
         runtime_env
             .get("XP_CLOUDFLARED_GOMEMLIMIT")
             .map(String::as_str),
@@ -575,6 +583,19 @@ fn build_runtime_env_forwards_vless_canary_and_default_endpoint_settings() {
             .get("XP_CLOUDFLARED_PROTOCOL")
             .map(String::as_str),
         Some("http2")
+    );
+
+    let override_env = env_map(&[("XP_XRAY_GOMEMLIMIT", "24MiB"), ("XP_XRAY_GOGC", "75")]);
+    let override_runtime_env = build_runtime_env(&override_env, None);
+    assert_eq!(
+        override_runtime_env
+            .get("XP_XRAY_GOMEMLIMIT")
+            .map(String::as_str),
+        Some("24MiB")
+    );
+    assert_eq!(
+        override_runtime_env.get("XP_XRAY_GOGC").map(String::as_str),
+        Some("75")
     );
 }
 

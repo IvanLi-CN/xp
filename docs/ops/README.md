@@ -1097,6 +1097,8 @@ sudo rc-service xray start
 sudo rc-service xp start
 ```
 
+Managed Xray services default to `GOMEMLIMIT=32MiB` and `GOGC=100` on systemd, OpenRC, and Docker/Compose. Use a separate systemd drop-in, an OpenRC `/etc/conf.d/xray` value, or the container `XP_XRAY_GOMEMLIMIT` / `XP_XRAY_GOGC` variables for an explicit operator override; host upgrades and generated service assets preserve those overrides. XP-generated legacy Xray `16MiB/50` defaults are migrated during managed-runtime backfill.
+
 ### Cloudflare Tunnel transport
 
 Managed cloudflared services default to `--protocol http2`. This avoids

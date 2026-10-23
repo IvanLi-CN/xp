@@ -20,11 +20,16 @@ use std::process::Command;
 mod assets;
 mod nft;
 mod state;
+mod xray_assets;
 pub(crate) use assets::{refresh_xray_service_assets, write_direct_xray_service_assets};
 use state::{
     ensure_guard_runtime_dir, fs_error, load_config, read_table_value, reject_symlink,
     remove_permit, running_as_root, update_status_counters, validate_config, validate_limits,
     verify_readback, write_config, write_permit, write_status,
+};
+pub(crate) use xray_assets::{
+    is_generated_legacy_openrc_xray_script, is_generated_legacy_systemd_xray_unit,
+    migrate_legacy_openrc_xray_script, render_openrc_xray_script, render_systemd_xray_unit,
 };
 pub const PREPARE_FAILURE_EXIT: i32 = 77;
 pub const TABLE_NAME: &str = "xp_ingress_guard";
@@ -92,101 +97,6 @@ pub(crate) fn configured_mode(paths: &Paths) -> Result<Option<GuardMode>, ExitEr
     Ok(load_config(paths)?.map(|config| config.mode))
 }
 
-pub(crate) fn render_systemd_xray_unit(xray_work_dir: &Path, mode: Option<GuardMode>) -> String {
-    let (pre, exec, boundary) = match mode {
-        Some(GuardMode::Enforced) => (
-            concat!(
-                "PermissionsStartOnly=true\n",
-                "ExecStartPre=-/usr/local/bin/xp-ops _ingress-guard-prepare\n",
-            ),
-            "/usr/local/bin/xp-ops _ingress-guard-exec",
-            "RestartPreventExitStatus=77\n",
-        ),
-        Some(GuardMode::Observe) => (
-            concat!(
-                "PermissionsStartOnly=true\n",
-                "ExecStartPre=-/usr/local/bin/xp-ops _ingress-guard-prepare\n",
-            ),
-            "/usr/local/bin/xray run -c /etc/xray/config.json",
-            "",
-        ),
-        None => ("", "/usr/local/bin/xray run -c /etc/xray/config.json", ""),
-    };
-    let marker = "# Managed by xp-ops ingress-guard service boundary\n";
-    format!(
-        "[Unit]\n\
-Description=xray (local proxy runtime)\n\
-Wants=network-online.target\n\
-After=network-online.target\n\
-\n\
-[Service]\n\
-Type=simple\n\
-User=xray\n\
-Group=xray\n\
-WorkingDirectory={}\n\
-Environment=GOMEMLIMIT=16MiB\n\
-Environment=GOGC=50\n\
-{}{}ExecStart={}\n\
-Restart=always\n\
-RestartSec=2s\n\
-{}\n\
-[Install]\n\
-WantedBy=multi-user.target\n",
-        xray_work_dir.display(),
-        marker,
-        pre,
-        exec,
-        boundary
-    )
-}
-
-pub(crate) fn render_openrc_xray_script(mode: Option<GuardMode>) -> String {
-    let command = if matches!(mode, Some(GuardMode::Enforced)) {
-        "command=\"/usr/local/bin/xp-ops\"\ncommand_args=\"_ingress-guard-exec\"\n"
-    } else {
-        "command=\"/usr/local/bin/xray\"\ncommand_args=\"run -c /etc/xray/config.json\"\n"
-    };
-    let pre = match mode {
-        Some(GuardMode::Enforced) => concat!(
-            "\nstart_pre() {\n",
-            "  /usr/local/bin/xp-ops _ingress-guard-prepare\n",
-            "  result=$?\n",
-            "  if [ \"$result\" -ne 0 ]; then\n",
-            "    return \"$result\"\n",
-            "  fi\n",
-            "}\n",
-        ),
-        Some(GuardMode::Observe) => concat!(
-            "\nstart_pre() {\n",
-            "  /usr/local/bin/xp-ops _ingress-guard-prepare\n",
-            "  result=$?\n",
-            "  if [ \"$result\" -ne 0 ]; then\n",
-            "    # Observe mode records failures but keeps direct Xray startup.\n",
-            "    return 0\n",
-            "  fi\n",
-            "}\n",
-        ),
-        None => "",
-    };
-    format!(
-        concat!(
-            "#!/sbin/openrc-run\n\n",
-            "name=\"xray\"\n",
-            "description=\"xray (local proxy runtime)\"\n\n",
-            "# Managed by xp-ops ingress-guard service boundary\n",
-            "{}command_user=\"xray:xray\"\n",
-            "export GOMEMLIMIT=\"${{GOMEMLIMIT:-16MiB}}\"\n",
-            "export GOGC=\"${{GOGC:-50}}\"\n\n",
-            "# Ensure automatic recovery on crashes without busy-looping.\n",
-            "supervisor=supervise-daemon\n",
-            "respawn_delay=2\n",
-            "respawn_max=0\n",
-            "{}\n",
-            "depend() {{\n  need net\n}}\n",
-        ),
-        command, pre
-    )
-}
 impl Default for GuardStatus {
     fn default() -> Self {
         Self {
