@@ -120,6 +120,7 @@ jobs:
           python3 ./.github/scripts/test-notify-release-failure.py
           python3 ./.github/scripts/test-ci-performance.py
           bash -n scripts/testbox/*.sh
+          python3 -m py_compile scripts/testbox/remote-run-guard.py
           scripts/testbox/test-shared-quota-xray-e2e-guards.sh
           ruby - <<'RUBY'
           require "yaml"

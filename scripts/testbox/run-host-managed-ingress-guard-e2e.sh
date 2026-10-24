@@ -14,7 +14,7 @@ PATH_HASH8="$(printf '%s' "$(realpath "$REPO_ROOT")" | python3 -c 'import hashli
 RUN_NONCE="$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$$_${RUN_NONCE}_$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
 REMOTE_RUN="$TESTBOX_REMOTE_ROOT/workspaces/$USER/${REPO_NAME}__${PATH_HASH8}/runs/$RUN_ID"
-CONTAINER="codex_${REPO_NAME}_${PATH_HASH8}_ingress_${RUN_ID}"
+CONTAINER="$(testbox_bounded_name "codex_${REPO_NAME}_${PATH_HASH8}_ingress_${RUN_ID}")"
 testbox_remote_root_preflight
 REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
 
@@ -29,37 +29,8 @@ cleanup() {
   if [ "$REMOTE_RUN_CREATED" != "1" ]; then
     return
   fi
-  ssh -o BatchMode=yes "$TESTBOX" \
-    "TESTBOX_REMOTE_ROOT_B64=\$(printf '%s' '$TESTBOX_REMOTE_ROOT' | base64 | tr -d '\\n') REMOTE_RUN_B64=\$(printf '%s' '$REMOTE_RUN' | base64 | tr -d '\\n') CONTAINER_B64=\$(printf '%s' '$CONTAINER' | base64 | tr -d '\\n') RUN_ID_B64=\$(printf '%s' '$RUN_ID' | base64 | tr -d '\\n') bash -s" <<'REMOTE_CLEANUP'
-set -euo pipefail
-TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
-REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
-CONTAINER="$(printf '%s' "${CONTAINER_B64:?}" | base64 -d)"
-RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
-assert_no_symlink_path() {
-  local path="$1"
-  while [ "$path" != "/" ] && [ "$path" != "." ]; do
-    if [ -L "$path" ]; then
-      return 2
-    fi
-    path="$(dirname "$path")"
-  done
-}
-if test ! -L "$TESTBOX_REMOTE_ROOT" &&
-  test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT" &&
-  test ! -L "$REMOTE_RUN" &&
-  assert_no_symlink_path "$REMOTE_RUN"; then
-  remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
-  case "$remote_run_real" in
-    "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*)
-      test -f "$remote_run_real/.codex-run-id"
-      test "$(cat -- "$remote_run_real/.codex-run-id")" = "$RUN_ID"
-      docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-      rm -rf -- "$remote_run_real"
-      ;;
-  esac
-fi
-REMOTE_CLEANUP
+  ssh -o BatchMode=yes "$TESTBOX" "docker rm -f '$CONTAINER' >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
+  testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 

@@ -25,7 +25,7 @@ WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
-COMPOSE_PROJECT="$(python3 -c 'import re, sys; print(re.sub(r"[^a-z0-9_-]+", "_", sys.argv[1].lower()).strip("_")[:63])' "codex_${WORKSPACE_SLUG}_host_join_${RUN_ID}")"
+COMPOSE_PROJECT="$(testbox_bounded_name "codex_${WORKSPACE_SLUG}_host_join_${RUN_ID}")"
 testbox_remote_root_preflight
 REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
 REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"

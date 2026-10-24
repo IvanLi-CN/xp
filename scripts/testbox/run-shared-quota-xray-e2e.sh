@@ -170,13 +170,7 @@ REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
 REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
-COMPOSE_PROJECT="$(python3 - "$COMPOSE_PROJECT_RAW" <<'PY'
-import re, sys
-s=sys.argv[1].lower()
-s=re.sub(r'[^a-z0-9_-]+','_',s).strip('_')
-print(s[:63] if len(s)>63 else s)
-PY
-)"
+COMPOSE_PROJECT="$(testbox_bounded_name "$COMPOSE_PROJECT_RAW")"
 REMOTE_RUN_B64="$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')"
 TESTBOX_REMOTE_ROOT_B64="$(printf '%s' "$TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')"
 COMPOSE_PROJECT_B64="$(printf '%s' "$COMPOSE_PROJECT" | base64 | tr -d '\n')"
@@ -449,7 +443,7 @@ cleanup() {
   fi
   if [ -n "${REMOTE_RUN:-}" ]; then
     if assert_remote_run; then
-      rm -rf -- "$REMOTE_RUN" >/dev/null 2>&1 || true
+      remove_remote_run >/dev/null 2>&1 || true
     fi
   fi
 }
@@ -676,13 +670,56 @@ import time
 claim_root = pathlib.Path(sys.argv[1])
 remote_run = pathlib.Path(sys.argv[2])
 compose_project = sys.argv[3]
-remote_root = pathlib.Path(sys.argv[4]).resolve()
+remote_root = pathlib.Path(os.path.normpath(sys.argv[4]))
 lock_dir = claim_root / ".allocator.lock"
 lock_timeout_seconds = 30
 lock_poll_seconds = 0.2
 pending_claim_grace_seconds = 120
 
-claim_root.mkdir(parents=True, exist_ok=True)
+if remote_root.is_symlink() or remote_root.resolve() != remote_root:
+    print("shared-testbox remote root is not canonical", file=sys.stderr)
+    sys.exit(1)
+
+
+def ensure_directory(path, create):
+    try:
+        parts = path.relative_to(remote_root).parts
+    except ValueError:
+        print(f"shared-testbox path escaped remote root: {path}", file=sys.stderr)
+        sys.exit(1)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    current_fd = os.open(remote_root, flags)
+    try:
+        for part in parts:
+            try:
+                next_fd = os.open(part, flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                if not create:
+                    print(f"shared-testbox directory is missing: {path}", file=sys.stderr)
+                    sys.exit(1)
+                os.mkdir(part, 0o700, dir_fd=current_fd)
+                next_fd = os.open(part, flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+    finally:
+        os.close(current_fd)
+
+
+def path_has_symlink(path):
+    try:
+        parts = path.relative_to(remote_root).parts
+    except ValueError:
+        return True
+    current = remote_root
+    for part in parts:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
+
+
+ensure_directory(remote_root / "agents", create=True)
+ensure_directory(claim_root, create=True)
 
 deadline = time.time() + lock_timeout_seconds
 while True:
@@ -733,7 +770,13 @@ try:
                 pass
 
     for claim_dir in claim_root.iterdir():
-        if not claim_dir.is_dir() or claim_dir.name.startswith("."):
+        if claim_dir.name.startswith("."):
+            continue
+        if claim_dir.is_symlink():
+            claim_dir.unlink()
+            continue
+        if not claim_dir.is_dir() or path_has_symlink(claim_dir):
+            shutil.rmtree(claim_dir, ignore_errors=True)
             continue
 
         run_path_file = claim_dir / "run_path"
@@ -745,9 +788,11 @@ try:
         run_path = pathlib.Path(run_path_file.read_text().strip())
 
         def remove_stale_run():
-            if run_path.is_symlink() or not run_path.is_dir():
+            if path_has_symlink(run_path) or not run_path.is_dir():
                 return
             run_real = run_path.resolve(strict=False)
+            if path_has_symlink(run_real):
+                return
             allowed_roots = (
                 remote_root / "agents",
                 remote_root / "workspaces",
@@ -785,13 +830,15 @@ try:
 
         if not active:
             remove_stale_run()
-            shutil.rmtree(claim_dir, ignore_errors=True)
+            if not path_has_symlink(claim_dir):
+                shutil.rmtree(claim_dir, ignore_errors=True)
             continue
 
         try:
             claimed.append(ipaddress.ip_network(subnet_file.read_text().strip(), strict=False))
         except ValueError:
-            shutil.rmtree(claim_dir, ignore_errors=True)
+            if not path_has_symlink(claim_dir):
+                shutil.rmtree(claim_dir, ignore_errors=True)
 
     for octet in range(0, 256):
         candidate = ipaddress.ip_network(f"10.203.{octet}.0/24")
@@ -805,6 +852,9 @@ try:
         if claim_dir.exists():
             continue
 
+        ensure_directory(claim_root, create=False)
+        if claim_dir.exists() or claim_dir.is_symlink():
+            continue
         claim_dir.mkdir()
         (claim_dir / "run_path").write_text(f"{remote_run}\n")
         (claim_dir / "compose_project").write_text(f"{compose_project}\n")

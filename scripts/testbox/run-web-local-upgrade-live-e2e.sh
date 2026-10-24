@@ -56,13 +56,7 @@ cleanup_remote_run() {
 trap cleanup_remote_run EXIT INT TERM
 
 CONTAINER_RAW="codex_${WORKSPACE_SLUG}_web_upgrade_live_${RUN_ID}"
-CONTAINER_NAME="$(python3 - "$CONTAINER_RAW" <<'PY'
-import re, sys
-s = sys.argv[1].lower()
-s = re.sub(r'[^a-z0-9_.-]+', '_', s).strip('_.-')
-print(s[:63] if len(s) > 63 else s)
-PY
-)"
+CONTAINER_NAME="$(testbox_bounded_name "$CONTAINER_RAW")"
 
 REMOTE_RUN_B64="$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')"
 TESTBOX_REMOTE_ROOT_B64="$(printf '%s' "$TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')"
@@ -138,7 +132,7 @@ cleanup() {
   fi
   if [ -n "${REMOTE_RUN:-}" ]; then
     if assert_remote_run; then
-      rm -rf -- "$REMOTE_RUN" >/dev/null 2>&1 || true
+      remove_remote_run >/dev/null 2>&1 || true
     fi
   fi
 }

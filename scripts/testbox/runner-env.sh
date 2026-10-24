@@ -11,6 +11,7 @@ case "${USER:-}" in
 esac
 
 TESTBOX_REMOTE_ROOT="${XP_TESTBOX_REMOTE_ROOT%/}"
+TESTBOX_REMOTE_GUARD_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/remote-run-guard.py"
 case "$TESTBOX_REMOTE_ROOT" in
   ""|/|*/..|*/../*)
     echo "XP_TESTBOX_REMOTE_ROOT must be a dedicated absolute directory" >&2
@@ -38,6 +39,20 @@ testbox_validate_component() {
   esac
 }
 
+testbox_bounded_name() {
+  python3 - "$1" <<'PY'
+import hashlib
+import re
+import sys
+
+raw = sys.argv[1]
+safe = re.sub(r"[^a-z0-9_-]+", "_", raw.lower()).strip("_-")
+digest = hashlib.sha256(raw.encode()).hexdigest()[:12]
+prefix = safe[: 63 - len(digest) - 1].rstrip("_-") or "run"
+print(f"{prefix}_{digest}")
+PY
+}
+
 testbox_remote_root_preflight() {
   ssh -o BatchMode=yes "$TESTBOX" \
     "set -euo pipefail; root='$TESTBOX_REMOTE_ROOT'; mkdir -p -- \"\$root\"; test -d \"\$root\"; test ! -L \"\$root\"; test \"\$(readlink -f -- \"\$root\")\" = \"\$root\""
@@ -49,42 +64,7 @@ testbox_remote_run_guard() {
   root_b64="$(printf '%s' "$TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')"
   remote_run_b64="$(printf '%s' "$remote_run" | base64 | tr -d '\n')"
   ssh -o BatchMode=yes "$TESTBOX" \
-    "TESTBOX_REMOTE_ROOT_B64='$root_b64' REMOTE_RUN_B64='$remote_run_b64' bash -s" <<'REMOTE_RUN_GUARD'
-set -euo pipefail
-TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
-REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
-assert_no_symlink_path() {
-  local path="$1"
-  while [ "$path" != "/" ] && [ "$path" != "." ]; do
-    if [ -L "$path" ]; then
-      return 2
-    fi
-    path="$(dirname "$path")"
-  done
-}
-test ! -L "$TESTBOX_REMOTE_ROOT"
-test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
-assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
-test ! -L "$REMOTE_RUN"
-assert_existing_no_symlink_path() {
-  local path="$1"
-  while [ ! -e "$path" ] && [ ! -L "$path" ] && [ "$path" != "/" ]; do
-    path="$(dirname "$path")"
-  done
-  assert_no_symlink_path "$path"
-}
-if ! assert_existing_no_symlink_path "$REMOTE_RUN"; then
-  exit 2
-fi
-remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
-case "$remote_run_real" in
-  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
-  *) exit 2 ;;
-esac
-assert_no_symlink_path "$remote_run_real"
-REMOTE_RUN="$remote_run_real"
-printf '%s\n' "$REMOTE_RUN"
-REMOTE_RUN_GUARD
+    "TESTBOX_REMOTE_ROOT_B64='$root_b64' REMOTE_RUN_B64='$remote_run_b64' RUN_ID_B64='' python3 - guard" < "$TESTBOX_REMOTE_GUARD_HELPER"
 }
 
 testbox_remote_cleanup() {
@@ -95,35 +75,5 @@ testbox_remote_cleanup() {
   remote_run_b64="$(printf '%s' "$remote_run" | base64 | tr -d '\n')"
   run_id_b64="$(printf '%s' "$run_id" | base64 | tr -d '\n')"
   ssh -o BatchMode=yes "$TESTBOX" \
-    "TESTBOX_REMOTE_ROOT_B64='$root_b64' REMOTE_RUN_B64='$remote_run_b64' RUN_ID_B64='$run_id_b64' bash -s" <<'REMOTE_CLEANUP'
-set -euo pipefail
-TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
-REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
-RUN_ID="$(printf '%s' "${RUN_ID_B64:-}" | base64 -d)"
-assert_no_symlink_path() {
-  local path="$1"
-  while [ "$path" != "/" ] && [ "$path" != "." ]; do
-    if [ -L "$path" ]; then
-      return 2
-    fi
-    path="$(dirname "$path")"
-  done
-}
-test ! -L "$TESTBOX_REMOTE_ROOT"
-test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
-assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
-test ! -L "$REMOTE_RUN"
-assert_no_symlink_path "$REMOTE_RUN"
-remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
-case "$remote_run_real" in
-  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*)
-    if [ -n "$RUN_ID" ]; then
-      test -f "$remote_run_real/.codex-run-id"
-      test "$(cat -- "$remote_run_real/.codex-run-id")" = "$RUN_ID"
-    fi
-    rm -rf -- "$remote_run_real"
-    ;;
-  *) exit 2 ;;
-esac
-REMOTE_CLEANUP
+    "TESTBOX_REMOTE_ROOT_B64='$root_b64' REMOTE_RUN_B64='$remote_run_b64' RUN_ID_B64='$run_id_b64' python3 - cleanup" < "$TESTBOX_REMOTE_GUARD_HELPER"
 }

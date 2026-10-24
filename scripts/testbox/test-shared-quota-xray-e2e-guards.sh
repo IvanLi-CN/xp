@@ -105,6 +105,15 @@ expect_failure \
   USER=ivan
   # shellcheck source=runner-env.sh
   source "$SCRIPT_DIR/runner-env.sh"
+  long_name_raw="$(printf 'repository%.0s' {1..20})"
+  long_name="$(testbox_bounded_name "$long_name_raw")"
+  test "${#long_name}" -eq 63
+  test "${long_name##*_}" = "$(python3 - "$long_name_raw" <<'PY'
+import hashlib
+import sys
+print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:12])
+PY
+)"
   testbox_remote_root_preflight
   guarded_run="$(testbox_remote_run_guard "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1")"
   test "$guarded_run" = "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1"
@@ -132,6 +141,12 @@ expect_failure \
   test -L "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo"
   if testbox_remote_run_guard "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-2"; then
     echo 'expected intermediate symlink guard to fail' >&2
+    exit 1
+  fi
+  mkdir -p "$guard_root/agents-outside"
+  ln -s "$guard_root/agents-outside" "$XP_TESTBOX_REMOTE_ROOT/agents"
+  if testbox_remote_run_guard "$XP_TESTBOX_REMOTE_ROOT/agents/ivan/runs/run-4"; then
+    echo 'expected agents symlink guard to fail' >&2
     exit 1
   fi
 )

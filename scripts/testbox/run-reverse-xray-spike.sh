@@ -30,11 +30,7 @@ REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/${REPO_NAME}__${PATH_HASH8}"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 COMPOSE_PROJECT="codex_${REPO_NAME}_${PATH_HASH8}_${RUN_ID}"
-COMPOSE_PROJECT="$(python3 - "$COMPOSE_PROJECT" <<'PY'
-import re, sys
-print(re.sub(r'[^a-z0-9_-]+', '_', sys.argv[1].lower()).strip('_')[:63])
-PY
-)"
+COMPOSE_PROJECT="$(testbox_bounded_name "$COMPOSE_PROJECT")"
 testbox_remote_root_preflight
 REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
 REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
@@ -56,30 +52,34 @@ TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
-assert_no_symlink_path() {
-  local path="$1"
-  while [ "$path" != "/" ] && [ "$path" != "." ]; do
-    if [ -L "$path" ]; then
-      return 2
-    fi
-    path="$(dirname "$path")"
-  done
-}
-test ! -L "$TESTBOX_REMOTE_ROOT"
-test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
-test ! -L "$REMOTE_RUN"
-assert_no_symlink_path "$REMOTE_RUN"
-remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
-case "$remote_run_real" in
-  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*)
-    test -f "$remote_run_real/.codex-run-id"
-    test "$(cat -- "$remote_run_real/.codex-run-id")" = "$RUN_ID"
-    cd "$remote_run_real"
-    docker compose -p "$COMPOSE_PROJECT" -f scripts/testbox/reverse-xray-spike-compose.yml -f .codex.caps-compat.yml down -v --remove-orphans || true
-    rm -rf -- "$remote_run_real"
-    ;;
-  *) exit 2 ;;
-esac
+if [ -f "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" ]; then
+  RUN_ID="$RUN_ID" python3 "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" verify "$TESTBOX_REMOTE_ROOT" "$REMOTE_RUN"
+  remote_run_real="$REMOTE_RUN"
+else
+  assert_no_symlink_path() {
+    local path="$1"
+    while [ "$path" != "/" ] && [ "$path" != "." ]; do
+      if [ -L "$path" ]; then
+        return 2
+      fi
+      path="$(dirname "$path")"
+    done
+  }
+  test ! -L "$TESTBOX_REMOTE_ROOT"
+  test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+  test ! -L "$REMOTE_RUN"
+  assert_no_symlink_path "$REMOTE_RUN"
+  remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
+  test -f "$remote_run_real/.codex-run-id"
+  test "$(cat -- "$remote_run_real/.codex-run-id")" = "$RUN_ID"
+fi
+cd "$remote_run_real"
+docker compose -p "$COMPOSE_PROJECT" -f scripts/testbox/reverse-xray-spike-compose.yml -f .codex.caps-compat.yml down -v --remove-orphans || true
+if [ -f "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" ]; then
+  RUN_ID="$RUN_ID" python3 "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" cleanup "$TESTBOX_REMOTE_ROOT" "$REMOTE_RUN"
+else
+  rm -rf -- "$remote_run_real"
+fi
 REMOTE_CLEANUP
 }
 trap cleanup EXIT INT TERM

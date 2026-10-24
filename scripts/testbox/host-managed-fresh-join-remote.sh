@@ -34,8 +34,21 @@ REMOTE_RUN="$remote_run_real"
 source "$REMOTE_RUN/scripts/testbox/remote-run-guard.sh"
 XP_HOST_IMAGE_PREFIX="$COMPOSE_PROJECT"
 RECEIPT_PATH="$REMOTE_WORKSPACE/receipts/host-managed-fresh-join-${COMPOSE_PROJECT}.txt"
-BUILDER_NAME="${COMPOSE_PROJECT}-musl-builder"
-SOURCE_NAME="${COMPOSE_PROJECT}-xray-source"
+bounded_name() {
+  python3 - "$1" <<'PY'
+import hashlib
+import re
+import sys
+
+raw = sys.argv[1]
+safe = re.sub(r"[^a-z0-9_-]+", "_", raw.lower()).strip("_-")
+digest = hashlib.sha256(raw.encode()).hexdigest()[:12]
+prefix = safe[: 63 - len(digest) - 1].rstrip("_-") or "run"
+print(f"{prefix}_{digest}")
+PY
+}
+BUILDER_NAME="$(bounded_name "${COMPOSE_PROJECT}-musl-builder")"
+SOURCE_NAME="$(bounded_name "${COMPOSE_PROJECT}-xray-source")"
 COMPOSE_DIR="$REMOTE_RUN/scripts/testbox"
 COMPOSE_FILE="compose-host-managed-fresh-join.yml"
 
@@ -63,7 +76,7 @@ cleanup() {
   docker rm -f "$BUILDER_NAME" "$SOURCE_NAME" >/dev/null 2>&1 || true
   docker image rm "$XP_HOST_IMAGE_PREFIX-leader" "$XP_HOST_IMAGE_PREFIX-systemd" "$XP_HOST_IMAGE_PREFIX-openrc" >/dev/null 2>&1 || true
   if assert_remote_run; then
-    rm -rf -- "$REMOTE_RUN" >/dev/null 2>&1 || true
+    remove_remote_run >/dev/null 2>&1 || true
   fi
   return "$status"
 }
