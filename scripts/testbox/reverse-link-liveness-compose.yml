@@ -6,7 +6,7 @@ services:
     working_dir: /workspace
     command: ["sleep", "infinity"]
     environment:
-      GOMEMLIMIT: 16MiB
-      GOGC: "50"
+      GOMEMLIMIT: 32MiB
+      GOGC: "100"
     volumes:
       - ../../:/workspace

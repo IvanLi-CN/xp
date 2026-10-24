@@ -11,7 +11,18 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
     for (service, defaults) in [
         (
             "xray",
-            &[("GOMEMLIMIT", "16MiB", None), ("GOGC", "50", None)][..],
+            &[
+                (
+                    "GOMEMLIMIT",
+                    crate::ops::MANAGED_XRAY_GOMEMLIMIT,
+                    Some(crate::ops::LEGACY_XRAY_GOMEMLIMIT),
+                ),
+                (
+                    "GOGC",
+                    crate::ops::MANAGED_XRAY_GOGC,
+                    Some(crate::ops::LEGACY_XRAY_GOGC),
+                ),
+            ][..],
         ),
         (
             "cloudflared",
@@ -27,10 +38,11 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
         if !unit.exists() {
             continue;
         }
-        let migrate_legacy_cloudflared_limit = service == "cloudflared"
-            && is_generated_legacy_systemd_cloudflared_unit(
-                &fs::read_to_string(&unit).map_err(filesystem_error)?,
-            );
+        let unit_raw = fs::read_to_string(&unit).map_err(filesystem_error)?;
+        let migrate_legacy_xray_default = service == "xray"
+            && crate::ops::ingress_guard::is_generated_legacy_systemd_xray_unit(&unit_raw);
+        let migrate_legacy_cloudflared_limit =
+            service == "cloudflared" && is_generated_legacy_systemd_cloudflared_unit(&unit_raw);
         if service == "cloudflared" {
             backfill_systemd_cloudflared_protocol(&unit)?;
         }
@@ -55,7 +67,11 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
                 &sources,
                 key,
                 *legacy_default,
-                migrate_legacy_cloudflared_limit,
+                if service == "xray" {
+                    migrate_legacy_xray_default
+                } else {
+                    migrate_legacy_cloudflared_limit
+                },
             ) {
                 content.push_str(&format!("Environment={key}={value}\n"));
             }
@@ -63,15 +79,24 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
         write_string_if_changed(&managed, &content).map_err(filesystem_error)?;
     }
 
-    for (path, limit) in [
-        (paths.openrc_initd_dir().join("xray"), "16MiB"),
-        (paths.openrc_initd_dir().join("cloudflared"), "12MiB"),
+    for (path, limit, gogc) in [
+        (
+            paths.openrc_initd_dir().join("xray"),
+            crate::ops::MANAGED_XRAY_GOMEMLIMIT,
+            crate::ops::MANAGED_XRAY_GOGC,
+        ),
+        (paths.openrc_initd_dir().join("cloudflared"), "12MiB", "50"),
     ] {
         if !path.exists() {
             continue;
         }
         let raw = fs::read_to_string(&path).map_err(filesystem_error)?;
         let mut updated = raw.clone();
+        if path.file_name() == Some(OsStr::new("xray"))
+            && crate::ops::ingress_guard::is_generated_legacy_openrc_xray_script(&raw)
+        {
+            updated = crate::ops::ingress_guard::migrate_legacy_openrc_xray_script(&updated);
+        }
         if path.file_name() == Some(OsStr::new("cloudflared")) {
             if is_generated_legacy_openrc_cloudflared_script(&raw) {
                 updated = updated.replacen(
@@ -87,7 +112,7 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
             value.push_str(&format!("export GOMEMLIMIT=\"${{GOMEMLIMIT:-{limit}}}\"\n"));
         }
         if !updated.contains("GOGC") {
-            value.push_str("export GOGC=\"${GOGC:-50}\"\n");
+            value.push_str(&format!("export GOGC=\"${{GOGC:-{gogc}}}\"\n"));
         }
         if path.file_name() == Some(OsStr::new("cloudflared"))
             && !updated.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS")
@@ -305,7 +330,11 @@ fn backfill_openrc_cloudflared_protocol(script: &str) -> String {
 
 fn is_generated_systemd_drop_in(service: &str, raw: &str) -> bool {
     let is_legacy = match service {
-        "xray" => raw == "[Service]\nEnvironment=GOMEMLIMIT=16MiB\nEnvironment=GOGC=50\n",
+        "xray" => matches!(
+            raw,
+            "[Service]\nEnvironment=GOMEMLIMIT=32MiB\nEnvironment=GOGC=100\n"
+                | "[Service]\nEnvironment=GOMEMLIMIT=16MiB\nEnvironment=GOGC=50\n"
+        ),
         "cloudflared" => matches!(
             raw,
             "[Service]\nEnvironment=GOMEMLIMIT=8MiB\nEnvironment=GOGC=50\n"
@@ -318,7 +347,12 @@ fn is_generated_systemd_drop_in(service: &str, raw: &str) -> bool {
     }
 
     let allowed = match service {
-        "xray" => &[("GOMEMLIMIT", "16MiB"), ("GOGC", "50")][..],
+        "xray" => &[
+            ("GOMEMLIMIT", crate::ops::MANAGED_XRAY_GOMEMLIMIT),
+            ("GOGC", crate::ops::MANAGED_XRAY_GOGC),
+            ("GOMEMLIMIT", crate::ops::LEGACY_XRAY_GOMEMLIMIT),
+            ("GOGC", crate::ops::LEGACY_XRAY_GOGC),
+        ][..],
         "cloudflared" => &[
             ("GOMEMLIMIT", "12MiB"),
             ("GOMEMLIMIT", "8MiB"),

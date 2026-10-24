@@ -1049,14 +1049,14 @@ fn spawn_xray(
             runtime_env
                 .get("XP_XRAY_GOMEMLIMIT")
                 .map(String::as_str)
-                .unwrap_or("16MiB"),
+                .unwrap_or(crate::ops::MANAGED_XRAY_GOMEMLIMIT),
         )
         .env(
             "GOGC",
             runtime_env
                 .get("XP_XRAY_GOGC")
                 .map(String::as_str)
-                .unwrap_or("50"),
+                .unwrap_or(crate::ops::MANAGED_XRAY_GOGC),
         )
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

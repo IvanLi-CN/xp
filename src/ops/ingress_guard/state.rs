@@ -497,7 +497,10 @@ fn is_generated_xray_memory_drop_in(raw: &str) -> bool {
     lines.all(|line| {
         matches!(
             line,
-            "" | "Environment=GOMEMLIMIT=16MiB" | "Environment=GOGC=50"
+            "" | "Environment=GOMEMLIMIT=32MiB"
+                | "Environment=GOGC=100"
+                | "Environment=GOMEMLIMIT=16MiB"
+                | "Environment=GOGC=50"
         )
     })
 }
@@ -522,6 +525,7 @@ fn is_generated_xray_service_asset(init: InitSystem, raw: &str) -> bool {
             ]
             .iter()
             .any(|expected| raw == expected)
+                || super::is_generated_legacy_systemd_xray_unit(raw)
         }
         InitSystem::OpenRc => {
             let direct = super::render_openrc_xray_script(None);
@@ -533,6 +537,7 @@ fn is_generated_xray_service_asset(init: InitSystem, raw: &str) -> bool {
             ]
             .iter()
             .any(|expected| raw == expected)
+                || super::is_generated_legacy_openrc_xray_script(raw)
         }
         InitSystem::None => false,
     }

@@ -200,7 +200,7 @@ jobs:
       - run: bunx --no-install dprint check
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults: {run: {working-directory: web}}
     steps:
@@ -241,7 +241,7 @@ jobs:
           path: cache-receipt/web.json
 
   storybook:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults: {run: {working-directory: web}}
     steps:
