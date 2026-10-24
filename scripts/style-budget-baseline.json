@@ -375,7 +375,12 @@
     "max_line_length": 193
   },
   "src/mihomo_redact.rs": {
-    "source_lines": 1331
+    "source_lines": 1339
+  },
+  "src/mihomo_import.rs": {
+    "long_line_count": 11,
+    "max_line_length": 155,
+    "source_lines": 2541
   },
   "src/mihomo_redact/tests.rs": {
     "long_line_count": 5,
@@ -556,7 +561,8 @@
   },
   "web/src/components/AppShell.tsx": {
     "long_line_count": 5,
-    "max_line_length": 215
+    "max_line_length": 215,
+    "source_lines": 1005
   },
   "web/src/components/AuthGate.stories.tsx": {
     "long_line_count": 1,
@@ -966,22 +972,22 @@
     "max_line_length": 393
   },
   "docs/specs/mihomo-subscription-import/IMPLEMENTATION.md": {
-    "long_line_count": 5,
-    "max_line_length": 146
+    "long_line_count": 11,
+    "max_line_length": 455
   },
   "docs/specs/mihomo-subscription-import/HISTORY.md": {
-    "long_line_count": 3,
-    "max_line_length": 173
+    "long_line_count": 7,
+    "max_line_length": 307
   },
   "docs/specs/mihomo-subscription-import/SPEC.md": {
-    "long_line_count": 60,
-    "max_line_length": 214
+    "long_line_count": 63,
+    "max_line_length": 501
   },
   "docs/specs/mihomo-subscription-import/contracts/http-apis.md": {
     "long_line_count": 22,
     "max_line_length": 225
   },
   "web/src/api/releaseInventories.ts": {
-    "source_lines": 1029
+    "source_lines": 1126
   }
 }

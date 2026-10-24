@@ -150,7 +150,12 @@ export function AppShell({
 	const primaryBackend = usePrimaryBackend();
 	const staticConsole = isStaticWebConsole();
 	const [adminToken] = useState(() => readAdminToken());
-	const apiCompatibility = useApiCompatibility(adminToken, runtime.isOnline);
+	const apiCompatibility = useApiCompatibility(
+		adminToken,
+		runtime.isOnline,
+		primaryBackend.primaryOrigin,
+		primaryBackend.generation,
+	);
 	const { requestNavigation } = useObjectNavigationGuard();
 	useObjectNavigationBrowserBlocker();
 	const compatibility = apiCompatibility.data ?? null;

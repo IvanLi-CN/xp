@@ -80,6 +80,7 @@ export function MihomoSubscriptionImportDialog({
 	const [error, setError] = useState<string | null>(null);
 	const abortRef = useRef<AbortController | null>(null);
 	const requestIdRef = useRef(0);
+	const previewFingerprint = `${userId}\u0000${existingExtraProxiesYaml}`;
 
 	const cancelRequest = useCallback(() => {
 		requestIdRef.current += 1;
@@ -142,7 +143,7 @@ export function MihomoSubscriptionImportDialog({
 			);
 			if (requestId !== requestIdRef.current) return;
 			setPreview(nextPreview);
-			setPreviewBaseline(existingExtraProxiesYaml);
+			setPreviewBaseline(previewFingerprint);
 		} catch (cause) {
 			if (requestId !== requestIdRef.current || controller.signal.aborted)
 				return;
@@ -157,6 +158,7 @@ export function MihomoSubscriptionImportDialog({
 		adminToken,
 		cancelRequest,
 		existingExtraProxiesYaml,
+		previewFingerprint,
 		previewRequest,
 		source,
 		userId,
@@ -165,7 +167,7 @@ export function MihomoSubscriptionImportDialog({
 	const isStale =
 		preview !== null &&
 		previewBaseline !== null &&
-		previewBaseline !== existingExtraProxiesYaml;
+		previewBaseline !== previewFingerprint;
 	const canAdd =
 		!readOnly &&
 		!isLoading &&

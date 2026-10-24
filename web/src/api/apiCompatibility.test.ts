@@ -51,6 +51,31 @@ describe("api compatibility", () => {
 		);
 	});
 
+	it("requires an explicit capability probe for subscription import", () => {
+		const result = resolveApiCompatibility({ releaseTag: "v3.22.5" });
+
+		expect(result.kind).toBe("compatible");
+		if (result.kind !== "compatible") return;
+		expect(result.isFeatureAvailable("admin.mihomo-subscription-import")).toBe(
+			false,
+		);
+	});
+
+	it("does not restore probe-only capabilities from a non-authoritative cache", () => {
+		const result = resolveApiCompatibility({
+			releaseTag: "v3.22.5",
+			capabilities: ["admin.mihomo-subscription-import"],
+			capabilitiesAreAuthoritative: false,
+		});
+
+		expect(result.kind).toBe("compatible");
+		if (result.kind !== "compatible") return;
+		expect(result.capabilitiesAreAuthoritative).toBe(false);
+		expect(result.isFeatureAvailable("admin.mihomo-subscription-import")).toBe(
+			false,
+		);
+	});
+
 	it("rejects an explicitly empty capability advertisement", () => {
 		expect(
 			resolveApiCompatibility({

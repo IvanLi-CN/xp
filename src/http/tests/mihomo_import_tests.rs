@@ -1,4 +1,7 @@
-use axum::http::{StatusCode, header};
+use axum::{
+    body::to_bytes,
+    http::{StatusCode, header},
+};
 use serde_json::json;
 use tower::util::ServiceExt;
 
@@ -62,6 +65,25 @@ async fn admin_mihomo_import_preview_is_draft_only_and_bounded() {
         store.get_user_mihomo_profile(&fixtures.user_id)
     };
     assert_eq!(after, before, "preview must not persist the user profile");
+
+    let invalid_json = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            &path,
+            json!({
+                "source": "vless://invalid@example.com:443",
+                "existing_extra_proxies_yaml": "",
+                "unexpected_secret": "do-not-echo"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid_json.status(), StatusCode::BAD_REQUEST);
+    let invalid_json_body = to_bytes(invalid_json.into_body(), 64 * 1024).await.unwrap();
+    let invalid_json_body = String::from_utf8_lossy(&invalid_json_body);
+    assert!(invalid_json_body.contains("invalid JSON request body"));
+    assert!(!invalid_json_body.contains("do-not-echo"));
 
     let invalid_draft = app
         .clone()

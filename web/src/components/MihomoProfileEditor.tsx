@@ -624,6 +624,7 @@ export function MihomoProfileEditor({
 				</SheetContent>
 			</Sheet>
 			<MihomoSubscriptionImportDialog
+				key={userId}
 				open={importOpen}
 				onOpenChange={setImportOpen}
 				adminToken={adminToken}

@@ -27,7 +27,7 @@ where
             .map_err(|_| ApiError::too_large("request body is too large"))?;
         let _ = state;
         let value = serde_json::from_slice::<T>(&bytes)
-            .map_err(|error| ApiError::invalid_request(error.to_string()))?;
+            .map_err(|_| ApiError::invalid_request("invalid JSON request body"))?;
         Ok(Self(value))
     }
 }

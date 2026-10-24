@@ -1,13 +1,18 @@
-use super::{Candidate, meaningful_lines};
+use super::{Candidate, ImportError, MAX_CANDIDATES, meaningful_lines};
 use base64::Engine as _;
 use reqwest::Url;
 use serde_yaml::{Mapping, Value};
 use std::collections::BTreeMap;
 
-pub(super) fn parse_raw_candidates(source: &str) -> Vec<Candidate> {
-    meaningful_lines(source)
-        .into_iter()
-        .map(|line| {
+pub(super) fn parse_raw_candidates(source: &str) -> Result<Vec<Candidate>, ImportError> {
+    let mut candidates = Vec::new();
+    for line in meaningful_lines(source) {
+        if candidates.len() == MAX_CANDIDATES {
+            return Err(ImportError::too_large(format!(
+                "source contains more than {MAX_CANDIDATES} candidates"
+            )));
+        }
+        candidates.push({
             let line = line.strip_prefix("- ").map(str::trim).unwrap_or(line);
             let scheme = line
                 .split_once("://")
@@ -28,23 +33,28 @@ pub(super) fn parse_raw_candidates(source: &str) -> Vec<Candidate> {
                     failure: Some(reason),
                 },
             }
-        })
-        .collect()
+        });
+    }
+    Ok(candidates)
 }
 
 fn parse_uri_proxy(source: &str) -> Result<(Value, Option<String>, String, Vec<String>), String> {
     let url = Url::parse(source).map_err(|_| "URI is malformed".to_owned())?;
     let scheme = url.scheme().to_ascii_lowercase();
-    let fragment_name = url
-        .fragment()
-        .and_then(decode_component)
-        .and_then(|name| safe_name(&name));
+    let fragment_name = parse_fragment_name(&url)?;
+    let opaque_payload = source
+        .split_once("://")
+        .map(|(_, payload)| payload)
+        .unwrap_or_default()
+        .split(['#', '?'])
+        .next()
+        .unwrap_or_default();
     match scheme.as_str() {
         "vless" => parse_vless(url, fragment_name),
-        "ss" => parse_ss(url, fragment_name),
-        "vmess" => parse_vmess(url, fragment_name),
+        "ss" => parse_ss(url, fragment_name, opaque_payload),
+        "vmess" => parse_vmess(url, fragment_name, opaque_payload),
         "trojan" => parse_trojan(url, fragment_name),
-        "hysteria2" | "hy2" => parse_hysteria2(url, fragment_name),
+        "hysteria2" | "hy2" => parse_hysteria2(url, fragment_name, source),
         "tuic" => parse_tuic(url, fragment_name),
         _ => Err("unsupported scheme".to_owned()),
     }
@@ -121,8 +131,9 @@ fn parse_vless(
 fn parse_ss(
     url: Url,
     name: Option<String>,
+    opaque_payload: &str,
 ) -> Result<(Value, Option<String>, String, Vec<String>), String> {
-    let (method, password, server, port) = parse_ss_parts(&url)?;
+    let (method, password, server, port) = parse_ss_parts(&url, opaque_payload)?;
     let mut map = base_proxy("ss", &server, port);
     insert_string(&mut map, "cipher", method);
     insert_string(&mut map, "password", password);
@@ -138,32 +149,40 @@ fn parse_ss(
     ))
 }
 
-fn parse_ss_parts(url: &Url) -> Result<(String, String, String, u16), String> {
+fn parse_ss_parts(
+    url: &Url,
+    opaque_payload: &str,
+) -> Result<(String, String, String, u16), String> {
     let direct_user = decode_component(url.username()).unwrap_or_default();
     let direct_password = url.password().and_then(decode_component);
-    if let (Some(server), Some(port), Some(password)) = (
-        url.host_str().filter(|value| !value.is_empty()),
-        url.port(),
-        direct_password,
-    ) {
-        return Ok((direct_user, password, server.to_owned(), port));
+    let explicit_port = url.port().or_else(|| {
+        opaque_payload
+            .rsplit_once('@')
+            .and_then(|(_, authority)| explicit_authority_port(authority))
+    });
+    if let (Some(server), Some(port), Some(password)) =
+        (normalized_host(url), explicit_port, direct_password)
+    {
+        if direct_user.trim().is_empty() || password.trim().is_empty() || port == 0 {
+            return Err("ss port is invalid".to_owned());
+        }
+        return Ok((direct_user, password, server, port));
     }
 
-    if let (Some(server), Some(port)) =
-        (url.host_str().filter(|value| !value.is_empty()), url.port())
+    if let (Some(server), Some(port)) = (normalized_host(url), explicit_port)
         && let Some(decoded) = decode_base64_bytes(&direct_user)
         && let Ok(decoded) = String::from_utf8(decoded)
         && let Some((method, password)) = decoded.split_once(':')
     {
-        return Ok((
-            method.to_owned(),
-            password.to_owned(),
-            server.to_owned(),
-            port,
-        ));
+        if method.trim().is_empty() || password.trim().is_empty() || port == 0 {
+            return Err("ss method and password are required".to_owned());
+        }
+        return Ok((method.to_owned(), password.to_owned(), server, port));
     }
 
-    let encoded = if !direct_user.is_empty() && url.host_str().is_some() {
+    let encoded = if !opaque_payload.is_empty() {
+        opaque_payload.to_owned()
+    } else if !direct_user.is_empty() && url.host_str().is_some() {
         direct_user
     } else {
         url.host_str()
@@ -180,28 +199,35 @@ fn parse_ss_parts(url: &Url) -> Result<(String, String, String, u16), String> {
     let (method, password) = userinfo
         .split_once(':')
         .ok_or_else(|| "ss payload is missing password".to_owned())?;
+    if method.trim().is_empty() || password.trim().is_empty() {
+        return Err("ss method and password are required".to_owned());
+    }
     let authority_url = Url::parse(&format!("http://{authority}"))
         .map_err(|_| "ss payload server is invalid".to_owned())?;
-    let server = authority_url
-        .host_str()
-        .filter(|value| !value.is_empty())
+    let server = normalized_host(&authority_url)
         .ok_or_else(|| "ss payload server is required".to_owned())?;
-    let port = authority_url
-        .port()
+    let port = explicit_authority_port(authority)
         .ok_or_else(|| "ss payload port is required".to_owned())?;
-    Ok((
-        method.to_owned(),
-        password.to_owned(),
-        server.to_owned(),
-        port,
-    ))
+    Ok((method.to_owned(), password.to_owned(), server, port))
+}
+
+fn explicit_authority_port(authority: &str) -> Option<u16> {
+    let port = if let Some((_, suffix)) = authority.rsplit_once(']') {
+        suffix.strip_prefix(':')
+    } else {
+        authority.rsplit_once(':').map(|(_, suffix)| suffix)
+    }?;
+    port.parse::<u16>().ok().filter(|port| *port > 0)
 }
 
 fn parse_vmess(
     url: Url,
     fragment_name: Option<String>,
+    opaque_payload: &str,
 ) -> Result<(Value, Option<String>, String, Vec<String>), String> {
-    let encoded = if !url.path().trim_matches('/').is_empty() {
+    let encoded = if !opaque_payload.is_empty() {
+        opaque_payload.to_owned()
+    } else if !url.path().trim_matches('/').is_empty() {
         url.path().trim_matches('/').to_owned()
     } else {
         url.host_str().unwrap_or_default().to_owned()
@@ -231,6 +257,11 @@ fn parse_vmess(
         json_string(&payload, "scy").unwrap_or_else(|| "auto".to_owned()),
     );
     insert_bool(&mut map, "udp", true);
+    if payload.get("aid").is_some() {
+        let alter_id =
+            json_u64(&payload, "aid").ok_or_else(|| "vmess alterId is invalid".to_owned())?;
+        insert_number(&mut map, "alterId", alter_id);
+    }
     let tls = json_string(&payload, "tls")
         .map(|value| value == "tls" || value == "true")
         .or_else(|| payload.get("tls").and_then(serde_json::Value::as_bool))
@@ -259,8 +290,8 @@ fn parse_vmess(
         insert_string(&mut grpc, "grpc-service-name", service);
         map.insert(Value::String("grpc-opts".to_owned()), Value::Mapping(grpc));
     }
-    let name =
-        fragment_name.or_else(|| json_string(&payload, "ps").and_then(|value| safe_name(&value)));
+    let payload_name = safe_json_name(json_string(&payload, "ps"))?;
+    let name = fragment_name.or(payload_name);
     Ok((
         finish_proxy(map, name.clone()),
         name,
@@ -322,19 +353,51 @@ fn parse_trojan(
 fn parse_hysteria2(
     url: Url,
     name: Option<String>,
+    source: &str,
 ) -> Result<(Value, Option<String>, String, Vec<String>), String> {
-    let password = decode_component(url.username())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "hysteria2 password is required".to_owned())?;
+    let userinfo_has_colon = source
+        .split_once("://")
+        .and_then(|(_, remainder)| remainder.split_once('@'))
+        .is_some_and(|(userinfo, _)| userinfo.contains(':'));
+    let auth = match url.password() {
+        Some(raw_password) => {
+            let username = decode_component(url.username())
+                .ok_or_else(|| "hysteria2 authentication is invalid".to_owned())?;
+            let password = decode_component(raw_password)
+                .ok_or_else(|| "hysteria2 authentication is invalid".to_owned())?;
+            if username.is_empty() && password.is_empty() {
+                return Err("hysteria2 password is required".to_owned());
+            }
+            format!("{username}:{password}")
+        }
+        None if userinfo_has_colon => {
+            let username = decode_component(url.username())
+                .ok_or_else(|| "hysteria2 authentication is invalid".to_owned())?;
+            if username.is_empty() {
+                return Err("hysteria2 password is required".to_owned());
+            }
+            format!("{username}:")
+        }
+        None => decode_component(url.username())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "hysteria2 password is required".to_owned())?,
+    };
     let (server, port) = host_port(&url, "hysteria2")?;
     let query = query_map(&url);
     let mut map = base_proxy("hysteria2", &server, port);
-    insert_string(&mut map, "password", password);
+    insert_string(&mut map, "password", auth);
     if let Some(sni) = query.get("sni") {
         insert_string(&mut map, "sni", sni.clone());
     }
     if let Some(insecure) = query_bool(&query, "insecure") {
         insert_bool(&mut map, "skip-cert-verify", insecure);
+    }
+    if let Some(pin) = query
+        .get("pinSHA256")
+        .or_else(|| query.get("pin-sha256"))
+        .filter(|value| !value.is_empty())
+    {
+        insert_string(&mut map, "fingerprint", pin.clone());
     }
     if let Some(obfs) = query.get("obfs") {
         if obfs != "salamander" {
@@ -405,18 +468,31 @@ fn parse_tuic(
 }
 
 fn host_port(url: &Url, scheme: &str) -> Result<(String, u16), String> {
-    let server = url
-        .host_str()
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("{scheme} server is required"))?;
+    let server = normalized_host(url).ok_or_else(|| format!("{scheme} server is required"))?;
     let port = url
         .port()
+        .or_else(|| matches!(scheme, "hysteria2" | "hy2").then_some(443));
+    let port = port
+        .filter(|port| *port > 0)
         .ok_or_else(|| format!("{scheme} port is required"))?;
-    Ok((server.to_owned(), port))
+    Ok((server, port))
 }
 
 fn supported_network(network: &str) -> bool {
-    matches!(network, "tcp" | "ws" | "grpc" | "http" | "h2")
+    matches!(network, "tcp" | "ws" | "grpc")
+}
+
+fn normalized_host(url: &Url) -> Option<String> {
+    let host = url.host_str()?.trim();
+    if host.is_empty() {
+        return None;
+    }
+    Some(
+        host.strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+            .unwrap_or(host)
+            .to_owned(),
+    )
 }
 
 fn query_map(url: &Url) -> BTreeMap<String, String> {
@@ -525,6 +601,31 @@ fn decode_component(value: &str) -> Option<String> {
     String::from_utf8(output).ok()
 }
 
+fn parse_fragment_name(url: &Url) -> Result<Option<String>, String> {
+    let Some(fragment) = url.fragment() else {
+        return Ok(None);
+    };
+    let name = decode_component(fragment).ok_or_else(|| "proxy name is invalid".to_owned())?;
+    if name.trim().is_empty() {
+        return Ok(None);
+    }
+    safe_name(&name)
+        .map(Some)
+        .ok_or_else(|| "proxy name is invalid".to_owned())
+}
+
+fn safe_json_name(value: Option<String>) -> Result<Option<String>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.trim().is_empty() {
+        return Ok(None);
+    }
+    safe_name(&value)
+        .map(Some)
+        .ok_or_else(|| "proxy name is invalid".to_owned())
+}
+
 fn hex_digit(value: u8) -> Option<u8> {
     match value {
         b'0'..=b'9' => Some(value - b'0'),
@@ -571,21 +672,28 @@ fn json_port(value: &serde_json::Value, key: &str) -> Option<u16> {
         value
             .as_u64()
             .and_then(|number| u16::try_from(number).ok())
-            .or_else(|| value.as_str()?.parse().ok())
+            .filter(|port| *port > 0)
+            .or_else(|| value.as_str()?.parse().ok().filter(|port| *port > 0))
     })
+}
+
+fn json_u64(value: &serde_json::Value, key: &str) -> Option<u64> {
+    value
+        .get(key)
+        .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
+}
+
+fn insert_number(map: &mut Mapping, key: &str, value: u64) {
+    map.insert(
+        Value::String(key.to_owned()),
+        Value::Number(serde_yaml::Number::from(value)),
+    );
 }
 
 pub(super) fn safe_name(value: &str) -> Option<String> {
     let value = value.trim();
-    if value.is_empty() || value.chars().any(char::is_control) {
+    if value.is_empty() || value.chars().any(char::is_control) || value.chars().count() > 256 {
         return None;
     }
-    let mut name = value.chars().take(80).collect::<String>();
-    if name.is_empty() {
-        return None;
-    }
-    if name.len() < value.len() {
-        name.push_str("...");
-    }
-    Some(name)
+    Some(value.to_owned())
 }

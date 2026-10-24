@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, userEvent, within } from "@storybook/test";
+import { expect, userEvent, waitFor, within } from "@storybook/test";
 import { useRef, useState } from "react";
 
 import type {
@@ -65,6 +65,7 @@ function EditorStory({
 				}
 			: initialProfile;
 	const [draft, setDraft] = useState(initialDraft);
+	const [savedProfile, setSavedProfile] = useState(initialProfile);
 	const [isSaving, setIsSaving] = useState(startSaving);
 	const [saveAttempts, setSaveAttempts] = useState(0);
 	const [error, setError] = useState<string | null>(null);
@@ -84,24 +85,27 @@ function EditorStory({
 			setError("The previous save failed. Retry when the service is ready.");
 			return false;
 		}
+		if (!holdSave) {
+			setSavedProfile(draft);
+		}
 		return true;
 	};
 
 	return (
 		<div
-			className="min-h-[34rem] w-full bg-background p-6 text-foreground"
+			className="min-h-[34rem] w-full bg-background p-12 text-foreground"
 			data-visual-evidence-surface="mihomo-profile-editor"
 		>
 			<div data-visual-evidence-target="mihomo-profile-editor">
 				<MihomoProfileEditor
 					userName="Mira Sato"
 					userId="story-user"
-					profile={initialProfile}
+					profile={savedProfile}
 					draft={draft}
-					dirty={Object.keys(initialProfile).some(
+					dirty={Object.keys(savedProfile).some(
 						(key) =>
 							draft[key as keyof AdminUserMihomoProfile] !==
-							initialProfile[key as keyof AdminUserMihomoProfile],
+							savedProfile[key as keyof AdminUserMihomoProfile],
 					)}
 					isSaving={isSaving}
 					readOnly={readOnly}
@@ -174,21 +178,55 @@ export const ImportPreview: Story = {
 		const dialog = await within(document.body).findByRole("dialog");
 		await userEvent.type(
 			within(dialog).getByLabelText("Subscription or node content"),
-			"vless://00000000-0000-0000-0000-000000000001@edge.example.com:443#edge",
+			"vless://00000000-0000-0000-0000-000000000001@edge.example.com:443#imported-edge",
 		);
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "Preview" }),
 		);
-		await expect(within(dialog)).toHaveTextContent("Preview report");
-		await expect(within(dialog)).toHaveTextContent("imported-edge");
+		await expect(dialog).toHaveTextContent("Preview report");
+		await expect(dialog).toHaveTextContent("imported-edge");
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "Add valid nodes" }),
 		);
 		await expect(
 			within(document.body).queryByRole("dialog"),
 		).not.toBeInTheDocument();
-		await expect(canvas).toHaveTextContent("Unsaved configuration changes");
+		await expect(canvasElement).toHaveTextContent(
+			"Unsaved configuration changes",
+		);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save configuration" }),
+		);
+		await waitFor(() =>
+			expect(canvasElement).toHaveTextContent("Saved configuration"),
+		);
 	},
+};
+
+export const ImportPreviewReport: Story = {
+	args: { importAvailable: true },
+};
+
+export const ImportPreviewMobile: Story = {
+	args: { importAvailable: true },
+	parameters: {
+		viewport: {
+			defaultViewport: "mihomoMobile393",
+			viewports: {
+				mihomoMobile393: {
+					name: "Mihomo mobile (393x852)",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	play: ImportPreview.play,
+};
+
+export const ImportPreviewReportMobile: Story = {
+	args: { importAvailable: true },
+	parameters: ImportPreviewMobile.parameters,
 };
 
 export const Expanded: Story = {

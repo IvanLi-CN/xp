@@ -14,6 +14,9 @@ import { fetchVersionCheck } from "./versionCheck";
 export { API_COMPATIBILITY_WINDOW } from "./releaseInventories";
 
 const ReleaseTagSchema = z.string().regex(/^v\d+\.\d+\.\d+$/);
+const CAPABILITIES_REQUIRING_EXPLICIT_PROBE = new Set([
+	"admin.mihomo-subscription-import",
+]);
 const CapabilitiesResponseSchema = z
 	.object({
 		release_tag: z.string().optional(),
@@ -29,6 +32,7 @@ export type ApiCompatibilityResult =
 			kind: "compatible";
 			profile: ReleaseInventory;
 			advertisedCapabilities: ReadonlySet<string>;
+			capabilitiesAreAuthoritative: boolean;
 			isFeatureAvailable: (capability: string) => boolean;
 			degradationFor: (capability: string) => string | null;
 	  }
@@ -103,15 +107,21 @@ function commonProfile(
 function compatibleResult(
 	profile: ReleaseInventory,
 	advertisedCapabilities: Iterable<string>,
+	capabilitiesAreAuthoritative: boolean,
 ): ApiCompatibilityResult {
 	const capabilities = new Set(advertisedCapabilities);
+	const isFeatureAvailable = (capability: string) =>
+		capabilities.has(capability) &&
+		(capabilitiesAreAuthoritative ||
+			!CAPABILITIES_REQUIRING_EXPLICIT_PROBE.has(capability));
 	return {
 		kind: "compatible",
 		profile,
 		advertisedCapabilities: capabilities,
-		isFeatureAvailable: (capability) => capabilities.has(capability),
+		capabilitiesAreAuthoritative,
+		isFeatureAvailable,
 		degradationFor: (capability) =>
-			capabilities.has(capability)
+			isFeatureAvailable(capability)
 				? null
 				: `API capability is unavailable for this server: ${capability}`,
 	};
@@ -121,6 +131,7 @@ export function resolveApiCompatibility(input: {
 	releaseTag?: string;
 	capabilities?: readonly string[];
 	fingerprint?: ApiFingerprint;
+	capabilitiesAreAuthoritative?: boolean;
 }): ApiCompatibilityResult {
 	if (input.capabilities !== undefined && input.capabilities.length === 0) {
 		return {
@@ -129,6 +140,8 @@ export function resolveApiCompatibility(input: {
 		};
 	}
 	const advertised = new Set(input.capabilities ?? []);
+	const capabilitiesAreAuthoritative =
+		input.capabilitiesAreAuthoritative ?? input.capabilities !== undefined;
 	if (advertised.size > 0) {
 		const inventoriedCapabilities = new Set(
 			RELEASE_INVENTORIES.flatMap((profile) => profile.capabilities),
@@ -149,7 +162,13 @@ export function resolveApiCompatibility(input: {
 				(candidate) => candidate.capabilities.length === smallestProfileSize,
 			);
 			const profile = commonProfile(leastSpecificCandidates);
-			if (profile) return compatibleResult(profile, advertised);
+			if (profile) {
+				return compatibleResult(
+					profile,
+					advertised,
+					capabilitiesAreAuthoritative,
+				);
+			}
 		}
 	}
 
@@ -173,6 +192,7 @@ export function resolveApiCompatibility(input: {
 		return compatibleResult(
 			profile,
 			advertised.size > 0 ? advertised : profile.capabilities,
+			advertised.size > 0 && capabilitiesAreAuthoritative,
 		);
 	}
 
@@ -190,7 +210,7 @@ export function resolveApiCompatibility(input: {
 				Object.keys(candidate.fingerprint).length === mostSpecificSize,
 		);
 		const profile = commonProfile(mostSpecificCandidates);
-		if (profile) return compatibleResult(profile, profile.capabilities);
+		if (profile) return compatibleResult(profile, profile.capabilities, false);
 	}
 
 	return {

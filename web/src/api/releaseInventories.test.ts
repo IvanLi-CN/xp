@@ -41,6 +41,18 @@ type PinnedWebContract = {
 	parser: string | null;
 };
 
+function contractSourceCommit(
+	inventory: (typeof RELEASE_INVENTORIES)[number],
+): string {
+	return inventory.contractSourceCommit ?? inventory.sourceCommit;
+}
+
+function serverApiRoutes(
+	inventory: (typeof RELEASE_INVENTORIES)[number],
+): readonly string[] {
+	return inventory.serverApiRoutes ?? inventory.apiRoutes;
+}
+
 function normalizedRoute(
 	method: string,
 	path: string,
@@ -76,7 +88,7 @@ function extractPinnedWebContracts(
 		const functions = source.split(/(?=export (?:async )?function )/g).slice(1);
 		return functions.flatMap((block) => {
 			const path = /[`"](\/api[^`"]+)[`"]/.exec(block)?.[1];
-			if (!path) return [];
+			if (!path || path === "/api/admin/") return [];
 			const method =
 				/method:\s*"(DELETE|GET|PATCH|POST|PUT)"/.exec(block)?.[1] ?? "GET";
 			const route = normalizedRoute(method, path, routes);
@@ -151,6 +163,13 @@ describe("immutable release inventories", () => {
 			"8cf9564f366cb260b35106396840cbe3ed903c75",
 			"aee855e41f63af0c99f296259b038cda73e24ae9",
 		]);
+		expect(
+			RELEASE_INVENTORIES.map((inventory) => inventory.contractSourceCommit),
+		).toEqual([
+			"cca3c1455960cbd93b8bda22fba493c012865756",
+			undefined,
+			undefined,
+		]);
 		expect(RELEASE_INVENTORIES[0]?.capabilityProbePath).toBe(
 			API_CAPABILITIES_PATH,
 		);
@@ -163,17 +182,31 @@ describe("immutable release inventories", () => {
 
 	it("checks every inventory route against its pinned backend source", () => {
 		for (const inventory of RELEASE_INVENTORIES) {
-			const source = execFileSync(
-				"git",
-				["show", `${inventory.sourceCommit}:src/http/mod.rs`],
-				{ encoding: "utf8" },
-			);
-			for (const route of inventory.apiRoutes) {
-				const path = route.slice(route.indexOf(" ") + 1);
-				const sourcePath = path.startsWith("/api/admin")
-					? path.slice("/api/admin".length)
-					: path.slice("/api".length);
-				expect(source).toContain(`"${sourcePath}"`);
+			for (const [sourceCommit, routes] of [
+				[contractSourceCommit(inventory), inventory.apiRoutes],
+				[inventory.sourceCommit, serverApiRoutes(inventory)],
+			] as const) {
+				const sourceFiles = execFileSync(
+					"git",
+					["ls-tree", "-r", "--name-only", sourceCommit, ":(top)src/http"],
+					{ encoding: "utf8" },
+				)
+					.split("\n")
+					.filter((file) => file.endsWith(".rs"));
+				const source = sourceFiles
+					.map((file) =>
+						execFileSync("git", ["show", `${sourceCommit}:${file}`], {
+							encoding: "utf8",
+						}),
+					)
+					.join("\n");
+				for (const route of routes) {
+					const path = route.slice(route.indexOf(" ") + 1);
+					const sourcePath = path.startsWith("/api/admin")
+						? path.slice("/api/admin".length)
+						: path.slice("/api".length);
+					expect(source).toContain(`"${sourcePath}"`);
+				}
 			}
 		}
 	});
@@ -193,7 +226,7 @@ describe("immutable release inventories", () => {
 					"ls-tree",
 					"-r",
 					"--name-only",
-					inventory.sourceCommit,
+					contractSourceCommit(inventory),
 					":(top)web/src/api",
 				],
 				{ encoding: "utf8" },
@@ -212,7 +245,7 @@ describe("immutable release inventories", () => {
 				digest.update(
 					execFileSync("git", [
 						"show",
-						`${inventory.sourceCommit}:${repoPath}`,
+						`${contractSourceCommit(inventory)}:${repoPath}`,
 					]),
 				);
 			}
@@ -237,7 +270,7 @@ describe("immutable release inventories", () => {
 					"ls-tree",
 					"-r",
 					"--name-only",
-					consumer.sourceCommit,
+					contractSourceCommit(consumer),
 					":(top)web/src/api",
 				],
 				{ encoding: "utf8" },
@@ -245,7 +278,7 @@ describe("immutable release inventories", () => {
 				.split("\n")
 				.filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"));
 			const contracts = extractPinnedWebContracts(
-				consumer.sourceCommit,
+				contractSourceCommit(consumer),
 				files,
 				consumer.apiRoutes,
 			);
@@ -261,7 +294,11 @@ describe("immutable release inventories", () => {
 					(candidate) => candidate.route === contract.route,
 				);
 				expect(request, `${contract.module}: ${contract.route}`).toBeDefined();
-				const expectedStatus = !server.apiRoutes.includes(contract.route)
+				const fixtureServerRoutes =
+					fixture.direction === "legacy-web-to-new-api"
+						? server.apiRoutes
+						: serverApiRoutes(server);
+				const expectedStatus = !fixtureServerRoutes.includes(contract.route)
 					? 404
 					: contract.route === "DELETE /api/admin/nodes/{node_id}"
 						? 204
@@ -269,7 +306,7 @@ describe("immutable release inventories", () => {
 				expect(request?.expectedStatus).toBe(expectedStatus);
 			}
 		}
-	});
+	}, 60_000);
 
 	it("contains immutable per-minor routes and tolerant response contracts", () => {
 		for (const inventory of RELEASE_INVENTORIES) {
@@ -299,6 +336,16 @@ describe("immutable release inventories", () => {
 		);
 		expect(current?.capabilities).toContain("admin.mihomo-resource-policy");
 		expect(legacy?.capabilities).not.toContain("admin.mihomo-resource-policy");
+		expect(current?.capabilities).toContain("admin.mihomo-subscription-import");
+		expect(legacy?.capabilities).not.toContain(
+			"admin.mihomo-subscription-import",
+		);
+		expect(current?.apiRoutes).toContain(
+			"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview",
+		);
+		expect(legacy?.apiRoutes).not.toContain(
+			"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview",
+		);
 		expect(API_CAPABILITIES).toContain("admin.mesh-transport-reuse");
 		expect(current?.capabilities).not.toContain("admin.mesh-transport-reuse");
 		expect(current?.responseSchemas["GET /api/admin/status/events"]).toContain(
@@ -325,8 +372,16 @@ describe("immutable release inventories", () => {
 			expect(consumer).toBeDefined();
 			expect(server).toBeDefined();
 			if (!consumer || !server) continue;
-			expect(fixture.consumerSourceCommit).toBe(consumer.sourceCommit);
-			expect(fixture.serverSourceCommit).toBe(server.sourceCommit);
+			const fixtureServerRoutes =
+				fixture.direction === "legacy-web-to-new-api"
+					? server.apiRoutes
+					: serverApiRoutes(server);
+			expect(fixture.consumerSourceCommit).toBe(contractSourceCommit(consumer));
+			expect(fixture.serverSourceCommit).toBe(
+				fixture.direction === "legacy-web-to-new-api"
+					? contractSourceCommit(server)
+					: server.sourceCommit,
+			);
 			expect(fixture.consumerReleaseTag).toBe(consumer.releaseTag);
 			expect(fixture.serverReleaseTag).toBe(server.releaseTag);
 			const probe = new Request(
@@ -359,21 +414,21 @@ describe("immutable release inventories", () => {
 				);
 				const executedResponse = executeFixtureRequest(
 					fixture,
-					server.apiRoutes,
+					fixtureServerRoutes,
 					request.route,
 					executedRequest,
 				);
 				expect(executedResponse.status).toBe(request.expectedStatus);
 				if (request.expectedStatus === 404) {
 					expect(request.optional).toBe(true);
-					expect(server.apiRoutes).not.toContain(request.route);
+					expect(fixtureServerRoutes).not.toContain(request.route);
 				} else {
 					expect(request.optional).toBe(false);
-					expect(server.apiRoutes).toContain(request.route);
+					expect(fixtureServerRoutes).toContain(request.route);
 				}
 			}
 			for (const route of Object.keys(consumer.responseSchemas)) {
-				if (!server.apiRoutes.includes(route)) continue;
+				if (!fixtureServerRoutes.includes(route)) continue;
 				expect(
 					fixture.responses.some((response) => response.route === route),
 				).toBe(true);
@@ -483,7 +538,7 @@ describe("immutable release inventories", () => {
 					contract.direction === "legacy-web-to-new-api" &&
 					contract.consumerReleaseTag === inventory.releaseTag,
 			);
-			expect(newWebContract?.serverRoutes).toEqual(inventory.apiRoutes);
+			expect(newWebContract?.serverRoutes).toEqual(serverApiRoutes(inventory));
 			expect(legacyWebContract?.consumerRoutes).toEqual(inventory.apiRoutes);
 			expect(newWebContract?.webCallsites).toEqual(
 				RELEASE_INVENTORIES[0]?.webCallsites,

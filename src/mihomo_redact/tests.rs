@@ -315,7 +315,7 @@ async fn url_loader_rejects_remote_bodies_that_exceed_limit() {
     .await
     .unwrap_err();
 
-    assert_eq!(err.kind, RedactErrorKind::InvalidInput);
+    assert_eq!(err.kind, RedactErrorKind::TooLarge);
     assert!(err.message.contains("exceeds"));
 }
 

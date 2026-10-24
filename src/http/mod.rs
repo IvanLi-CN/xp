@@ -4853,6 +4853,7 @@ async fn admin_delete_node_mihomo_resource_policy(
 fn map_mihomo_redact_error(err: mihomo_redact::RedactError) -> ApiError {
     match err.kind {
         mihomo_redact::RedactErrorKind::InvalidInput => ApiError::invalid_request(err.message),
+        mihomo_redact::RedactErrorKind::TooLarge => ApiError::too_large(err.message),
         mihomo_redact::RedactErrorKind::Network => {
             ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, err.message)
         }

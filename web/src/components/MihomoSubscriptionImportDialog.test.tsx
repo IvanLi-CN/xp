@@ -125,4 +125,39 @@ describe("MihomoSubscriptionImportDialog", () => {
 		await user.click(screen.getByRole("button", { name: "Add valid nodes" }));
 		expect(onAdd).not.toHaveBeenCalled();
 	});
+
+	it("invalidates a preview when the target user changes", async () => {
+		const user = userEvent.setup();
+		const onAdd = vi.fn();
+		const previewRequest = vi.fn().mockResolvedValue(PREVIEW);
+		const view = renderDialog({ onAdd, previewRequest });
+
+		await user.type(
+			screen.getByLabelText("Subscription or node content"),
+			"ss://example",
+		);
+		await user.click(screen.getByRole("button", { name: "Preview" }));
+		await screen.findByText("Preview report");
+
+		view.rerender(
+			<MihomoSubscriptionImportDialog
+				open
+				onOpenChange={vi.fn()}
+				adminToken="admin-token"
+				userId="user-2"
+				existingExtraProxiesYaml={"# keep\n"}
+				readOnly={false}
+				onAdd={onAdd}
+				previewRequest={previewRequest}
+			/>,
+		);
+
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Add valid nodes" }),
+			).toBeDisabled(),
+		);
+		expect(screen.getByText("Preview report")).toBeInTheDocument();
+		expect(onAdd).not.toHaveBeenCalled();
+	});
 });
