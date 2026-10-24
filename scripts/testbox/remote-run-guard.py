@@ -25,7 +25,12 @@ def fail(message: str) -> NoReturn:
     raise SystemExit(2)
 
 
-def validate_directory(directory_fd: int, owner_required: bool, allow_sticky: bool) -> None:
+def validate_directory(
+    directory_fd: int,
+    owner_required: bool,
+    allow_sticky: bool,
+    private_required: bool = False,
+) -> None:
     directory_stat = os.fstat(directory_fd)
     if not stat.S_ISDIR(directory_stat.st_mode):
         fail("testbox path component is not a directory")
@@ -34,6 +39,8 @@ def validate_directory(directory_fd: int, owner_required: bool, allow_sticky: bo
             fail("testbox path component is not owned by the current user")
     elif directory_stat.st_uid not in (0, os.geteuid()):
         fail("testbox root ancestor is not trusted")
+    if private_required and stat.S_IMODE(directory_stat.st_mode) != 0o700:
+        fail("testbox managed directory must be private")
     if directory_stat.st_mode & 0o022 and not (
         allow_sticky and directory_stat.st_mode & stat.S_ISVTX
     ):
@@ -70,6 +77,7 @@ def ensure_root(root: str) -> None:
                 next_fd,
                 owner_required=index == len(parts) - 1,
                 allow_sticky=index != len(parts) - 1,
+                private_required=index == len(parts) - 1,
             )
             os.close(current_fd)
             current_fd = next_fd
@@ -130,6 +138,7 @@ def open_root(root: str) -> int:
                 next_fd,
                 owner_required=index == len(parts) - 1,
                 allow_sticky=index != len(parts) - 1,
+                private_required=index == len(parts) - 1,
             )
             os.close(current_fd)
             current_fd = next_fd
@@ -158,7 +167,12 @@ def open_parent(root_fd: int, parts: list[str], create: bool) -> int:
                     fail(f"testbox run parent is not a safe directory: {exc}")
             except OSError as exc:
                 fail(f"testbox run parent is not a safe directory: {exc}")
-            validate_directory(next_fd, owner_required=True, allow_sticky=False)
+            validate_directory(
+                next_fd,
+                owner_required=True,
+                allow_sticky=False,
+                private_required=True,
+            )
             os.close(current_fd)
             current_fd = next_fd
         return current_fd
@@ -354,6 +368,7 @@ def create_run(root: str, run: str, expected: str) -> None:
         except FileExistsError:
             fail("testbox run directory already exists")
         run_fd = os.open(parts[-1], OPEN_FLAGS, dir_fd=parent_fd)
+        validate_directory(run_fd, owner_required=True, allow_sticky=False, private_required=True)
         marker_fd = os.open(
             ".codex-run-id",
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW,
@@ -400,6 +415,7 @@ def verify_or_cleanup(root: str, run: str, expected: str, remove: bool) -> None:
         except OSError as exc:
             fail(f"testbox run directory is not safe: {exc}")
         try:
+            validate_directory(run_fd, owner_required=True, allow_sticky=False, private_required=True)
             marker_data = marker_matches(run_fd, expected)
             if remove:
                 remove_tree(parent_fd, parts[-1], run_fd, marker_data)
@@ -419,7 +435,12 @@ def cleanup_claim(root: str, claim: str, lock: bool) -> None:
         try:
             claim_fd = os.open(parts[-1], OPEN_FLAGS, dir_fd=parent_fd)
             try:
-                validate_directory(claim_fd, owner_required=True, allow_sticky=False)
+                validate_directory(
+                    claim_fd,
+                    owner_required=True,
+                    allow_sticky=False,
+                    private_required=True,
+                )
                 remove_tree(parent_fd, parts[-1], claim_fd)
             finally:
                 os.close(claim_fd)

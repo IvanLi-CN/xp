@@ -35,11 +35,12 @@ REMOTE_RUN_CREATED=0
 cleanup() {
   local status="${1:-$?}"
   set +e
+  local cleanup_ok=1
   if [[ "$REMOTE_RUN_CREATED" = "1" && "$status" != 0 ]] && testbox_remote_run_verify "$REMOTE_RUN" "$RUN_ID"; then
     ssh -o BatchMode=yes "$TESTBOX" "test \"\$(cat -- '$REMOTE_RUN/.codex-run-id')\" = '$RUN_ID' && cd '$REMOTE_RUN' && docker compose -p '$COMPOSE_PROJECT' -f scripts/testbox/reverse-xray-spike-compose.yml logs --no-color rendezvous target" >&2
   fi
   if [[ "$REMOTE_RUN_CREATED" = "1" ]]; then
-    ssh -o BatchMode=yes "$TESTBOX" \
+    if ssh -o BatchMode=yes "$TESTBOX" \
       "TESTBOX_REMOTE_ROOT_B64=\$(printf '%s' '$TESTBOX_REMOTE_ROOT' | base64 | tr -d '\\n') REMOTE_RUN_B64=\$(printf '%s' '$REMOTE_RUN' | base64 | tr -d '\\n') COMPOSE_PROJECT_B64=\$(printf '%s' '$COMPOSE_PROJECT' | base64 | tr -d '\\n') RUN_ID_B64=\$(printf '%s' '$RUN_ID' | base64 | tr -d '\\n') bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1
 set -euo pipefail
 TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
@@ -50,10 +51,20 @@ GUARD_SCRIPT="$REMOTE_RUN/scripts/testbox/remote-run-guard.py"
 if [ -f "$GUARD_SCRIPT" ]; then
   RUN_ID="$RUN_ID" python3 "$GUARD_SCRIPT" verify "$TESTBOX_REMOTE_ROOT" "$REMOTE_RUN"
   cd "$REMOTE_RUN"
-  docker compose -p "$COMPOSE_PROJECT" -f scripts/testbox/reverse-xray-spike-compose.yml -f .codex.caps-compat.yml down -v --remove-orphans || true
+  docker compose -p "$COMPOSE_PROJECT" -f scripts/testbox/reverse-xray-spike-compose.yml -f .codex.caps-compat.yml down -v --remove-orphans
 fi
 REMOTE_CLEANUP
-    testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
+    then
+      :
+    else
+      cleanup_ok=0
+    fi
+    if [ "$cleanup_ok" = "1" ]; then
+      testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || cleanup_ok=0
+    fi
+  fi
+  if [ "$cleanup_ok" != "1" ] && [ "$status" -eq 0 ]; then
+    status=1
   fi
   return "$status"
 }

@@ -55,6 +55,7 @@ COMPOSE_FILE="compose-host-managed-fresh-join.yml"
 cleanup() {
   local status="${1:-$?}"
   set +e
+  local cleanup_ok=1
   if [ "$status" -ne 0 ]; then
     printf '%s\n' \
       "result=failed" \
@@ -70,15 +71,28 @@ cleanup() {
     fi
   fi
   if [ -d "$COMPOSE_DIR" ]; then
-    (
+    if (
       cd "$COMPOSE_DIR" || exit 1
       XP_TEST_IMAGE="$XP_TEST_IMAGE" XP_HOST_IMAGE_PREFIX="$XP_HOST_IMAGE_PREFIX" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1
-    ) || true
+    ); then
+      :
+    else
+      cleanup_ok=0
+    fi
+  else
+    cleanup_ok=0
   fi
   docker rm -f "$BUILDER_NAME" "$SOURCE_NAME" >/dev/null 2>&1 || true
   docker image rm "$XP_HOST_IMAGE_PREFIX-leader" "$XP_HOST_IMAGE_PREFIX-systemd" "$XP_HOST_IMAGE_PREFIX-openrc" >/dev/null 2>&1 || true
-  if assert_remote_run; then
-    remove_remote_run >/dev/null 2>&1 || true
+  if [ "$cleanup_ok" = "1" ]; then
+    if assert_remote_run && remove_remote_run >/dev/null 2>&1; then
+      :
+    else
+      cleanup_ok=0
+    fi
+  fi
+  if [ "$cleanup_ok" != "1" ] && [ "$status" -eq 0 ]; then
+    status=1
   fi
   return "$status"
 }

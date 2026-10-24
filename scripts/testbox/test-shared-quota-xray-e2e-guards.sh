@@ -123,6 +123,13 @@ print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:12])
 PY
 )"
   testbox_remote_root_preflight
+  chmod 0755 "$XP_TESTBOX_REMOTE_ROOT"
+  if TESTBOX_REMOTE_ROOT_B64="$(printf '%s' "$XP_TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')" \
+    python3 "$SCRIPT_DIR/remote-run-guard.py" ensure-root; then
+    echo 'expected non-private remote root guard to fail' >&2
+    exit 1
+  fi
+  chmod 0700 "$XP_TESTBOX_REMOTE_ROOT"
   guarded_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1")"
   test "$guarded_run" = "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1"
   test "$(cat "$guarded_run/.codex-run-id")" = run-1
@@ -179,6 +186,10 @@ PY
   fi
   claim_dir="$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims/10_203_0_0_24"
   mkdir -p "$claim_dir"
+  chmod 700 \
+    "$XP_TESTBOX_REMOTE_ROOT/agents" \
+    "$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims" \
+    "$claim_dir"
   python3 - "$XP_TESTBOX_REMOTE_ROOT" "$claim_dir" "$SCRIPT_DIR/remote-run-guard.py" <<'PY'
 import fcntl
 import os

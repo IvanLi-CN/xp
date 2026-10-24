@@ -230,13 +230,14 @@ echo "compose_project=$COMPOSE_PROJECT"
 echo "evidence_manifest=$EVIDENCE_PATH"
 
 cleanup_local() {
+  local status=$?
   set +e
   write_evidence_manifest "${EVIDENCE_STATUS:-interrupted}"
   rm -f "$SOURCE_ARCHIVE" "$WEB_DIST_ARCHIVE"
   if [ -n "${BASELINE_ARCHIVE:-}" ]; then
     rm -f "$BASELINE_ARCHIVE"
   fi
-  if [ "${REMOTE_RUN_CREATED:-0}" = "1" ]; then
+  if [ "${REMOTE_RUN_CREATED:-0}" = "1" ] && [ "$status" -eq 0 ]; then
     ssh -o BatchMode=yes "$TESTBOX" \
       "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1 || true
 set -euo pipefail
@@ -275,6 +276,7 @@ for resource_label in candidate-smoke baseline candidate source-journal summary;
   systemctl --user stop "$resource_unit" >/dev/null 2>&1 || true
   systemctl --user reset-failed "$resource_unit" >/dev/null 2>&1 || true
 done
+cleanup_ok=1
 if [ -d "$REMOTE_RUN/scripts/e2e" ]; then
   cd "$REMOTE_RUN/scripts/e2e"
   cleanup_files=()
@@ -284,8 +286,15 @@ if [ -d "$REMOTE_RUN/scripts/e2e" ]; then
     fi
   done
   if [ "${#cleanup_files[@]}" -gt 0 ]; then
-    docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+    if docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1; then
+      :
+    else
+      cleanup_ok=0
+    fi
   fi
+fi
+if [ "$cleanup_ok" != "1" ]; then
+  exit 1
 fi
 test ! -L "$TESTBOX_REMOTE_ROOT"
 test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
@@ -297,8 +306,11 @@ case "$final_run" in
   *) exit 2 ;;
 esac
 REMOTE_CLEANUP
-    testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
+    if testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1; then
+      :
+    fi
   fi
+  return "$status"
 }
 on_local_signal() {
   trap - EXIT INT TERM
@@ -437,28 +449,33 @@ export TMPDIR="$REMOTE_RUN/tmp"
 mkdir -p "$TMPDIR"
 
 cleanup() {
+  local status=$?
   if [ "${CLEANUP_DONE:-0}" = "1" ]; then
-    return
+    return "$status"
   fi
   CLEANUP_DONE=1
   set +e
   cleanup_ok=1
-  if [ -n "${REMOTE_RUN:-}" ] && [ -d "$REMOTE_RUN/scripts/e2e" ]; then
-    if (
-      cd "$REMOTE_RUN/scripts/e2e" || exit 1
-      if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
-        cleanup_files=(-f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml")
-        if [ -f ".codex.user-compat.yaml" ]; then
-          cleanup_files+=(-f ".codex.user-compat.yaml")
-        fi
-        docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1
-      else
-        exit 1
-      fi
-    ); then
-      :
-    else
+  if [ -n "${REMOTE_RUN:-}" ]; then
+    if [ -n "${SUBNET_CLAIM_DIR:-}" ] && [ ! -d "$REMOTE_RUN/scripts/e2e" ]; then
       cleanup_ok=0
+    elif [ -d "$REMOTE_RUN/scripts/e2e" ]; then
+      if (
+        cd "$REMOTE_RUN/scripts/e2e" || exit 1
+        if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
+          cleanup_files=(-f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml")
+          if [ -f ".codex.user-compat.yaml" ]; then
+            cleanup_files+=(-f ".codex.user-compat.yaml")
+          fi
+          docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1
+        else
+          exit 1
+        fi
+      ); then
+        :
+      else
+        cleanup_ok=0
+      fi
     fi
   fi
   if [ "$cleanup_ok" = "1" ] && [ -n "${REMOTE_RUN:-}" ]; then
@@ -479,6 +496,10 @@ cleanup() {
       cleanup_ok=0
     fi
   fi
+  if [ "$cleanup_ok" != "1" ] && [ "$status" -eq 0 ]; then
+    status=1
+  fi
+  return "$status"
 }
 on_signal() {
   cleanup
@@ -741,7 +762,10 @@ def open_directory(path, create):
                 current_fd = next_fd
                 continue
             directory_stat = os.fstat(next_fd)
-            if directory_stat.st_uid != os.geteuid() or directory_stat.st_mode & 0o022:
+            if (
+                directory_stat.st_uid != os.geteuid()
+                or (directory_stat.st_mode & 0o777) != 0o700
+            ):
                 print(
                     f"shared-testbox directory has unsafe ownership or mode: {path}",
                     file=sys.stderr,
@@ -976,6 +1000,12 @@ try:
         try:
             claimed.append(ipaddress.ip_network(subnet_file.read_text().strip(), strict=False))
         except ValueError:
+            if active:
+                print(
+                    f"active shared-testbox claim has invalid subnet metadata: {claim_dir}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             if not path_has_symlink(claim_dir):
                 cleanup_claim_dir(claim_dir)
 

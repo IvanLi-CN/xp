@@ -30,7 +30,7 @@ REMOTE_RUN_CREATED=0
 cleanup_remote_run() {
   local status="${1:-$?}"
   set +e
-  if [ "$REMOTE_RUN_CREATED" = "1" ]; then
+  if [ "$REMOTE_RUN_CREATED" = "1" ] && [ "$status" -eq 0 ]; then
     testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
   fi
   return "$status"
