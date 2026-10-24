@@ -82,6 +82,9 @@ fn parse_vless(
     insert_string(&mut map, "network", network);
     insert_bool(&mut map, "udp", true);
     insert_bool(&mut map, "tls", security != "none");
+    if let Some(encryption) = query.get("encryption") {
+        insert_string(&mut map, "encryption", encryption.clone());
+    }
     if let Some(flow) = query.get("flow").filter(|value| !value.is_empty()) {
         insert_string(&mut map, "flow", flow.clone());
     }
@@ -102,7 +105,6 @@ fn parse_vless(
             .ok_or_else(|| "vless reality public key is required".to_owned())?;
         let short_id = query
             .get("sid")
-            .filter(|value| !value.is_empty())
             .ok_or_else(|| "vless reality short id is required".to_owned())?;
         let mut reality = Mapping::new();
         insert_string(&mut reality, "public-key", public_key.clone());
@@ -247,10 +249,20 @@ fn parse_vmess(
     if !supported_network(&network) {
         return Err("vmess transport is unsupported".to_owned());
     }
+    let vmess_http =
+        match json_string(&payload, "type").filter(|value| !value.is_empty() && value != "none") {
+            Some(value) if value == "http" => true,
+            Some(_) => return Err("vmess transport is unsupported".to_owned()),
+            None => false,
+        };
 
     let mut map = base_proxy("vmess", &server, port);
     insert_string(&mut map, "uuid", uuid);
-    insert_string(&mut map, "network", network.as_str());
+    insert_string(
+        &mut map,
+        "network",
+        if vmess_http { "http" } else { network.as_str() },
+    );
     insert_string(
         &mut map,
         "cipher",
@@ -289,6 +301,8 @@ fn parse_vmess(
         let mut grpc = Mapping::new();
         insert_string(&mut grpc, "grpc-service-name", service);
         map.insert(Value::String("grpc-opts".to_owned()), Value::Mapping(grpc));
+    } else if vmess_http {
+        add_vmess_http_options(&mut map, &payload);
     }
     let payload_name = safe_json_name(json_string(&payload, "ps"))?;
     let name = fragment_name.or(payload_name);
@@ -453,7 +467,10 @@ fn parse_tuic(
     if let Some(value) = query_bool(&query, "disable_sni") {
         insert_bool(&mut map, "disable-sni", value);
     }
-    if let Some(value) = query_bool(&query, "insecure") {
+    if let Some(value) = query_bool(&query, "insecure")
+        .or_else(|| query_bool(&query, "allow_insecure"))
+        .or_else(|| query_bool(&query, "allow-insecure"))
+    {
         insert_bool(&mut map, "skip-cert-verify", value);
     }
     if let Some(alpn) = query.get("alpn") {
@@ -580,6 +597,27 @@ fn add_grpc_options(map: &mut Mapping, query: &BTreeMap<String, String>) {
     }
 }
 
+fn add_vmess_http_options(map: &mut Mapping, payload: &serde_json::Value) {
+    let mut http = Mapping::new();
+    if let Some(path) = json_string(payload, "path") {
+        http.insert(
+            Value::String("path".to_owned()),
+            Value::Sequence(vec![Value::String(path)]),
+        );
+    }
+    if let Some(host) = json_string(payload, "host") {
+        let mut headers = Mapping::new();
+        headers.insert(
+            Value::String("Host".to_owned()),
+            Value::Sequence(vec![Value::String(host)]),
+        );
+        http.insert(Value::String("headers".to_owned()), Value::Mapping(headers));
+    }
+    if !http.is_empty() {
+        map.insert(Value::String("http-opts".to_owned()), Value::Mapping(http));
+    }
+}
+
 fn decode_component(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
     let mut output = Vec::with_capacity(bytes.len());
@@ -681,6 +719,61 @@ fn json_u64(value: &serde_json::Value, key: &str) -> Option<u64> {
     value
         .get(key)
         .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_vless_encryption_and_explicit_empty_reality_short_id() {
+        let url = Url::parse(concat!(
+            "vless://00000000-0000-0000-0000-000000000001@example.com:443?",
+            "encryption=mlkem768x25519plus.native%2Fxorpub%2Ftoken&",
+            "security=reality&pbk=public-key&sid=#reality"
+        ))
+        .expect("URL");
+        let (proxy, _, _, _) = parse_vless(url, Some("reality".to_owned())).expect("proxy");
+        assert_eq!(
+            proxy["encryption"].as_str(),
+            Some("mlkem768x25519plus.native/xorpub/token")
+        );
+        assert_eq!(proxy["reality-opts"]["short-id"].as_str(), Some(""));
+    }
+
+    #[test]
+    fn preserves_vmess_http_transport_options() {
+        let payload = serde_json::json!({
+            "v": "2",
+            "ps": "vmess-http",
+            "add": "vmess.example",
+            "port": "443",
+            "id": "00000000-0000-0000-0000-000000000001",
+            "net": "tcp",
+            "type": "http",
+            "path": "/video",
+            "host": "cdn.example",
+        });
+        let encoded = base64::engine::general_purpose::STANDARD.encode(payload.to_string());
+        let url = Url::parse(&format!("vmess://{encoded}")).expect("URL");
+        let (proxy, _, _, _) = parse_vmess(url, None, &encoded).expect("proxy");
+        assert_eq!(proxy["network"].as_str(), Some("http"));
+        assert_eq!(proxy["http-opts"]["path"][0].as_str(), Some("/video"));
+        assert_eq!(
+            proxy["http-opts"]["headers"]["Host"][0].as_str(),
+            Some("cdn.example")
+        );
+    }
+
+    #[test]
+    fn preserves_tuic_allow_insecure_alias() {
+        let url = Url::parse(
+            "tuic://00000000-0000-0000-0000-000000000001:secret@tuic.example:443?allow_insecure=1",
+        )
+        .expect("URL");
+        let (proxy, _, _, _) = parse_tuic(url, None).expect("proxy");
+        assert_eq!(proxy["skip-cert-verify"].as_bool(), Some(true));
+    }
 }
 
 fn insert_number(map: &mut Mapping, key: &str, value: u64) {
