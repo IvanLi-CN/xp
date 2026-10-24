@@ -290,11 +290,19 @@ fn parse_vmess(
     if let Some(insecure) = json_bool(&payload, "insecure") {
         insert_bool(&mut map, "skip-cert-verify", insecure);
     }
-    if let Some(sni) = json_string(&payload, "sni").or_else(|| json_string(&payload, "host")) {
+    if let Some(sni) =
+        json_string(&payload, "sni").or_else(|| json_string(&payload, "host").and_then(single_host))
+    {
         insert_string(&mut map, "servername", sni);
     }
     if let Some(alpn) = json_string(&payload, "alpn") {
         insert_alpn(&mut map, &alpn);
+    }
+    if let Some(fingerprint) = json_string(&payload, "pcs").filter(|value| !value.is_empty()) {
+        insert_string(&mut map, "fingerprint", fingerprint);
+    }
+    if let Some(name) = json_string(&payload, "vcn").filter(|value| !value.is_empty()) {
+        insert_string(&mut map, "name-cert-verify", name);
     }
     if network == "ws" {
         let mut ws = Mapping::new();
@@ -765,6 +773,15 @@ fn json_bool(value: &serde_json::Value, key: &str) -> Option<bool> {
     })
 }
 
+fn single_host(value: String) -> Option<String> {
+    let mut hosts = value
+        .split(',')
+        .map(str::trim)
+        .filter(|host| !host.is_empty());
+    let host = hosts.next()?.to_owned();
+    hosts.next().is_none().then_some(host)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -843,6 +860,26 @@ mod tests {
         assert_eq!(proxy["skip-cert-verify"].as_bool(), Some(true));
         assert_eq!(proxy["alpn"][0].as_str(), Some("h2"));
         assert_eq!(proxy["alpn"][1].as_str(), Some("http/1.1"));
+    }
+
+    #[test]
+    fn preserves_vmess_certificate_constraints_without_multi_host_sni() {
+        let payload = serde_json::json!({
+            "add": "vmess.example",
+            "port": "443",
+            "id": "00000000-0000-0000-0000-000000000001",
+            "net": "tcp",
+            "tls": "tls",
+            "host": "cdn.example,cdn-2.example",
+            "pcs": "sha256-fingerprint",
+            "vcn": "origin.example",
+        });
+        let encoded = base64::engine::general_purpose::STANDARD.encode(payload.to_string());
+        let url = Url::parse(&format!("vmess://{encoded}")).expect("URL");
+        let (proxy, _, _, _) = parse_vmess(url, None, &encoded).expect("proxy");
+        assert!(proxy.get("servername").is_none());
+        assert_eq!(proxy["fingerprint"].as_str(), Some("sha256-fingerprint"));
+        assert_eq!(proxy["name-cert-verify"].as_str(), Some("origin.example"));
     }
 
     #[test]
