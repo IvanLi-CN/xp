@@ -102,6 +102,7 @@ fn parse_vless(
     if let Some(fp) = query.get("fp").or_else(|| query.get("fingerprint")) {
         insert_string(&mut map, "client-fingerprint", fp.clone());
     }
+    insert_certificate_constraints(&mut map, &query);
     if let Some(alpn) = query.get("alpn") {
         insert_alpn(&mut map, alpn);
     }
@@ -260,6 +261,7 @@ fn parse_vmess(
     let vmess_http =
         match json_string(&payload, "type").filter(|value| !value.is_empty() && value != "none") {
             Some(value) if value == "http" => true,
+            Some(value) if network == "grpc" && matches!(value.as_str(), "gun" | "grpc") => false,
             Some(_) => return Err("vmess transport is unsupported".to_owned()),
             None => false,
         };
@@ -360,6 +362,7 @@ fn parse_trojan(
     if let Some(fp) = query.get("fp") {
         insert_string(&mut map, "client-fingerprint", fp.clone());
     }
+    insert_certificate_constraints(&mut map, &query);
     if let Some(alpn) = query.get("alpn") {
         insert_alpn(&mut map, alpn);
     }
@@ -553,6 +556,15 @@ fn query_bool(query: &BTreeMap<String, String>, key: &str) -> Option<bool> {
             "0" | "false" | "no" => Some(false),
             _ => None,
         })
+}
+
+fn insert_certificate_constraints(map: &mut Mapping, query: &BTreeMap<String, String>) {
+    if let Some(fingerprint) = query.get("pcs").filter(|value| !value.is_empty()) {
+        insert_string(map, "fingerprint", fingerprint.clone());
+    }
+    if let Some(name) = query.get("vcn").filter(|value| !value.is_empty()) {
+        insert_string(map, "name-cert-verify", name.clone());
+    }
 }
 
 fn base_proxy(proxy_type: &str, server: &str, port: u16) -> Mapping {
@@ -830,6 +842,18 @@ mod tests {
     }
 
     #[test]
+    fn preserves_vless_certificate_constraints() {
+        let url = Url::parse(concat!(
+            "vless://00000000-0000-0000-0000-000000000001@example.com:443?",
+            "security=tls&pcs=sha256-fingerprint&vcn=origin.example"
+        ))
+        .expect("URL");
+        let (proxy, _, _, _) = parse_vless(url, None).expect("proxy");
+        assert_eq!(proxy["fingerprint"].as_str(), Some("sha256-fingerprint"));
+        assert_eq!(proxy["name-cert-verify"].as_str(), Some("origin.example"));
+    }
+
+    #[test]
     fn preserves_vmess_http_transport_options() {
         let payload = serde_json::json!({
             "v": "2",
@@ -884,12 +908,37 @@ mod tests {
 
     #[test]
     fn preserves_trojan_alpn_and_insecure_alias() {
-        let url = Url::parse("trojan://secret@example.com:443?alpn=h2%2Chttp%2F1.1&insecure=1")
-            .expect("URL");
+        let url = Url::parse(concat!(
+            "trojan://secret@example.com:443?alpn=h2%2Chttp%2F1.1&",
+            "insecure=1&pcs=sha256-fingerprint&vcn=origin.example"
+        ))
+        .expect("URL");
         let (proxy, _, _, _) = parse_trojan(url, None).expect("proxy");
         assert_eq!(proxy["skip-cert-verify"].as_bool(), Some(true));
         assert_eq!(proxy["alpn"][0].as_str(), Some("h2"));
         assert_eq!(proxy["alpn"][1].as_str(), Some("http/1.1"));
+        assert_eq!(proxy["fingerprint"].as_str(), Some("sha256-fingerprint"));
+        assert_eq!(proxy["name-cert-verify"].as_str(), Some("origin.example"));
+    }
+
+    #[test]
+    fn preserves_vmess_grpc_mode() {
+        let payload = serde_json::json!({
+            "add": "vmess.example",
+            "port": "443",
+            "id": "00000000-0000-0000-0000-000000000001",
+            "net": "grpc",
+            "type": "gun",
+            "path": "grpc-service",
+        });
+        let encoded = base64::engine::general_purpose::STANDARD.encode(payload.to_string());
+        let url = Url::parse(&format!("vmess://{encoded}")).expect("URL");
+        let (proxy, _, _, _) = parse_vmess(url, None, &encoded).expect("proxy");
+        assert_eq!(proxy["network"].as_str(), Some("grpc"));
+        assert_eq!(
+            proxy["grpc-opts"]["grpc-service-name"].as_str(),
+            Some("grpc-service")
+        );
     }
 
     #[test]
