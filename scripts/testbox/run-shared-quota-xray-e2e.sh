@@ -309,6 +309,8 @@ REMOTE_CLEANUP
     then
     if testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1; then
       :
+    else
+      status=1
     fi
   fi
   return "$status"
@@ -906,7 +908,14 @@ def cleanup_stale_run(path, claim_dir):
     environment.pop("RUN_ID_B64", None)
     environment["RUN_ID"] = path.name
     result = subprocess.run(
-        ["python3", str(guard_script), "cleanup", str(remote_root), str(path)],
+        [
+            "python3",
+            str(guard_script),
+            "cleanup-with-claim",
+            str(remote_root),
+            str(path),
+            str(claim_dir),
+        ],
         check=False,
         env=environment,
     )
@@ -1018,9 +1027,13 @@ try:
         try:
             for line in lease_file.read_text().splitlines():
                 key, value = line.split("=", 1)
+                if key not in {"pid", "start_ticks"} or key in lease:
+                    raise ValueError("duplicate or unknown lease field")
                 lease[key] = value
             pid = int(lease["pid"])
             start_ticks = int(lease["start_ticks"])
+            if pid <= 0 or start_ticks <= 0 or set(lease) != {"pid", "start_ticks"}:
+                raise ValueError("lease values must be positive and complete")
         except (KeyError, ValueError, OSError, UnicodeDecodeError) as exc:
             print(f"invalid active shared-testbox lease {lease_file}: {exc}", file=sys.stderr)
             sys.exit(1)
@@ -1042,9 +1055,6 @@ try:
             stale_cleanup_ok = remove_stale_run()
             if not stale_cleanup_ok:
                 print(f"cannot safely reclaim shared-testbox run: {run_path}", file=sys.stderr)
-                sys.exit(1)
-            if path_has_symlink(claim_dir) or not cleanup_claim_dir(claim_dir):
-                print(f"cannot release shared-testbox claim: {claim_dir}", file=sys.stderr)
                 sys.exit(1)
             continue
 
