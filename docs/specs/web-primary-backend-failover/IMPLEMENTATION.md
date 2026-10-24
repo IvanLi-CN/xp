@@ -26,6 +26,8 @@
   authenticated node inventory. The Bearer-protected runtime-policy route supplies only canonical
   compatible API origins; a ten-minute policy grant is held in memory by the Service Worker per
   controlled client and rewrites only the next navigation's `connect-src`.
+- External subscription URLs are built from the current verified Primary Backend origin, so copied
+  URLs remain directly consumable by clients that do not execute the Web app runtime.
 - Vite emits the build declaration and document-fallback handler as a content-hashed external asset.
   The release build packages `web/dist` with `edgeone.json`, a same-SHA manifest, and checksum
   before
