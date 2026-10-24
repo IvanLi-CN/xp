@@ -102,7 +102,14 @@ fn parse_vless(
     if let Some(fp) = query.get("fp").or_else(|| query.get("fingerprint")) {
         insert_string(&mut map, "client-fingerprint", fp.clone());
     }
-    insert_certificate_constraints(&mut map, &query);
+    if let Some(skip_cert_verify) = query_bool(&query, "insecure")
+        .or_else(|| query_bool(&query, "allowInsecure"))
+        .or_else(|| query_bool(&query, "allow-insecure"))
+        .or_else(|| query_bool(&query, "allow_insecure"))
+    {
+        insert_bool(&mut map, "skip-cert-verify", skip_cert_verify);
+    }
+    insert_certificate_constraints(&mut map, &query)?;
     if let Some(alpn) = query.get("alpn") {
         insert_alpn(&mut map, alpn);
     }
@@ -300,12 +307,10 @@ fn parse_vmess(
     if let Some(alpn) = json_string(&payload, "alpn") {
         insert_alpn(&mut map, &alpn);
     }
-    if let Some(fingerprint) = json_string(&payload, "pcs").filter(|value| !value.is_empty()) {
-        insert_string(&mut map, "fingerprint", fingerprint);
+    if let Some(fingerprint) = json_string(&payload, "fp").filter(|value| !value.is_empty()) {
+        insert_string(&mut map, "client-fingerprint", fingerprint);
     }
-    if let Some(name) = json_string(&payload, "vcn").filter(|value| !value.is_empty()) {
-        insert_string(&mut map, "name-cert-verify", name);
-    }
+    insert_json_certificate_constraints(&mut map, &payload)?;
     if network == "ws" {
         let mut ws = Mapping::new();
         if let Some(path) = json_string(&payload, "path") {
@@ -362,7 +367,7 @@ fn parse_trojan(
     if let Some(fp) = query.get("fp") {
         insert_string(&mut map, "client-fingerprint", fp.clone());
     }
-    insert_certificate_constraints(&mut map, &query);
+    insert_certificate_constraints(&mut map, &query)?;
     if let Some(alpn) = query.get("alpn") {
         insert_alpn(&mut map, alpn);
     }
@@ -558,12 +563,49 @@ fn query_bool(query: &BTreeMap<String, String>, key: &str) -> Option<bool> {
         })
 }
 
-fn insert_certificate_constraints(map: &mut Mapping, query: &BTreeMap<String, String>) {
-    if let Some(fingerprint) = query.get("pcs").filter(|value| !value.is_empty()) {
-        insert_string(map, "fingerprint", fingerprint.clone());
+fn insert_certificate_constraints(
+    map: &mut Mapping,
+    query: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    for (source_key, target_key) in [("pcs", "fingerprint"), ("vcn", "name-cert-verify")] {
+        if let Some(value) = query.get(source_key).filter(|value| !value.is_empty()) {
+            insert_string(
+                map,
+                target_key,
+                single_certificate_constraint(value, source_key)?,
+            );
+        }
     }
-    if let Some(name) = query.get("vcn").filter(|value| !value.is_empty()) {
-        insert_string(map, "name-cert-verify", name.clone());
+    Ok(())
+}
+
+fn insert_json_certificate_constraints(
+    map: &mut Mapping,
+    payload: &serde_json::Value,
+) -> Result<(), String> {
+    for (source_key, target_key) in [("pcs", "fingerprint"), ("vcn", "name-cert-verify")] {
+        if let Some(value) = json_string(payload, source_key).filter(|value| !value.is_empty()) {
+            insert_string(
+                map,
+                target_key,
+                single_certificate_constraint(&value, source_key)?,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn single_certificate_constraint(value: &str, source_key: &str) -> Result<String, String> {
+    let values = value
+        .split([',', '~', '\n', '\r'])
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    match values.as_slice() {
+        [single] => Ok((*single).to_owned()),
+        _ => Err(format!(
+            "{source_key} contains multiple values which Mihomo cannot represent"
+        )),
     }
 }
 
@@ -795,162 +837,8 @@ fn single_host(value: String) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn preserves_vless_encryption_and_explicit_empty_reality_short_id() {
-        let url = Url::parse(concat!(
-            "vless://00000000-0000-0000-0000-000000000001@example.com:443?",
-            "encryption=mlkem768x25519plus.native%2Fxorpub%2Ftoken&",
-            "security=reality&pbk=public-key&sid=#reality"
-        ))
-        .expect("URL");
-        let (proxy, _, _, _) = parse_vless(url, Some("reality".to_owned())).expect("proxy");
-        assert_eq!(
-            proxy["encryption"].as_str(),
-            Some("mlkem768x25519plus.native/xorpub/token")
-        );
-        assert_eq!(proxy["reality-opts"]["short-id"].as_str(), Some(""));
-    }
-
-    #[test]
-    fn defaults_missing_reality_short_id_to_empty() {
-        let url = Url::parse(concat!(
-            "vless://00000000-0000-0000-0000-000000000001@example.com:443?",
-            "security=reality&pbk=public-key#reality"
-        ))
-        .expect("URL");
-        let (proxy, _, _, _) = parse_vless(url, None).expect("proxy");
-        assert_eq!(proxy["reality-opts"]["short-id"].as_str(), Some(""));
-    }
-
-    #[test]
-    fn preserves_vless_tcp_http_disguise() {
-        let url = Url::parse(concat!(
-            "vless://00000000-0000-0000-0000-000000000001@example.com:443?",
-            "type=tcp&headerType=http&path=%2Fvideo&host=cdn.example%2Ccdn-2.example"
-        ))
-        .expect("URL");
-        let (proxy, _, _, _) = parse_vless(url, None).expect("proxy");
-        assert_eq!(proxy["network"].as_str(), Some("http"));
-        assert_eq!(proxy["http-opts"]["path"][0].as_str(), Some("/video"));
-        assert_eq!(
-            proxy["http-opts"]["headers"]["Host"][1].as_str(),
-            Some("cdn-2.example")
-        );
-    }
-
-    #[test]
-    fn preserves_vless_certificate_constraints() {
-        let url = Url::parse(concat!(
-            "vless://00000000-0000-0000-0000-000000000001@example.com:443?",
-            "security=tls&pcs=sha256-fingerprint&vcn=origin.example"
-        ))
-        .expect("URL");
-        let (proxy, _, _, _) = parse_vless(url, None).expect("proxy");
-        assert_eq!(proxy["fingerprint"].as_str(), Some("sha256-fingerprint"));
-        assert_eq!(proxy["name-cert-verify"].as_str(), Some("origin.example"));
-    }
-
-    #[test]
-    fn preserves_vmess_http_transport_options() {
-        let payload = serde_json::json!({
-            "v": "2",
-            "ps": "vmess-http",
-            "add": "vmess.example",
-            "port": "443",
-            "id": "00000000-0000-0000-0000-000000000001",
-            "net": "tcp",
-            "type": "http",
-            "path": "/video",
-            "host": "cdn.example, cdn-2.example",
-            "insecure": "1",
-            "alpn": "h2,http/1.1",
-        });
-        let encoded = base64::engine::general_purpose::STANDARD.encode(payload.to_string());
-        let url = Url::parse(&format!("vmess://{encoded}")).expect("URL");
-        let (proxy, _, _, _) = parse_vmess(url, None, &encoded).expect("proxy");
-        assert_eq!(proxy["network"].as_str(), Some("http"));
-        assert_eq!(proxy["http-opts"]["path"][0].as_str(), Some("/video"));
-        assert_eq!(
-            proxy["http-opts"]["headers"]["Host"][0].as_str(),
-            Some("cdn.example")
-        );
-        assert_eq!(
-            proxy["http-opts"]["headers"]["Host"][1].as_str(),
-            Some("cdn-2.example")
-        );
-        assert_eq!(proxy["skip-cert-verify"].as_bool(), Some(true));
-        assert_eq!(proxy["alpn"][0].as_str(), Some("h2"));
-        assert_eq!(proxy["alpn"][1].as_str(), Some("http/1.1"));
-    }
-
-    #[test]
-    fn preserves_vmess_certificate_constraints_without_multi_host_sni() {
-        let payload = serde_json::json!({
-            "add": "vmess.example",
-            "port": "443",
-            "id": "00000000-0000-0000-0000-000000000001",
-            "net": "tcp",
-            "tls": "tls",
-            "host": "cdn.example,cdn-2.example",
-            "pcs": "sha256-fingerprint",
-            "vcn": "origin.example",
-        });
-        let encoded = base64::engine::general_purpose::STANDARD.encode(payload.to_string());
-        let url = Url::parse(&format!("vmess://{encoded}")).expect("URL");
-        let (proxy, _, _, _) = parse_vmess(url, None, &encoded).expect("proxy");
-        assert!(proxy.get("servername").is_none());
-        assert_eq!(proxy["fingerprint"].as_str(), Some("sha256-fingerprint"));
-        assert_eq!(proxy["name-cert-verify"].as_str(), Some("origin.example"));
-    }
-
-    #[test]
-    fn preserves_trojan_alpn_and_insecure_alias() {
-        let url = Url::parse(concat!(
-            "trojan://secret@example.com:443?alpn=h2%2Chttp%2F1.1&",
-            "insecure=1&pcs=sha256-fingerprint&vcn=origin.example"
-        ))
-        .expect("URL");
-        let (proxy, _, _, _) = parse_trojan(url, None).expect("proxy");
-        assert_eq!(proxy["skip-cert-verify"].as_bool(), Some(true));
-        assert_eq!(proxy["alpn"][0].as_str(), Some("h2"));
-        assert_eq!(proxy["alpn"][1].as_str(), Some("http/1.1"));
-        assert_eq!(proxy["fingerprint"].as_str(), Some("sha256-fingerprint"));
-        assert_eq!(proxy["name-cert-verify"].as_str(), Some("origin.example"));
-    }
-
-    #[test]
-    fn preserves_vmess_grpc_mode() {
-        let payload = serde_json::json!({
-            "add": "vmess.example",
-            "port": "443",
-            "id": "00000000-0000-0000-0000-000000000001",
-            "net": "grpc",
-            "type": "gun",
-            "path": "grpc-service",
-        });
-        let encoded = base64::engine::general_purpose::STANDARD.encode(payload.to_string());
-        let url = Url::parse(&format!("vmess://{encoded}")).expect("URL");
-        let (proxy, _, _, _) = parse_vmess(url, None, &encoded).expect("proxy");
-        assert_eq!(proxy["network"].as_str(), Some("grpc"));
-        assert_eq!(
-            proxy["grpc-opts"]["grpc-service-name"].as_str(),
-            Some("grpc-service")
-        );
-    }
-
-    #[test]
-    fn preserves_tuic_allow_insecure_alias() {
-        let url = Url::parse(
-            "tuic://00000000-0000-0000-0000-000000000001:secret@tuic.example:443?allow_insecure=1",
-        )
-        .expect("URL");
-        let (proxy, _, _, _) = parse_tuic(url, None).expect("proxy");
-        assert_eq!(proxy["skip-cert-verify"].as_bool(), Some(true));
-    }
-}
+#[path = "uri_tests.rs"]
+mod tests;
 
 fn insert_number(map: &mut Mapping, key: &str, value: u64) {
     map.insert(
