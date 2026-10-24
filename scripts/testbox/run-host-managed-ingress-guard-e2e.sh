@@ -19,11 +19,27 @@ REMOTE_RUN_CREATED=0
 cleanup() {
   local status="${1:-$?}"
   set +e
+  local cleanup_ok=1
   if [ "$REMOTE_RUN_CREATED" != "1" ]; then
     return "$status"
   fi
-  ssh -o BatchMode=yes "$TESTBOX" "docker rm -f '$CONTAINER' >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
-  testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
+  if ssh -o BatchMode=yes "$TESTBOX" \
+    "if docker inspect '$CONTAINER' >/dev/null 2>&1; then docker rm -f '$CONTAINER' >/dev/null 2>&1; else docker info >/dev/null 2>&1; fi" \
+    >/dev/null 2>&1; then
+    :
+  else
+    cleanup_ok=0
+  fi
+  if [ "$cleanup_ok" = "1" ]; then
+    if testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1; then
+      :
+    else
+      cleanup_ok=0
+    fi
+  fi
+  if [ "$cleanup_ok" != "1" ] && [ "$status" -eq 0 ]; then
+    status=1
+  fi
   return "$status"
 }
 on_signal() {
@@ -32,7 +48,13 @@ on_signal() {
   cleanup "$status"
   exit "$status"
 }
-trap cleanup EXIT
+on_exit() {
+  local status=$?
+  trap - EXIT
+  cleanup "$status"
+  exit $?
+}
+trap on_exit EXIT
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 testbox_remote_root_preflight

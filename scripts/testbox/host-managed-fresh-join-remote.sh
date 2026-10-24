@@ -52,6 +52,22 @@ SOURCE_NAME="$(bounded_name "${COMPOSE_PROJECT}-xray-source")"
 COMPOSE_DIR="$REMOTE_RUN/scripts/testbox"
 COMPOSE_FILE="compose-host-managed-fresh-join.yml"
 
+remove_container_if_present() {
+  local name="$1"
+  if docker inspect "$name" >/dev/null 2>&1; then
+    docker rm -f "$name" >/dev/null 2>&1
+  else
+    docker info >/dev/null 2>&1
+  fi
+}
+remove_image_if_present() {
+  local image="$1"
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    docker image rm "$image" >/dev/null 2>&1
+  else
+    docker info >/dev/null 2>&1
+  fi
+}
 cleanup() {
   local status="${1:-$?}"
   set +e
@@ -82,8 +98,11 @@ cleanup() {
   else
     cleanup_ok=0
   fi
-  docker rm -f "$BUILDER_NAME" "$SOURCE_NAME" >/dev/null 2>&1 || true
-  docker image rm "$XP_HOST_IMAGE_PREFIX-leader" "$XP_HOST_IMAGE_PREFIX-systemd" "$XP_HOST_IMAGE_PREFIX-openrc" >/dev/null 2>&1 || true
+  remove_container_if_present "$BUILDER_NAME" || cleanup_ok=0
+  remove_container_if_present "$SOURCE_NAME" || cleanup_ok=0
+  remove_image_if_present "$XP_HOST_IMAGE_PREFIX-leader" || cleanup_ok=0
+  remove_image_if_present "$XP_HOST_IMAGE_PREFIX-systemd" || cleanup_ok=0
+  remove_image_if_present "$XP_HOST_IMAGE_PREFIX-openrc" || cleanup_ok=0
   if [ "$cleanup_ok" = "1" ]; then
     if assert_remote_run && remove_remote_run >/dev/null 2>&1; then
       :

@@ -247,7 +247,7 @@ def rename_noreplace(parent_fd: int, source: str, target: str) -> bool:
     raise OSError(error, os.strerror(error))
 
 
-def remove_directory_entry(parent_fd: int, name: str, directory_fd: int) -> None:
+def quarantine_directory_entry(parent_fd: int, name: str, directory_fd: int) -> str:
     same_directory(parent_fd, name, directory_fd)
     for attempt in range(16):
         quarantine = (
@@ -258,13 +258,29 @@ def remove_directory_entry(parent_fd: int, name: str, directory_fd: int) -> None
             continue
         try:
             same_directory(parent_fd, quarantine, directory_fd)
-            os.rmdir(quarantine, dir_fd=parent_fd)
         except BaseException:
             if not rename_noreplace(parent_fd, quarantine, name):
                 fail("cannot restore testbox cleanup quarantine")
             raise
-        return
+        return quarantine
     fail("cannot allocate a testbox cleanup quarantine name")
+
+
+def restore_directory_entry(
+    parent_fd: int, name: str, quarantine: str, directory_fd: int
+) -> None:
+    same_directory(parent_fd, quarantine, directory_fd)
+    if not rename_noreplace(parent_fd, quarantine, name):
+        fail("cannot restore testbox cleanup quarantine")
+
+
+def remove_directory_entry(parent_fd: int, name: str, directory_fd: int) -> None:
+    quarantine = quarantine_directory_entry(parent_fd, name, directory_fd)
+    try:
+        os.rmdir(quarantine, dir_fd=parent_fd)
+    except BaseException:
+        restore_directory_entry(parent_fd, name, quarantine, directory_fd)
+        raise
 
 
 def restore_marker(run_fd: int, marker_data: bytes) -> None:
@@ -453,8 +469,36 @@ def cleanup_claim(root: str, claim: str, lock: bool) -> None:
 
 
 def cleanup_run_and_claim(root: str, run: str, claim: str, expected: str) -> None:
-    verify_or_cleanup(root, run, expected, remove=True)
-    cleanup_claim(root, claim, lock=True)
+    root, parts = run_parts(root, run)
+    root_fd = open_root(root)
+    parent_fd = open_parent(root_fd, parts[:-1], create=False)
+    lock_fd = lock_parent(parent_fd)
+    run_fd: int | None = None
+    quarantine: str | None = None
+    try:
+        run_fd = os.open(parts[-1], OPEN_FLAGS, dir_fd=parent_fd)
+        validate_directory(run_fd, owner_required=True, allow_sticky=False, private_required=True)
+        marker_data = marker_matches(run_fd, expected)
+        quarantine = quarantine_directory_entry(parent_fd, parts[-1], run_fd)
+        try:
+            cleanup_claim(root, claim, lock=True)
+        except BaseException:
+            restore_directory_entry(parent_fd, parts[-1], quarantine, run_fd)
+            quarantine = None
+            raise
+        try:
+            remove_tree(parent_fd, quarantine, run_fd, marker_data)
+            quarantine = None
+        except BaseException:
+            if quarantine is not None:
+                restore_directory_entry(parent_fd, parts[-1], quarantine, run_fd)
+                quarantine = None
+            raise
+    finally:
+        if run_fd is not None:
+            os.close(run_fd)
+        os.close(lock_fd)
+        os.close(parent_fd)
 
 
 def decode_env_paths() -> tuple[str, str]:

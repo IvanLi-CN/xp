@@ -206,6 +206,28 @@ with open(lock_path, "a+") as lock_file:
     )
 assert not os.path.exists(claim)
 PY
+  quarantine_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-quarantine" run-quarantine)"
+  quarantine_claim="$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims/10_203_1_0_24"
+  mkdir -p "$quarantine_claim"
+  chmod 700 \
+    "$XP_TESTBOX_REMOTE_ROOT/agents" \
+    "$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims" \
+    "$quarantine_claim"
+  printf '%s\n' codex-quarantine > "$quarantine_claim/compose_project"
+  printf '%s\n' "$quarantine_run" > "$quarantine_claim/run_path"
+  printf '%s\n' 10.203.1.0/24 > "$quarantine_claim/subnet"
+  chmod 0755 "$quarantine_claim"
+  if RUN_ID=run-quarantine python3 "$SCRIPT_DIR/remote-run-guard.py" \
+    cleanup-with-claim "$XP_TESTBOX_REMOTE_ROOT" "$quarantine_run" "$quarantine_claim"; then
+    echo 'expected unsafe claim cleanup to fail closed' >&2
+    exit 1
+  fi
+  test -e "$quarantine_run"
+  chmod 0700 "$quarantine_claim"
+  RUN_ID=run-quarantine python3 "$SCRIPT_DIR/remote-run-guard.py" \
+    cleanup-with-claim "$XP_TESTBOX_REMOTE_ROOT" "$quarantine_run" "$quarantine_claim"
+  test ! -e "$quarantine_run"
+  test ! -e "$quarantine_claim"
   rm -rf "$XP_TESTBOX_REMOTE_ROOT/agents"
   mkdir -p "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan"
   mkdir -p "$guard_root/outside"

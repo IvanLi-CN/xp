@@ -238,8 +238,8 @@ cleanup_local() {
     rm -f "$BASELINE_ARCHIVE"
   fi
   if [ "${REMOTE_RUN_CREATED:-0}" = "1" ] && [ "$status" -eq 0 ]; then
-    ssh -o BatchMode=yes "$TESTBOX" \
-      "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1 || true
+    if ssh -o BatchMode=yes "$TESTBOX" \
+      "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1
 set -euo pipefail
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
@@ -306,6 +306,7 @@ case "$final_run" in
   *) exit 2 ;;
 esac
 REMOTE_CLEANUP
+    then
     if testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1; then
       :
     fi
@@ -733,7 +734,6 @@ claim_root = pathlib.Path(sys.argv[1])
 remote_run = pathlib.Path(sys.argv[2])
 compose_project = sys.argv[3]
 remote_root = pathlib.Path(os.path.normpath(sys.argv[4]))
-pending_claim_grace_seconds = 120
 
 if remote_root.is_symlink() or remote_root.resolve() != remote_root:
     print("shared-testbox remote root is not canonical", file=sys.stderr)
@@ -1011,36 +1011,32 @@ try:
         if lease_file.is_symlink() or (lease_file.exists() and not lease_file.is_file()):
             print(f"shared-testbox lease is missing or unsafe: {lease_file}", file=sys.stderr)
             sys.exit(1)
-        if lease_file.is_file():
-            lease = {}
-            try:
-                for line in lease_file.read_text().splitlines():
-                    key, value = line.split("=", 1)
-                    lease[key] = value
-                pid = int(lease["pid"])
-                start_ticks = int(lease["start_ticks"])
-            except (KeyError, ValueError, OSError, UnicodeDecodeError) as exc:
-                print(f"invalid active shared-testbox lease {lease_file}: {exc}", file=sys.stderr)
-                sys.exit(1)
-            try:
-                proc_stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
-                proc_start_ticks = int(proc_stat.rsplit(")", 1)[1].split()[19])
-                proc_cwd = pathlib.Path(os.path.realpath(f"/proc/{pid}/cwd"))
-                run_real = pathlib.Path(os.path.realpath(run_path))
-                active = proc_start_ticks == start_ticks and (
-                    proc_cwd == run_real or run_real in proc_cwd.parents
-                )
-            except FileNotFoundError:
-                active = False
-            except (ValueError, OSError) as exc:
-                print(f"cannot validate shared-testbox lease {lease_file}: {exc}", file=sys.stderr)
-                sys.exit(1)
-        else:
-            try:
-                active = time.time() - claim_dir.stat().st_mtime < pending_claim_grace_seconds
-            except OSError:
-                print(f"cannot inspect shared-testbox claim: {claim_dir}", file=sys.stderr)
-                sys.exit(1)
+        if not lease_file.is_file():
+            print(f"shared-testbox lease metadata is missing: {lease_file}", file=sys.stderr)
+            sys.exit(1)
+        lease = {}
+        try:
+            for line in lease_file.read_text().splitlines():
+                key, value = line.split("=", 1)
+                lease[key] = value
+            pid = int(lease["pid"])
+            start_ticks = int(lease["start_ticks"])
+        except (KeyError, ValueError, OSError, UnicodeDecodeError) as exc:
+            print(f"invalid active shared-testbox lease {lease_file}: {exc}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            proc_stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+            proc_start_ticks = int(proc_stat.rsplit(")", 1)[1].split()[19])
+            proc_cwd = pathlib.Path(os.path.realpath(f"/proc/{pid}/cwd"))
+            run_real = pathlib.Path(os.path.realpath(run_path))
+            active = proc_start_ticks == start_ticks and (
+                proc_cwd == run_real or run_real in proc_cwd.parents
+            )
+        except FileNotFoundError:
+            active = False
+        except (ValueError, OSError) as exc:
+            print(f"cannot validate shared-testbox lease {lease_file}: {exc}", file=sys.stderr)
+            sys.exit(1)
 
         if not active:
             stale_cleanup_ok = remove_stale_run()
