@@ -177,6 +177,17 @@ PY
   rm -rf "$fifo_run"
   testbox_remote_cleanup "$guarded_run" run-3
   test ! -e "$guarded_run"
+  mesh_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/agents/thread-1/runs/run-mesh" run-mesh)"
+  (
+    export TESTBOX_REMOTE_ROOT="$XP_TESTBOX_REMOTE_ROOT"
+    export REMOTE_RUN="$mesh_run"
+    export REMOTE_RUN_ID=run-mesh
+    export REMOTE_WORKSPACE="$XP_TESTBOX_REMOTE_ROOT/agents/thread-1/workspace"
+    source "$SCRIPT_DIR/remote-run-guard.sh"
+    test "$REMOTE_WORKSPACE" = "$XP_TESTBOX_REMOTE_ROOT/agents/thread-1/workspace"
+  )
+  testbox_remote_cleanup "$mesh_run" run-mesh
+  test ! -e "$mesh_run"
   mkdir -p "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/insecure"
   chmod 0777 "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/insecure"
   if testbox_remote_run_create \

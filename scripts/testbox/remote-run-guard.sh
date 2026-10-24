@@ -18,7 +18,17 @@ assert_remote_run() {
   REMOTE_RUN="$remote_run_real"
   export REMOTE_RUN
   if [ -n "${REMOTE_WORKSPACE:-}" ]; then
-    REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
+    case "$REMOTE_RUN" in
+      */agents/*/runs/*)
+        REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")/workspace"
+        ;;
+      */workspaces/*/runs/*)
+        REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
+        ;;
+      *)
+        return 2
+        ;;
+    esac
     export REMOTE_WORKSPACE
   fi
 }
