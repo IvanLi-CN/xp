@@ -665,10 +665,6 @@
     "long_line_count": 1,
     "max_line_length": 178
   },
-  "web/src/components/ui/button.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 230
-  },
   "web/src/components/ui/card.stories.tsx": {
     "long_line_count": 1,
     "max_line_length": 184
@@ -748,10 +744,6 @@
   "web/src/components/ui/sheet.stories.tsx": {
     "long_line_count": 1,
     "max_line_length": 174
-  },
-  "web/src/components/ui/sheet.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 153
   },
   "web/src/components/ui/table.stories.tsx": {
     "long_line_count": 1,

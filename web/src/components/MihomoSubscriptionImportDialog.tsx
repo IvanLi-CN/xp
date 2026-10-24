@@ -194,25 +194,37 @@ export function MihomoSubscriptionImportDialog({
 			<SheetContent
 				side="bottom"
 				data-testid="mihomo-import-panel"
+				aria-busy={isLoading}
 				className={cn(
-					"h-[min(46rem,calc(100dvh-1rem))]",
-					"max-h-[min(46rem,calc(100dvh-1rem))] w-full max-w-none",
+					"grid h-auto max-h-[min(46rem,calc(100dvh-1rem))] w-full max-w-none",
 					"grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden",
 					"rounded-t-2xl border-x-0 border-b-0 p-0",
 					"sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-1/2",
-					"sm:h-[min(46rem,calc(100dvh-2rem))]",
 					"sm:max-h-[min(46rem,calc(100dvh-2rem))]",
 					"sm:w-[calc(100vw-2rem)] sm:max-w-2xl",
 					"sm:-translate-x-1/2 sm:-translate-y-1/2",
 					"sm:rounded-2xl sm:border",
 				)}
 			>
+				<output className="sr-only" aria-live="polite" aria-atomic="true">
+					{isLoading
+						? "Previewing imported nodes."
+						: preview
+							? [
+									"Preview complete.",
+									`${preview.counts.added} added,`,
+									`${preview.counts.skipped} skipped,`,
+									`${preview.counts.failed} failed,`,
+									`${preview.counts.warnings} warning${preview.counts.warnings === 1 ? "" : "s"}.`,
+								].join(" ")
+							: ""}
+				</output>
 				<SheetHeader className="shrink-0 border-b border-border px-5 pb-4 pt-2 sm:px-6 sm:py-4">
 					<div
 						className="mx-auto mb-1 mt-0.5 h-1 w-10 rounded-full bg-muted-foreground/30 sm:hidden"
 						aria-hidden="true"
 					/>
-					<SheetTitle className="flex items-center gap-2 pr-8 text-base">
+					<SheetTitle className="flex items-center gap-2 pr-14 text-base">
 						<Icon
 							name="tabler:download"
 							className="size-5 text-primary"
@@ -344,7 +356,10 @@ export function MihomoSubscriptionImportDialog({
 													<span className="font-mono">{item.scheme}</span>
 												) : null}
 												{item.name ? (
-													<span className="min-w-0 truncate font-medium">
+													<span
+														className="max-w-full min-w-0 break-words font-medium"
+														title={item.name}
+													>
 														{item.name}
 													</span>
 												) : null}

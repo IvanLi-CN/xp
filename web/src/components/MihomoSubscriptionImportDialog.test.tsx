@@ -60,10 +60,16 @@ describe("MihomoSubscriptionImportDialog", () => {
 		renderDialog();
 
 		expect(screen.getByRole("dialog")).toHaveClass(
+			"grid",
+			"h-auto",
 			"bottom-0",
 			"rounded-t-2xl",
 			"sm:top-1/2",
 			"sm:rounded-2xl",
+		);
+		expect(screen.getByRole("button", { name: "Close" })).toHaveClass(
+			"size-11",
+			"focus-visible:ring-[3px]",
 		);
 	});
 
@@ -85,6 +91,9 @@ describe("MihomoSubscriptionImportDialog", () => {
 		expect(screen.getByLabelText("Import counts")).toHaveTextContent(
 			"Added1Skipped1Failed1Warnings1",
 		);
+		expect(screen.getByRole("status")).toHaveTextContent(
+			"Preview complete. 1 added, 1 skipped, 1 failed, 1 warning.",
+		);
 		expect(previewRequest).toHaveBeenCalledWith(
 			"ss://example",
 			"# keep\n",
@@ -100,6 +109,27 @@ describe("MihomoSubscriptionImportDialog", () => {
 		expect(onAdd).toHaveBeenCalledWith(
 			"# keep\n- name: imported\n  type: ss\n  server: import.example.com\n  port: 443\n",
 		);
+	});
+
+	it("keeps long node names readable instead of truncating them", async () => {
+		const user = userEvent.setup();
+		const longName = `imported-${"very-long-node-name-".repeat(8)}`;
+		const previewRequest = vi.fn().mockResolvedValue({
+			...PREVIEW,
+			items: [{ ...PREVIEW.items[0], name: longName }],
+		});
+		renderDialog({ previewRequest });
+
+		await user.type(
+			screen.getByLabelText("Subscription or node content"),
+			"ss://example",
+		);
+		await user.click(screen.getByRole("button", { name: "Preview" }));
+
+		const name = await screen.findByText(longName);
+		expect(name).toHaveClass("break-words");
+		expect(name).not.toHaveClass("truncate");
+		expect(name).toHaveAttribute("title", longName);
 	});
 
 	it("locks Add when the draft fingerprint changes after preview", async () => {

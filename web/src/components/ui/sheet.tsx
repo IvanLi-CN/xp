@@ -49,7 +49,13 @@ const SheetContent = React.forwardRef<
 			{...props}
 		>
 			{children}
-			<DialogPrimitive.Close className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+			<DialogPrimitive.Close
+				className={cn(
+					"absolute right-4 top-4 flex size-11 items-center justify-center rounded-md",
+					"text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+					"focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20",
+				)}
+			>
 				<span className="sr-only">Close</span>
 				<svg
 					viewBox="0 0 16 16"
