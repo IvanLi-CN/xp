@@ -22,6 +22,41 @@ def fail(message: str) -> NoReturn:
     raise SystemExit(2)
 
 
+def root_parts(root: str) -> tuple[str, list[str]]:
+    root = os.path.normpath(root)
+    if not os.path.isabs(root) or root == os.sep:
+        fail("testbox remote root must be a dedicated absolute directory")
+    parts = os.path.relpath(root, os.sep).split(os.sep)
+    if any(
+        not part or any(character not in SAFE_COMPONENTS for character in part)
+        for part in parts
+    ):
+        fail("testbox remote root contains an unsafe component")
+    return root, parts
+
+
+def ensure_root(root: str) -> None:
+    root, parts = root_parts(root)
+    current_fd = os.open(os.sep, OPEN_FLAGS)
+    try:
+        for part in parts:
+            try:
+                next_fd = os.open(part, OPEN_FLAGS, dir_fd=current_fd)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(part, 0o700, dir_fd=current_fd)
+                except FileExistsError:
+                    pass
+                next_fd = os.open(part, OPEN_FLAGS, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+    except OSError as exc:
+        fail(f"cannot prepare testbox remote root safely: {exc}")
+    finally:
+        os.close(current_fd)
+    print(root)
+
+
 def run_parts(root: str, run: str) -> tuple[str, list[str]]:
     root = os.path.normpath(root)
     run = os.path.normpath(run)
@@ -110,8 +145,25 @@ def lock_parent(parent_fd: int) -> int:
         fail(f"cannot lock testbox run parent safely: {exc}")
 
 
-def remove_tree(parent_fd: int, name: str) -> None:
-    directory_fd = os.open(name, OPEN_FLAGS, dir_fd=parent_fd)
+def same_directory(parent_fd: int, name: str, directory_fd: int) -> None:
+    expected = os.fstat(directory_fd)
+    try:
+        actual = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError as exc:
+        fail(f"testbox directory changed during cleanup: {exc}")
+    if (
+        not stat.S_ISDIR(actual.st_mode)
+        or actual.st_dev != expected.st_dev
+        or actual.st_ino != expected.st_ino
+    ):
+        fail("testbox directory changed during cleanup")
+
+
+def remove_tree(parent_fd: int, name: str, directory_fd: int | None = None) -> None:
+    owns_fd = directory_fd is None
+    if directory_fd is None:
+        directory_fd = os.open(name, OPEN_FLAGS, dir_fd=parent_fd)
+    same_directory(parent_fd, name, directory_fd)
     try:
         for entry in os.scandir(directory_fd):
             entry_name = entry.name
@@ -124,7 +176,9 @@ def remove_tree(parent_fd: int, name: str) -> None:
             else:
                 os.unlink(entry_name, dir_fd=directory_fd)
     finally:
-        os.close(directory_fd)
+        same_directory(parent_fd, name, directory_fd)
+        if owns_fd:
+            os.close(directory_fd)
     os.rmdir(name, dir_fd=parent_fd)
 
 
@@ -151,6 +205,7 @@ def create_run(root: str, run: str, expected: str) -> None:
     parent_fd = open_parent(root_fd, parts[:-1], create=True)
     lock_fd = lock_parent(parent_fd)
     created = False
+    run_fd: int | None = None
     try:
         try:
             os.mkdir(parts[-1], 0o700, dir_fd=parent_fd)
@@ -158,28 +213,27 @@ def create_run(root: str, run: str, expected: str) -> None:
         except FileExistsError:
             fail("testbox run directory already exists")
         run_fd = os.open(parts[-1], OPEN_FLAGS, dir_fd=parent_fd)
+        marker_fd = os.open(
+            ".codex-run-id",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW,
+            0o600,
+            dir_fd=run_fd,
+        )
         try:
-            marker_fd = os.open(
-                ".codex-run-id",
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW,
-                0o600,
-                dir_fd=run_fd,
-            )
-            try:
-                os.write(marker_fd, f"{expected}\n".encode())
-                os.fsync(marker_fd)
-            finally:
-                os.close(marker_fd)
+            os.write(marker_fd, f"{expected}\n".encode())
+            os.fsync(marker_fd)
         finally:
-            os.close(run_fd)
+            os.close(marker_fd)
     except BaseException:
-        if created:
+        if created and run_fd is not None:
             try:
-                remove_tree(parent_fd, parts[-1])
+                remove_tree(parent_fd, parts[-1], run_fd)
             except OSError:
                 pass
         raise
     finally:
+        if run_fd is not None:
+            os.close(run_fd)
         os.close(lock_fd)
         os.close(parent_fd)
     print(os.path.normpath(run))
@@ -200,7 +254,7 @@ def verify_or_cleanup(root: str, run: str, expected: str, remove: bool) -> None:
         try:
             marker_matches(run_fd, expected)
             if remove:
-                remove_tree(parent_fd, parts[-1])
+                remove_tree(parent_fd, parts[-1], run_fd)
         finally:
             os.close(run_fd)
     finally:
@@ -215,7 +269,11 @@ def cleanup_claim(root: str, claim: str, lock: bool) -> None:
     lock_fd = lock_parent(parent_fd) if lock else None
     try:
         try:
-            remove_tree(parent_fd, parts[-1])
+            claim_fd = os.open(parts[-1], OPEN_FLAGS, dir_fd=parent_fd)
+            try:
+                remove_tree(parent_fd, parts[-1], claim_fd)
+            finally:
+                os.close(claim_fd)
         except FileNotFoundError:
             pass
     finally:
@@ -233,6 +291,13 @@ def decode_env_paths() -> tuple[str, str]:
     return root, run
 
 
+def decode_env_root() -> str:
+    try:
+        return base64.b64decode(os.environ["TESTBOX_REMOTE_ROOT_B64"]).decode()
+    except (KeyError, ValueError, UnicodeDecodeError) as exc:
+        raise SystemExit(f"invalid encoded testbox root: {exc}") from exc
+
+
 def expected_marker() -> str:
     encoded_run_id = os.environ.get("RUN_ID_B64")
     if encoded_run_id is None:
@@ -246,6 +311,9 @@ def expected_marker() -> str:
 def main() -> None:
     if len(sys.argv) == 2:
         mode = sys.argv[1]
+        if mode == "ensure-root":
+            ensure_root(decode_env_root())
+            return
         root, run = decode_env_paths()
     elif len(sys.argv) == 4:
         mode, root, run = sys.argv[1:4]

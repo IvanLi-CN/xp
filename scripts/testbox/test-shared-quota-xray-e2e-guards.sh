@@ -105,6 +105,14 @@ expect_failure \
   USER=ivan
   # shellcheck source=runner-env.sh
   source "$SCRIPT_DIR/runner-env.sh"
+  mkdir -p "$guard_root/outside"
+  ln -s "$guard_root/outside" "$guard_root/root-alias"
+  bad_root_b64="$(printf '%s' "$guard_root/root-alias/nested" | base64 | tr -d '\n')"
+  if TESTBOX_REMOTE_ROOT_B64="$bad_root_b64" python3 "$SCRIPT_DIR/remote-run-guard.py" ensure-root; then
+    echo 'expected symlinked root ancestor guard to fail' >&2
+    exit 1
+  fi
+  test ! -e "$guard_root/outside/nested"
   long_name_raw="$(printf 'repository%.0s' {1..20})"
   long_name="$(testbox_bounded_name "$long_name_raw")"
   test "${#long_name}" -eq 63

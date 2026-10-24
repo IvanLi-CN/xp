@@ -54,8 +54,10 @@ PY
 }
 
 testbox_remote_root_preflight() {
+  local root_b64
+  root_b64="$(printf '%s' "$TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')"
   ssh -o BatchMode=yes "$TESTBOX" \
-    "set -euo pipefail; root='$TESTBOX_REMOTE_ROOT'; mkdir -p -- \"\$root\"; test -d \"\$root\"; test ! -L \"\$root\"; test \"\$(readlink -f -- \"\$root\")\" = \"\$root\""
+    "TESTBOX_REMOTE_ROOT_B64='$root_b64' python3 - ensure-root" < "$TESTBOX_REMOTE_GUARD_HELPER" >/dev/null
 }
 
 testbox_remote_run_create() {
