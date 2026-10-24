@@ -106,6 +106,13 @@ write request is unresolved. A timed-out write becomes an explicitly unknown res
 before the barrier is released.
 _Avoid_: automatic replay, transparent failover
 
+**External Subscription URL**:
+An absolute URL copied from the console for a Mihomo, Clash, or raw subscription
+client. It uses the current verified Primary Backend origin and must work without
+the console's JavaScript, Service Worker, local storage, or browser transport
+rewrite.
+_Avoid_: static page URL, relative API path, browser-only request URL
+
 **Legacy Node Navigation**:
 The existing full-page jump from one node-hosted console origin to another using its
 separate login handoff. It is compatibility behaviour, not Backend Selection.
