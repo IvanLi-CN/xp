@@ -373,10 +373,10 @@
 - Production delivery still requires a continuous 300-second counter window, bounded by two
   read-only status samples, proving both source-to-ACK and repository-to-apply capacity at 10x the
   peak generated segment and byte rates. Queue depth alone is not acceptance evidence.
-- The Agent VM runner must compile both the candidate binary and the resource workload with the
+- The resource runner must compile both the candidate binary and the resource workload with the
   `resource-fixture` feature so the bounded live enqueue fixture is exercised; a runtime
   environment variable alone is not sufficient to enable a Cargo feature.
-- Release readiness requires a JSON Agent VM attestation bound to the exact target SHA and log
+- Release readiness requires a JSON resource attestation bound to the exact target SHA and log
   digest. It must identify the 300-second window, 128 MiB/no-swap limits, and all four segment/
   byte 10x gates; missing or mismatched evidence fails closed before artifact publication. The
   owner-dispatched release accepts an evidence commit with exactly the target as its only parent

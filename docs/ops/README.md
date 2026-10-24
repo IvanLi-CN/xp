@@ -1024,10 +1024,12 @@ Notes:
   tiered import followed by a fresh deep summary pass; the member cannot enter `ready` while that
   verification remains unresolved.
 
-  Mesh resource runner Cargo caching is documented in `docs/ops/cargo-cache.md`. The shared
-  Cargo Home contains dependency downloads only; candidate and baseline build targets remain
-  inside the owning shared-testbox Agent Directory. The disposable run directory is cleaned after
-  evidence capture and is never a cache. The formal comparison remains 900 seconds per side.
+  Mesh resource runner inputs are caller-owned: every remote run must provide an explicit `TESTBOX`
+  SSH target and `XP_TESTBOX_REMOTE_ROOT`; no host alias or remote root is defaulted by the project.
+  Cargo caching is documented in `docs/ops/cargo-cache.md`. The shared Cargo Home contains
+  dependency downloads only; candidate and baseline build targets remain inside the owning
+  shared-testbox Agent Directory. The disposable run directory is cleaned after evidence capture
+  and is never a cache. The formal comparison remains 900 seconds per side.
   Tombstones accepted during `syncing` are persisted locally but their acknowledgement fanout is
   deferred until the member is Raft-`ready`, after which the existing durable acknowledgement page
   retries delivery to all cluster nodes.
@@ -1295,16 +1297,18 @@ published only after the target SHA has successful `ci`, `fixture-policy`, and `
 on `main`.
 
 For a corrective release, an owner dispatches the `release` workflow with the exact merged `head_sha`,
-`release_type`, `channel`, `expected_version`, `reason`, and the SHA of an Agent VM evidence commit.
-That evidence commit must have the target as its only parent and contain only the attestation JSON
-and workload log. The commit must also have a GitHub-verified valid signature by the repository
+`release_type`, `channel`, `expected_version`, `reason`, and the SHA of an owner-supplied resource
+evidence commit.
+The current evidence contract is v2: the evidence commit must have the target as its only parent and
+contain only `resource-evidence.json` and `resource-workload.log`; pre-v2 evidence commits must be
+regenerated. The commit must also have a GitHub-verified valid signature by the repository
 owner. The workflow itself also requires the dispatch actor and re-run actor to be the repository
 owner, and verifies the pinned owner signing key with `git verify-commit`. It recomputes the log
 digest, publishes the evidence files and commit identity as release assets, then fails before tag
 creation if the target is not on `main`, the expected version does not match, evidence is malformed
 or mismatched, or any required workflow is missing or unsuccessful. This is an owner-dispatched
 Manual Backfill;
-there is no automatic release trigger without an auditable Agent VM evidence reference. Stable
+there is no automatic release trigger without an auditable resource evidence reference. Stable
 releases publish `latest`; prereleases do not. If the target commit changes a workflow file, the
 Actions `GITHUB_TOKEN` cannot create its tag; an owner must first push the exact annotated tag with a
 credential that has workflow scope, after which the workflow's idempotent tag step reuses it.
@@ -1314,8 +1318,10 @@ credential that has workflow scope, after which the workflow's idempotent tag st
 Performance acceptance is explicit and SHA-bound; ordinary main runs are not accumulated into an
 informal moving average. Dispatch `ci-performance` from the exact commit under test and pass the
 same full 40-character SHA as `target_sha`. It runs three isolated cold/warm pairs. Each pair has a
-unique cache namespace, requires cold misses and warm hits, and fails when the maximum parallel-job
-duration exceeds 420 seconds cold or 300 seconds warm.
+unique cache namespace containing the workflow run and attempt, so a rerun cannot reuse the previous
+attempt's cold cache. It requires cold misses and warm hits, and fails when the maximum parallel-job
+duration exceeds 540 seconds cold or 300 seconds warm. The cold budget covers a real Cargo rebuild
+on a hosted runner; warm remains the tighter regression signal after cache population.
 
 Dispatch `release-performance` the same way to exercise the reusable release build graph without
 creating a tag, package version, GitHub Release, or deployment. It uses a synthetic

@@ -34,5 +34,5 @@ response, a different range, or a SQLite write failure still leaves the durable 
 ## Validation
 
 Runtime coverage proves that an observed non-permanent gap is sealed exactly once and that a second
-probe cannot reuse the consumed continuation. Focused history-repository tests and the Agent VM
-resource gate remain required before publication.
+probe cannot reuse the consumed continuation. Focused history-repository tests and the resource gate
+remain required before publication.

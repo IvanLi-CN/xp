@@ -7,18 +7,18 @@ derive them from a host name or an Agent identifier.
 ## Cache ownership
 
 `CARGO_HOME` may be shared by compatible Linux agents for Cargo's registry and
-Git dependency downloads:
+Git dependency downloads. Its location is supplied by the runner operator:
 
 ```text
-/srv/codex/caches/linux-amd64/cargo/
+<shared-cargo-home>/cargo/
 ```
 
 Compiled project output stays private to the current Agent Directory. For a
-shared-testbox task, select a cache root inside the directory returned by
-`testbox-agent-dir.sh`, for example:
+shared-testbox task, select a cache root inside the directory derived from the
+caller-provided `XP_TESTBOX_REMOTE_ROOT`, for example:
 
 ```text
-/srv/codex/agents/<CODEX_THREAD_ID>/xp-cargo-cache/
+<XP_TESTBOX_REMOTE_ROOT>/agents/<CODEX_THREAD_ID>/xp-cargo-cache/
   source/candidate/
   source/baseline/
   target/<rustc-fingerprint>/candidate/
@@ -30,22 +30,34 @@ fingerprints decide whether a unit is reusable after the matching source slot,
 Web assets, toolchain and build environment are restored. A target directory is
 never shared between Agents and is removed only with the owning Agent Directory.
 
+`XP_TESTBOX_REMOTE_ROOT` is an operator-owned private `0700` directory. Host-global subnet claim
+allocation is global within that explicit root for concurrent runs under the same Unix account; do
+not share the root across Unix UIDs. Run parents, claims, markers and contents remain owned by the
+current user.
+
 ## Runner usage
 
-Resource runs require both explicit paths:
+Resource runs require the explicit host, remote root and cache paths:
 
 ```bash
-XP_TESTBOX_CARGO_CACHE_ROOT=/srv/codex/agents/$CODEX_THREAD_ID/xp-cargo-cache \
-XP_TESTBOX_CARGO_HOME=/srv/codex/caches/linux-amd64/cargo \
+TESTBOX=<ssh-target> \
+XP_TESTBOX_REMOTE_ROOT=<remote-root> \
+XP_TESTBOX_CARGO_CACHE_ROOT=<remote-root>/agents/$CODEX_THREAD_ID/xp-cargo-cache \
+XP_TESTBOX_CARGO_HOME=<shared-cargo-home>/cargo \
 XP_RUN_MESH_RESOURCE=1 \
 scripts/testbox/run-shared-quota-xray-e2e.sh
 ```
 
-The runner synchronizes immutable candidate and baseline source snapshots into
-stable cache slots, builds through `scripts/cargo-cache/with-cargo-target.sh`,
+The runner requires `TESTBOX` and `XP_TESTBOX_REMOTE_ROOT` for every remote run. It synchronizes
+immutable candidate and baseline source snapshots into stable cache slots, builds through
+`scripts/cargo-cache/with-cargo-target.sh`,
 and copies the resolved XP and resource-test executables into the disposable
 run before measurement. The run directory is cleaned by the existing runner
-trap; it is not a cache.
+trap; it is not a cache. Stale lease reclamation first tears down the recorded
+Compose project and releases the subnet claim only after both Compose and run-directory cleanup
+succeed; a failed cleanup keeps the claim for retry.
+Incomplete, malformed, or unsafe claim metadata fails closed and remains for operator repair; the
+allocator never tears down or reuses an ambiguous claim.
 
 Remote build and test processes inherit `TMPDIR=<disposable-run>/tmp`. Rust
 resource fixtures therefore keep temporary node state, SQLite files and logs
@@ -55,7 +67,8 @@ Use `scripts/cargo-cache/status.sh --cache-root PATH` to inspect both slots.
 The status command is read-only. `scripts/cargo-cache/test.sh` is the local
 fixture for the wrapper's Cargo invalidation, path, slot and lock behavior.
 `scripts/testbox/test-shared-quota-xray-e2e-guards.sh` exercises the runner's
-early cache and formal/smoke gate guards without connecting to testbox.
+early environment, cache and formal/smoke gate guards without connecting to a
+remote host.
 
 ## Gate rules
 
