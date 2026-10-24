@@ -247,11 +247,12 @@ PY
   test ! -e "$quarantine_claim"
   transaction_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-transaction" run-transaction)"
   transaction_claim="$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims/10_203_2_0_24"
-  mkdir -p "$transaction_claim" "$transaction_run/nested"
+  mkdir -p "$transaction_claim/nested" "$transaction_run/nested"
   chmod 700 "$transaction_claim"
   printf '%s\n' codex-transaction > "$transaction_claim/compose_project"
   printf '%s\n' "$transaction_run" > "$transaction_claim/run_path"
   printf '%s\n' 10.203.2.0/24 > "$transaction_claim/subnet"
+  printf 'claim data\n' > "$transaction_claim/nested/file"
   printf 'keep me\n' > "$transaction_run/nested/file"
   chmod 500 "$transaction_run/nested"
   if RUN_ID=run-transaction python3 "$SCRIPT_DIR/remote-run-guard.py" \
@@ -262,6 +263,15 @@ PY
   test -d "$transaction_run"
   test -d "$transaction_claim"
   chmod 700 "$transaction_run/nested"
+  chmod 500 "$transaction_claim/nested"
+  if RUN_ID=run-transaction python3 "$SCRIPT_DIR/remote-run-guard.py" \
+    cleanup-with-claim "$XP_TESTBOX_REMOTE_ROOT" "$transaction_run" "$transaction_claim"; then
+    echo 'expected claim cleanup failure to preserve run and claim' >&2
+    exit 1
+  fi
+  test -d "$transaction_run"
+  test -d "$transaction_claim"
+  chmod 700 "$transaction_claim/nested"
   RUN_ID=run-transaction python3 "$SCRIPT_DIR/remote-run-guard.py" \
     cleanup-with-claim "$XP_TESTBOX_REMOTE_ROOT" "$transaction_run" "$transaction_claim"
   test ! -e "$transaction_run"
