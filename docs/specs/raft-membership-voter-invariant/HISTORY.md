@@ -24,3 +24,5 @@
   recovery and promotion remain distinct operations.
 - Fresh joins are admitted independently of unrelated stale learners. An expired legacy Reserved
   session keeps its learner and DesiredState Node while only the session is terminalized.
+- Interrupted cleanup of a recorded expired Join is recoverable only from the exact absent
+  postcondition; a remaining learner is terminally blocked for explicit stale-learner recovery.

@@ -7,9 +7,11 @@
   one active operation, monotonic phase transitions, and terminal timestamps.
 - `RaftFacade::ensure_linearizable()` uses OpenRaft's quorum heartbeat in production. Lifecycle
   writers evaluate mappings and fingerprints only after that check.
-- `raft_membership_guard` never infers a promotion. Its periodic work audits orphan voters,
-  unexpected learners, and missing desired members; it resumes only recorded RemoveNode and
-  Restore operations, and prunes terminal evidence after 24 hours.
+- `raft_membership_guard` never infers a promotion or membership removal. Its periodic work audits
+  orphan voters, unexpected learners, and missing desired members; it resumes recorded RemoveNode
+  and Restore operations, terminalizes an expired Join only after proving its learner, DesiredState
+  node, and endpoints are absent, blocks the operation when the learner remains, and prunes terminal
+  evidence after 24 hours.
 - Fresh join uses `require_fresh_join_admission`: it retains the quorum-backed, non-joint, target
   identity, active-operation, and voter/DesiredState checks while excluding unrelated
   `unexpected_learners` from this one admission decision. The generic clean-membership gate remains

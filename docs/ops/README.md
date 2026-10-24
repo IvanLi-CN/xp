@@ -1562,7 +1562,11 @@ After recovery:
   the leader removes the incomplete membership/node and expires the reservation when that session is
   owned by a recorded Join operation. A legacy `Reserved` session that is already expired while its
   non-voter learner remains is only marked `Expired`; its learner and DesiredState Node stay in
-  place for explicit stale-learner recovery.
+  place for explicit stale-learner recovery. If the leader crashes after that cleanup has already
+  removed the learner, DesiredState node, and endpoints but before the Join operation transition is
+  committed, the membership guard terminalizes the exact recorded operation after restart. A
+  remaining learner is blocked for explicit stale-learner recovery and is never removed by this
+  recovery path.
 - Run `xp-ops xp sync-node-meta` on each node after updating `/etc/xp/xp.env` to ensure membership
   `NodeMeta` (leader discovery/forwarding) matches config. This command preserves existing
   managed-default endpoint ports from Raft even when the local bootstrap env differs.

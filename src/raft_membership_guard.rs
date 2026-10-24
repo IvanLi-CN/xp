@@ -19,6 +19,7 @@ use crate::{
     },
 };
 
+mod expired_join_recovery;
 mod remove_node_operation;
 pub(crate) mod stale_learner_recovery;
 mod stale_learner_retirement;
@@ -883,6 +884,10 @@ pub async fn resume_membership_operations_once(
         return prune_terminal_operations(&raft, &store).await;
     };
     match operation.kind {
+        MembershipOperationKind::Join => {
+            return expired_join_recovery::resume_expired_join_operation(&raft, &store, operation)
+                .await;
+        }
         MembershipOperationKind::Restore => {
             return resume_restore_operation(&raft, &store, operation).await;
         }
@@ -893,7 +898,6 @@ pub async fn resume_membership_operations_once(
             return remove_node_operation::resume_remove_node_operation(&raft, &store, operation)
                 .await;
         }
-        _ => Ok(()),
     }
 }
 

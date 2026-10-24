@@ -70,9 +70,12 @@ metadata into an orphan voter without a DesiredState Node mapping.
   voter, uses `RemoveVoters(..., false)`, verifies `absent`, and only then deletes DesiredState
   Node/endpoints. It never performs a compensating re-add on an unknown result.
 - The periodic worker only audits invariants, prunes terminal records after their retention period,
-  and resumes a recorded RemoveNode or Restore operation. The Join coordinator advances only a
-  matching recorded Join operation. None of them calls `add_voters` for an unknown session, deletes
-  an unknown member, or uses a speculative rollback.
+  and resumes a recorded RemoveNode or Restore operation. It may also terminalize an already
+  expired Join only after a linearizable check proves that its exact learner, DesiredState node,
+  and endpoints are absent; if the learner remains, it records `Blocked` and requires explicit
+  stale-learner recovery. The Join coordinator advances only a matching recorded Join operation.
+  None of them calls `add_voters` for an unknown session, deletes an unknown member, or uses a
+  speculative rollback.
 - Any retained DesiredState-mapped voter lacking `cluster.membership-lifecycle-v1` freezes fresh
   join, delete, restore, and repair lifecycle writes with `coordinated_upgrade_required`.
   A voter with an eligible Mesh endpoint verifies that capability only through signed Mesh
@@ -90,7 +93,8 @@ metadata into an orphan voter without a DesiredState Node mapping.
   the existing additive `UpsertNode` command. It retains the DesiredState Node and learner, creates
   no cleanup membership operation, and issues no `RemoveNodes`; explicit stale-learner recovery
   remains a separate operator decision. Expiry of a recorded active Join operation keeps its
-  existing owned-learner cleanup contract.
+  existing owned-learner cleanup contract, and an interrupted cleanup is resumed only from the
+  exact absent postcondition described above.
 
 - Stale learner retirement additionally requires every current voter to expose the dedicated signed
   capability `cluster.stale-learner-retirement-v1`. This barrier is distinct from recovery because
