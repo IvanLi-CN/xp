@@ -296,10 +296,14 @@ export const ReadOnly: Story = {
 		await expect(
 			within(dialog).getByRole("button", { name: "Save configuration" }),
 		).toBeDisabled();
+		await waitFor(() =>
+			expect(dialog.querySelectorAll<HTMLElement>(".cm-content")).toHaveLength(
+				3,
+			),
+		);
 		const editors = Array.from(
 			dialog.querySelectorAll<HTMLElement>(".cm-content"),
 		);
-		await expect(editors).toHaveLength(3);
 		for (const editor of editors) {
 			await expect(editor).toHaveAttribute("contenteditable", "false");
 		}

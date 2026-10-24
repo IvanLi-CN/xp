@@ -240,6 +240,23 @@ export function MihomoProfileEditor({
 			)}
 			data-mihomo-document={documentId}
 		>
+			{documentId === "extra_proxies_yaml" && !expanded ? (
+				<div className="mb-2 flex items-center justify-between gap-3">
+					<span className="text-sm font-medium text-foreground">
+						{DOCUMENT_LABELS[documentId]}
+					</span>
+					{canImport ? (
+						<Button
+							variant="outline"
+							size="sm"
+							iconLeft={<Icon name="tabler:download" />}
+							onClick={openImport}
+						>
+							Import nodes
+						</Button>
+					) : null}
+				</div>
+			) : null}
 			<YamlCodeEditor
 				label={DOCUMENT_LABELS[documentId]}
 				value={draft[documentId]}
@@ -249,7 +266,7 @@ export function MihomoProfileEditor({
 				readOnly={readOnly || isSaving || !isLoaded}
 				fillHeight={expanded}
 				preserveEditorStateOnValueChange
-				hideLabel={expanded}
+				hideLabel={expanded || documentId === "extra_proxies_yaml"}
 				onCreateEditor={(view) => {
 					views.current[documentId] = view;
 				}}
@@ -350,15 +367,6 @@ export function MihomoProfileEditor({
 					{readOnly ? "Read-only profile" : "Changes apply to all three files."}
 				</span>
 				<div className="flex items-center gap-2">
-					{canImport ? (
-						<Button
-							variant="outline"
-							iconLeft={<Icon name="tabler:download" />}
-							onClick={openImport}
-						>
-							Import nodes
-						</Button>
-					) : null}
 					<Button
 						loading={isSaving}
 						disabled={readOnly || !dirty || !isLoaded}
