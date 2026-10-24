@@ -785,6 +785,7 @@ def cleanup_stale_run(path):
     if path_has_symlink(path) or not path.is_dir() or not is_allowed_run(path):
         return
     environment = os.environ.copy()
+    environment.pop("RUN_ID_B64", None)
     environment["RUN_ID"] = path.name
     subprocess.run(
         ["python3", str(guard_script), "cleanup", str(remote_root), str(path)],
