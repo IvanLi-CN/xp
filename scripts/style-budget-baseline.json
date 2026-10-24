@@ -972,11 +972,11 @@
     "max_line_length": 393
   },
   "docs/specs/mihomo-subscription-import/IMPLEMENTATION.md": {
-    "long_line_count": 11,
+    "long_line_count": 12,
     "max_line_length": 455
   },
   "docs/specs/mihomo-subscription-import/HISTORY.md": {
-    "long_line_count": 7,
+    "long_line_count": 8,
     "max_line_length": 307
   },
   "docs/specs/mihomo-subscription-import/SPEC.md": {
