@@ -128,14 +128,6 @@ PY
   test "$(cat "$guarded_run/.codex-run-id")" = run-1
   testbox_remote_cleanup "$guarded_run" run-1
   test ! -e "$guarded_run"
-  chmod 2770 "$XP_TESTBOX_REMOTE_ROOT"
-  shared_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/agents/ivan/runs/run-shared")"
-  test -g "$XP_TESTBOX_REMOTE_ROOT/agents"
-  test -r "$XP_TESTBOX_REMOTE_ROOT/agents"
-  test -w "$XP_TESTBOX_REMOTE_ROOT/agents"
-  test -x "$XP_TESTBOX_REMOTE_ROOT/agents"
-  testbox_remote_cleanup "$shared_run" run-shared
-  chmod 0700 "$XP_TESTBOX_REMOTE_ROOT"
   python3 - "$guard_root" "$SCRIPT_DIR/remote-run-guard.py" <<'PY'
 import importlib.util
 import os

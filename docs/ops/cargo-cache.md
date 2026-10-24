@@ -30,12 +30,10 @@ fingerprints decide whether a unit is reusable after the matching source slot,
 Web assets, toolchain and build environment are restored. A target directory is
 never shared between Agents and is removed only with the owning Agent Directory.
 
-The default remote root may be a private `0700` directory owned by the invoking Unix user. If
-multiple Unix users share one remote root, the operator must provision that root and its
-`agents/` subtree as setgid directories with group `rwx` and no `other` permissions (normally
-`2770`), and every user must belong to that group. The runner accepts this explicit shared mode
-for the host-global subnet claim directory; ordinary workspaces, Agent directories, run parents,
-and run contents remain owned by the invoking user.
+`XP_TESTBOX_REMOTE_ROOT` is an operator-owned private `0700` directory. Host-global subnet claim
+allocation is global within that explicit root for concurrent runs under the same Unix account; do
+not share the root across Unix UIDs. Run parents, claims, markers and contents remain owned by the
+current user.
 
 ## Runner usage
 

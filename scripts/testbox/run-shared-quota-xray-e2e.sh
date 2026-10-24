@@ -161,8 +161,8 @@ else
   REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
   REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 fi
-# Subnet claims are host-global so concurrent runs from different users cannot
-# select the same Docker network range.
+# Subnet claims are global within the operator-owned root so concurrent runs
+# under one Unix account cannot select the same Docker network range.
 REMOTE_SUBNET_CLAIMS="$TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims"
 REMOTE_RUN_CREATED=0
 cleanup_unclaimed_run() {
@@ -442,25 +442,41 @@ cleanup() {
   fi
   CLEANUP_DONE=1
   set +e
+  cleanup_ok=1
   if [ -n "${REMOTE_RUN:-}" ] && [ -d "$REMOTE_RUN/scripts/e2e" ]; then
-    (
+    if (
       cd "$REMOTE_RUN/scripts/e2e" || exit 1
       if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
         cleanup_files=(-f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml")
         if [ -f ".codex.user-compat.yaml" ]; then
           cleanup_files+=(-f ".codex.user-compat.yaml")
         fi
-        docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+        docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1
+      else
+        exit 1
       fi
-    ) || true
+    ); then
+      :
+    else
+      cleanup_ok=0
+    fi
   fi
-  if [ -n "${SUBNET_CLAIM_DIR:-}" ]; then
-    python3 "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" \
-      claim-cleanup "$TESTBOX_REMOTE_ROOT" "$SUBNET_CLAIM_DIR" >/dev/null 2>&1 || true
-  fi
-  if [ -n "${REMOTE_RUN:-}" ]; then
+  if [ "$cleanup_ok" = "1" ] && [ -n "${REMOTE_RUN:-}" ]; then
     if assert_remote_run; then
-      remove_remote_run >/dev/null 2>&1 || true
+      if [ -n "${SUBNET_CLAIM_DIR:-}" ]; then
+        if RUN_ID="${REMOTE_RUN_ID:-}" python3 "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" \
+          cleanup-with-claim "$TESTBOX_REMOTE_ROOT" "$REMOTE_RUN" "$SUBNET_CLAIM_DIR" >/dev/null 2>&1; then
+          :
+        else
+          cleanup_ok=0
+        fi
+      elif remove_remote_run >/dev/null 2>&1; then
+        :
+      else
+        cleanup_ok=0
+      fi
+    else
+      cleanup_ok=0
     fi
   fi
 }
@@ -696,7 +712,7 @@ if remote_root.is_symlink() or remote_root.resolve() != remote_root:
     sys.exit(1)
 
 
-def open_directory(path, create, shared=False):
+def open_directory(path, create):
     try:
         suffix = path.relative_to(remote_root).parts
     except ValueError:
@@ -716,39 +732,16 @@ def open_directory(path, create, shared=False):
                     print(f"shared-testbox directory is missing: {path}", file=sys.stderr)
                     sys.exit(1)
                 try:
-                    os.mkdir(
-                        part,
-                        0o2770 if shared and part == suffix[-1] else 0o700,
-                        dir_fd=current_fd,
-                    )
+                    os.mkdir(part, 0o700, dir_fd=current_fd)
                 except FileExistsError:
                     pass
                 next_fd = os.open(part, flags, dir_fd=current_fd)
-            is_target = relative_index == len(suffix) - 1
-            if (
-                shared
-                and is_target
-                and os.fstat(next_fd).st_uid == os.geteuid()
-            ):
-                os.fchmod(next_fd, 0o2770)
             if relative_index < 0:
                 os.close(current_fd)
                 current_fd = next_fd
                 continue
             directory_stat = os.fstat(next_fd)
-            shared_mode = (
-                directory_stat.st_mode & 0o2000
-                and directory_stat.st_mode & 0o070 == 0o070
-                and directory_stat.st_mode & 0o007 == 0
-                and directory_stat.st_gid in (*os.getgroups(), os.getegid())
-            )
-            private_mode = (
-                directory_stat.st_uid == os.geteuid()
-                and directory_stat.st_mode & 0o022 == 0
-            )
-            if (shared and is_target and not (shared_mode or private_mode)) or (
-                not shared and not private_mode
-            ):
+            if directory_stat.st_uid != os.geteuid() or directory_stat.st_mode & 0o022:
                 print(
                     f"shared-testbox directory has unsafe ownership or mode: {path}",
                     file=sys.stderr,
@@ -762,8 +755,8 @@ def open_directory(path, create, shared=False):
         raise
 
 
-def ensure_directory(path, create, shared=False):
-    directory_fd = open_directory(path, create, shared)
+def ensure_directory(path, create):
+    directory_fd = open_directory(path, create)
     os.close(directory_fd)
 
 
@@ -876,24 +869,18 @@ def cleanup_stale_run(path, claim_dir):
     return result.returncode == 0
 
 
-ensure_directory(remote_root / "agents", create=True, shared=True)
-ensure_directory(claim_root, create=True, shared=True)
+ensure_directory(remote_root / "agents", create=True)
+ensure_directory(claim_root, create=True)
 
-claim_root_fd = open_directory(claim_root, create=False, shared=True)
+claim_root_fd = open_directory(claim_root, create=False)
 lock_fd = os.open(
     ".codex-run-lock",
     os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-    0o660,
+    0o600,
     dir_fd=claim_root_fd,
 )
-if os.geteuid() == os.fstat(lock_fd).st_uid:
-    os.fchmod(lock_fd, 0o660)
 lock_stat = os.fstat(lock_fd)
-if not (
-    lock_stat.st_mode & 0o070 == 0o060
-    and lock_stat.st_mode & 0o007 == 0
-    and lock_stat.st_gid in (*os.getgroups(), os.getegid())
-):
+if lock_stat.st_uid != os.geteuid() or lock_stat.st_mode & 0o022:
     print("shared-testbox claim lock has unsafe ownership or mode", file=sys.stderr)
     sys.exit(1)
 fcntl.flock(lock_fd, fcntl.LOCK_EX)
@@ -1008,14 +995,10 @@ try:
         if claim_dir.exists() or claim_dir.is_symlink():
             continue
         try:
-            claim_dir.mkdir(mode=0o2770)
-            claim_dir.chmod(0o2770)
+            claim_dir.mkdir(mode=0o700)
             (claim_dir / "run_path").write_text(f"{remote_run}\n")
-            (claim_dir / "run_path").chmod(0o660)
             (claim_dir / "compose_project").write_text(f"{compose_project}\n")
-            (claim_dir / "compose_project").chmod(0o660)
             (claim_dir / "subnet").write_text(f"{candidate}\n")
-            (claim_dir / "subnet").chmod(0o660)
         except BaseException:
             cleanup_claim_dir(claim_dir)
             raise

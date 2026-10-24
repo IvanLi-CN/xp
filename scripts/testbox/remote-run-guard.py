@@ -25,26 +25,10 @@ def fail(message: str) -> NoReturn:
     raise SystemExit(2)
 
 
-def is_shared_directory(directory_stat: os.stat_result) -> bool:
-    return bool(
-        stat.S_ISGID & directory_stat.st_mode
-        and directory_stat.st_mode & 0o070 == 0o070
-        and directory_stat.st_mode & 0o007 == 0
-        and directory_stat.st_gid in (*os.getgroups(), os.getegid())
-    )
-
-
-def validate_directory(
-    directory_fd: int,
-    owner_required: bool,
-    allow_sticky: bool,
-    shared_allowed: bool = False,
-) -> None:
+def validate_directory(directory_fd: int, owner_required: bool, allow_sticky: bool) -> None:
     directory_stat = os.fstat(directory_fd)
     if not stat.S_ISDIR(directory_stat.st_mode):
         fail("testbox path component is not a directory")
-    if shared_allowed and is_shared_directory(directory_stat):
-        return
     if owner_required:
         if directory_stat.st_uid != os.geteuid():
             fail("testbox path component is not owned by the current user")
@@ -86,7 +70,6 @@ def ensure_root(root: str) -> None:
                 next_fd,
                 owner_required=index == len(parts) - 1,
                 allow_sticky=index != len(parts) - 1,
-                shared_allowed=index == len(parts) - 1,
             )
             os.close(current_fd)
             current_fd = next_fd
@@ -147,7 +130,6 @@ def open_root(root: str) -> int:
                 next_fd,
                 owner_required=index == len(parts) - 1,
                 allow_sticky=index != len(parts) - 1,
-                shared_allowed=index == len(parts) - 1,
             )
             os.close(current_fd)
             current_fd = next_fd
@@ -157,20 +139,17 @@ def open_root(root: str) -> int:
         fail(f"cannot open testbox remote root safely: {exc}")
 
 
-def open_parent(root_fd: int, parts: list[str], create: bool, shared_prefix: int = 0) -> int:
+def open_parent(root_fd: int, parts: list[str], create: bool) -> int:
     current_fd = root_fd
     try:
-        for index, part in enumerate(parts):
-            is_shared = index < shared_prefix
-            created = False
+        for part in parts:
             try:
                 next_fd = os.open(part, OPEN_FLAGS, dir_fd=current_fd)
             except FileNotFoundError:
                 if not create:
                     fail("testbox run parent does not exist")
                 try:
-                    os.mkdir(part, 0o2770 if is_shared else 0o700, dir_fd=current_fd)
-                    created = True
+                    os.mkdir(part, 0o700, dir_fd=current_fd)
                 except FileExistsError:
                     pass
                 try:
@@ -179,14 +158,7 @@ def open_parent(root_fd: int, parts: list[str], create: bool, shared_prefix: int
                     fail(f"testbox run parent is not a safe directory: {exc}")
             except OSError as exc:
                 fail(f"testbox run parent is not a safe directory: {exc}")
-            if is_shared and created:
-                os.fchmod(next_fd, 0o2770)
-            validate_directory(
-                next_fd,
-                owner_required=not is_shared,
-                allow_sticky=False,
-                shared_allowed=is_shared,
-            )
+            validate_directory(next_fd, owner_required=True, allow_sticky=False)
             os.close(current_fd)
             current_fd = next_fd
         return current_fd
@@ -195,27 +167,17 @@ def open_parent(root_fd: int, parts: list[str], create: bool, shared_prefix: int
         raise
 
 
-def lock_parent(parent_fd: int, shared: bool = False) -> int:
+def lock_parent(parent_fd: int) -> int:
     try:
         lock_fd = os.open(
             ".codex-run-lock",
             os.O_RDWR | os.O_CREAT | NOFOLLOW,
-            0o660 if shared else 0o600,
+            0o600,
             dir_fd=parent_fd,
         )
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
         lock_stat = os.fstat(lock_fd)
-        if shared and lock_stat.st_uid == os.geteuid():
-            os.fchmod(lock_fd, 0o660)
-            lock_stat = os.fstat(lock_fd)
-        shared_lock = (
-            lock_stat.st_mode & 0o070 == 0o060
-            and lock_stat.st_mode & 0o007 == 0
-            and lock_stat.st_gid in (*os.getgroups(), os.getegid())
-        )
-        if (shared and not shared_lock) or (
-            not shared and (lock_stat.st_uid != os.geteuid() or lock_stat.st_mode & 0o022)
-        ):
+        if lock_stat.st_uid != os.geteuid() or lock_stat.st_mode & 0o022:
             fail("testbox run lock is writable by another user")
         return lock_fd
     except OSError as exc:
@@ -292,16 +254,13 @@ def remove_directory_entry(parent_fd: int, name: str, directory_fd: int) -> None
 
 
 def restore_marker(run_fd: int, marker_data: bytes) -> None:
-    marker_mode = 0o660 if is_shared_directory(os.fstat(run_fd)) else 0o600
     marker_fd = os.open(
         ".codex-run-id",
         os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW,
-        marker_mode,
+        0o600,
         dir_fd=run_fd,
     )
     try:
-        if marker_mode == 0o660:
-            os.fchmod(marker_fd, marker_mode)
         os.write(marker_fd, marker_data)
         os.fsync(marker_fd)
     finally:
@@ -360,20 +319,11 @@ def marker_matches(run_fd: int, expected: str) -> bytes:
     except OSError as exc:
         fail(f"cannot open testbox run marker safely: {exc}")
     try:
-        run_stat = os.fstat(run_fd)
-        shared_run = is_shared_directory(run_stat)
         marker_stat = os.fstat(marker_fd)
-        private_marker = (
-            marker_stat.st_uid == os.geteuid() and marker_stat.st_mode & 0o077 == 0
-        )
-        shared_marker = (
-            marker_stat.st_uid == run_stat.st_uid
-            and marker_stat.st_gid in (*os.getgroups(), os.getegid())
-            and marker_stat.st_mode & 0o070 == 0o060
-            and marker_stat.st_mode & 0o007 == 0
-        )
-        if not stat.S_ISREG(marker_stat.st_mode) or not (
-            shared_marker if shared_run else private_marker
+        if (
+            not stat.S_ISREG(marker_stat.st_mode)
+            or marker_stat.st_uid != os.geteuid()
+            or marker_stat.st_mode & 0o077
         ):
             fail("testbox run marker is not a private regular file")
         marker_data = os.read(marker_fd, 256)
@@ -393,34 +343,24 @@ def create_run(root: str, run: str, expected: str) -> None:
         fail("testbox run marker is required")
     root, parts = run_parts(root, run)
     root_fd = open_root(root)
-    shared_run = parts[0] in ("agents", "workspaces")
-    parent_fd = open_parent(
-        root_fd,
-        parts[:-1],
-        create=True,
-        shared_prefix=len(parts) - 1 if shared_run else 0,
-    )
-    lock_fd = lock_parent(parent_fd, shared=shared_run)
+    parent_fd = open_parent(root_fd, parts[:-1], create=True)
+    lock_fd = lock_parent(parent_fd)
     created = False
     run_fd: int | None = None
     try:
         try:
-            os.mkdir(parts[-1], 0o2770 if shared_run else 0o700, dir_fd=parent_fd)
+            os.mkdir(parts[-1], 0o700, dir_fd=parent_fd)
             created = True
         except FileExistsError:
             fail("testbox run directory already exists")
         run_fd = os.open(parts[-1], OPEN_FLAGS, dir_fd=parent_fd)
-        if shared_run:
-            os.fchmod(run_fd, 0o2770)
         marker_fd = os.open(
             ".codex-run-id",
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW,
-            0o660 if shared_run else 0o600,
+            0o600,
             dir_fd=run_fd,
         )
         try:
-            if shared_run:
-                os.fchmod(marker_fd, 0o660)
             os.write(marker_fd, f"{expected}\n".encode())
             os.fsync(marker_fd)
         finally:
@@ -450,14 +390,8 @@ def create_run(root: str, run: str, expected: str) -> None:
 def verify_or_cleanup(root: str, run: str, expected: str, remove: bool) -> None:
     root, parts = run_parts(root, run)
     root_fd = open_root(root)
-    shared_run = parts[0] in ("agents", "workspaces")
-    parent_fd = open_parent(
-        root_fd,
-        parts[:-1],
-        create=False,
-        shared_prefix=len(parts) - 1 if shared_run else 0,
-    )
-    lock_fd = lock_parent(parent_fd, shared=shared_run)
+    parent_fd = open_parent(root_fd, parts[:-1], create=False)
+    lock_fd = lock_parent(parent_fd)
     try:
         try:
             run_fd = os.open(parts[-1], OPEN_FLAGS, dir_fd=parent_fd)
@@ -479,18 +413,13 @@ def verify_or_cleanup(root: str, run: str, expected: str, remove: bool) -> None:
 def cleanup_claim(root: str, claim: str, lock: bool) -> None:
     root, parts = claim_parts(root, claim)
     root_fd = open_root(root)
-    parent_fd = open_parent(root_fd, parts[:-1], create=False, shared_prefix=2)
-    lock_fd = lock_parent(parent_fd, shared=True) if lock else None
+    parent_fd = open_parent(root_fd, parts[:-1], create=False)
+    lock_fd = lock_parent(parent_fd) if lock else None
     try:
         try:
             claim_fd = os.open(parts[-1], OPEN_FLAGS, dir_fd=parent_fd)
             try:
-                validate_directory(
-                    claim_fd,
-                    owner_required=True,
-                    allow_sticky=False,
-                    shared_allowed=True,
-                )
+                validate_directory(claim_fd, owner_required=True, allow_sticky=False)
                 remove_tree(parent_fd, parts[-1], claim_fd)
             finally:
                 os.close(claim_fd)
@@ -500,6 +429,11 @@ def cleanup_claim(root: str, claim: str, lock: bool) -> None:
         if lock_fd is not None:
             os.close(lock_fd)
         os.close(parent_fd)
+
+
+def cleanup_run_and_claim(root: str, run: str, claim: str, expected: str) -> None:
+    verify_or_cleanup(root, run, expected, remove=True)
+    cleanup_claim(root, claim, lock=True)
 
 
 def decode_env_paths() -> tuple[str, str]:
@@ -529,6 +463,7 @@ def expected_marker() -> str:
 
 
 def main() -> None:
+    claim: str | None = None
     if len(sys.argv) == 2:
         mode = sys.argv[1]
         if mode == "ensure-root":
@@ -537,8 +472,11 @@ def main() -> None:
         root, run = decode_env_paths()
     elif len(sys.argv) == 4:
         mode, root, run = sys.argv[1:4]
+        claim = None
+    elif len(sys.argv) == 5:
+        mode, root, run, claim = sys.argv[1:5]
     else:
-        raise SystemExit("usage: remote-run-guard.py MODE ROOT RUN")
+        raise SystemExit("usage: remote-run-guard.py MODE ROOT RUN [CLAIM]")
     expected = expected_marker()
     if mode == "guard":
         create_run(root, run, expected)
@@ -546,6 +484,8 @@ def main() -> None:
         verify_or_cleanup(root, run, expected, remove=False)
     elif mode == "cleanup":
         verify_or_cleanup(root, run, expected, remove=True)
+    elif mode == "cleanup-with-claim" and claim is not None:
+        cleanup_run_and_claim(root, run, claim, expected)
     elif mode == "claim-cleanup":
         cleanup_claim(root, run, lock=True)
     elif mode == "claim-cleanup-locked":
