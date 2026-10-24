@@ -30,6 +30,13 @@ fingerprints decide whether a unit is reusable after the matching source slot,
 Web assets, toolchain and build environment are restored. A target directory is
 never shared between Agents and is removed only with the owning Agent Directory.
 
+The default remote root may be a private `0700` directory owned by the invoking Unix user. If
+multiple Unix users share one remote root, the operator must provision that root and its
+`agents/` subtree as setgid directories with group `rwx` and no `other` permissions (normally
+`2770`), and every user must belong to that group. The runner accepts this explicit shared mode
+for the host-global subnet claim directory; ordinary workspaces, Agent directories, run parents,
+and run contents remain owned by the invoking user.
+
 ## Runner usage
 
 Resource runs require the explicit host, remote root and cache paths:
@@ -48,7 +55,9 @@ immutable candidate and baseline source snapshots into stable cache slots, build
 `scripts/cargo-cache/with-cargo-target.sh`,
 and copies the resolved XP and resource-test executables into the disposable
 run before measurement. The run directory is cleaned by the existing runner
-trap; it is not a cache.
+trap; it is not a cache. Stale lease reclamation first tears down the recorded
+Compose project and releases the subnet claim only after both Compose and run-directory cleanup
+succeed; a failed cleanup keeps the claim for retry.
 
 Remote build and test processes inherit `TMPDIR=<disposable-run>/tmp`. Rust
 resource fixtures therefore keep temporary node state, SQLite files and logs

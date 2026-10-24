@@ -680,6 +680,7 @@ import ipaddress
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -695,17 +696,19 @@ if remote_root.is_symlink() or remote_root.resolve() != remote_root:
     sys.exit(1)
 
 
-def open_directory(path, create):
+def open_directory(path, create, shared=False):
     try:
         suffix = path.relative_to(remote_root).parts
     except ValueError:
         print(f"shared-testbox path escaped remote root: {path}", file=sys.stderr)
         sys.exit(1)
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    parts = remote_root.relative_to(remote_root.anchor).parts + suffix
+    root_parts = remote_root.relative_to(remote_root.anchor).parts
+    parts = root_parts + suffix
     current_fd = os.open(remote_root.anchor, flags)
     try:
-        for part in parts:
+        for index, part in enumerate(parts):
+            relative_index = index - len(root_parts)
             try:
                 next_fd = os.open(part, flags, dir_fd=current_fd)
             except FileNotFoundError:
@@ -713,10 +716,44 @@ def open_directory(path, create):
                     print(f"shared-testbox directory is missing: {path}", file=sys.stderr)
                     sys.exit(1)
                 try:
-                    os.mkdir(part, 0o700, dir_fd=current_fd)
+                    os.mkdir(
+                        part,
+                        0o2770 if shared and part == suffix[-1] else 0o700,
+                        dir_fd=current_fd,
+                    )
                 except FileExistsError:
                     pass
                 next_fd = os.open(part, flags, dir_fd=current_fd)
+            is_target = relative_index == len(suffix) - 1
+            if (
+                shared
+                and is_target
+                and os.fstat(next_fd).st_uid == os.geteuid()
+            ):
+                os.fchmod(next_fd, 0o2770)
+            if relative_index < 0:
+                os.close(current_fd)
+                current_fd = next_fd
+                continue
+            directory_stat = os.fstat(next_fd)
+            shared_mode = (
+                directory_stat.st_mode & 0o2000
+                and directory_stat.st_mode & 0o070 == 0o070
+                and directory_stat.st_mode & 0o007 == 0
+                and directory_stat.st_gid in (*os.getgroups(), os.getegid())
+            )
+            private_mode = (
+                directory_stat.st_uid == os.geteuid()
+                and directory_stat.st_mode & 0o022 == 0
+            )
+            if (shared and is_target and not (shared_mode or private_mode)) or (
+                not shared and not private_mode
+            ):
+                print(
+                    f"shared-testbox directory has unsafe ownership or mode: {path}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             os.close(current_fd)
             current_fd = next_fd
         return current_fd
@@ -725,8 +762,8 @@ def open_directory(path, create):
         raise
 
 
-def ensure_directory(path, create):
-    directory_fd = open_directory(path, create)
+def ensure_directory(path, create, shared=False):
+    directory_fd = open_directory(path, create, shared)
     os.close(directory_fd)
 
 
@@ -781,29 +818,84 @@ def cleanup_claim_dir(path):
     )
 
 
-def cleanup_stale_run(path):
+def cleanup_stale_run(path, claim_dir):
+    if not path.exists():
+        return True
     if path_has_symlink(path) or not path.is_dir() or not is_allowed_run(path):
-        return
+        return False
+    try:
+        compose_project = (claim_dir / "compose_project").read_text().strip()
+    except (OSError, UnicodeDecodeError):
+        return False
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", compose_project):
+        return False
+    compose_dir = path / "scripts/e2e"
+    required_files = [
+        "docker-compose.xray.yml",
+        ".codex.caps-compat.yaml",
+        ".codex.net-compat.yaml",
+    ]
+    if path_has_symlink(compose_dir) or not compose_dir.is_dir():
+        return False
+    if any(
+        (compose_dir / filename).is_symlink() or not (compose_dir / filename).is_file()
+        for filename in required_files
+    ):
+        return False
+    compose_files = []
+    for filename in [*required_files, ".codex.user-compat.yaml"]:
+        if (compose_dir / filename).is_file() and not (compose_dir / filename).is_symlink():
+            compose_files.extend(["-f", filename])
+    try:
+        compose_result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-p",
+                compose_project,
+                *compose_files,
+                "down",
+                "-v",
+                "--remove-orphans",
+            ],
+            cwd=compose_dir,
+            check=False,
+        )
+    except OSError:
+        return False
+    if compose_result.returncode != 0:
+        return False
     environment = os.environ.copy()
     environment.pop("RUN_ID_B64", None)
     environment["RUN_ID"] = path.name
-    subprocess.run(
+    result = subprocess.run(
         ["python3", str(guard_script), "cleanup", str(remote_root), str(path)],
         check=False,
         env=environment,
     )
+    return result.returncode == 0
 
 
-ensure_directory(remote_root / "agents", create=True)
-ensure_directory(claim_root, create=True)
+ensure_directory(remote_root / "agents", create=True, shared=True)
+ensure_directory(claim_root, create=True, shared=True)
 
-claim_root_fd = open_directory(claim_root, create=False)
+claim_root_fd = open_directory(claim_root, create=False, shared=True)
 lock_fd = os.open(
     ".codex-run-lock",
     os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-    0o600,
+    0o660,
     dir_fd=claim_root_fd,
 )
+if os.geteuid() == os.fstat(lock_fd).st_uid:
+    os.fchmod(lock_fd, 0o660)
+lock_stat = os.fstat(lock_fd)
+if not (
+    lock_stat.st_mode & 0o070 == 0o060
+    and lock_stat.st_mode & 0o007 == 0
+    and lock_stat.st_gid in (*os.getgroups(), os.getegid())
+):
+    print("shared-testbox claim lock has unsafe ownership or mode", file=sys.stderr)
+    sys.exit(1)
 fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
 used = []
@@ -861,7 +953,7 @@ try:
         run_path = pathlib.Path(run_path_file.read_text().strip())
 
         def remove_stale_run():
-            cleanup_stale_run(run_path)
+            return cleanup_stale_run(run_path, claim_dir)
 
         active = False
         lease_file = claim_dir / "lease"
@@ -889,8 +981,8 @@ try:
                 active = False
 
         if not active:
-            remove_stale_run()
-            if not path_has_symlink(claim_dir):
+            stale_cleanup_ok = remove_stale_run()
+            if stale_cleanup_ok and not path_has_symlink(claim_dir):
                 cleanup_claim_dir(claim_dir)
             continue
 
@@ -915,11 +1007,15 @@ try:
         ensure_directory(claim_root, create=False)
         if claim_dir.exists() or claim_dir.is_symlink():
             continue
-        claim_dir.mkdir(mode=0o700)
         try:
+            claim_dir.mkdir(mode=0o2770)
+            claim_dir.chmod(0o2770)
             (claim_dir / "run_path").write_text(f"{remote_run}\n")
+            (claim_dir / "run_path").chmod(0o660)
             (claim_dir / "compose_project").write_text(f"{compose_project}\n")
+            (claim_dir / "compose_project").chmod(0o660)
             (claim_dir / "subnet").write_text(f"{candidate}\n")
+            (claim_dir / "subnet").chmod(0o660)
         except BaseException:
             cleanup_claim_dir(claim_dir)
             raise
