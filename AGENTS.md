@@ -243,7 +243,10 @@
   reservation without extending its 10-minute activation deadline. Expiry cleanup for a recorded
   Join operation removes its owned learner and DesiredState node; an expired legacy `Reserved`
   session whose learner remains is only terminalized as `Expired`, retaining that learner and node
-  for explicit recovery.
+  for explicit recovery. If a crash leaves that recorded Join active after its learner, DesiredState
+  node, and endpoints are already absent, the current leader may terminalize it as `Expired` only
+  after a linearizable exact-shape check; if the learner remains, the operation is `Blocked` and
+  requires explicit stale-learner recovery.
 - Fresh join, restore and delete require every current voter to expose
   `cluster.membership-lifecycle-v1`. Orphan-voter repair first proves one exact non-leader orphan,
   then requires that capability only from every retained DesiredState-mapped voter; the proven

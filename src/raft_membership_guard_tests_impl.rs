@@ -21,6 +21,8 @@ use crate::{
     state::{JsonSnapshotStore, StoreInit},
 };
 
+#[path = "raft_membership_guard_expired_join_tests.rs"]
+mod expired_join;
 #[path = "raft_membership_guard_stale_learner_retirement_tests.rs"]
 mod stale_learner_retirement;
 
