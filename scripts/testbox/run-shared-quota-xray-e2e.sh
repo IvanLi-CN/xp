@@ -230,7 +230,7 @@ echo "compose_project=$COMPOSE_PROJECT"
 echo "evidence_manifest=$EVIDENCE_PATH"
 
 cleanup_local() {
-  local status=$?
+  local status="${1:-$?}"
   set +e
   write_evidence_manifest "${EVIDENCE_STATUS:-interrupted}"
   rm -f "$SOURCE_ARCHIVE" "$WEB_DIST_ARCHIVE"
@@ -320,11 +320,21 @@ REMOTE_CLEANUP
 }
 on_local_signal() {
   trap - EXIT INT TERM
-  cleanup_local
+  cleanup_local "$1"
   exit "$1"
 }
+on_local_exit() {
+  local status=$?
+  trap - EXIT
+  cleanup_local "$status"
+  local cleanup_status=$?
+  if [ "$status" -eq 0 ] && [ "$cleanup_status" -ne 0 ]; then
+    status="$cleanup_status"
+  fi
+  exit "$status"
+}
 trap - EXIT
-trap cleanup_local EXIT
+trap on_local_exit EXIT
 trap 'on_local_signal 130' INT
 trap 'on_local_signal 143' TERM
 
