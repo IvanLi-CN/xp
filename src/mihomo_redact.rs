@@ -43,7 +43,6 @@ pub enum UrlLoadPolicy {
 }
 
 const MAX_REMOTE_SOURCE_BYTES: usize = 2 * 1024 * 1024;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RedactErrorKind {
     InvalidInput,
@@ -166,6 +165,7 @@ fn resolve_public_url_target_blocking(url: &Url) -> Result<Vec<SocketAddr>, Reda
 fn build_http_client(timeout: Duration) -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .timeout(timeout)
+        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
 }
 
@@ -263,17 +263,21 @@ async fn fetch_url_source(
 ) -> Result<String, RedactError> {
     let deadline = tokio::time::Instant::now() + timeout;
     let mut current = source;
-    for _ in 0..10 {
+    for redirect_count in 0..=10 {
         let client_timeout = remaining_timeout(deadline)?;
         let client = build_http_client_for_url(&current, client_timeout, policy).await?;
         let response = client
             .get(current.clone())
+            .header(reqwest::header::CACHE_CONTROL, "no-store")
             .send()
             .await
             .map_err(|e| RedactError::network(format!("network_error: fetch source: {e}")))?;
 
         let status = response.status();
         if status.is_redirection() {
+            if redirect_count == 10 {
+                return Err(RedactError::network("network_error: too many redirects"));
+            }
             let location = response
                 .headers()
                 .get(reqwest::header::LOCATION)
@@ -336,10 +340,7 @@ async fn fetch_url_source(
             ))
         });
     }
-
-    Err(RedactError::network(
-        "network_error: too many redirects while fetching source",
-    ))
+    Err(RedactError::network("network_error: too many redirects"))
 }
 
 fn normalize_input(raw: &str, format: SourceFormat) -> Result<String, RedactError> {

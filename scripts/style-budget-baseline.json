@@ -921,9 +921,6 @@
   "src/http/history_repository.rs": {
     "source_lines": 1120
   },
-  "web/src/api/releaseInventories.ts": {
-    "source_lines": 1014
-  },
   "docs/specs/remove-grants-hard-cut/IMPLEMENTATION.md": {
     "long_line_count": 1,
     "max_line_length": 126
@@ -963,5 +960,28 @@
   "docs/specs/node-user-inbound-ip-usage/HISTORY.md": {
     "long_line_count": 3,
     "max_line_length": 155
+  },
+  "docs/adr/0028-mihomo-static-subscription-import.md": {
+    "long_line_count": 6,
+    "max_line_length": 393
+  },
+  "docs/specs/mihomo-subscription-import/IMPLEMENTATION.md": {
+    "long_line_count": 5,
+    "max_line_length": 146
+  },
+  "docs/specs/mihomo-subscription-import/HISTORY.md": {
+    "long_line_count": 3,
+    "max_line_length": 173
+  },
+  "docs/specs/mihomo-subscription-import/SPEC.md": {
+    "long_line_count": 60,
+    "max_line_length": 214
+  },
+  "docs/specs/mihomo-subscription-import/contracts/http-apis.md": {
+    "long_line_count": 22,
+    "max_line_length": 225
+  },
+  "web/src/api/releaseInventories.ts": {
+    "source_lines": 1029
   }
 }

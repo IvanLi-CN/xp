@@ -23,6 +23,7 @@ export const API_CAPABILITIES = [
 	"admin.node-probes",
 	"admin.traffic-usage",
 	"admin.mihomo-tools",
+	"admin.mihomo-subscription-import",
 	"admin.mihomo-resource-policy",
 	"node.mihomo-resource-private-cidrs-v1",
 ] as const;
@@ -137,6 +138,7 @@ const API_ROUTES_322 = [
 	"GET /api/admin/users/{user_id}/traffic",
 	"GET /api/admin/users/{user_id}/subscription-mihomo-profile",
 	"PUT /api/admin/users/{user_id}/subscription-mihomo-profile",
+	"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview",
 	"GET /api/admin/users/quota-summaries",
 	"GET /api/admin/quota-policy/global-weight-rows",
 	"PUT /api/admin/quota-policy/global-weight-rows/{user_id}",
@@ -481,6 +483,12 @@ const RESPONSE_FIELDS_322 = {
 		"admin_token_masked",
 	],
 	"GET /api/admin/status/events": ["hello", "snapshot", "mesh_revision"],
+	"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": [
+		"detected_source",
+		"added_proxies_yaml",
+		"counts",
+		"items",
+	],
 	"GET /api/admin/mesh/status": [
 		"generated_at",
 		"revision",
@@ -561,6 +569,9 @@ const REQUEST_SCHEMAS_322: ResponseSchemaMap = {
 	"PUT /api/admin/quota-policy/nodes/{node_id}/policy": ["inherit_global"],
 	"POST /api/admin/tools/mihomo/redact": ["AdminMihomoRedactRequest"],
 	"POST /api/admin/upgrade/start": ["target_tag"],
+	"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": [
+		"AdminMihomoImportPreviewRequest",
+	],
 	"POST /api/admin/mesh/probes": ["node_ids"],
 };
 
@@ -778,6 +789,23 @@ const RELEASE_FIXTURE_RESPONSES: Readonly<
 				local: {},
 				peers: [],
 				events: [],
+			},
+		},
+		"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": {
+			contentType: "application/json",
+			body: {
+				detected_source: "raw",
+				added_proxies_yaml: "- name: imported\n  type: ss\n",
+				counts: { added: 1, skipped: 0, failed: 0, warnings: 0 },
+				items: [
+					{
+						source_index: 1,
+						status: "added",
+						name: "imported",
+						scheme: "ss",
+						warnings: [],
+					},
+				],
 			},
 		},
 		"GET /api/sub/{subscription_token}": {

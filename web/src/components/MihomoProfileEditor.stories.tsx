@@ -2,8 +2,12 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { expect, userEvent, within } from "@storybook/test";
 import { useRef, useState } from "react";
 
-import type { AdminUserMihomoProfile } from "../api/adminUsers";
+import type {
+	AdminMihomoImportPreview,
+	AdminUserMihomoProfile,
+} from "../api/adminUsers";
 import { MihomoProfileEditor } from "./MihomoProfileEditor";
+import type { MihomoImportPreviewRequestFn } from "./MihomoSubscriptionImportDialog";
 
 const INITIAL_PROFILE: AdminUserMihomoProfile = {
 	mixin_yaml: "port: 0\nproxy-groups:\n  - name: Auto\n    type: url-test\n",
@@ -19,6 +23,28 @@ type EditorStoryProps = {
 	startWithError?: boolean;
 	startSaving?: boolean;
 	holdSave?: boolean;
+	importAvailable?: boolean;
+};
+
+const IMPORT_PREVIEW: AdminMihomoImportPreview = {
+	detected_source: "raw",
+	added_proxies_yaml: [
+		"- name: imported-edge\n",
+		"  type: vless\n",
+		"  server: edge.example.com\n",
+		"  port: 443\n",
+		"  uuid: 00000000-0000-0000-0000-000000000001\n",
+	].join(""),
+	counts: { added: 1, skipped: 0, failed: 0, warnings: 0 },
+	items: [
+		{
+			source_index: 1,
+			status: "added",
+			name: "imported-edge",
+			scheme: "vless",
+			warnings: [],
+		},
+	],
 };
 
 function EditorStory({
@@ -27,6 +53,7 @@ function EditorStory({
 	startWithError = false,
 	startSaving = false,
 	holdSave = false,
+	importAvailable = false,
 }: EditorStoryProps) {
 	const initialDraft =
 		startWithError || holdSave
@@ -80,6 +107,10 @@ function EditorStory({
 					readOnly={readOnly}
 					error={error}
 					isLoaded
+					importAvailable={importAvailable}
+					previewImport={
+						(async () => IMPORT_PREVIEW) satisfies MihomoImportPreviewRequestFn
+					}
 					onChange={(documentId, value) => {
 						setDraft((current) => {
 							switch (documentId) {
@@ -134,6 +165,31 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Inline: Story = {};
+
+export const ImportPreview: Story = {
+	args: { importAvailable: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button", { name: "Import nodes" }));
+		const dialog = await within(document.body).findByRole("dialog");
+		await userEvent.type(
+			within(dialog).getByLabelText("Subscription or node content"),
+			"vless://00000000-0000-0000-0000-000000000001@edge.example.com:443#edge",
+		);
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Preview" }),
+		);
+		await expect(within(dialog)).toHaveTextContent("Preview report");
+		await expect(within(dialog)).toHaveTextContent("imported-edge");
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Add valid nodes" }),
+		);
+		await expect(
+			within(document.body).queryByRole("dialog"),
+		).not.toBeInTheDocument();
+		await expect(canvas).toHaveTextContent("Unsaved configuration changes");
+	},
+};
 
 export const Expanded: Story = {
 	play: async ({ canvasElement }) => {

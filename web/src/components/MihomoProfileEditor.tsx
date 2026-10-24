@@ -17,6 +17,10 @@ import {
 import { cn } from "../lib/utils";
 import { Button, IconButton } from "./Button";
 import { Icon } from "./Icon";
+import {
+	type MihomoImportPreviewRequestFn,
+	MihomoSubscriptionImportDialog,
+} from "./MihomoSubscriptionImportDialog";
 import { YamlCodeEditor } from "./YamlCodeEditor";
 import {
 	Dialog,
@@ -57,6 +61,9 @@ type MihomoProfileEditorProps = {
 	onChange: (documentId: MihomoProfileDocumentId, value: string) => void;
 	onSave: () => Promise<boolean>;
 	onExpandAvailabilityChange?: (available: boolean) => void;
+	adminToken?: string;
+	importAvailable?: boolean;
+	previewImport?: MihomoImportPreviewRequestFn;
 };
 
 type VisualViewportMetrics = {
@@ -120,8 +127,12 @@ export function MihomoProfileEditor({
 	onChange,
 	onSave,
 	onExpandAvailabilityChange,
+	adminToken = "",
+	importAvailable = false,
+	previewImport,
 }: MihomoProfileEditorProps) {
 	const [expanded, setExpanded] = useState(false);
+	const [importOpen, setImportOpen] = useState(false);
 	const [filesOpen, setFilesOpen] = useState(false);
 	const [selectedDocument, setSelectedDocument] =
 		useState<MihomoProfileDocumentId>("mixin_yaml");
@@ -136,6 +147,7 @@ export function MihomoProfileEditor({
 	);
 	const viewportMetrics = useVisualViewportMetrics(expanded);
 	const currentStatus = statusLabel(readOnly, dirty);
+	const canImport = importAvailable && !readOnly && isLoaded;
 
 	useEffect(() => {
 		if (typeof document === "undefined") return;
@@ -187,6 +199,11 @@ export function MihomoProfileEditor({
 		savedScrollY.current = window.scrollY;
 		setExpanded(true);
 	}, [isLoaded]);
+
+	const openImport = useCallback(() => {
+		if (!canImport) return;
+		setImportOpen(true);
+	}, [canImport]);
 
 	const closeExpanded = useCallback(() => {
 		setFilesOpen(false);
@@ -332,14 +349,25 @@ export function MihomoProfileEditor({
 				<span className="text-xs text-muted-foreground">
 					{readOnly ? "Read-only profile" : "Changes apply to all three files."}
 				</span>
-				<Button
-					loading={isSaving}
-					disabled={readOnly || !dirty || !isLoaded}
-					iconLeft={<Icon name="tabler:device-floppy" />}
-					onClick={() => void onSave()}
-				>
-					Save configuration
-				</Button>
+				<div className="flex items-center gap-2">
+					{canImport ? (
+						<Button
+							variant="outline"
+							iconLeft={<Icon name="tabler:download" />}
+							onClick={openImport}
+						>
+							Import nodes
+						</Button>
+					) : null}
+					<Button
+						loading={isSaving}
+						disabled={readOnly || !dirty || !isLoaded}
+						iconLeft={<Icon name="tabler:device-floppy" />}
+						onClick={() => void onSave()}
+					>
+						Save configuration
+					</Button>
+				</div>
 			</div>
 
 			<Dialog
@@ -420,6 +448,27 @@ export function MihomoProfileEditor({
 								</div>
 							</div>
 							<div className="flex shrink-0 items-center gap-2">
+								{canImport ? (
+									<>
+										<Button
+											className="hidden sm:inline-flex"
+											variant="outline"
+											size="sm"
+											iconLeft={<Icon name="tabler:download" />}
+											onClick={openImport}
+										>
+											Import nodes
+										</Button>
+										<IconButton
+											className="sm:hidden"
+											label="Import nodes"
+											tooltip="Import nodes"
+											onClick={openImport}
+										>
+											<Icon name="tabler:download" ariaLabel="Import nodes" />
+										</IconButton>
+									</>
+								) : null}
 								<div ref={filesTrigger} className="md:hidden">
 									<Button
 										variant="outline"
@@ -574,6 +623,16 @@ export function MihomoProfileEditor({
 					<div className="min-h-0 flex-1 overflow-y-auto p-2">{fileList}</div>
 				</SheetContent>
 			</Sheet>
+			<MihomoSubscriptionImportDialog
+				open={importOpen}
+				onOpenChange={setImportOpen}
+				adminToken={adminToken}
+				userId={userId}
+				existingExtraProxiesYaml={draft.extra_proxies_yaml}
+				readOnly={readOnly}
+				onAdd={(nextValue) => onChange("extra_proxies_yaml", nextValue)}
+				previewRequest={previewImport}
+			/>
 			{editorContent}
 		</>
 	);
