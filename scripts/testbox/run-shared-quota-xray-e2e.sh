@@ -164,6 +164,16 @@ fi
 # Subnet claims are host-global so concurrent runs from different users cannot
 # select the same Docker network range.
 REMOTE_SUBNET_CLAIMS="$TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims"
+REMOTE_RUN_CREATED=0
+cleanup_unclaimed_run() {
+  local status=$?
+  set +e
+  if [ "${REMOTE_RUN_CREATED:-0}" = "1" ]; then
+    testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
+  fi
+  return "$status"
+}
+trap cleanup_unclaimed_run EXIT
 testbox_remote_root_preflight
 REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 if [ "$RUN_MESH_RESOURCE" = "1" ]; then
@@ -295,6 +305,7 @@ on_local_signal() {
   cleanup_local
   exit "$1"
 }
+trap - EXIT
 trap cleanup_local EXIT
 trap 'on_local_signal 130' INT
 trap 'on_local_signal 143' TERM

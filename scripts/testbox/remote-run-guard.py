@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import ctypes
 import fcntl
 import os
 import stat
@@ -98,9 +99,16 @@ def claim_parts(root: str, claim: str) -> tuple[str, list[str]]:
 def open_root(root: str) -> int:
     if not NOFOLLOW:
         fail("testbox platform lacks O_NOFOLLOW")
+    _, parts = root_parts(root)
+    current_fd = os.open(os.sep, OPEN_FLAGS)
     try:
-        return os.open(root, OPEN_FLAGS)
+        for part in parts:
+            next_fd = os.open(part, OPEN_FLAGS, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
     except OSError as exc:
+        os.close(current_fd)
         fail(f"cannot open testbox remote root safely: {exc}")
 
 
@@ -159,6 +167,19 @@ def same_directory(parent_fd: int, name: str, directory_fd: int) -> None:
         fail("testbox directory changed during cleanup")
 
 
+def remove_directory_entry(parent_fd: int, name: str, directory_fd: int) -> None:
+    if sys.platform == "linux":
+        unlinkat = ctypes.CDLL(None, use_errno=True).unlinkat
+        unlinkat.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+        unlinkat.restype = ctypes.c_int
+        if unlinkat(directory_fd, b"", 0x200 | 0x1000) == 0:
+            return
+        error = ctypes.get_errno()
+        fail(f"cannot remove testbox directory by descriptor: {os.strerror(error)}")
+    same_directory(parent_fd, name, directory_fd)
+    os.rmdir(name, dir_fd=parent_fd)
+
+
 def remove_tree(parent_fd: int, name: str, directory_fd: int | None = None) -> None:
     owns_fd = directory_fd is None
     if directory_fd is None:
@@ -177,9 +198,11 @@ def remove_tree(parent_fd: int, name: str, directory_fd: int | None = None) -> N
                 os.unlink(entry_name, dir_fd=directory_fd)
     finally:
         same_directory(parent_fd, name, directory_fd)
+    try:
+        remove_directory_entry(parent_fd, name, directory_fd)
+    finally:
         if owns_fd:
             os.close(directory_fd)
-    os.rmdir(name, dir_fd=parent_fd)
 
 
 def marker_matches(run_fd: int, expected: str) -> None:

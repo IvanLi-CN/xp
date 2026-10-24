@@ -15,23 +15,25 @@ RUN_NONCE="$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$$_${RUN_NONCE}_$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
 REMOTE_RUN="$TESTBOX_REMOTE_ROOT/workspaces/$USER/${REPO_NAME}__${PATH_HASH8}/runs/$RUN_ID"
 CONTAINER="$(testbox_bounded_name "codex_${REPO_NAME}_${PATH_HASH8}_ingress_${RUN_ID}")"
+REMOTE_RUN_CREATED=0
+cleanup() {
+  local status=$?
+  set +e
+  if [ "$REMOTE_RUN_CREATED" != "1" ]; then
+    return "$status"
+  fi
+  ssh -o BatchMode=yes "$TESTBOX" "docker rm -f '$CONTAINER' >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
+  testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
+  return "$status"
+}
+trap cleanup EXIT INT TERM
 testbox_remote_root_preflight
 REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
+REMOTE_RUN_CREATED=1
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
 echo "container=$CONTAINER"
-
-REMOTE_RUN_CREATED=1
-cleanup() {
-  set +e
-  if [ "$REMOTE_RUN_CREATED" != "1" ]; then
-    return
-  fi
-  ssh -o BatchMode=yes "$TESTBOX" "docker rm -f '$CONTAINER' >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
-  testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT INT TERM
 
 ssh -o BatchMode=yes "$TESTBOX" "cat > '$REMOTE_RUN/run.sh'" <<'REMOTE'
 #!/usr/bin/env bash
