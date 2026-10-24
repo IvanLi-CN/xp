@@ -516,7 +516,11 @@ on_exit() {
   local status=$?
   trap - EXIT
   cleanup "$status"
-  exit $?
+  local cleanup_status=$?
+  if [ "$status" -eq 0 ] && [ "$cleanup_status" -ne 0 ]; then
+    status="$cleanup_status"
+  fi
+  exit "$status"
 }
 trap on_exit EXIT
 trap 'on_signal 130' INT
@@ -745,7 +749,7 @@ import sys
 
 claim_root = pathlib.Path(sys.argv[1])
 remote_run = pathlib.Path(sys.argv[2])
-compose_project = sys.argv[3]
+requested_compose_project = sys.argv[3]
 remote_root = pathlib.Path(os.path.normpath(sys.argv[4]))
 claim_pid = int(sys.argv[5])
 claim_start_ticks = int(sys.argv[6])
@@ -1115,7 +1119,7 @@ try:
         try:
             claim_dir.mkdir(mode=0o700)
             (claim_dir / "run_path").write_text(f"{remote_run}\n")
-            (claim_dir / "compose_project").write_text(f"{compose_project}\n")
+            (claim_dir / "compose_project").write_text(f"{requested_compose_project}\n")
             (claim_dir / "subnet").write_text(f"{candidate}\n")
             write_claim_lease(claim_dir)
         except BaseException:

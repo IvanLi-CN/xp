@@ -52,7 +52,11 @@ on_exit() {
   local status=$?
   trap - EXIT
   cleanup "$status"
-  exit $?
+  local cleanup_status=$?
+  if [ "$status" -eq 0 ] && [ "$cleanup_status" -ne 0 ]; then
+    status="$cleanup_status"
+  fi
+  exit "$status"
 }
 trap on_exit EXIT
 trap 'on_signal 130' INT

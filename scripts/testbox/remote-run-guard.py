@@ -368,6 +368,25 @@ def marker_matches(run_fd: int, expected: str) -> bytes:
     return marker_data
 
 
+def validate_removable_tree(directory_fd: int) -> None:
+    directory_stat = os.fstat(directory_fd)
+    if (
+        not stat.S_ISDIR(directory_stat.st_mode)
+        or directory_stat.st_uid != os.geteuid()
+        or not directory_stat.st_mode & stat.S_IWUSR
+        or not directory_stat.st_mode & stat.S_IXUSR
+    ):
+        fail("testbox cleanup tree is not writable by the current user")
+    for entry in os.scandir(directory_fd):
+        entry_stat = os.stat(entry.name, dir_fd=directory_fd, follow_symlinks=False)
+        if stat.S_ISDIR(entry_stat.st_mode):
+            child_fd = os.open(entry.name, OPEN_FLAGS, dir_fd=directory_fd)
+            try:
+                validate_removable_tree(child_fd)
+            finally:
+                os.close(child_fd)
+
+
 def create_run(root: str, run: str, expected: str) -> None:
     if not expected:
         fail("testbox run marker is required")
@@ -506,6 +525,8 @@ def cleanup_run_and_claim(
             allow_sticky=False,
             private_required=True,
         )
+        validate_removable_tree(run_fd)
+        validate_removable_tree(claim_fd)
         quarantine = quarantine_directory_entry(run_parent_fd, run_path_parts[-1], run_fd)
         try:
             claim_quarantine = quarantine_directory_entry(
