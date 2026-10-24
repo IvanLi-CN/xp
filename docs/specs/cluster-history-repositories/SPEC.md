@@ -397,13 +397,14 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   128 MiB/no-swap cgroup with 257 near-limit segments and repeated summary requests; the runner's
   `XP_MESH_RESOURCE_SUMMARY_ONLY=1` mode runs this gate together with the 20,000-row source journal
   resource benchmark, while isolating both from the 50-peer comparison.
-  A release readiness check must receive a JSON attestation bound to the exact target SHA, the
+  A release readiness check must receive a v2 JSON attestation bound to the exact target SHA, the
   resource-workload log digest, the 300-second window, the 128 MiB/no-swap limits, and all four
   segment/byte
   10x results. Missing, malformed, or mismatched attestation fails closed before image, Web, or
   GitHub Release publication; CI and release workflows cannot synthesize this evidence. The
-  release workflow is owner-dispatched and accepts an evidence commit whose only parent is the
-  target commit and whose only paths are the attestation and the workload log; readiness
+  release workflow is owner-dispatched and accepts a v2 evidence commit whose only parent is the
+  target commit and whose only paths are `resource-evidence.json` and `resource-workload.log`;
+  pre-v2 evidence commits must be regenerated. Readiness
   recomputes the log digest from those files and requires a GitHub-verified valid signature by the
   pinned repository-owner signing key. The workflow is owner-triggered and retains the evidence
   files and commit identity as release assets.

@@ -40,6 +40,8 @@ WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
+testbox_remote_root_preflight
+testbox_remote_run_guard "$REMOTE_RUN"
 
 CONTAINER_RAW="codex_${WORKSPACE_SLUG}_web_upgrade_live_${RUN_ID}"
 CONTAINER_NAME="$(python3 - "$CONTAINER_RAW" <<'PY'
@@ -51,6 +53,7 @@ PY
 )"
 
 REMOTE_RUN_B64="$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')"
+TESTBOX_REMOTE_ROOT_B64="$(printf '%s' "$TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')"
 REMOTE_WORKSPACE_B64="$(printf '%s' "$REMOTE_WORKSPACE" | base64 | tr -d '\n')"
 CONTAINER_NAME_B64="$(printf '%s' "$CONTAINER_NAME" | base64 | tr -d '\n')"
 RUST_IMAGE_B64="$(printf '%s' "$RUST_IMAGE" | base64 | tr -d '\n')"
@@ -77,15 +80,27 @@ rsync -az --delete \
 
 ssh -o BatchMode=yes "$TESTBOX" bash -s \
   "$REMOTE_RUN_B64" \
+  "$TESTBOX_REMOTE_ROOT_B64" \
   "$REMOTE_WORKSPACE_B64" \
   "$CONTAINER_NAME_B64" \
   "$RUST_IMAGE_B64" <<'REMOTE'
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${1:?}" | base64 -d)"
-REMOTE_WORKSPACE="$(printf '%s' "${2:?}" | base64 -d)"
-CONTAINER_NAME="$(printf '%s' "${3:?}" | base64 -d)"
-RUST_IMAGE="$(printf '%s' "${4:?}" | base64 -d)"
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${2:?}" | base64 -d)"
+REMOTE_WORKSPACE="$(printf '%s' "${3:?}" | base64 -d)"
+CONTAINER_NAME="$(printf '%s' "${4:?}" | base64 -d)"
+RUST_IMAGE="$(printf '%s' "${5:?}" | base64 -d)"
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+case "$remote_run_real" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
+REMOTE_RUN="$remote_run_real"
+source "$REMOTE_RUN/scripts/testbox/remote-run-guard.sh"
 CARGO_HOME_DIR="$REMOTE_WORKSPACE/cargo-home"
 RUSTUP_HOME_DIR="$REMOTE_WORKSPACE/rustup-home"
 
@@ -95,7 +110,9 @@ cleanup() {
     docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   fi
   if [ -n "${REMOTE_RUN:-}" ]; then
-    rm -rf "$REMOTE_RUN" >/dev/null 2>&1 || true
+    if assert_remote_run; then
+      rm -rf -- "$REMOTE_RUN" >/dev/null 2>&1 || true
+    fi
   fi
 }
 trap cleanup EXIT INT TERM

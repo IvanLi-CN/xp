@@ -26,7 +26,7 @@ FAILURE_CONCLUSIONS = {
     "neutral",
 }
 
-RESOURCE_EVIDENCE_SCHEMA = "xp-history-throughput-v1"
+RESOURCE_EVIDENCE_SCHEMA = "xp-history-throughput-v2"
 
 
 class ReadinessError(RuntimeError):

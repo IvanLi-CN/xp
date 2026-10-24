@@ -145,12 +145,6 @@ RUN_NONCE="$(python3 -c 'import secrets; print(secrets.token_hex(4))')"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA}_${RUN_NONCE}"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 
-case "${USER:-}" in
-  ""|*[!A-Za-z0-9._-]*)
-    echo "USER contains unsupported remote path characters" >&2
-    exit 2
-    ;;
-esac
 if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   case "${CODEX_THREAD_ID:-}" in
     ""|*[!A-Za-z0-9._-]*)
@@ -170,6 +164,8 @@ fi
 # select the same Docker network range.
 REMOTE_SUBNET_CLAIMS="$TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims"
 REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
+testbox_remote_root_preflight
+testbox_remote_run_guard "$REMOTE_RUN"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
 COMPOSE_PROJECT="$(python3 - "$COMPOSE_PROJECT_RAW" <<'PY'
@@ -238,10 +234,24 @@ REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
-case "$REMOTE_RUN" in
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    test ! -L "$path"
+    path="$(dirname -- "$path")"
+  done
+}
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
   *) exit 2 ;;
 esac
+assert_no_symlink_path "$remote_run_real"
+REMOTE_RUN="$remote_run_real"
 scope_unit="codex-xp-source-journal-${RUN_ID}.scope"
 systemctl --user stop "$scope_unit" >/dev/null 2>&1 || true
 systemctl --user reset-failed "$scope_unit" >/dev/null 2>&1 || true
@@ -292,6 +302,24 @@ set -euo pipefail
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_WORKSPACE="$(printf '%s' "${REMOTE_WORKSPACE_B64:?}" | base64 -d)"
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    test ! -L "$path"
+    path="$(dirname -- "$path")"
+  done
+}
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+case "$remote_run_real" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
+assert_no_symlink_path "$remote_run_real"
+REMOTE_RUN="$remote_run_real"
 if [[ "$REMOTE_RUN" == "$TESTBOX_REMOTE_ROOT"/agents/*/runs/* ]]; then
   agent_base="$TESTBOX_REMOTE_ROOT/agents"
   agent_dir="$(dirname "$REMOTE_WORKSPACE")"
@@ -352,6 +380,17 @@ SOURCE_ARCHIVE_SHA="$(printf '%s' "${SOURCE_ARCHIVE_SHA_B64:?}" | base64 -d)"
 WEB_DIST_ARCHIVE_SHA="$(printf '%s' "${WEB_DIST_ARCHIVE_SHA_B64:?}" | base64 -d)"
 BASELINE_ARCHIVE_SHA="$(printf '%s' "${BASELINE_ARCHIVE_SHA_B64:?}" | base64 -d)"
 
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+case "$remote_run_real" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
+REMOTE_RUN="$remote_run_real"
+source "$REMOTE_RUN/scripts/testbox/remote-run-guard.sh"
+
 export TMPDIR="$REMOTE_RUN/tmp"
 mkdir -p "$TMPDIR"
 
@@ -375,7 +414,9 @@ cleanup() {
     rm -rf "$SUBNET_CLAIM_DIR" >/dev/null 2>&1 || true
   fi
   if [ -n "${REMOTE_RUN:-}" ]; then
-    rm -rf "$REMOTE_RUN" >/dev/null 2>&1 || true
+    if assert_remote_run; then
+      rm -rf -- "$REMOTE_RUN" >/dev/null 2>&1 || true
+    fi
   fi
 }
 on_signal() {

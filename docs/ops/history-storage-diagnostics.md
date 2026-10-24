@@ -81,7 +81,7 @@ attestation must record a 300-second window,
 `MemoryMax=128M`, `MemorySwapMax=0`, and successful segment and canonical-byte 10x gates for both
 delivery stages. Missing, malformed, or SHA-mismatched evidence fails closed before release
 artifacts are published.
-The attestation fields are `schema=xp-history-throughput-v1`, `target_sha`, `log_sha`,
+The attestation fields are `schema=xp-history-throughput-v2`, `target_sha`, `log_sha`,
 `window_seconds=300`, `memory_limit_mib=128`, `swap_limit_mib=0`, the observed
 `sample_window_seconds`, `generated_segments`, `generated_bytes`, `peak_generated_segments`,
 `peak_generated_bytes`, `acknowledged_segments`, `acknowledged_bytes`, `applied_segments`, and

@@ -27,8 +27,9 @@ on:
         type: string
       resource_evidence_ref:
         description: >-
-          Evidence commit SHA whose only parent is head_sha and which contains the resource log and
-          attestation
+          Resource evidence contract v2 commit SHA whose only parent is head_sha and which contains
+          resource-evidence.json and resource-workload.log; pre-v2 evidence commits must be
+          regenerated
         required: true
         type: string
 

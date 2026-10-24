@@ -25,6 +25,8 @@ REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 COMPOSE_PROJECT="$(python3 -c 'import re, sys; print(re.sub(r"[^a-z0-9_-]+", "_", sys.argv[1].lower()).strip("_")[:63])' "codex_${WORKSPACE_SLUG}_host_join_${RUN_ID}")"
+testbox_remote_root_preflight
+testbox_remote_run_guard "$REMOTE_RUN"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
@@ -42,6 +44,7 @@ ssh -o BatchMode=yes "$TESTBOX" \
   "printf 'git_commit=%s\\nsource_archive_sha256=%s\\n' '$GIT_SHA' '$SOURCE_ARCHIVE_SHA256' > '$REMOTE_RUN/source-manifest'"
 
 REMOTE_RUN_B64="$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')"
+TESTBOX_REMOTE_ROOT_B64="$(printf '%s' "$TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')"
 REMOTE_WORKSPACE_B64="$(printf '%s' "$REMOTE_WORKSPACE" | base64 | tr -d '\n')"
 COMPOSE_PROJECT_B64="$(printf '%s' "$COMPOSE_PROJECT" | base64 | tr -d '\n')"
 RUST_IMAGE_B64="$(printf '%s' "$RUST_IMAGE" | base64 | tr -d '\n')"
@@ -52,4 +55,4 @@ SOURCE_ARCHIVE_SHA256_B64="$(printf '%s' "$SOURCE_ARCHIVE_SHA256" | base64 | tr 
 # Run a synced remote script rather than piping it through SSH. Docker Compose
 # may read stdin, which must never be allowed to consume the control script.
 ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUST_IMAGE_B64='$RUST_IMAGE_B64' XP_TEST_IMAGE_B64='$XP_TEST_IMAGE_B64' GIT_SHA_B64='$GIT_SHA_B64' SOURCE_ARCHIVE_SHA256_B64='$SOURCE_ARCHIVE_SHA256_B64' bash '$REMOTE_RUN/scripts/testbox/host-managed-fresh-join-remote.sh'"
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUST_IMAGE_B64='$RUST_IMAGE_B64' XP_TEST_IMAGE_B64='$XP_TEST_IMAGE_B64' GIT_SHA_B64='$GIT_SHA_B64' SOURCE_ARCHIVE_SHA256_B64='$SOURCE_ARCHIVE_SHA256_B64' bash '$REMOTE_RUN/scripts/testbox/host-managed-fresh-join-remote.sh'"

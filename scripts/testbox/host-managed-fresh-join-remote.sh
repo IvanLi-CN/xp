@@ -2,12 +2,23 @@
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_WORKSPACE="$(printf '%s' "${REMOTE_WORKSPACE_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 RUST_IMAGE="$(printf '%s' "${RUST_IMAGE_B64:?}" | base64 -d)"
 XP_TEST_IMAGE="$(printf '%s' "${XP_TEST_IMAGE_B64:?}" | base64 -d)"
 GIT_SHA="$(printf '%s' "${GIT_SHA_B64:?}" | base64 -d)"
 SOURCE_ARCHIVE_SHA256="$(printf '%s' "${SOURCE_ARCHIVE_SHA256_B64:?}" | base64 -d)"
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+case "$remote_run_real" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
+REMOTE_RUN="$remote_run_real"
+source "$REMOTE_RUN/scripts/testbox/remote-run-guard.sh"
 XP_HOST_IMAGE_PREFIX="$COMPOSE_PROJECT"
 RECEIPT_PATH="$REMOTE_WORKSPACE/receipts/host-managed-fresh-join-${COMPOSE_PROJECT}.txt"
 BUILDER_NAME="${COMPOSE_PROJECT}-musl-builder"

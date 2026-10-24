@@ -33,14 +33,34 @@ import re, sys
 print(re.sub(r'[^a-z0-9_-]+', '_', sys.argv[1].lower()).strip('_')[:63])
 PY
 )"
+testbox_remote_root_preflight
+testbox_remote_run_guard "$REMOTE_RUN"
 
 cleanup() {
   local status=$?
   set +e
-  if [[ "$status" != 0 ]]; then
+  if [[ "$status" != 0 ]] && testbox_remote_run_guard "$REMOTE_RUN"; then
     ssh -o BatchMode=yes "$TESTBOX" "cd '$REMOTE_RUN' && docker compose -p '$COMPOSE_PROJECT' -f scripts/testbox/reverse-xray-spike-compose.yml logs --no-color rendezvous target" >&2
   fi
-  ssh -o BatchMode=yes "$TESTBOX" "cd '$REMOTE_RUN' && docker compose -p '$COMPOSE_PROJECT' -f scripts/testbox/reverse-xray-spike-compose.yml -f .codex.caps-compat.yml down -v --remove-orphans; rm -rf '$REMOTE_RUN'" >/dev/null 2>&1
+  ssh -o BatchMode=yes "$TESTBOX" \
+    "TESTBOX_REMOTE_ROOT_B64=\$(printf '%s' '$TESTBOX_REMOTE_ROOT' | base64 | tr -d '\\n') REMOTE_RUN_B64=\$(printf '%s' '$REMOTE_RUN' | base64 | tr -d '\\n') COMPOSE_PROJECT_B64=\$(printf '%s' '$COMPOSE_PROJECT' | base64 | tr -d '\\n') bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1
+set -euo pipefail
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
+REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+case "$remote_run_real" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*)
+    cd "$remote_run_real"
+    docker compose -p "$COMPOSE_PROJECT" -f scripts/testbox/reverse-xray-spike-compose.yml -f .codex.caps-compat.yml down -v --remove-orphans || true
+    rm -rf -- "$remote_run_real"
+    ;;
+  *) exit 2 ;;
+esac
+REMOTE_CLEANUP
 }
 trap cleanup EXIT INT TERM
 

@@ -1299,8 +1299,9 @@ on `main`.
 For a corrective release, an owner dispatches the `release` workflow with the exact merged `head_sha`,
 `release_type`, `channel`, `expected_version`, `reason`, and the SHA of an owner-supplied resource
 evidence commit.
-That evidence commit must have the target as its only parent and contain only the attestation JSON
-and workload log. The commit must also have a GitHub-verified valid signature by the repository
+The current evidence contract is v2: the evidence commit must have the target as its only parent and
+contain only `resource-evidence.json` and `resource-workload.log`; pre-v2 evidence commits must be
+regenerated. The commit must also have a GitHub-verified valid signature by the repository
 owner. The workflow itself also requires the dispatch actor and re-run actor to be the repository
 owner, and verifies the pinned owner signing key with `git verify-commit`. It recomputes the log
 digest, publishes the evidence files and commit identity as release assets, then fails before tag

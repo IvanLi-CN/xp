@@ -32,6 +32,14 @@ expect_failure \
     "$RUNNER"
 
 expect_failure \
+  'USER must contain only safe path characters' \
+  env \
+    TESTBOX=ssh-target \
+    USER='unsafe user' \
+    XP_TESTBOX_REMOTE_ROOT=/tmp/xp-testbox-guard \
+    "$RUNNER"
+
+expect_failure \
   'XP_TESTBOX_CARGO_CACHE_ROOT and XP_TESTBOX_CARGO_HOME are required' \
   env \
     TESTBOX=ssh-target \
