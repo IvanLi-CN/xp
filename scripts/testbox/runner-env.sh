@@ -50,6 +50,7 @@ test ! -L "$TESTBOX_REMOTE_ROOT"
 test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
 assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
 remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
@@ -57,5 +58,41 @@ case "$remote_run_real" in
 esac
 assert_no_symlink_path "$remote_run_real"
 REMOTE_RUN="$remote_run_real"
+printf '%s\n' "$REMOTE_RUN"
 REMOTE_RUN_GUARD
+}
+
+testbox_remote_cleanup() {
+  local remote_run="$1"
+  local run_id="${2:-}"
+  ssh -o BatchMode=yes "$TESTBOX" \
+    "TESTBOX_REMOTE_ROOT_B64=\$(printf '%s' '$TESTBOX_REMOTE_ROOT' | base64 | tr -d '\\n') REMOTE_RUN_B64=\$(printf '%s' '$remote_run' | base64 | tr -d '\\n') RUN_ID_B64=\$(printf '%s' '$run_id' | base64 | tr -d '\\n') bash -s" <<'REMOTE_CLEANUP'
+set -euo pipefail
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
+REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+RUN_ID="$(printf '%s' "${RUN_ID_B64:-}" | base64 -d)"
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    test ! -L "$path"
+    path="$(dirname -- "$path")"
+  done
+}
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
+remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+case "$remote_run_real" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*)
+    if [ -n "$RUN_ID" ]; then
+      test -f "$remote_run_real/.codex-run-id"
+      test "$(cat -- "$remote_run_real/.codex-run-id")" = "$RUN_ID"
+    fi
+    rm -rf -- "$remote_run_real"
+    ;;
+  *) exit 2 ;;
+esac
+REMOTE_CLEANUP
 }

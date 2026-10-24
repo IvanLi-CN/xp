@@ -163,9 +163,10 @@ fi
 # Subnet claims are host-global so concurrent runs from different users cannot
 # select the same Docker network range.
 REMOTE_SUBNET_CLAIMS="$TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims"
-REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 testbox_remote_root_preflight
-testbox_remote_run_guard "$REMOTE_RUN"
+REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
+REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
+REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
 COMPOSE_PROJECT="$(python3 - "$COMPOSE_PROJECT_RAW" <<'PY'
@@ -245,6 +246,7 @@ test ! -L "$TESTBOX_REMOTE_ROOT"
 test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
 assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
 remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
@@ -252,6 +254,8 @@ case "$remote_run_real" in
 esac
 assert_no_symlink_path "$remote_run_real"
 REMOTE_RUN="$remote_run_real"
+test -f "$REMOTE_RUN/.codex-run-id"
+test "$(cat -- "$REMOTE_RUN/.codex-run-id")" = "$RUN_ID"
 scope_unit="codex-xp-source-journal-${RUN_ID}.scope"
 systemctl --user stop "$scope_unit" >/dev/null 2>&1 || true
 systemctl --user reset-failed "$scope_unit" >/dev/null 2>&1 || true
@@ -295,13 +299,13 @@ source_archive_sha256=$SOURCE_ARCHIVE_SHA
 web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA
 "
 WORKSPACE_METADATA_B64="$(printf '%s' "$WORKSPACE_METADATA" | base64 | tr -d '\n')"
-REMOTE_RUN_CREATED=1
 ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' WORKSPACE_METADATA_B64='$WORKSPACE_METADATA_B64' bash -s" <<'REMOTE_BOOTSTRAP'
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' WORKSPACE_METADATA_B64='$WORKSPACE_METADATA_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE_BOOTSTRAP'
 set -euo pipefail
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_WORKSPACE="$(printf '%s' "${REMOTE_WORKSPACE_B64:?}" | base64 -d)"
+RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
 assert_no_symlink_path() {
   local path="$1"
   while [ "$path" != "/" ] && [ "$path" != "." ]; do
@@ -313,6 +317,7 @@ test ! -L "$TESTBOX_REMOTE_ROOT"
 test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
 assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
 remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
@@ -320,6 +325,7 @@ case "$remote_run_real" in
 esac
 assert_no_symlink_path "$remote_run_real"
 REMOTE_RUN="$remote_run_real"
+REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
 if [[ "$REMOTE_RUN" == "$TESTBOX_REMOTE_ROOT"/agents/*/runs/* ]]; then
   agent_base="$TESTBOX_REMOTE_ROOT/agents"
   agent_dir="$(dirname "$REMOTE_WORKSPACE")"
@@ -332,9 +338,12 @@ if [[ "$REMOTE_RUN" == "$TESTBOX_REMOTE_ROOT"/agents/*/runs/* ]]; then
   fi
   [[ "$(readlink -f -- "$agent_dir")" == "$agent_dir" ]]
 fi
-mkdir -p "$REMOTE_WORKSPACE" "$REMOTE_RUN"
+mkdir -p "$REMOTE_WORKSPACE"
+mkdir "$REMOTE_RUN"
+printf '%s\n' "$RUN_ID" > "$REMOTE_RUN/.codex-run-id"
 printf '%s' "${WORKSPACE_METADATA_B64:?}" | base64 -d > "$REMOTE_WORKSPACE/workspace.txt"
 REMOTE_BOOTSTRAP
+REMOTE_RUN_CREATED=1
 
 # 4) Sync the immutable tracked tree, then overlay the generated Web shell.
 rsync -a "$SOURCE_ARCHIVE" "$TESTBOX:$REMOTE_RUN/source.tar"
@@ -379,10 +388,19 @@ TESTBOX_CARGO_HOME="$(printf '%s' "${TESTBOX_CARGO_HOME_B64:?}" | base64 -d)"
 SOURCE_ARCHIVE_SHA="$(printf '%s' "${SOURCE_ARCHIVE_SHA_B64:?}" | base64 -d)"
 WEB_DIST_ARCHIVE_SHA="$(printf '%s' "${WEB_DIST_ARCHIVE_SHA_B64:?}" | base64 -d)"
 BASELINE_ARCHIVE_SHA="$(printf '%s' "${BASELINE_ARCHIVE_SHA_B64:?}" | base64 -d)"
+REMOTE_RUN_ID="$RUN_ID"
 
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    test ! -L "$path"
+    path="$(dirname -- "$path")"
+  done
+}
 test ! -L "$TESTBOX_REMOTE_ROOT"
 test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
 remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;

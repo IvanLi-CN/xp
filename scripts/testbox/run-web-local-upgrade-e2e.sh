@@ -36,14 +36,25 @@ PY
 )"
 
 GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
-RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$GIT_SHA"
+RUN_NONCE="$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
+RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA}_${RUN_NONCE}"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 
 REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 testbox_remote_root_preflight
-testbox_remote_run_guard "$REMOTE_RUN"
+REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
+REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
+
+REMOTE_RUN_CREATED=0
+cleanup_remote_run() {
+  set +e
+  if [ "$REMOTE_RUN_CREATED" = "1" ]; then
+    testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_remote_run EXIT INT TERM
 
 CONTAINER_RAW="codex_${WORKSPACE_SLUG}_web_upgrade_${RUN_ID}"
 CONTAINER_NAME="$(python3 - "$CONTAINER_RAW" <<'PY'
@@ -69,6 +80,7 @@ CONTAINER_NAME_B64="$(printf '%s' "$CONTAINER_NAME" | base64 | tr -d '\n')"
 RUST_IMAGE_B64="$(printf '%s' "$RUST_IMAGE" | base64 | tr -d '\n')"
 OPENRC_CONTAINER_NAME_B64="$(printf '%s' "$OPENRC_CONTAINER_NAME" | base64 | tr -d '\n')"
 ALPINE_IMAGE_B64="$(printf '%s' "$ALPINE_IMAGE" | base64 | tr -d '\n')"
+RUN_ID_B64="$(printf '%s' "$RUN_ID" | base64 | tr -d '\n')"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
@@ -79,10 +91,11 @@ echo "alpine_image=$ALPINE_IMAGE"
 
 CREATED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ssh -o BatchMode=yes "$TESTBOX" \
-  "mkdir -p '$REMOTE_RUN' && cat > '$REMOTE_WORKSPACE/workspace.txt'" <<TXT
+  "mkdir -p '$(dirname -- "$REMOTE_RUN")' && mkdir '$REMOTE_RUN' && printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id' && cat > '$REMOTE_WORKSPACE/workspace.txt'" <<TXT
 local_repo_root=$REPO_ROOT
 created_utc=$CREATED_UTC
 TXT
+REMOTE_RUN_CREATED=1
 
 rsync -az --delete \
   --exclude '.git/' \
@@ -99,7 +112,8 @@ ssh -o BatchMode=yes "$TESTBOX" bash -s \
   "$CONTAINER_NAME_B64" \
   "$RUST_IMAGE_B64" \
   "$OPENRC_CONTAINER_NAME_B64" \
-  "$ALPINE_IMAGE_B64" <<'REMOTE'
+  "$ALPINE_IMAGE_B64" \
+  "$RUN_ID_B64" <<'REMOTE'
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${1:?}" | base64 -d)"
@@ -109,9 +123,20 @@ CONTAINER_NAME="$(printf '%s' "${4:?}" | base64 -d)"
 RUST_IMAGE="$(printf '%s' "${5:?}" | base64 -d)"
 OPENRC_CONTAINER_NAME="$(printf '%s' "${6:?}" | base64 -d)"
 ALPINE_IMAGE="$(printf '%s' "${7:?}" | base64 -d)"
+RUN_ID="$(printf '%s' "${8:?}" | base64 -d)"
+REMOTE_RUN_ID="$RUN_ID"
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    test ! -L "$path"
+    path="$(dirname -- "$path")"
+  done
+}
 test ! -L "$TESTBOX_REMOTE_ROOT"
 test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
 remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;

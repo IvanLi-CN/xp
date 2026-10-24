@@ -9,9 +9,20 @@ RUST_IMAGE="$(printf '%s' "${RUST_IMAGE_B64:?}" | base64 -d)"
 XP_TEST_IMAGE="$(printf '%s' "${XP_TEST_IMAGE_B64:?}" | base64 -d)"
 GIT_SHA="$(printf '%s' "${GIT_SHA_B64:?}" | base64 -d)"
 SOURCE_ARCHIVE_SHA256="$(printf '%s' "${SOURCE_ARCHIVE_SHA256_B64:?}" | base64 -d)"
+RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
+REMOTE_RUN_ID="$RUN_ID"
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    test ! -L "$path"
+    path="$(dirname -- "$path")"
+  done
+}
 test ! -L "$TESTBOX_REMOTE_ROOT"
 test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
 remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
@@ -49,7 +60,9 @@ cleanup() {
   fi
   docker rm -f "$BUILDER_NAME" "$SOURCE_NAME" >/dev/null 2>&1 || true
   docker image rm "$XP_HOST_IMAGE_PREFIX-leader" "$XP_HOST_IMAGE_PREFIX-systemd" "$XP_HOST_IMAGE_PREFIX-openrc" >/dev/null 2>&1 || true
-  rm -rf "$REMOTE_RUN" >/dev/null 2>&1 || true
+  if assert_remote_run; then
+    rm -rf -- "$REMOTE_RUN" >/dev/null 2>&1 || true
+  fi
   return "$status"
 }
 trap cleanup EXIT INT TERM

@@ -24,6 +24,7 @@ assert_remote_run() {
   test "$remote_root_real" = "$TESTBOX_REMOTE_ROOT"
   assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
   test ! -L "$REMOTE_RUN"
+  assert_no_symlink_path "$REMOTE_RUN"
   remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
   case "$remote_run_real" in
     "$remote_root_real"/agents/*/runs/*|"$remote_root_real"/workspaces/*/runs/*) ;;
@@ -35,6 +36,14 @@ assert_remote_run() {
   assert_no_symlink_path "$remote_run_real"
   REMOTE_RUN="$remote_run_real"
   export REMOTE_RUN
+  if [ -n "${REMOTE_RUN_ID:-}" ]; then
+    test -f "$REMOTE_RUN/.codex-run-id"
+    test "$(cat -- "$REMOTE_RUN/.codex-run-id")" = "$REMOTE_RUN_ID"
+  fi
+  if [ -n "${REMOTE_WORKSPACE:-}" ]; then
+    REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
+    export REMOTE_WORKSPACE
+  fi
 }
 
 assert_remote_run

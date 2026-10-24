@@ -119,6 +119,8 @@ jobs:
           python3 ./.github/scripts/test-release-governance.py
           python3 ./.github/scripts/test-notify-release-failure.py
           python3 ./.github/scripts/test-ci-performance.py
+          bash -n scripts/testbox/*.sh
+          scripts/testbox/test-shared-quota-xray-e2e-guards.sh
           ruby - <<'RUBY'
           require "yaml"
           Dir[".github/workflows/*.yml"].sort.each do |workflow|

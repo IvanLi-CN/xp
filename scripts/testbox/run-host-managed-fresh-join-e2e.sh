@@ -26,13 +26,24 @@ REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 COMPOSE_PROJECT="$(python3 -c 'import re, sys; print(re.sub(r"[^a-z0-9_-]+", "_", sys.argv[1].lower()).strip("_")[:63])' "codex_${WORKSPACE_SLUG}_host_join_${RUN_ID}")"
 testbox_remote_root_preflight
-testbox_remote_run_guard "$REMOTE_RUN"
+REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
+REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
+
+REMOTE_RUN_CREATED=0
+cleanup_remote_run() {
+  set +e
+  if [ "$REMOTE_RUN_CREATED" = "1" ]; then
+    testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_remote_run EXIT INT TERM
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
 echo "compose_project=$COMPOSE_PROJECT"
 
-ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RUN' '$REMOTE_WORKSPACE/cargo-home' '$REMOTE_WORKSPACE/rustup-home' '$REMOTE_WORKSPACE/host-join-musl-target' '$REMOTE_WORKSPACE/receipts'"
+ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_WORKSPACE' && mkdir '$REMOTE_RUN' && printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id' && mkdir -p '$REMOTE_WORKSPACE/cargo-home' '$REMOTE_WORKSPACE/rustup-home' '$REMOTE_WORKSPACE/host-join-musl-target' '$REMOTE_WORKSPACE/receipts'"
+REMOTE_RUN_CREATED=1
 rsync -az --delete \
   --exclude '.git/' \
   --exclude 'target/' \
@@ -51,8 +62,9 @@ RUST_IMAGE_B64="$(printf '%s' "$RUST_IMAGE" | base64 | tr -d '\n')"
 XP_TEST_IMAGE_B64="$(printf '%s' "$XP_TEST_IMAGE" | base64 | tr -d '\n')"
 GIT_SHA_B64="$(printf '%s' "$GIT_SHA" | base64 | tr -d '\n')"
 SOURCE_ARCHIVE_SHA256_B64="$(printf '%s' "$SOURCE_ARCHIVE_SHA256" | base64 | tr -d '\n')"
+RUN_ID_B64="$(printf '%s' "$RUN_ID" | base64 | tr -d '\n')"
 
 # Run a synced remote script rather than piping it through SSH. Docker Compose
 # may read stdin, which must never be allowed to consume the control script.
 ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUST_IMAGE_B64='$RUST_IMAGE_B64' XP_TEST_IMAGE_B64='$XP_TEST_IMAGE_B64' GIT_SHA_B64='$GIT_SHA_B64' SOURCE_ARCHIVE_SHA256_B64='$SOURCE_ARCHIVE_SHA256_B64' bash '$REMOTE_RUN/scripts/testbox/host-managed-fresh-join-remote.sh'"
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUST_IMAGE_B64='$RUST_IMAGE_B64' XP_TEST_IMAGE_B64='$XP_TEST_IMAGE_B64' GIT_SHA_B64='$GIT_SHA_B64' SOURCE_ARCHIVE_SHA256_B64='$SOURCE_ARCHIVE_SHA256_B64' RUN_ID_B64='$RUN_ID_B64' bash '$REMOTE_RUN/scripts/testbox/host-managed-fresh-join-remote.sh'"

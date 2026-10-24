@@ -23,7 +23,8 @@ PY
 )"
 GIT_SHA="$(git rev-parse HEAD)"
 GIT_SHA_SHORT="$(git rev-parse --short HEAD)"
-RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA_SHORT}_reverse"
+RUN_NONCE="$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
+RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA_SHORT}_${RUN_NONCE}_reverse"
 REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/${REPO_NAME}__${PATH_HASH8}"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
@@ -34,20 +35,26 @@ print(re.sub(r'[^a-z0-9_-]+', '_', sys.argv[1].lower()).strip('_')[:63])
 PY
 )"
 testbox_remote_root_preflight
-testbox_remote_run_guard "$REMOTE_RUN"
+REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
+REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
 
+REMOTE_RUN_CREATED=0
 cleanup() {
   local status=$?
   set +e
-  if [[ "$status" != 0 ]] && testbox_remote_run_guard "$REMOTE_RUN"; then
-    ssh -o BatchMode=yes "$TESTBOX" "cd '$REMOTE_RUN' && docker compose -p '$COMPOSE_PROJECT' -f scripts/testbox/reverse-xray-spike-compose.yml logs --no-color rendezvous target" >&2
+  if [[ "$REMOTE_RUN_CREATED" = "1" && "$status" != 0 ]] && testbox_remote_run_guard "$REMOTE_RUN"; then
+    ssh -o BatchMode=yes "$TESTBOX" "test \"\$(cat -- '$REMOTE_RUN/.codex-run-id')\" = '$RUN_ID' && cd '$REMOTE_RUN' && docker compose -p '$COMPOSE_PROJECT' -f scripts/testbox/reverse-xray-spike-compose.yml logs --no-color rendezvous target" >&2
+  fi
+  if [[ "$REMOTE_RUN_CREATED" != "1" ]]; then
+    return "$status"
   fi
   ssh -o BatchMode=yes "$TESTBOX" \
-    "TESTBOX_REMOTE_ROOT_B64=\$(printf '%s' '$TESTBOX_REMOTE_ROOT' | base64 | tr -d '\\n') REMOTE_RUN_B64=\$(printf '%s' '$REMOTE_RUN' | base64 | tr -d '\\n') COMPOSE_PROJECT_B64=\$(printf '%s' '$COMPOSE_PROJECT' | base64 | tr -d '\\n') bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1
+    "TESTBOX_REMOTE_ROOT_B64=\$(printf '%s' '$TESTBOX_REMOTE_ROOT' | base64 | tr -d '\\n') REMOTE_RUN_B64=\$(printf '%s' '$REMOTE_RUN' | base64 | tr -d '\\n') COMPOSE_PROJECT_B64=\$(printf '%s' '$COMPOSE_PROJECT' | base64 | tr -d '\\n') RUN_ID_B64=\$(printf '%s' '$RUN_ID' | base64 | tr -d '\\n') bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1
 set -euo pipefail
 TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
+RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
 test ! -L "$TESTBOX_REMOTE_ROOT"
 test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
@@ -56,6 +63,8 @@ case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*)
     cd "$remote_run_real"
     docker compose -p "$COMPOSE_PROJECT" -f scripts/testbox/reverse-xray-spike-compose.yml -f .codex.caps-compat.yml down -v --remove-orphans || true
+    test -f "$remote_run_real/.codex-run-id"
+    test "$(cat -- "$remote_run_real/.codex-run-id")" = "$RUN_ID"
     rm -rf -- "$remote_run_real"
     ;;
   *) exit 2 ;;
@@ -64,7 +73,8 @@ REMOTE_CLEANUP
 }
 trap cleanup EXIT INT TERM
 
-ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RUN'"
+ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$(dirname -- "$REMOTE_RUN")' && mkdir '$REMOTE_RUN' && printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id'"
+REMOTE_RUN_CREATED=1
 rsync -az --delete --exclude '.git/' --exclude 'target/' --exclude 'web/node_modules/' \
   "$REPO_ROOT/" "$TESTBOX:$REMOTE_RUN/"
 ssh -o BatchMode=yes "$TESTBOX" "cd '$REMOTE_RUN' && \

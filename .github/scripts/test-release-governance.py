@@ -290,6 +290,11 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertNotIn("cargo clippy", workflow)
         self.assertNotIn("cargo test", workflow)
 
+    def test_ci_runs_testbox_launcher_contracts(self) -> None:
+        workflow = (Path(__file__).parents[1] / "workflows" / "ci.yml").read_text()
+        self.assertIn("bash -n scripts/testbox/*.sh", workflow)
+        self.assertIn("scripts/testbox/test-shared-quota-xray-e2e-guards.sh", workflow)
+
     def test_label_gate_requires_unique_type_and_channel(self) -> None:
         workflow = (Path(__file__).parents[1] / "workflows" / "label-gate.yml").read_text()
         self.assertIn("listLabelsOnIssue", workflow)
