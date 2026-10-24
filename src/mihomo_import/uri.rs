@@ -279,6 +279,9 @@ fn parse_vmess(
         .or_else(|| payload.get("tls").and_then(serde_json::Value::as_bool))
         .unwrap_or(false);
     insert_bool(&mut map, "tls", tls);
+    if let Some(insecure) = json_bool(&payload, "insecure") {
+        insert_bool(&mut map, "skip-cert-verify", insecure);
+    }
     if let Some(sni) = json_string(&payload, "sni").or_else(|| json_string(&payload, "host")) {
         insert_string(&mut map, "servername", sni);
     }
@@ -609,7 +612,13 @@ fn add_vmess_http_options(map: &mut Mapping, payload: &serde_json::Value) {
         let mut headers = Mapping::new();
         headers.insert(
             Value::String("Host".to_owned()),
-            Value::Sequence(vec![Value::String(host)]),
+            Value::Sequence(
+                host.split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| Value::String(value.to_owned()))
+                    .collect(),
+            ),
         );
         http.insert(Value::String("headers".to_owned()), Value::Mapping(headers));
     }
@@ -721,6 +730,20 @@ fn json_u64(value: &serde_json::Value, key: &str) -> Option<u64> {
         .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
 }
 
+fn json_bool(value: &serde_json::Value, key: &str) -> Option<bool> {
+    value.get(key).and_then(|value| {
+        value.as_bool().or_else(|| {
+            value
+                .as_str()
+                .and_then(|value| match value.to_ascii_lowercase().as_str() {
+                    "1" | "true" | "yes" => Some(true),
+                    "0" | "false" | "no" => Some(false),
+                    _ => None,
+                })
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -752,7 +775,8 @@ mod tests {
             "net": "tcp",
             "type": "http",
             "path": "/video",
-            "host": "cdn.example",
+            "host": "cdn.example, cdn-2.example",
+            "insecure": "1",
         });
         let encoded = base64::engine::general_purpose::STANDARD.encode(payload.to_string());
         let url = Url::parse(&format!("vmess://{encoded}")).expect("URL");
@@ -763,6 +787,11 @@ mod tests {
             proxy["http-opts"]["headers"]["Host"][0].as_str(),
             Some("cdn.example")
         );
+        assert_eq!(
+            proxy["http-opts"]["headers"]["Host"][1].as_str(),
+            Some("cdn-2.example")
+        );
+        assert_eq!(proxy["skip-cert-verify"].as_bool(), Some(true));
     }
 
     #[test]
