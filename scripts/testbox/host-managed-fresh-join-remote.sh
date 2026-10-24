@@ -14,8 +14,10 @@ REMOTE_RUN_ID="$RUN_ID"
 assert_no_symlink_path() {
   local path="$1"
   while [ "$path" != "/" ] && [ "$path" != "." ]; do
-    test ! -L "$path"
-    path="$(dirname -- "$path")"
+    if [ -L "$path" ]; then
+      return 2
+    fi
+    path="$(dirname "$path")"
   done
 }
 test ! -L "$TESTBOX_REMOTE_ROOT"
@@ -23,7 +25,7 @@ test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
 assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
 assert_no_symlink_path "$REMOTE_RUN"
-remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
   *) exit 2 ;;

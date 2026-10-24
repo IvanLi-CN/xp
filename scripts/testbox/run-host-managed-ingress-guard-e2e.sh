@@ -9,7 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/runner-env.sh"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_NAME="$(basename "$REPO_ROOT")"
-PATH_HASH8="$(printf '%s' "$(realpath "$REPO_ROOT")" | shasum -a 256 | cut -c1-8)"
+testbox_validate_component repository "$REPO_NAME"
+PATH_HASH8="$(printf '%s' "$(realpath "$REPO_ROOT")" | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:8])')"
 RUN_NONCE="$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$$_${RUN_NONCE}_$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
 REMOTE_RUN="$TESTBOX_REMOTE_ROOT/workspaces/$USER/${REPO_NAME}__${PATH_HASH8}/runs/$RUN_ID"
@@ -21,9 +22,8 @@ echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
 echo "container=$CONTAINER"
 
-REMOTE_RUN_CREATED=0
-ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$(dirname -- "$REMOTE_RUN")' && mkdir '$REMOTE_RUN' && printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id'"
 REMOTE_RUN_CREATED=1
+ssh -o BatchMode=yes "$TESTBOX" "set -e; mkdir -p '$(dirname "$REMOTE_RUN")' && mkdir '$REMOTE_RUN' && REMOTE_RUN='$REMOTE_RUN'; trap 'rm -rf -- \"\$REMOTE_RUN\"' EXIT; printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id'; trap - EXIT"
 cleanup() {
   set +e
   if [ "$REMOTE_RUN_CREATED" != "1" ]; then
@@ -36,10 +36,20 @@ TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 CONTAINER="$(printf '%s' "${CONTAINER_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    if [ -L "$path" ]; then
+      return 2
+    fi
+    path="$(dirname "$path")"
+  done
+}
 if test ! -L "$TESTBOX_REMOTE_ROOT" &&
   test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT" &&
-  test ! -L "$REMOTE_RUN"; then
-  remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+  test ! -L "$REMOTE_RUN" &&
+  assert_no_symlink_path "$REMOTE_RUN"; then
+  remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
   case "$remote_run_real" in
     "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*)
       test -f "$remote_run_real/.codex-run-id"

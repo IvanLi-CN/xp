@@ -26,6 +26,7 @@ PY
 )"
 
 REPO_NAME="$(basename "$REPO_ROOT")"
+testbox_validate_component repository "$REPO_NAME"
 PATH_HASH8="$(python3 - "$REPO_ROOT" <<'PY'
 import hashlib, os, sys
 p = os.path.realpath(sys.argv[1]).encode()
@@ -43,9 +44,9 @@ REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 testbox_remote_root_preflight
 REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
-REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
+REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
 
-REMOTE_RUN_CREATED=0
+REMOTE_RUN_CREATED=1
 cleanup_remote_run() {
   set +e
   if [ "$REMOTE_RUN_CREATED" = "1" ]; then
@@ -77,11 +78,10 @@ echo "rust_image=$RUST_IMAGE"
 
 CREATED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ssh -o BatchMode=yes "$TESTBOX" \
-  "mkdir -p '$(dirname -- "$REMOTE_RUN")' && mkdir '$REMOTE_RUN' && printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id' && cat > '$REMOTE_WORKSPACE/workspace.txt'" <<TXT
+  "set -e; mkdir -p '$(dirname "$REMOTE_RUN")' && mkdir '$REMOTE_RUN' && REMOTE_RUN='$REMOTE_RUN'; trap 'rm -rf -- \"\$REMOTE_RUN\"' EXIT; printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id' && cat > '$REMOTE_WORKSPACE/workspace.txt'; trap - EXIT" <<TXT
 local_repo_root=$REPO_ROOT
 created_utc=$CREATED_UTC
 TXT
-REMOTE_RUN_CREATED=1
 
 rsync -az --delete \
   --exclude '.git/' \
@@ -110,8 +110,10 @@ REMOTE_RUN_ID="$RUN_ID"
 assert_no_symlink_path() {
   local path="$1"
   while [ "$path" != "/" ] && [ "$path" != "." ]; do
-    test ! -L "$path"
-    path="$(dirname -- "$path")"
+    if [ -L "$path" ]; then
+      return 2
+    fi
+    path="$(dirname "$path")"
   done
 }
 test ! -L "$TESTBOX_REMOTE_ROOT"
@@ -119,7 +121,7 @@ test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
 assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
 assert_no_symlink_path "$REMOTE_RUN"
-remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
   *) exit 2 ;;

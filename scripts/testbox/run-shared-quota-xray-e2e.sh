@@ -121,11 +121,12 @@ with tarfile.open(archive, "w") as output:
 PY
 }
 git -C "$REPO_ROOT" archive --format=tar "$GIT_SHA_FULL" > "$SOURCE_ARCHIVE"
-SOURCE_ARCHIVE_SHA="$(shasum -a 256 "$SOURCE_ARCHIVE" | awk '{print $1}')"
+SOURCE_ARCHIVE_SHA="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$SOURCE_ARCHIVE")"
 create_deterministic_tar "$REPO_ROOT/web/dist" "$WEB_DIST_ARCHIVE"
-WEB_DIST_ARCHIVE_SHA="$(shasum -a 256 "$WEB_DIST_ARCHIVE" | awk '{print $1}')"
+WEB_DIST_ARCHIVE_SHA="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$WEB_DIST_ARCHIVE")"
 
 REPO_NAME="$(basename "$REPO_ROOT")"
+testbox_validate_component repository "$REPO_NAME"
 case "$REPO_NAME" in
   ""|*[!A-Za-z0-9._-]*)
     echo "repository name contains unsupported path characters: $REPO_NAME" >&2
@@ -165,7 +166,7 @@ fi
 REMOTE_SUBNET_CLAIMS="$TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims"
 testbox_remote_root_preflight
 REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
-REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
+REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
 REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
@@ -238,8 +239,10 @@ RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
 assert_no_symlink_path() {
   local path="$1"
   while [ "$path" != "/" ] && [ "$path" != "." ]; do
-    test ! -L "$path"
-    path="$(dirname -- "$path")"
+    if [ -L "$path" ]; then
+      return 2
+    fi
+    path="$(dirname "$path")"
   done
 }
 test ! -L "$TESTBOX_REMOTE_ROOT"
@@ -247,7 +250,7 @@ test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
 assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
 assert_no_symlink_path "$REMOTE_RUN"
-remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
   *) exit 2 ;;
@@ -276,7 +279,18 @@ if [ -d "$REMOTE_RUN/scripts/e2e" ]; then
     docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
   fi
 fi
-rm -rf "$REMOTE_RUN"
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
+final_run="$(readlink -m -- "$REMOTE_RUN")"
+case "$final_run" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
+test -f "$final_run/.codex-run-id"
+test "$(cat -- "$final_run/.codex-run-id")" = "$RUN_ID"
+rm -rf -- "$final_run"
 REMOTE_CLEANUP
   fi
 }
@@ -310,7 +324,7 @@ assert_no_symlink_path() {
   local path="$1"
   while [ "$path" != "/" ] && [ "$path" != "." ]; do
     test ! -L "$path"
-    path="$(dirname -- "$path")"
+    path="$(dirname "$path")"
   done
 }
 test ! -L "$TESTBOX_REMOTE_ROOT"
@@ -318,14 +332,14 @@ test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
 assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
 assert_no_symlink_path "$REMOTE_RUN"
-remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
   *) exit 2 ;;
 esac
 assert_no_symlink_path "$remote_run_real"
 REMOTE_RUN="$remote_run_real"
-REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
+REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
 if [[ "$REMOTE_RUN" == "$TESTBOX_REMOTE_ROOT"/agents/*/runs/* ]]; then
   agent_base="$TESTBOX_REMOTE_ROOT/agents"
   agent_dir="$(dirname "$REMOTE_WORKSPACE")"
@@ -340,8 +354,10 @@ if [[ "$REMOTE_RUN" == "$TESTBOX_REMOTE_ROOT"/agents/*/runs/* ]]; then
 fi
 mkdir -p "$REMOTE_WORKSPACE"
 mkdir "$REMOTE_RUN"
+trap 'rm -rf -- "$REMOTE_RUN"' EXIT
 printf '%s\n' "$RUN_ID" > "$REMOTE_RUN/.codex-run-id"
 printf '%s' "${WORKSPACE_METADATA_B64:?}" | base64 -d > "$REMOTE_WORKSPACE/workspace.txt"
+trap - EXIT
 REMOTE_BOOTSTRAP
 REMOTE_RUN_CREATED=1
 
@@ -357,7 +373,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ] && [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; t
   git -C "$REPO_ROOT" cat-file -e "$MESH_RESOURCE_BASELINE_SHA^{commit}"
   BASELINE_ARCHIVE="$(mktemp -t xp-testbox-baseline.XXXXXX.tar)"
   git -C "$REPO_ROOT" archive --format=tar "$MESH_RESOURCE_BASELINE_SHA" > "$BASELINE_ARCHIVE"
-  BASELINE_ARCHIVE_SHA="$(shasum -a 256 "$BASELINE_ARCHIVE" | awk '{print $1}')"
+  BASELINE_ARCHIVE_SHA="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$BASELINE_ARCHIVE")"
   rsync -a "$BASELINE_ARCHIVE" "$TESTBOX:$REMOTE_RUN/resource-baseline.tar"
   ssh -o BatchMode=yes "$TESTBOX" \
     "test \"\$(sha256sum '$REMOTE_RUN/resource-baseline.tar' | awk '{print \$1}')\" = '$BASELINE_ARCHIVE_SHA' && mkdir -p '$REMOTE_RESOURCE_BASELINE' && tar -xf '$REMOTE_RUN/resource-baseline.tar' -C '$REMOTE_RESOURCE_BASELINE' && rm -f '$REMOTE_RUN/resource-baseline.tar'"
@@ -394,14 +410,14 @@ assert_no_symlink_path() {
   local path="$1"
   while [ "$path" != "/" ] && [ "$path" != "." ]; do
     test ! -L "$path"
-    path="$(dirname -- "$path")"
+    path="$(dirname "$path")"
   done
 }
 test ! -L "$TESTBOX_REMOTE_ROOT"
 test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
 assert_no_symlink_path "$REMOTE_RUN"
-remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
   *) exit 2 ;;
@@ -1010,7 +1026,7 @@ fi
 REMOTE
 then
   EVIDENCE_STATUS=passed
-  REMOTE_RUN_CREATED=0
+REMOTE_RUN_CREATED=1
 else
   status=${PIPESTATUS[0]}
   EVIDENCE_STATUS=failed

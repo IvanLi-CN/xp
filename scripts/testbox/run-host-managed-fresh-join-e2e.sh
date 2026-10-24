@@ -11,13 +11,14 @@ RUST_IMAGE="${RUST_IMAGE:-rust:1.96.0-bookworm}"
 XP_TEST_IMAGE="${XP_TEST_IMAGE:-xp-fresh-join-candidate}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_NAME="$(basename "$REPO_ROOT")"
+testbox_validate_component repository "$REPO_NAME"
 PATH_HASH8="$(python3 -c 'import hashlib, os, sys; print(hashlib.sha256(os.path.realpath(sys.argv[1]).encode()).hexdigest()[:8])' "$REPO_ROOT")"
 if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)" ]; then
   echo "host-managed fresh-join runner requires a clean worktree" >&2
   exit 1
 fi
 GIT_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-SOURCE_ARCHIVE_SHA256="$(git -C "$REPO_ROOT" archive --format=tar "$GIT_SHA" | sha256sum | awk '{print $1}')"
+SOURCE_ARCHIVE_SHA256="$(git -C "$REPO_ROOT" archive --format=tar "$GIT_SHA" | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
 RUN_NONCE="$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${RUN_NONCE}_${GIT_SHA:0:12}"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
@@ -27,9 +28,9 @@ REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 COMPOSE_PROJECT="$(python3 -c 'import re, sys; print(re.sub(r"[^a-z0-9_-]+", "_", sys.argv[1].lower()).strip("_")[:63])' "codex_${WORKSPACE_SLUG}_host_join_${RUN_ID}")"
 testbox_remote_root_preflight
 REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
-REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
+REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
 
-REMOTE_RUN_CREATED=0
+REMOTE_RUN_CREATED=1
 cleanup_remote_run() {
   set +e
   if [ "$REMOTE_RUN_CREATED" = "1" ]; then
@@ -42,8 +43,7 @@ echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
 echo "compose_project=$COMPOSE_PROJECT"
 
-ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_WORKSPACE' && mkdir '$REMOTE_RUN' && printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id' && mkdir -p '$REMOTE_WORKSPACE/cargo-home' '$REMOTE_WORKSPACE/rustup-home' '$REMOTE_WORKSPACE/host-join-musl-target' '$REMOTE_WORKSPACE/receipts'"
-REMOTE_RUN_CREATED=1
+ssh -o BatchMode=yes "$TESTBOX" "set -e; mkdir -p '$REMOTE_WORKSPACE' && mkdir '$REMOTE_RUN' && REMOTE_RUN='$REMOTE_RUN'; trap 'rm -rf -- \"\$REMOTE_RUN\"' EXIT; printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id' && mkdir -p '$REMOTE_WORKSPACE/cargo-home' '$REMOTE_WORKSPACE/rustup-home' '$REMOTE_WORKSPACE/host-join-musl-target' '$REMOTE_WORKSPACE/receipts' && trap - EXIT"
 rsync -az --delete \
   --exclude '.git/' \
   --exclude 'target/' \

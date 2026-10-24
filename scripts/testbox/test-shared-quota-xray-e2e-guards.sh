@@ -81,11 +81,21 @@ expect_failure \
     XP_MESH_RESOURCE_DURATION_SECS=900 \
     "$RUNNER"
 
-if readlink -f / >/dev/null 2>&1; then
 (
   set -euo pipefail
   guard_root="$(mktemp -d "${TMPDIR:-/tmp}/xp-testbox-remote-guard.XXXXXX")"
   guard_root="$(cd "$guard_root" && pwd -P)"
+  readlink() {
+    case "${1:-}" in
+      -f|-m)
+        shift
+        [ "${1:-}" = "--" ] && shift
+        python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"
+        ;;
+      *) command readlink "$@" ;;
+    esac
+  }
+  export -f readlink
   ssh() {
     shift 3
     bash -c "$1"
@@ -96,20 +106,34 @@ if readlink -f / >/dev/null 2>&1; then
   # shellcheck source=runner-env.sh
   source "$SCRIPT_DIR/runner-env.sh"
   testbox_remote_root_preflight
-  mkdir -p "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1"
-  printf 'run-1\n' > "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1/.codex-run-id"
   guarded_run="$(testbox_remote_run_guard "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1")"
   test "$guarded_run" = "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1"
+  mkdir -p "$guarded_run"
+  printf 'run-1\n' > "$guarded_run/.codex-run-id"
   testbox_remote_cleanup "$guarded_run" run-1
+  test ! -e "$guarded_run"
+  guarded_run="$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-3"
+  mkdir -p "$guarded_run"
+  printf 'run-3\n' > "$guarded_run/.codex-run-id"
+  if TESTBOX_REMOTE_ROOT="$XP_TESTBOX_REMOTE_ROOT" \
+    REMOTE_RUN="$guarded_run" \
+    REMOTE_RUN_ID=run-2 \
+    REMOTE_WORKSPACE="$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo" \
+    bash "$SCRIPT_DIR/remote-run-guard.sh"; then
+    echo 'expected remote marker guard to fail' >&2
+    exit 1
+  fi
+  testbox_remote_cleanup "$guarded_run" run-3
   test ! -e "$guarded_run"
   mkdir -p "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan"
   mkdir -p "$guard_root/outside"
+  rm -rf "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo"
   ln -s "$guard_root/outside" "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo"
+  test -L "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo"
   if testbox_remote_run_guard "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-2"; then
     echo 'expected intermediate symlink guard to fail' >&2
     exit 1
   fi
 )
-fi
 
 printf 'shared testbox runner guard tests: passed\n'

@@ -12,20 +12,20 @@ assert_no_symlink_path() {
       echo "remote run path contains a symlink: $path" >&2
       return 2
     fi
-    path="$(dirname -- "$path")"
+    path="$(dirname "$path")"
   done
 }
 
 assert_remote_run() {
   local remote_root_real remote_run_real
 
-  test ! -L "$TESTBOX_REMOTE_ROOT"
+  if [ -L "$TESTBOX_REMOTE_ROOT" ]; then return 2; fi
   remote_root_real="$(readlink -f -- "$TESTBOX_REMOTE_ROOT")"
-  test "$remote_root_real" = "$TESTBOX_REMOTE_ROOT"
-  assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
-  test ! -L "$REMOTE_RUN"
-  assert_no_symlink_path "$REMOTE_RUN"
-  remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+  if [ "$remote_root_real" != "$TESTBOX_REMOTE_ROOT" ]; then return 2; fi
+  if ! assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"; then return 2; fi
+  if [ -L "$REMOTE_RUN" ]; then return 2; fi
+  if ! assert_no_symlink_path "$REMOTE_RUN"; then return 2; fi
+  remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
   case "$remote_run_real" in
     "$remote_root_real"/agents/*/runs/*|"$remote_root_real"/workspaces/*/runs/*) ;;
     *)
@@ -37,11 +37,11 @@ assert_remote_run() {
   REMOTE_RUN="$remote_run_real"
   export REMOTE_RUN
   if [ -n "${REMOTE_RUN_ID:-}" ]; then
-    test -f "$REMOTE_RUN/.codex-run-id"
-    test "$(cat -- "$REMOTE_RUN/.codex-run-id")" = "$REMOTE_RUN_ID"
+    if [ ! -f "$REMOTE_RUN/.codex-run-id" ]; then return 2; fi
+    if [ "$(cat -- "$REMOTE_RUN/.codex-run-id")" != "$REMOTE_RUN_ID" ]; then return 2; fi
   fi
   if [ -n "${REMOTE_WORKSPACE:-}" ]; then
-    REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
+    REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
     export REMOTE_WORKSPACE
   fi
 }

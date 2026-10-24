@@ -12,6 +12,7 @@ print(os.path.realpath(sys.argv[1]))
 PY
 )"
 REPO_NAME="$(basename "$REPO_ROOT")"
+testbox_validate_component repository "$REPO_NAME"
 if ! git diff --quiet HEAD -- || ! git diff --cached --quiet || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
   echo "reverse-xray-spike requires a clean worktree" >&2
   exit 1
@@ -36,9 +37,9 @@ PY
 )"
 testbox_remote_root_preflight
 REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
-REMOTE_WORKSPACE="$(dirname -- "$(dirname -- "$REMOTE_RUN")")"
+REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
 
-REMOTE_RUN_CREATED=0
+REMOTE_RUN_CREATED=1
 cleanup() {
   local status=$?
   set +e
@@ -55,16 +56,26 @@ TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    if [ -L "$path" ]; then
+      return 2
+    fi
+    path="$(dirname "$path")"
+  done
+}
 test ! -L "$TESTBOX_REMOTE_ROOT"
 test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
 test ! -L "$REMOTE_RUN"
-remote_run_real="$(readlink -f -- "$REMOTE_RUN")"
+assert_no_symlink_path "$REMOTE_RUN"
+remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
 case "$remote_run_real" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*)
-    cd "$remote_run_real"
-    docker compose -p "$COMPOSE_PROJECT" -f scripts/testbox/reverse-xray-spike-compose.yml -f .codex.caps-compat.yml down -v --remove-orphans || true
     test -f "$remote_run_real/.codex-run-id"
     test "$(cat -- "$remote_run_real/.codex-run-id")" = "$RUN_ID"
+    cd "$remote_run_real"
+    docker compose -p "$COMPOSE_PROJECT" -f scripts/testbox/reverse-xray-spike-compose.yml -f .codex.caps-compat.yml down -v --remove-orphans || true
     rm -rf -- "$remote_run_real"
     ;;
   *) exit 2 ;;
@@ -73,8 +84,7 @@ REMOTE_CLEANUP
 }
 trap cleanup EXIT INT TERM
 
-ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$(dirname -- "$REMOTE_RUN")' && mkdir '$REMOTE_RUN' && printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id'"
-REMOTE_RUN_CREATED=1
+ssh -o BatchMode=yes "$TESTBOX" "set -e; mkdir -p '$(dirname "$REMOTE_RUN")' && mkdir '$REMOTE_RUN' && REMOTE_RUN='$REMOTE_RUN'; trap 'rm -rf -- \"\$REMOTE_RUN\"' EXIT; printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id'; trap - EXIT"
 rsync -az --delete --exclude '.git/' --exclude 'target/' --exclude 'web/node_modules/' \
   "$REPO_ROOT/" "$TESTBOX:$REMOTE_RUN/"
 ssh -o BatchMode=yes "$TESTBOX" "cd '$REMOTE_RUN' && \
