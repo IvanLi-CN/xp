@@ -221,7 +221,26 @@ export const ImportPreviewMobile: Story = {
 			},
 		},
 	},
-	play: ImportPreview.play,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button", { name: "Import nodes" }));
+		const dialog = await within(document.body).findByRole("dialog");
+		await expect(dialog).toHaveClass("bottom-0", "rounded-t-2xl");
+		await userEvent.type(
+			within(dialog).getByLabelText("Subscription or node content"),
+			"vless://00000000-0000-0000-0000-000000000001@edge.example.com:443#imported-edge",
+		);
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Preview" }),
+		);
+		await expect(dialog).toHaveTextContent("Preview report");
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Add valid nodes" }),
+		);
+		await expect(
+			within(document.body).queryByRole("dialog"),
+		).not.toBeInTheDocument();
+	},
 };
 
 export const ImportPreviewReportMobile: Story = {

@@ -8,13 +8,13 @@ import { cn } from "../lib/utils";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-} from "./ui/dialog";
+	Sheet,
+	SheetContent,
+	SheetDescription,
+	SheetFooter,
+	SheetHeader,
+	SheetTitle,
+} from "./ui/sheet";
 
 export type MihomoImportPreviewRequestFn = (
 	source: string,
@@ -190,27 +190,41 @@ export function MihomoSubscriptionImportDialog({
 	}, [canAdd, close, existingExtraProxiesYaml, isStale, onAdd, preview]);
 
 	return (
-		<Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && close()}>
-			<DialogContent
+		<Sheet open={open} onOpenChange={(nextOpen) => !nextOpen && close()}>
+			<SheetContent
+				side="bottom"
+				data-testid="mihomo-import-panel"
 				className={cn(
-					"h-[min(46rem,calc(100dvh-2rem))] max-h-[min(46rem,calc(100dvh-2rem))]",
-					"grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-2xl",
+					"h-[min(46rem,calc(100dvh-1rem))]",
+					"max-h-[min(46rem,calc(100dvh-1rem))] w-full max-w-none",
+					"grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden",
+					"rounded-t-2xl border-x-0 border-b-0 p-0",
+					"sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-1/2",
+					"sm:h-[min(46rem,calc(100dvh-2rem))]",
+					"sm:max-h-[min(46rem,calc(100dvh-2rem))]",
+					"sm:w-[calc(100vw-2rem)] sm:max-w-2xl",
+					"sm:-translate-x-1/2 sm:-translate-y-1/2",
+					"sm:rounded-2xl sm:border",
 				)}
 			>
-				<DialogHeader className="shrink-0 border-b border-border px-5 py-4 sm:px-6">
-					<DialogTitle className="flex items-center gap-2 text-base">
+				<SheetHeader className="shrink-0 border-b border-border px-5 pb-4 pt-2 sm:px-6 sm:py-4">
+					<div
+						className="mx-auto mb-1 mt-0.5 h-1 w-10 rounded-full bg-muted-foreground/30 sm:hidden"
+						aria-hidden="true"
+					/>
+					<SheetTitle className="flex items-center gap-2 pr-8 text-base">
 						<Icon
 							name="tabler:download"
 							className="size-5 text-primary"
 							ariaLabel=""
 						/>
 						Import Mihomo nodes
-					</DialogTitle>
-					<DialogDescription>
+					</SheetTitle>
+					<SheetDescription>
 						Paste a URL, node URI, Base64 text, or Mihomo YAML to preview valid
 						nodes.
-					</DialogDescription>
-				</DialogHeader>
+					</SheetDescription>
+				</SheetHeader>
 
 				<div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6">
 					<div className="space-y-2">
@@ -269,19 +283,22 @@ export function MihomoSubscriptionImportDialog({
 
 					{preview ? (
 						<section className="space-y-3" aria-label="Import preview">
-							<div className="flex flex-wrap items-center justify-between gap-2">
+							<div className="flex flex-wrap items-center gap-2">
 								<div className="flex items-center gap-2 text-sm font-medium">
 									<span>Preview report</span>
 									<span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] text-primary">
 										{SOURCE_LABELS[preview.detected_source]}
 									</span>
 								</div>
-								<span className="text-xs text-muted-foreground">
-									{preview.counts.warnings} warning
-									{preview.counts.warnings === 1 ? "" : "s"}
-								</span>
 							</div>
-							<div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+							<dl
+								aria-label="Import counts"
+								data-testid="mihomo-import-summary"
+								className={cn(
+									"flex flex-wrap items-center gap-x-4 gap-y-1.5",
+									"rounded-md border border-border bg-muted/25 px-3 py-2",
+								)}
+							>
 								{[
 									["Added", preview.counts.added, "text-success"],
 									["Skipped", preview.counts.skipped, "text-muted-foreground"],
@@ -290,22 +307,20 @@ export function MihomoSubscriptionImportDialog({
 								].map(([label, count, color]) => (
 									<div
 										key={label}
-										className="rounded-md border border-border bg-muted/25 px-3 py-2"
+										className="inline-flex items-baseline gap-1.5 whitespace-nowrap"
 									>
-										<div className="text-[11px] text-muted-foreground">
-											{label}
-										</div>
-										<div
+										<dt className="text-xs text-muted-foreground">{label}</dt>
+										<dd
 											className={cn(
-												"mt-1 text-lg font-semibold tabular-nums",
+												"text-sm font-semibold tabular-nums",
 												color,
 											)}
 										>
 											{count}
-										</div>
+										</dd>
 									</div>
 								))}
-							</div>
+							</dl>
 							{preview.items.length > 0 ? (
 								<ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
 									{preview.items.map((item) => (
@@ -361,7 +376,13 @@ export function MihomoSubscriptionImportDialog({
 					) : null}
 				</div>
 
-				<DialogFooter className="shrink-0 border-t border-border px-5 py-4 sm:px-6">
+				<SheetFooter
+					className={cn(
+						"shrink-0 border-t border-border px-5 pt-4",
+						"pb-[calc(1rem+env(safe-area-inset-bottom))]",
+						"sm:px-6 sm:py-4",
+					)}
+				>
 					<Button variant="outline" onClick={close}>
 						Cancel
 					</Button>
@@ -381,8 +402,8 @@ export function MihomoSubscriptionImportDialog({
 					>
 						Add valid nodes
 					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
+				</SheetFooter>
+			</SheetContent>
+		</Sheet>
 	);
 }

@@ -56,6 +56,17 @@ function renderDialog(
 }
 
 describe("MihomoSubscriptionImportDialog", () => {
+	it("uses a bottom sheet surface that becomes a centered panel on larger screens", () => {
+		renderDialog();
+
+		expect(screen.getByRole("dialog")).toHaveClass(
+			"bottom-0",
+			"rounded-t-2xl",
+			"sm:top-1/2",
+			"sm:rounded-2xl",
+		);
+	});
+
 	it("previews a pasted source, reports partial results, and only adds explicitly", async () => {
 		const user = userEvent.setup();
 		const onAdd = vi.fn();
@@ -71,6 +82,9 @@ describe("MihomoSubscriptionImportDialog", () => {
 		await expect(
 			screen.findByText("Preview report"),
 		).resolves.toBeInTheDocument();
+		expect(screen.getByLabelText("Import counts")).toHaveTextContent(
+			"Added1Skipped1Failed1Warnings1",
+		);
 		expect(previewRequest).toHaveBeenCalledWith(
 			"ss://example",
 			"# keep\n",
