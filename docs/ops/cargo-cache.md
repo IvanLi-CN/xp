@@ -56,6 +56,8 @@ run before measurement. The run directory is cleaned by the existing runner
 trap; it is not a cache. Stale lease reclamation first tears down the recorded
 Compose project and releases the subnet claim only after both Compose and run-directory cleanup
 succeed; a failed cleanup keeps the claim for retry.
+Incomplete, malformed, or unsafe claim metadata fails closed and remains for operator repair; the
+allocator never tears down or reuses an ambiguous claim.
 
 Remote build and test processes inherit `TMPDIR=<disposable-run>/tmp`. Rust
 resource fixtures therefore keep temporary node state, SQLite files and logs

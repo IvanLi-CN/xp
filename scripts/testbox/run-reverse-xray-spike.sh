@@ -74,7 +74,13 @@ on_signal() {
   cleanup "$status"
   exit "$status"
 }
-trap cleanup EXIT
+on_exit() {
+  local status=$?
+  trap - EXIT
+  cleanup "$status"
+  exit $?
+}
+trap on_exit EXIT
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 testbox_remote_root_preflight

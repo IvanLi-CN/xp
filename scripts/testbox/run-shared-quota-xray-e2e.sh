@@ -449,7 +449,7 @@ export TMPDIR="$REMOTE_RUN/tmp"
 mkdir -p "$TMPDIR"
 
 cleanup() {
-  local status=$?
+  local status="${1:-$?}"
   if [ "${CLEANUP_DONE:-0}" = "1" ]; then
     return "$status"
   fi
@@ -506,7 +506,13 @@ on_signal() {
   trap - EXIT INT TERM
   exit "$1"
 }
-trap cleanup EXIT
+on_exit() {
+  local status=$?
+  trap - EXIT
+  cleanup "$status"
+  exit $?
+}
+trap on_exit EXIT
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
@@ -718,6 +724,7 @@ import json
 import os
 import pathlib
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -822,8 +829,8 @@ guard_script = remote_run / "scripts/testbox/remote-run-guard.py"
 
 def cleanup_claim_dir(path):
     if path_has_symlink(path) or not guard_script.is_file():
-        return
-    subprocess.run(
+        return False
+    result = subprocess.run(
         [
             "python3",
             str(guard_script),
@@ -833,17 +840,30 @@ def cleanup_claim_dir(path):
         ],
         check=False,
     )
+    return result.returncode == 0
+
+
+def read_claim_file(path, label):
+    if path.is_symlink() or not path.is_file():
+        print(f"shared-testbox claim metadata is missing or unsafe: {label}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        value = path.read_text().strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"cannot read shared-testbox claim metadata {label}: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if not value:
+        print(f"shared-testbox claim metadata is empty: {label}", file=sys.stderr)
+        sys.exit(1)
+    return value
 
 
 def cleanup_stale_run(path, claim_dir):
-    if not path.exists():
-        return True
+    if not path.exists() or path.is_symlink():
+        return False
     if path_has_symlink(path) or not path.is_dir() or not is_allowed_run(path):
         return False
-    try:
-        compose_project = (claim_dir / "compose_project").read_text().strip()
-    except (OSError, UnicodeDecodeError):
-        return False
+    compose_project = read_claim_file(claim_dir / "compose_project", "compose_project")
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", compose_project):
         return False
     compose_dir = path / "scripts/e2e"
@@ -950,25 +970,48 @@ try:
         if claim_dir.name.startswith("."):
             continue
         if claim_dir.is_symlink():
-            continue
+            print(f"shared-testbox claim directory is a symlink: {claim_dir}", file=sys.stderr)
+            sys.exit(1)
         if not claim_dir.is_dir() or path_has_symlink(claim_dir):
-            cleanup_claim_dir(claim_dir)
+            if not cleanup_claim_dir(claim_dir):
+                print(f"cannot clean unsafe shared-testbox claim: {claim_dir}", file=sys.stderr)
+                sys.exit(1)
             continue
+
+        claim_stat = claim_dir.stat()
+        if claim_stat.st_uid != os.geteuid() or stat.S_IMODE(claim_stat.st_mode) != 0o700:
+            print(f"shared-testbox claim directory is not private: {claim_dir}", file=sys.stderr)
+            sys.exit(1)
 
         run_path_file = claim_dir / "run_path"
         subnet_file = claim_dir / "subnet"
-        if not run_path_file.exists() or not subnet_file.exists():
-            cleanup_claim_dir(claim_dir)
-            continue
-
-        run_path = pathlib.Path(run_path_file.read_text().strip())
+        run_path = pathlib.Path(read_claim_file(run_path_file, str(run_path_file)))
+        subnet_text = read_claim_file(subnet_file, str(subnet_file))
+        try:
+            subnet = ipaddress.ip_network(subnet_text, strict=False)
+        except ValueError as exc:
+            print(f"invalid shared-testbox claim subnet {subnet_file}: {exc}", file=sys.stderr)
+            sys.exit(1)
+        if not run_path.is_absolute() or not is_allowed_run(run_path):
+            print(f"invalid shared-testbox claim run path: {run_path}", file=sys.stderr)
+            sys.exit(1)
+        compose_project = read_claim_file(claim_dir / "compose_project", "compose_project")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", compose_project):
+            print(f"invalid shared-testbox Compose project: {claim_dir}", file=sys.stderr)
+            sys.exit(1)
 
         def remove_stale_run():
             return cleanup_stale_run(run_path, claim_dir)
 
         active = False
         lease_file = claim_dir / "lease"
-        if run_path.is_dir() and not run_path.is_symlink() and lease_file.is_file():
+        if not run_path.exists() or run_path.is_symlink() or not run_path.is_dir():
+            print(f"shared-testbox claim points to a missing or unsafe run: {run_path}", file=sys.stderr)
+            sys.exit(1)
+        if lease_file.is_symlink() or (lease_file.exists() and not lease_file.is_file()):
+            print(f"shared-testbox lease is missing or unsafe: {lease_file}", file=sys.stderr)
+            sys.exit(1)
+        if lease_file.is_file():
             lease = {}
             try:
                 for line in lease_file.read_text().splitlines():
@@ -976,6 +1019,10 @@ try:
                     lease[key] = value
                 pid = int(lease["pid"])
                 start_ticks = int(lease["start_ticks"])
+            except (KeyError, ValueError, OSError, UnicodeDecodeError) as exc:
+                print(f"invalid active shared-testbox lease {lease_file}: {exc}", file=sys.stderr)
+                sys.exit(1)
+            try:
                 proc_stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
                 proc_start_ticks = int(proc_stat.rsplit(")", 1)[1].split()[19])
                 proc_cwd = pathlib.Path(os.path.realpath(f"/proc/{pid}/cwd"))
@@ -983,31 +1030,29 @@ try:
                 active = proc_start_ticks == start_ticks and (
                     proc_cwd == run_real or run_real in proc_cwd.parents
                 )
-            except (KeyError, ValueError, FileNotFoundError, OSError):
+            except FileNotFoundError:
                 active = False
-        elif run_path.is_dir() and not run_path.is_symlink():
+            except (ValueError, OSError) as exc:
+                print(f"cannot validate shared-testbox lease {lease_file}: {exc}", file=sys.stderr)
+                sys.exit(1)
+        else:
             try:
                 active = time.time() - claim_dir.stat().st_mtime < pending_claim_grace_seconds
             except OSError:
-                active = False
+                print(f"cannot inspect shared-testbox claim: {claim_dir}", file=sys.stderr)
+                sys.exit(1)
 
         if not active:
             stale_cleanup_ok = remove_stale_run()
-            if stale_cleanup_ok and not path_has_symlink(claim_dir):
-                cleanup_claim_dir(claim_dir)
+            if not stale_cleanup_ok:
+                print(f"cannot safely reclaim shared-testbox run: {run_path}", file=sys.stderr)
+                sys.exit(1)
+            if path_has_symlink(claim_dir) or not cleanup_claim_dir(claim_dir):
+                print(f"cannot release shared-testbox claim: {claim_dir}", file=sys.stderr)
+                sys.exit(1)
             continue
 
-        try:
-            claimed.append(ipaddress.ip_network(subnet_file.read_text().strip(), strict=False))
-        except ValueError:
-            if active:
-                print(
-                    f"active shared-testbox claim has invalid subnet metadata: {claim_dir}",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-            if not path_has_symlink(claim_dir):
-                cleanup_claim_dir(claim_dir)
+        claimed.append(subnet)
 
     for octet in range(0, 256):
         candidate = ipaddress.ip_network(f"10.203.{octet}.0/24")
@@ -1055,6 +1100,7 @@ fi
 claim_start_ticks="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
 if [ -n "$claim_start_ticks" ]; then
   printf 'pid=%s\nstart_ticks=%s\n' "$$" "$claim_start_ticks" > "$SUBNET_CLAIM_DIR/lease"
+  chmod 600 "$SUBNET_CLAIM_DIR/lease"
 fi
 
 cat > "$net_override" <<YAML

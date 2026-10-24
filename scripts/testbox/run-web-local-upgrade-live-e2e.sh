@@ -46,7 +46,7 @@ REMOTE_RUN_CREATED=0
 cleanup_remote_run() {
   local status="${1:-$?}"
   set +e
-  if [ "$REMOTE_RUN_CREATED" = "1" ]; then
+  if [ "$REMOTE_RUN_CREATED" = "1" ] && [ "$status" -eq 0 ]; then
     testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
   fi
   return "$status"
@@ -136,16 +136,32 @@ source "$REMOTE_RUN/scripts/testbox/remote-run-guard.sh"
 CARGO_HOME_DIR="$REMOTE_WORKSPACE/cargo-home"
 RUSTUP_HOME_DIR="$REMOTE_WORKSPACE/rustup-home"
 
-cleanup() {
-  set +e
-  if [ -n "${CONTAINER_NAME:-}" ]; then
-    docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+remove_container() {
+  local name="$1"
+  if docker inspect "$name" >/dev/null 2>&1; then
+    docker rm -f "$name" >/dev/null 2>&1
+  else
+    docker info >/dev/null 2>&1
   fi
-  if [ -n "${REMOTE_RUN:-}" ]; then
-    if assert_remote_run; then
-      remove_remote_run >/dev/null 2>&1 || true
+}
+cleanup() {
+  local status="${1:-$?}"
+  set +e
+  local cleanup_ok=1
+  if [ -n "${CONTAINER_NAME:-}" ]; then
+    remove_container "$CONTAINER_NAME" || cleanup_ok=0
+  fi
+  if [ "$cleanup_ok" = "1" ] && [ -n "${REMOTE_RUN:-}" ]; then
+    if assert_remote_run && remove_remote_run >/dev/null 2>&1; then
+      :
+    else
+      cleanup_ok=0
     fi
   fi
+  if [ "$cleanup_ok" != "1" ] && [ "$status" -eq 0 ]; then
+    status=1
+  fi
+  return "$status"
 }
 on_signal() {
   local status="$1"
@@ -154,7 +170,13 @@ on_signal() {
   exit "$status"
 }
 trap - EXIT INT TERM
-trap cleanup EXIT
+on_exit() {
+  local status=$?
+  trap - EXIT
+  cleanup "$status"
+  exit $?
+}
+trap on_exit EXIT
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
