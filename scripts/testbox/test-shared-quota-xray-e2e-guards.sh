@@ -162,6 +162,13 @@ PY
   fi
   testbox_remote_cleanup "$guarded_run" run-3
   test ! -e "$guarded_run"
+  mkdir -p "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/insecure"
+  chmod 0777 "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/insecure"
+  if testbox_remote_run_create \
+    "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/insecure/runs/run-insecure"; then
+    echo 'expected writable remote run parent guard to fail' >&2
+    exit 1
+  fi
   claim_dir="$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims/10_203_0_0_24"
   mkdir -p "$claim_dir"
   python3 - "$XP_TESTBOX_REMOTE_ROOT" "$claim_dir" "$SCRIPT_DIR/remote-run-guard.py" <<'PY'

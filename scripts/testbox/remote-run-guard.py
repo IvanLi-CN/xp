@@ -25,6 +25,21 @@ def fail(message: str) -> NoReturn:
     raise SystemExit(2)
 
 
+def validate_directory(directory_fd: int, owner_required: bool, allow_sticky: bool) -> None:
+    directory_stat = os.fstat(directory_fd)
+    if not stat.S_ISDIR(directory_stat.st_mode):
+        fail("testbox path component is not a directory")
+    if owner_required:
+        if directory_stat.st_uid != os.geteuid():
+            fail("testbox path component is not owned by the current user")
+    elif directory_stat.st_uid not in (0, os.geteuid()):
+        fail("testbox root ancestor is not trusted")
+    if directory_stat.st_mode & 0o022 and not (
+        allow_sticky and directory_stat.st_mode & stat.S_ISVTX
+    ):
+        fail("testbox path component is writable by another user")
+
+
 def root_parts(root: str) -> tuple[str, list[str]]:
     root = os.path.normpath(root)
     if not os.path.isabs(root) or root == os.sep:
@@ -42,7 +57,7 @@ def ensure_root(root: str) -> None:
     root, parts = root_parts(root)
     current_fd = os.open(os.sep, OPEN_FLAGS)
     try:
-        for part in parts:
+        for index, part in enumerate(parts):
             try:
                 next_fd = os.open(part, OPEN_FLAGS, dir_fd=current_fd)
             except FileNotFoundError:
@@ -51,6 +66,11 @@ def ensure_root(root: str) -> None:
                 except FileExistsError:
                     pass
                 next_fd = os.open(part, OPEN_FLAGS, dir_fd=current_fd)
+            validate_directory(
+                next_fd,
+                owner_required=index == len(parts) - 1,
+                allow_sticky=index != len(parts) - 1,
+            )
             os.close(current_fd)
             current_fd = next_fd
     except OSError as exc:
@@ -104,8 +124,13 @@ def open_root(root: str) -> int:
     _, parts = root_parts(root)
     current_fd = os.open(os.sep, OPEN_FLAGS)
     try:
-        for part in parts:
+        for index, part in enumerate(parts):
             next_fd = os.open(part, OPEN_FLAGS, dir_fd=current_fd)
+            validate_directory(
+                next_fd,
+                owner_required=index == len(parts) - 1,
+                allow_sticky=index != len(parts) - 1,
+            )
             os.close(current_fd)
             current_fd = next_fd
         return current_fd
@@ -133,6 +158,7 @@ def open_parent(root_fd: int, parts: list[str], create: bool) -> int:
                     fail(f"testbox run parent is not a safe directory: {exc}")
             except OSError as exc:
                 fail(f"testbox run parent is not a safe directory: {exc}")
+            validate_directory(next_fd, owner_required=True, allow_sticky=False)
             os.close(current_fd)
             current_fd = next_fd
         return current_fd
@@ -150,6 +176,9 @@ def lock_parent(parent_fd: int) -> int:
             dir_fd=parent_fd,
         )
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        lock_stat = os.fstat(lock_fd)
+        if lock_stat.st_uid != os.geteuid() or lock_stat.st_mode & 0o022:
+            fail("testbox run lock is writable by another user")
         return lock_fd
     except OSError as exc:
         fail(f"cannot lock testbox run parent safely: {exc}")
