@@ -308,7 +308,7 @@ esac
 REMOTE_CLEANUP
     then
       if testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1; then
-        :
+        REMOTE_RUN_CREATED=0
       else
         status=1
       fi
