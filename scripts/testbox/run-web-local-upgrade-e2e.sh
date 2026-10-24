@@ -55,9 +55,9 @@ cleanup_remote_run() {
 }
 trap cleanup_remote_run EXIT INT TERM
 testbox_remote_root_preflight
+REMOTE_RUN_CREATED=1
 REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
-REMOTE_RUN_CREATED=1
 
 CONTAINER_RAW="codex_${WORKSPACE_SLUG}_web_upgrade_${RUN_ID}"
 CONTAINER_NAME="$(testbox_bounded_name "$CONTAINER_RAW")"

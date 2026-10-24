@@ -28,8 +28,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 testbox_remote_root_preflight
-REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 REMOTE_RUN_CREATED=1
+REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"

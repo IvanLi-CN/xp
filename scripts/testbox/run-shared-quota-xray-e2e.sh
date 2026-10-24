@@ -175,13 +175,13 @@ cleanup_unclaimed_run() {
 }
 trap cleanup_unclaimed_run EXIT
 testbox_remote_root_preflight
+REMOTE_RUN_CREATED=1
 REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   REMOTE_WORKSPACE="$REMOTE_AGENT_DIR/workspace"
 else
   REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
 fi
-REMOTE_RUN_CREATED=1
 REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
@@ -688,7 +688,6 @@ claim_root = pathlib.Path(sys.argv[1])
 remote_run = pathlib.Path(sys.argv[2])
 compose_project = sys.argv[3]
 remote_root = pathlib.Path(os.path.normpath(sys.argv[4]))
-lock_path = claim_root / ".codex-run-lock"
 pending_claim_grace_seconds = 120
 
 if remote_root.is_symlink() or remote_root.resolve() != remote_root:
@@ -696,14 +695,15 @@ if remote_root.is_symlink() or remote_root.resolve() != remote_root:
     sys.exit(1)
 
 
-def ensure_directory(path, create):
+def open_directory(path, create):
     try:
-        parts = path.relative_to(remote_root).parts
+        suffix = path.relative_to(remote_root).parts
     except ValueError:
         print(f"shared-testbox path escaped remote root: {path}", file=sys.stderr)
         sys.exit(1)
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    current_fd = os.open(remote_root, flags)
+    parts = remote_root.relative_to(remote_root.anchor).parts + suffix
+    current_fd = os.open(remote_root.anchor, flags)
     try:
         for part in parts:
             try:
@@ -712,12 +712,22 @@ def ensure_directory(path, create):
                 if not create:
                     print(f"shared-testbox directory is missing: {path}", file=sys.stderr)
                     sys.exit(1)
-                os.mkdir(part, 0o700, dir_fd=current_fd)
+                try:
+                    os.mkdir(part, 0o700, dir_fd=current_fd)
+                except FileExistsError:
+                    pass
                 next_fd = os.open(part, flags, dir_fd=current_fd)
             os.close(current_fd)
             current_fd = next_fd
-    finally:
+        return current_fd
+    except BaseException:
         os.close(current_fd)
+        raise
+
+
+def ensure_directory(path, create):
+    directory_fd = open_directory(path, create)
+    os.close(directory_fd)
 
 
 def path_has_symlink(path):
@@ -786,7 +796,13 @@ def cleanup_stale_run(path):
 ensure_directory(remote_root / "agents", create=True)
 ensure_directory(claim_root, create=True)
 
-lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+claim_root_fd = open_directory(claim_root, create=False)
+lock_fd = os.open(
+    ".codex-run-lock",
+    os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
+    0o600,
+    dir_fd=claim_root_fd,
+)
 fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
 used = []
@@ -911,6 +927,7 @@ try:
 finally:
     fcntl.flock(lock_fd, fcntl.LOCK_UN)
     os.close(lock_fd)
+    os.close(claim_root_fd)
 PY
 )
 

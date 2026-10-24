@@ -59,9 +59,9 @@ REMOTE_CLEANUP
 }
 trap cleanup EXIT INT TERM
 testbox_remote_root_preflight
+REMOTE_RUN_CREATED=1
 REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
-REMOTE_RUN_CREATED=1
 
 rsync -az --delete --exclude '.codex-run-id' --exclude '.git/' --exclude 'target/' --exclude 'web/node_modules/' \
   "$REPO_ROOT/" "$TESTBOX:$REMOTE_RUN/"

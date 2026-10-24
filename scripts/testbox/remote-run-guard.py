@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import base64
-import ctypes
 import fcntl
 import os
 import stat
@@ -168,16 +167,22 @@ def same_directory(parent_fd: int, name: str, directory_fd: int) -> None:
 
 
 def remove_directory_entry(parent_fd: int, name: str, directory_fd: int) -> None:
-    if sys.platform == "linux":
-        unlinkat = ctypes.CDLL(None, use_errno=True).unlinkat
-        unlinkat.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
-        unlinkat.restype = ctypes.c_int
-        if unlinkat(directory_fd, b"", 0x200 | 0x1000) == 0:
-            return
-        error = ctypes.get_errno()
-        fail(f"cannot remove testbox directory by descriptor: {os.strerror(error)}")
     same_directory(parent_fd, name, directory_fd)
-    os.rmdir(name, dir_fd=parent_fd)
+    for attempt in range(16):
+        quarantine = f".codex-run-quarantine-{os.getpid()}-{attempt}"
+        try:
+            os.rename(
+                name,
+                quarantine,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+            )
+        except FileExistsError:
+            continue
+        same_directory(parent_fd, quarantine, directory_fd)
+        os.rmdir(quarantine, dir_fd=parent_fd)
+        return
+    fail("cannot allocate a testbox cleanup quarantine name")
 
 
 def remove_tree(parent_fd: int, name: str, directory_fd: int | None = None) -> None:
@@ -251,6 +256,13 @@ def create_run(root: str, run: str, expected: str) -> None:
         if created and run_fd is not None:
             try:
                 remove_tree(parent_fd, parts[-1], run_fd)
+            except OSError:
+                pass
+        elif created:
+            try:
+                entry_stat = os.stat(parts[-1], dir_fd=parent_fd, follow_symlinks=False)
+                if stat.S_ISDIR(entry_stat.st_mode):
+                    os.rmdir(parts[-1], dir_fd=parent_fd)
             except OSError:
                 pass
         raise
