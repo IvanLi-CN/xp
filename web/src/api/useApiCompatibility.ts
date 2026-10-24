@@ -21,20 +21,30 @@ type PersistedCompatibility =
 			kind: "compatible";
 			profileReleaseTag: string;
 			advertisedCapabilities: string[];
+			capabilitiesAreAuthoritative?: boolean;
 	  }
 	| { kind: "incompatible"; reason: string };
 
-function persistedCompatibilityKey(adminToken: string): string {
-	return `${PERSISTED_COMPATIBILITY_PREFIX}${adminToken ? "admin" : "anonymous"}`;
+function persistedCompatibilityKey(
+	adminToken: string,
+	backendOrigin: string,
+): string {
+	const origin = backendOrigin.trim() || "unknown";
+	return `${PERSISTED_COMPATIBILITY_PREFIX}${
+		adminToken ? "admin" : "anonymous"
+	}-${encodeURIComponent(origin)}`;
 }
 
-function readPersistedCompatibility(
+export function readPersistedCompatibility(
 	adminToken: string,
+	backendOrigin = "",
 ): ApiCompatibilityResult | undefined {
 	if (isDemoRuntime()) return undefined;
 	if (typeof localStorage === "undefined") return undefined;
 	try {
-		const raw = localStorage.getItem(persistedCompatibilityKey(adminToken));
+		const raw = localStorage.getItem(
+			persistedCompatibilityKey(adminToken, backendOrigin),
+		);
 		if (!raw) return undefined;
 		const snapshot = JSON.parse(raw) as PersistedCompatibility;
 		if (snapshot.kind === "incompatible") return snapshot;
@@ -53,15 +63,18 @@ function readPersistedCompatibility(
 		return resolveApiCompatibility({
 			releaseTag: profile.releaseTag,
 			capabilities: snapshot.advertisedCapabilities,
+			capabilitiesAreAuthoritative:
+				snapshot.capabilitiesAreAuthoritative === true,
 		});
 	} catch {
 		return undefined;
 	}
 }
 
-function persistCompatibility(
+export function persistCompatibility(
 	adminToken: string,
 	compatibility: ApiCompatibilityResult,
+	backendOrigin = "",
 ): void {
 	if (isDemoRuntime()) return;
 	if (typeof localStorage === "undefined") return;
@@ -72,10 +85,12 @@ function persistCompatibility(
 					kind: "compatible",
 					profileReleaseTag: compatibility.profile.releaseTag,
 					advertisedCapabilities: [...compatibility.advertisedCapabilities],
+					capabilitiesAreAuthoritative:
+						compatibility.capabilitiesAreAuthoritative,
 				};
 	try {
 		localStorage.setItem(
-			persistedCompatibilityKey(adminToken),
+			persistedCompatibilityKey(adminToken, backendOrigin),
 			JSON.stringify(snapshot),
 		);
 	} catch {
@@ -100,15 +115,25 @@ export function ApiCompatibilityProvider(props: {
 	);
 }
 
-export function useApiCompatibility(adminToken: string, isOnline: boolean) {
+export function useApiCompatibility(
+	adminToken: string,
+	isOnline: boolean,
+	backendOrigin: string,
+	backendGeneration = 0,
+) {
 	return useQuery({
-		queryKey: ["apiCompatibility", adminToken ? "admin" : "anonymous"],
+		queryKey: [
+			"apiCompatibility",
+			adminToken ? "admin" : "anonymous",
+			backendOrigin,
+			backendGeneration,
+		],
 		queryFn: async ({ signal }) => {
 			const compatibility = await fetchApiCompatibility({
 				adminToken: adminToken || undefined,
 				signal,
 			});
-			persistCompatibility(adminToken, compatibility);
+			persistCompatibility(adminToken, compatibility, backendOrigin);
 			return compatibility;
 		},
 		enabled: isOnline,
@@ -119,7 +144,7 @@ export function useApiCompatibility(adminToken: string, isOnline: boolean) {
 		// PWA build or cache identity.
 		initialData: isOnline
 			? undefined
-			: () => readPersistedCompatibility(adminToken),
+			: () => readPersistedCompatibility(adminToken, backendOrigin),
 		initialDataUpdatedAt: 0,
 	});
 }

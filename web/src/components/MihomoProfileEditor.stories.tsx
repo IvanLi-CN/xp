@@ -1,9 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, userEvent, within } from "@storybook/test";
+import { expect, userEvent, waitFor, within } from "@storybook/test";
 import { useRef, useState } from "react";
 
-import type { AdminUserMihomoProfile } from "../api/adminUsers";
+import type {
+	AdminMihomoImportPreview,
+	AdminUserMihomoProfile,
+} from "../api/adminUsers";
 import { MihomoProfileEditor } from "./MihomoProfileEditor";
+import type { MihomoImportPreviewRequestFn } from "./MihomoSubscriptionImportDialog";
 
 const INITIAL_PROFILE: AdminUserMihomoProfile = {
 	mixin_yaml: "port: 0\nproxy-groups:\n  - name: Auto\n    type: url-test\n",
@@ -19,6 +23,28 @@ type EditorStoryProps = {
 	startWithError?: boolean;
 	startSaving?: boolean;
 	holdSave?: boolean;
+	importAvailable?: boolean;
+};
+
+const IMPORT_PREVIEW: AdminMihomoImportPreview = {
+	detected_source: "raw",
+	added_proxies_yaml: [
+		"- name: imported-edge\n",
+		"  type: vless\n",
+		"  server: edge.example.com\n",
+		"  port: 443\n",
+		"  uuid: 00000000-0000-0000-0000-000000000001\n",
+	].join(""),
+	counts: { added: 1, skipped: 0, failed: 0, warnings: 0 },
+	items: [
+		{
+			source_index: 1,
+			status: "added",
+			name: "imported-edge",
+			scheme: "vless",
+			warnings: [],
+		},
+	],
 };
 
 function EditorStory({
@@ -27,6 +53,7 @@ function EditorStory({
 	startWithError = false,
 	startSaving = false,
 	holdSave = false,
+	importAvailable = false,
 }: EditorStoryProps) {
 	const initialDraft =
 		startWithError || holdSave
@@ -38,6 +65,7 @@ function EditorStory({
 				}
 			: initialProfile;
 	const [draft, setDraft] = useState(initialDraft);
+	const [savedProfile, setSavedProfile] = useState(initialProfile);
 	const [isSaving, setIsSaving] = useState(startSaving);
 	const [saveAttempts, setSaveAttempts] = useState(0);
 	const [error, setError] = useState<string | null>(null);
@@ -57,29 +85,36 @@ function EditorStory({
 			setError("The previous save failed. Retry when the service is ready.");
 			return false;
 		}
+		if (!holdSave) {
+			setSavedProfile(draft);
+		}
 		return true;
 	};
 
 	return (
 		<div
-			className="min-h-[34rem] w-full bg-background p-6 text-foreground"
+			className="min-h-[34rem] w-full bg-background p-12 text-foreground"
 			data-visual-evidence-surface="mihomo-profile-editor"
 		>
 			<div data-visual-evidence-target="mihomo-profile-editor">
 				<MihomoProfileEditor
 					userName="Mira Sato"
 					userId="story-user"
-					profile={initialProfile}
+					profile={savedProfile}
 					draft={draft}
-					dirty={Object.keys(initialProfile).some(
+					dirty={Object.keys(savedProfile).some(
 						(key) =>
 							draft[key as keyof AdminUserMihomoProfile] !==
-							initialProfile[key as keyof AdminUserMihomoProfile],
+							savedProfile[key as keyof AdminUserMihomoProfile],
 					)}
 					isSaving={isSaving}
 					readOnly={readOnly}
 					error={error}
 					isLoaded
+					importAvailable={importAvailable}
+					previewImport={
+						(async () => IMPORT_PREVIEW) satisfies MihomoImportPreviewRequestFn
+					}
 					onChange={(documentId, value) => {
 						setDraft((current) => {
 							switch (documentId) {
@@ -135,6 +170,84 @@ type Story = StoryObj<typeof meta>;
 
 export const Inline: Story = {};
 
+export const ImportPreview: Story = {
+	args: { importAvailable: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button", { name: "Import nodes" }));
+		const dialog = await within(document.body).findByRole("dialog");
+		await userEvent.type(
+			within(dialog).getByLabelText("Subscription or node content"),
+			"vless://00000000-0000-0000-0000-000000000001@edge.example.com:443#imported-edge",
+		);
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Preview" }),
+		);
+		await expect(dialog).toHaveTextContent("Preview report");
+		await expect(dialog).toHaveTextContent("imported-edge");
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Add valid nodes" }),
+		);
+		await expect(
+			within(document.body).queryByRole("dialog"),
+		).not.toBeInTheDocument();
+		await expect(canvasElement).toHaveTextContent(
+			"Unsaved configuration changes",
+		);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save configuration" }),
+		);
+		await waitFor(() =>
+			expect(canvasElement).toHaveTextContent("Saved configuration"),
+		);
+	},
+};
+
+export const ImportPreviewReport: Story = {
+	args: { importAvailable: true },
+};
+
+export const ImportPreviewMobile: Story = {
+	args: { importAvailable: true },
+	parameters: {
+		viewport: {
+			defaultViewport: "mihomoMobile393",
+			viewports: {
+				mihomoMobile393: {
+					name: "Mihomo mobile (393x852)",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button", { name: "Import nodes" }));
+		const dialog = await within(document.body).findByRole("dialog");
+		await expect(dialog).toHaveClass("bottom-0", "rounded-t-2xl");
+		await userEvent.type(
+			within(dialog).getByLabelText("Subscription or node content"),
+			"vless://00000000-0000-0000-0000-000000000001@edge.example.com:443#imported-edge",
+		);
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Preview" }),
+		);
+		await expect(dialog).toHaveTextContent("Preview report");
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Add valid nodes" }),
+		);
+		await expect(
+			within(document.body).queryByRole("dialog"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const ImportPreviewReportMobile: Story = {
+	args: { importAvailable: true },
+	parameters: ImportPreviewMobile.parameters,
+};
+
 export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -183,10 +296,14 @@ export const ReadOnly: Story = {
 		await expect(
 			within(dialog).getByRole("button", { name: "Save configuration" }),
 		).toBeDisabled();
+		await waitFor(() =>
+			expect(dialog.querySelectorAll<HTMLElement>(".cm-content")).toHaveLength(
+				3,
+			),
+		);
 		const editors = Array.from(
 			dialog.querySelectorAll<HTMLElement>(".cm-content"),
 		);
-		await expect(editors).toHaveLength(3);
 		for (const editor of editors) {
 			await expect(editor).toHaveAttribute("contenteditable", "false");
 		}

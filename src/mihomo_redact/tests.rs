@@ -1,5 +1,5 @@
 use super::*;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
@@ -182,6 +182,7 @@ fn source_format_raw_keeps_input_unchanged() {
 async fn permissive_url_loader_fetches_remote_source() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
+        .and(header("cache-control", "no-store"))
         .and(path("/raw"))
         .respond_with(ResponseTemplate::new(200).set_body_string("vless://demo@example.com:443\n"))
         .mount(&server)
@@ -225,6 +226,36 @@ async fn public_only_url_loader_rejects_redirects_to_loopback() {
 
     assert_eq!(err.kind, RedactErrorKind::InvalidInput);
     assert!(err.message.contains("public ip"));
+}
+
+#[tokio::test]
+async fn url_loader_allows_ten_redirects_before_final_response() {
+    let server = MockServer::start().await;
+    for index in 0..10 {
+        Mock::given(method("GET"))
+            .and(path(format!("/redirect-{index}")))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", format!("/redirect-{}", index + 1)),
+            )
+            .mount(&server)
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path("/redirect-10"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok\n"))
+        .mount(&server)
+        .await;
+
+    let text = load_text_from_url(
+        &format!("{}/redirect-0", server.uri()),
+        15,
+        UrlLoadPolicy::AllowAny,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(text, "ok\n");
 }
 
 #[tokio::test]
@@ -284,7 +315,7 @@ async fn url_loader_rejects_remote_bodies_that_exceed_limit() {
     .await
     .unwrap_err();
 
-    assert_eq!(err.kind, RedactErrorKind::InvalidInput);
+    assert_eq!(err.kind, RedactErrorKind::TooLarge);
     assert!(err.message.contains("exceeds"));
 }
 

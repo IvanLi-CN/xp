@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveApiCompatibility } from "./apiCompatibility";
-import { getApiCapabilityState } from "./useApiCompatibility";
+import {
+	getApiCapabilityState,
+	persistCompatibility,
+	readPersistedCompatibility,
+} from "./useApiCompatibility";
 
 describe("API capability state", () => {
 	it("blocks protected queries while the compatibility probe is pending", () => {
@@ -25,5 +29,42 @@ describe("API capability state", () => {
 		expect(state.available).toBe(false);
 		expect(state.pending).toBe(false);
 		expect(state.reason).toMatch(/admin\.mesh/);
+	});
+
+	it("keeps probe-only capabilities disabled after persistence and restore", () => {
+		const compatibility = resolveApiCompatibility({
+			releaseTag: "v3.22.5",
+		});
+		persistCompatibility(
+			"cache-test",
+			compatibility,
+			"https://primary.example",
+		);
+
+		const restored = readPersistedCompatibility(
+			"cache-test",
+			"https://primary.example",
+		);
+		expect(restored?.kind).toBe("compatible");
+		if (!restored || restored.kind !== "compatible") return;
+		expect(
+			restored.isFeatureAvailable("admin.mihomo-subscription-import"),
+		).toBe(false);
+	});
+
+	it("does not restore another backend's persisted capability snapshot", () => {
+		const compatibility = resolveApiCompatibility({
+			releaseTag: "v3.22.5",
+			capabilities: ["api.health", "admin.mihomo-subscription-import"],
+		});
+		persistCompatibility(
+			"origin-test",
+			compatibility,
+			"https://primary.example",
+		);
+
+		expect(
+			readPersistedCompatibility("origin-test", "https://secondary.example"),
+		).toBeUndefined();
 	});
 });

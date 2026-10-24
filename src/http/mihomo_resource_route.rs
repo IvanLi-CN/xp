@@ -16,6 +16,20 @@ pub(super) async fn no_store_response(request: Request, next: Next) -> Response 
     response
 }
 
+pub(super) async fn no_store_mihomo_import_response(request: Request, next: Next) -> Response {
+    let should_disable_cache = request
+        .uri()
+        .path()
+        .ends_with("/subscription-mihomo-import/preview");
+    let mut response = next.run(request).await;
+    if should_disable_cache {
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    response
+}
+
 pub(super) async fn get_mihomo_resource(
     Extension(state): Extension<AppState>,
     Path(resource_id): Path<String>,

@@ -23,6 +23,7 @@ export const API_CAPABILITIES = [
 	"admin.node-probes",
 	"admin.traffic-usage",
 	"admin.mihomo-tools",
+	"admin.mihomo-subscription-import",
 	"admin.mihomo-resource-policy",
 	"node.mihomo-resource-private-cidrs-v1",
 ] as const;
@@ -31,10 +32,18 @@ export type ApiCapability = (typeof API_CAPABILITIES)[number] | (string & {});
 export type ReleaseInventory = {
 	minor: ApiCompatibilityMinor;
 	releaseTag: `v${string}`;
+	/** Historical source commit for the immutable release tag. */
 	sourceCommit: string;
+	/**
+	 * Source snapshot for the current additive API contract. Legacy profiles
+	 * intentionally omit this overlay and use their historical source.
+	 */
+	contractSourceCommit?: string;
 	webApiContractSha256: string;
 	capabilityProbePath?: string;
 	apiRoutes: readonly string[];
+	/** Historical server routes for the immutable release tag. */
+	serverApiRoutes?: readonly string[];
 	webCallsites: readonly string[];
 	requestSchemas: Readonly<Record<string, readonly string[]>>;
 	responseSchemas: Readonly<Record<string, readonly string[]>>;
@@ -85,6 +94,7 @@ const API_ROUTES_322 = [
 	"POST /api/admin/cluster/join-tokens",
 	"GET /api/admin/alerts",
 	"GET /api/admin/config",
+	"GET /api/admin/console/runtime-policy",
 	"GET /api/admin/mihomo/resource-policy",
 	"PUT /api/admin/mihomo/resource-policy",
 	"GET /api/admin/nodes",
@@ -95,6 +105,13 @@ const API_ROUTES_322 = [
 	"POST /api/admin/nodes/{node_id}/egress-probe/refresh",
 	"GET /api/admin/nodes/runtime",
 	"GET /api/admin/nodes/{node_id}/runtime",
+	"GET /api/admin/nodes/resources",
+	"GET /api/admin/nodes/{node_id}/resources",
+	"GET /api/admin/nodes/{node_id}/resources/recent",
+	"GET /api/admin/nodes/{node_id}/resources/history",
+	"GET /api/admin/nodes/{node_id}/mihomo-resource-policy",
+	"PUT /api/admin/nodes/{node_id}/mihomo-resource-policy",
+	"DELETE /api/admin/nodes/{node_id}/mihomo-resource-policy/override",
 	"GET /api/admin/nodes/{node_id}/history",
 	"GET /api/admin/nodes/{node_id}/traffic",
 	"GET /api/admin/nodes/{node_id}/ip-usage",
@@ -102,6 +119,7 @@ const API_ROUTES_322 = [
 	"GET /api/admin/nodes/{node_id}/runtime/events",
 	"GET /api/admin/status/events",
 	"GET /api/admin/mesh/status",
+	"PUT /api/admin/mesh/config",
 	"POST /api/admin/mesh/probes",
 	"GET /api/admin/endpoints",
 	"POST /api/admin/endpoints",
@@ -137,6 +155,23 @@ const API_ROUTES_322 = [
 	"GET /api/admin/users/{user_id}/traffic",
 	"GET /api/admin/users/{user_id}/subscription-mihomo-profile",
 	"PUT /api/admin/users/{user_id}/subscription-mihomo-profile",
+	"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview",
+	"GET /api/admin/membership-operations/{operation_id}",
+	"GET /api/admin/history-repositories",
+	"PUT /api/admin/history-repositories",
+	"GET /api/admin/history-repository",
+	"GET /api/admin/resource-monitoring/policy",
+	"GET /api/admin/monitors",
+	"POST /api/admin/monitors",
+	"POST /api/admin/monitors/test",
+	"POST /api/admin/monitor-draft-tests",
+	"GET /api/admin/monitor-draft-tests/{run_id}",
+	"GET /api/admin/monitors/{monitor_id}",
+	"PATCH /api/admin/monitors/{monitor_id}",
+	"DELETE /api/admin/monitors/{monitor_id}",
+	"POST /api/admin/monitors/{monitor_id}/run",
+	"GET /api/admin/monitors/{monitor_id}/status",
+	"GET /api/admin/monitors/{monitor_id}/history",
 	"GET /api/admin/users/quota-summaries",
 	"GET /api/admin/quota-policy/global-weight-rows",
 	"PUT /api/admin/quota-policy/global-weight-rows/{user_id}",
@@ -148,6 +183,40 @@ const API_ROUTES_322 = [
 	"POST /api/admin/tools/mihomo/redact",
 	"GET /api/sub/{subscription_token}",
 ] as const;
+
+const SERVER_ROUTES_ABSENT_FROM_322 = new Set([
+	"GET /api/admin/console/runtime-policy",
+	"GET /api/admin/nodes/resources",
+	"GET /api/admin/nodes/{node_id}/resources",
+	"GET /api/admin/nodes/{node_id}/resources/recent",
+	"GET /api/admin/nodes/{node_id}/resources/history",
+	"GET /api/admin/nodes/{node_id}/mihomo-resource-policy",
+	"PUT /api/admin/nodes/{node_id}/mihomo-resource-policy",
+	"DELETE /api/admin/nodes/{node_id}/mihomo-resource-policy/override",
+	"PUT /api/admin/mesh/config",
+	"GET /api/admin/membership-operations/{operation_id}",
+	"GET /api/admin/history-repositories",
+	"PUT /api/admin/history-repositories",
+	"GET /api/admin/history-repository",
+	"GET /api/admin/resource-monitoring/policy",
+	"GET /api/admin/monitors",
+	"POST /api/admin/monitors",
+	"POST /api/admin/monitors/test",
+	"POST /api/admin/monitor-draft-tests",
+	"GET /api/admin/monitor-draft-tests/{run_id}",
+	"GET /api/admin/monitors/{monitor_id}",
+	"PATCH /api/admin/monitors/{monitor_id}",
+	"DELETE /api/admin/monitors/{monitor_id}",
+	"POST /api/admin/monitors/{monitor_id}/run",
+	"GET /api/admin/monitors/{monitor_id}/status",
+	"GET /api/admin/monitors/{monitor_id}/history",
+	"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview",
+]);
+
+const SERVER_API_ROUTES_322 = API_ROUTES_322.filter(
+	(route) => !SERVER_ROUTES_ABSENT_FROM_322.has(route),
+);
+
 const API_ROUTES_321 = [
 	"GET /api/health",
 	"GET /api/cluster/info",
@@ -293,6 +362,7 @@ const WEB_CALLSITES_322 = [
 	"adminConfig",
 	"adminEndpointProbes",
 	"adminEndpoints",
+	"adminHistoryRepositories",
 	"adminJoinTokens",
 	"adminIpUsage",
 	"adminMesh",
@@ -303,6 +373,9 @@ const WEB_CALLSITES_322 = [
 	"adminQuotaPolicyNodePolicy",
 	"adminQuotaPolicyNodeWeightRows",
 	"adminRealityDomains",
+	"adminRepositoryHistory",
+	"adminResources",
+	"adminServiceMonitors",
 	"adminStatusEvents",
 	"adminTcpConnections",
 	"adminTools",
@@ -314,10 +387,16 @@ const WEB_CALLSITES_322 = [
 	"adminUserNodeWeights",
 	"adminUserQuotaSummaries",
 	"adminUsers",
+	"apiCompatibility",
 	"clusterInfo",
 	"health",
+	"releaseInventoryDigests",
+	"releaseInventoryFixtures",
+	"request",
+	"runtimePolicy",
 	"sse",
 	"subscription",
+	"useApiCompatibility",
 	"versionCheck",
 ] as const;
 
@@ -481,6 +560,12 @@ const RESPONSE_FIELDS_322 = {
 		"admin_token_masked",
 	],
 	"GET /api/admin/status/events": ["hello", "snapshot", "mesh_revision"],
+	"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": [
+		"detected_source",
+		"added_proxies_yaml",
+		"counts",
+		"items",
+	],
 	"GET /api/admin/mesh/status": [
 		"generated_at",
 		"revision",
@@ -561,6 +646,9 @@ const REQUEST_SCHEMAS_322: ResponseSchemaMap = {
 	"PUT /api/admin/quota-policy/nodes/{node_id}/policy": ["inherit_global"],
 	"POST /api/admin/tools/mihomo/redact": ["AdminMihomoRedactRequest"],
 	"POST /api/admin/upgrade/start": ["target_tag"],
+	"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": [
+		"AdminMihomoImportPreviewRequest",
+	],
 	"POST /api/admin/mesh/probes": ["node_ids"],
 };
 
@@ -634,15 +722,18 @@ export const RELEASE_INVENTORIES: readonly ReleaseInventory[] = [
 		minor: "3.22",
 		releaseTag: "v3.22.5",
 		sourceCommit: "d7e1e652fbd5fa07442bd960894764a5b81ef3bc",
+		contractSourceCommit: "cca3c1455960cbd93b8bda22fba493c012865756",
 		webApiContractSha256: WEB_API_CONTRACT_SHA256["3.22"],
 		capabilityProbePath: API_CAPABILITIES_PATH,
 		apiRoutes: API_ROUTES_322,
+		serverApiRoutes: SERVER_API_ROUTES_322,
 		webCallsites: WEB_CALLSITES_322,
 		requestSchemas: REQUEST_SCHEMAS_322,
 		responseSchemas: RESPONSE_SCHEMAS_322,
 		capabilities: [
 			...COMMON_CAPABILITIES,
 			"admin.mesh",
+			"admin.mihomo-subscription-import",
 			"admin.mihomo-resource-policy",
 		],
 		fingerprint: FINGERPRINT_322,
@@ -684,7 +775,7 @@ export const RELEASE_COMPATIBILITY_CONTRACTS: readonly ReleaseCompatibilityContr
 				serverReleaseTag: serverInventory.releaseTag,
 				serverMinor: serverInventory.minor,
 				consumerRoutes: currentInventory.apiRoutes,
-				serverRoutes: serverInventory.apiRoutes,
+				serverRoutes: serverApiRoutes(serverInventory),
 				webCallsites: currentInventory.webCallsites,
 				requestSchemas: currentInventory.requestSchemas,
 				responseSchemas: currentInventory.responseSchemas,
@@ -778,6 +869,23 @@ const RELEASE_FIXTURE_RESPONSES: Readonly<
 				local: {},
 				peers: [],
 				events: [],
+			},
+		},
+		"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": {
+			contentType: "application/json",
+			body: {
+				detected_source: "raw",
+				added_proxies_yaml: "- name: imported\n  type: ss\n",
+				counts: { added: 1, skipped: 0, failed: 0, warnings: 0 },
+				items: [
+					{
+						source_index: 1,
+						status: "added",
+						name: "imported",
+						scheme: "ss",
+						warnings: [],
+					},
+				],
 			},
 		},
 		"GET /api/sub/{subscription_token}": {
@@ -921,13 +1029,21 @@ const RELEASE_FIXTURE_RESPONSES: Readonly<
 	},
 };
 
+function contractSourceCommit(inventory: ReleaseInventory): string {
+	return inventory.contractSourceCommit ?? inventory.sourceCommit;
+}
+
+function serverApiRoutes(inventory: ReleaseInventory): readonly string[] {
+	return inventory.serverApiRoutes ?? inventory.apiRoutes;
+}
+
 function fixtureRequests(
 	consumer: ReleaseInventory,
-	server: ReleaseInventory,
+	serverRoutes: readonly string[],
 ): ReleaseApiFixture["requests"] {
 	return consumer.apiRoutes.map((route) => {
 		const separator = route.indexOf(" ");
-		const supported = server.apiRoutes.includes(route);
+		const supported = serverRoutes.includes(route);
 		return {
 			route,
 			method: route.slice(
@@ -949,10 +1065,11 @@ function fixtureRequests(
 function fixtureResponses(
 	consumer: ReleaseInventory,
 	server: ReleaseInventory,
+	serverRoutes: readonly string[],
 ): ReleaseApiFixture["responses"] {
 	const serverResponses = RELEASE_FIXTURE_RESPONSES[server.releaseTag] ?? {};
 	return Object.entries(consumer.responseSchemas).flatMap(([route, fields]) => {
-		if (!server.apiRoutes.includes(route)) return [];
+		if (!serverRoutes.includes(route)) return [];
 		const response = serverResponses[route];
 		if (!response) {
 			throw new Error(
@@ -989,13 +1106,20 @@ export const RELEASE_API_FIXTURES: readonly ReleaseApiFixture[] =
 				`Missing immutable inventory for ${contract.serverReleaseTag}`,
 			);
 		}
+		const serverRoutes =
+			contract.direction === "legacy-web-to-new-api"
+				? server.apiRoutes
+				: serverApiRoutes(server);
 		return {
 			direction: contract.direction,
 			consumerReleaseTag: consumer.releaseTag,
 			serverReleaseTag: server.releaseTag,
-			consumerSourceCommit: consumer.sourceCommit,
-			serverSourceCommit: server.sourceCommit,
-			requests: fixtureRequests(consumer, server),
-			responses: fixtureResponses(consumer, server),
+			consumerSourceCommit: contractSourceCommit(consumer),
+			serverSourceCommit:
+				contract.direction === "legacy-web-to-new-api"
+					? contractSourceCommit(server)
+					: server.sourceCommit,
+			requests: fixtureRequests(consumer, serverRoutes),
+			responses: fixtureResponses(consumer, server, serverRoutes),
 		};
 	});

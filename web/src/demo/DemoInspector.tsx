@@ -194,7 +194,11 @@ export function DemoFrame({ children }: { children: ReactNode }) {
 			)}
 			{mobile && (
 				<Sheet open={open} onOpenChange={setOpen}>
-					<SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto">
+					<SheetContent
+						side="bottom"
+						showClose={false}
+						className="max-h-[85dvh] overflow-y-auto"
+					>
 						<SheetHeader>
 							<SheetTitle className="sr-only">Demo Inspector</SheetTitle>
 						</SheetHeader>

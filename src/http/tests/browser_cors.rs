@@ -22,7 +22,7 @@ async fn reads_registered_origins_for_api_only() {
         .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
         .header(
             header::ACCESS_CONTROL_REQUEST_HEADERS,
-            "authorization, content-type",
+            "authorization, content-type, cache-control",
         )
         .body(Body::empty())
         .unwrap();
@@ -57,7 +57,7 @@ async fn reads_registered_origins_for_api_only() {
             .headers()
             .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
             .and_then(|value| value.to_str().ok()),
-        Some("Authorization, Content-Type, Accept"),
+        Some("Authorization, Content-Type, Accept, Cache-Control"),
     );
     let vary = response
         .headers()

@@ -43,10 +43,10 @@ pub enum UrlLoadPolicy {
 }
 
 const MAX_REMOTE_SOURCE_BYTES: usize = 2 * 1024 * 1024;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RedactErrorKind {
     InvalidInput,
+    TooLarge,
     Network,
 }
 
@@ -70,6 +70,14 @@ impl RedactError {
         Self {
             code: 3,
             kind: RedactErrorKind::Network,
+            message: message.into(),
+        }
+    }
+
+    fn too_large(message: impl Into<String>) -> Self {
+        Self {
+            code: 4,
+            kind: RedactErrorKind::TooLarge,
             message: message.into(),
         }
     }
@@ -166,6 +174,7 @@ fn resolve_public_url_target_blocking(url: &Url) -> Result<Vec<SocketAddr>, Reda
 fn build_http_client(timeout: Duration) -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .timeout(timeout)
+        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
 }
 
@@ -182,18 +191,18 @@ fn build_pinned_http_client(
 
 async fn build_http_client_for_url(
     url: &Url,
-    timeout: Duration,
+    deadline: tokio::time::Instant,
     policy: UrlLoadPolicy,
 ) -> Result<reqwest::Client, RedactError> {
     if matches!(policy, UrlLoadPolicy::PublicOnly) {
         let host = url.host_str().ok_or_else(|| {
             RedactError::invalid_input("invalid_input: source url host is missing")
         })?;
-        let addrs = resolve_public_url_target(url, timeout).await?;
-        return build_pinned_http_client(host, timeout, &addrs);
+        let addrs = resolve_public_url_target(url, remaining_timeout(deadline)?).await?;
+        return build_pinned_http_client(host, remaining_timeout(deadline)?, &addrs);
     }
 
-    build_http_client(timeout)
+    build_http_client(remaining_timeout(deadline)?)
         .build()
         .map_err(|e| RedactError::network(format!("network_error: build http client: {e}")))
 }
@@ -263,17 +272,20 @@ async fn fetch_url_source(
 ) -> Result<String, RedactError> {
     let deadline = tokio::time::Instant::now() + timeout;
     let mut current = source;
-    for _ in 0..10 {
-        let client_timeout = remaining_timeout(deadline)?;
-        let client = build_http_client_for_url(&current, client_timeout, policy).await?;
+    for redirect_count in 0..=10 {
+        let client = build_http_client_for_url(&current, deadline, policy).await?;
         let response = client
             .get(current.clone())
+            .header(reqwest::header::CACHE_CONTROL, "no-store")
             .send()
             .await
             .map_err(|e| RedactError::network(format!("network_error: fetch source: {e}")))?;
 
         let status = response.status();
         if status.is_redirection() {
+            if redirect_count == 10 {
+                return Err(RedactError::network("network_error: too many redirects"));
+            }
             let location = response
                 .headers()
                 .get(reqwest::header::LOCATION)
@@ -310,8 +322,8 @@ async fn fetch_url_source(
             .content_length()
             .is_some_and(|len| len > MAX_REMOTE_SOURCE_BYTES as u64)
         {
-            return Err(RedactError::invalid_input(format!(
-                "invalid_input: source body exceeds {MAX_REMOTE_SOURCE_BYTES} bytes",
+            return Err(RedactError::too_large(format!(
+                "source body exceeds {MAX_REMOTE_SOURCE_BYTES} bytes",
             )));
         }
 
@@ -323,8 +335,8 @@ async fn fetch_url_source(
             .map_err(|e| RedactError::network(format!("network_error: read source body: {e}")))?
         {
             if body.len() + chunk.len() > MAX_REMOTE_SOURCE_BYTES {
-                return Err(RedactError::invalid_input(format!(
-                    "invalid_input: source body exceeds {MAX_REMOTE_SOURCE_BYTES} bytes",
+                return Err(RedactError::too_large(format!(
+                    "source body exceeds {MAX_REMOTE_SOURCE_BYTES} bytes",
                 )));
             }
             body.extend_from_slice(&chunk);
@@ -336,10 +348,7 @@ async fn fetch_url_source(
             ))
         });
     }
-
-    Err(RedactError::network(
-        "network_error: too many redirects while fetching source",
-    ))
+    Err(RedactError::network("network_error: too many redirects"))
 }
 
 fn normalize_input(raw: &str, format: SourceFormat) -> Result<String, RedactError> {

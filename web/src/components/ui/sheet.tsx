@@ -39,35 +39,48 @@ const sheetVariants = cva(
 const SheetContent = React.forwardRef<
 	React.ElementRef<typeof DialogPrimitive.Content>,
 	React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> &
-		VariantProps<typeof sheetVariants>
->(({ side = "right", className, children, ...props }, ref) => (
-	<SheetPortal>
-		<SheetOverlay />
-		<DialogPrimitive.Content
-			ref={ref}
-			className={cn(sheetVariants({ side }), className)}
-			{...props}
-		>
-			{children}
-			<DialogPrimitive.Close className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-				<span className="sr-only">Close</span>
-				<svg
-					viewBox="0 0 16 16"
-					className="size-4"
-					fill="none"
-					aria-hidden="true"
-				>
-					<path
-						d="m4 4 8 8m0-8-8 8"
-						stroke="currentColor"
-						strokeWidth="1.5"
-						strokeLinecap="round"
-					/>
-				</svg>
-			</DialogPrimitive.Close>
-		</DialogPrimitive.Content>
-	</SheetPortal>
-));
+		VariantProps<typeof sheetVariants> & { showClose?: boolean }
+>(
+	(
+		{ side = "right", className, children, showClose = true, ...props },
+		ref,
+	) => (
+		<SheetPortal>
+			<SheetOverlay />
+			<DialogPrimitive.Content
+				ref={ref}
+				className={cn(sheetVariants({ side }), className)}
+				{...props}
+			>
+				{children}
+				{showClose ? (
+					<DialogPrimitive.Close
+						className={cn(
+							"absolute right-4 top-4 flex size-11 items-center justify-center rounded-md",
+							"text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+							"focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20",
+						)}
+					>
+						<span className="sr-only">Close</span>
+						<svg
+							viewBox="0 0 16 16"
+							className="size-4"
+							fill="none"
+							aria-hidden="true"
+						>
+							<path
+								d="m4 4 8 8m0-8-8 8"
+								stroke="currentColor"
+								strokeWidth="1.5"
+								strokeLinecap="round"
+							/>
+						</svg>
+					</DialogPrimitive.Close>
+				) : null}
+			</DialogPrimitive.Content>
+		</SheetPortal>
+	),
+);
 SheetContent.displayName = DialogPrimitive.Content.displayName;
 
 const SheetHeader = ({

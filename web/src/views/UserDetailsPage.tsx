@@ -138,6 +138,9 @@ export function UserDetailsPage() {
 	const endpointsCapability = useApiCapability("admin.endpoints");
 	const quotaCapability = useApiCapability("admin.quota-policy");
 	const trafficCapability = useApiCapability("admin.traffic-usage");
+	const mihomoImportCapability = useApiCapability(
+		"admin.mihomo-subscription-import",
+	);
 	const enabledFor = (capability: { available: boolean }) =>
 		adminToken.length > 0 && capability.available;
 	const [tab, setTab] = useState<UserDetailsTab>("user");
@@ -1335,6 +1338,8 @@ export function UserDetailsPage() {
 									readOnly={runtime.isReadOnly}
 									error={mihomoDraft.error}
 									isLoaded={mihomoDraft.isLoaded}
+									adminToken={adminToken}
+									importAvailable={enabledFor(mihomoImportCapability)}
 									onChange={mihomoDraft.setField}
 									onSave={mihomoDraft.save}
 								/>
