@@ -70,9 +70,11 @@ class CiPerformanceTests(unittest.TestCase):
         with self.assertRaises(performance.PerformanceError):
             performance.assert_ci(jobs, self.valid_receipts())
         jobs = self.valid_jobs()
-        jobs[0] = job(jobs[0]["name"], 421)
+        jobs[0] = job(jobs[0]["name"], 541)
         with self.assertRaises(performance.PerformanceError):
             performance.assert_ci(jobs, self.valid_receipts())
+        jobs[0] = job(jobs[0]["name"], 540)
+        self.assertEqual(performance.assert_ci(jobs, self.valid_receipts())["status"], "pass")
 
     def test_workflow_queue_is_reported_separately(self):
         payload = {
@@ -135,8 +137,9 @@ class WorkflowContractTests(unittest.TestCase):
         sample = (workflows / "ci-performance-sample.yml").read_text()
         self.assertIn("cache_phase: cold", sample)
         self.assertIn("cache_phase: warm", sample)
+        self.assertIn("github.run_attempt", sample)
         assertions = (SCRIPT_DIR / "performance_assert.py").read_text()
-        self.assertIn('(\"cold\", 420)', assertions)
+        self.assertIn('(\"cold\", 540)', assertions)
         self.assertIn('(\"warm\", 300)', assertions)
 
         ci = (workflows / "ci.yml").read_text()

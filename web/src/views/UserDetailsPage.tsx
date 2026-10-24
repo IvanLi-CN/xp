@@ -32,8 +32,10 @@ import type { UserQuotaReset } from "../api/quotaReset";
 import {
 	DEFAULT_SUBSCRIPTION_FORMAT,
 	type SubscriptionFormat,
+	buildSubscriptionUrl,
 } from "../api/subscription";
 import { useApiCapability } from "../api/useApiCompatibility";
+import { usePrimaryBackend } from "../backend/PrimaryBackendProvider";
 import {
 	AccessMatrix,
 	type AccessMatrixCellState,
@@ -121,6 +123,7 @@ function formatInlineList(items: string[]): string {
 export function UserDetailsPage() {
 	const adminToken = readAdminToken();
 	const runtime = useAppRuntime();
+	const primaryBackend = usePrimaryBackend();
 	const navigate = useNavigate();
 	const demoSearch = useRouterState({
 		select: (state) => state.location.searchStr,
@@ -368,18 +371,21 @@ export function UserDetailsPage() {
 
 	const subscriptionToken = user?.subscription_token ?? "";
 	const subscriptionUrl = useMemo(() => {
-		if (!subscriptionToken) return "";
-		const basePath = `/api/sub/${encodeURIComponent(subscriptionToken)}`;
-		if (typeof window === "undefined") {
-			return `${basePath}?format=${encodeURIComponent(subFormat)}`;
-		}
-		const url = new URL(basePath, window.location.origin);
-		url.searchParams.set("format", subFormat);
-		if (subFormat === "mihomo" && useExternalResourceMirror) {
-			url.searchParams.set("external_resources", "mirror");
-		}
-		return url.toString();
-	}, [subFormat, subscriptionToken, useExternalResourceMirror]);
+		return buildSubscriptionUrl({
+			origin: primaryBackend.primaryOrigin,
+			subscriptionToken,
+			format: subFormat,
+			externalResources:
+				subFormat === "mihomo" && useExternalResourceMirror
+					? "mirror"
+					: undefined,
+		});
+	}, [
+		primaryBackend.primaryOrigin,
+		subFormat,
+		subscriptionToken,
+		useExternalResourceMirror,
+	]);
 
 	useEffect(() => {
 		if (!user) return;

@@ -2,22 +2,76 @@
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_WORKSPACE="$(printf '%s' "${REMOTE_WORKSPACE_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 RUST_IMAGE="$(printf '%s' "${RUST_IMAGE_B64:?}" | base64 -d)"
 XP_TEST_IMAGE="$(printf '%s' "${XP_TEST_IMAGE_B64:?}" | base64 -d)"
 GIT_SHA="$(printf '%s' "${GIT_SHA_B64:?}" | base64 -d)"
 SOURCE_ARCHIVE_SHA256="$(printf '%s' "${SOURCE_ARCHIVE_SHA256_B64:?}" | base64 -d)"
+RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
+REMOTE_RUN_ID="$RUN_ID"
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    if [ -L "$path" ]; then
+      return 2
+    fi
+    path="$(dirname "$path")"
+  done
+}
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
+remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
+case "$remote_run_real" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
+REMOTE_RUN="$remote_run_real"
+source "$REMOTE_RUN/scripts/testbox/remote-run-guard.sh"
 XP_HOST_IMAGE_PREFIX="$COMPOSE_PROJECT"
 RECEIPT_PATH="$REMOTE_WORKSPACE/receipts/host-managed-fresh-join-${COMPOSE_PROJECT}.txt"
-BUILDER_NAME="${COMPOSE_PROJECT}-musl-builder"
-SOURCE_NAME="${COMPOSE_PROJECT}-xray-source"
+bounded_name() {
+  python3 - "$1" <<'PY'
+import hashlib
+import re
+import sys
+
+raw = sys.argv[1]
+safe = re.sub(r"[^a-z0-9_-]+", "_", raw.lower()).strip("_-")
+digest = hashlib.sha256(raw.encode()).hexdigest()[:12]
+prefix = safe[: 63 - len(digest) - 1].rstrip("_-") or "run"
+print(f"{prefix}_{digest}")
+PY
+}
+BUILDER_NAME="$(bounded_name "${COMPOSE_PROJECT}-musl-builder")"
+SOURCE_NAME="$(bounded_name "${COMPOSE_PROJECT}-xray-source")"
 COMPOSE_DIR="$REMOTE_RUN/scripts/testbox"
 COMPOSE_FILE="compose-host-managed-fresh-join.yml"
 
+remove_container_if_present() {
+  local name="$1"
+  if docker inspect "$name" >/dev/null 2>&1; then
+    docker rm -f "$name" >/dev/null 2>&1
+  else
+    docker info >/dev/null 2>&1
+  fi
+}
+remove_image_if_present() {
+  local image="$1"
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    docker image rm "$image" >/dev/null 2>&1
+  else
+    docker info >/dev/null 2>&1
+  fi
+}
 cleanup() {
-  local status=$?
+  local status="${1:-$?}"
   set +e
+  local cleanup_ok=1
   if [ "$status" -ne 0 ]; then
     printf '%s\n' \
       "result=failed" \
@@ -27,21 +81,59 @@ cleanup() {
       "exit_status=$status" > "$RECEIPT_PATH"
     if [ -d "$COMPOSE_DIR" ]; then
       (
-        cd "$COMPOSE_DIR" || exit 0
+        cd "$COMPOSE_DIR" || exit 1
         XP_TEST_IMAGE="$XP_TEST_IMAGE" XP_HOST_IMAGE_PREFIX="$XP_HOST_IMAGE_PREFIX" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" logs --no-color
       ) >> "$RECEIPT_PATH" 2>&1 || true
     fi
   fi
   if [ -d "$COMPOSE_DIR" ]; then
-    cd "$COMPOSE_DIR" || exit 0
-    XP_TEST_IMAGE="$XP_TEST_IMAGE" XP_HOST_IMAGE_PREFIX="$XP_HOST_IMAGE_PREFIX" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1 || true
+    if (
+      cd "$COMPOSE_DIR" || exit 1
+      XP_TEST_IMAGE="$XP_TEST_IMAGE" XP_HOST_IMAGE_PREFIX="$XP_HOST_IMAGE_PREFIX" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1
+    ); then
+      :
+    else
+      cleanup_ok=0
+    fi
+  else
+    cleanup_ok=0
   fi
-  docker rm -f "$BUILDER_NAME" "$SOURCE_NAME" >/dev/null 2>&1 || true
-  docker image rm "$XP_HOST_IMAGE_PREFIX-leader" "$XP_HOST_IMAGE_PREFIX-systemd" "$XP_HOST_IMAGE_PREFIX-openrc" >/dev/null 2>&1 || true
-  rm -rf "$REMOTE_RUN" >/dev/null 2>&1 || true
+  remove_container_if_present "$BUILDER_NAME" || cleanup_ok=0
+  remove_container_if_present "$SOURCE_NAME" || cleanup_ok=0
+  remove_image_if_present "$XP_HOST_IMAGE_PREFIX-leader" || cleanup_ok=0
+  remove_image_if_present "$XP_HOST_IMAGE_PREFIX-systemd" || cleanup_ok=0
+  remove_image_if_present "$XP_HOST_IMAGE_PREFIX-openrc" || cleanup_ok=0
+  if [ "$cleanup_ok" = "1" ]; then
+    if assert_remote_run && remove_remote_run >/dev/null 2>&1; then
+      :
+    else
+      cleanup_ok=0
+    fi
+  fi
+  if [ "$cleanup_ok" != "1" ] && [ "$status" -eq 0 ]; then
+    status=1
+  fi
   return "$status"
 }
-trap cleanup EXIT INT TERM
+on_signal() {
+  local status="$1"
+  trap - EXIT INT TERM
+  cleanup "$status"
+  exit "$status"
+}
+on_exit() {
+  local status=$?
+  trap - EXIT
+  cleanup "$status"
+  local cleanup_status=$?
+  if [ "$status" -eq 0 ] && [ "$cleanup_status" -ne 0 ]; then
+    status="$cleanup_status"
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 cd "$COMPOSE_DIR"
 

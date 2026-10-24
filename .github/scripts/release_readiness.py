@@ -26,7 +26,7 @@ FAILURE_CONCLUSIONS = {
     "neutral",
 }
 
-RESOURCE_EVIDENCE_SCHEMA = "xp-history-throughput-v1"
+RESOURCE_EVIDENCE_SCHEMA = "xp-history-throughput-v2"
 
 
 class ReadinessError(RuntimeError):
@@ -143,26 +143,26 @@ def evaluate(payload: Any, target_sha: str) -> tuple[str, str]:
 
 
 def validate_resource_evidence(raw: str | None, target_sha: str) -> str:
-    """Require an Agent VM attestation before any release artifact is published."""
+    """Require a resource attestation before any release artifact is published."""
     if not raw:
-        raise ReadinessError("agent_vm_resource_evidence_missing")
+        raise ReadinessError("resource_evidence_missing")
     try:
         evidence = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ReadinessError("agent_vm_resource_evidence_invalid_json") from exc
+        raise ReadinessError("resource_evidence_invalid_json") from exc
     if not isinstance(evidence, dict):
-        raise ReadinessError("agent_vm_resource_evidence_invalid_shape")
+        raise ReadinessError("resource_evidence_invalid_shape")
     if evidence.get("schema") != RESOURCE_EVIDENCE_SCHEMA:
-        raise ReadinessError("agent_vm_resource_evidence_schema_mismatch")
+        raise ReadinessError("resource_evidence_schema_mismatch")
     if evidence.get("target_sha") != target_sha:
-        raise ReadinessError("agent_vm_resource_evidence_sha_mismatch")
+        raise ReadinessError("resource_evidence_sha_mismatch")
     log_sha = evidence.get("log_sha")
     if not isinstance(log_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", log_sha):
-        raise ReadinessError("agent_vm_resource_evidence_log_sha_invalid")
+        raise ReadinessError("resource_evidence_log_sha_invalid")
     if evidence.get("window_seconds") != 300:
-        raise ReadinessError("agent_vm_resource_evidence_window_invalid")
+        raise ReadinessError("resource_evidence_window_invalid")
     if evidence.get("memory_limit_mib") != 128 or evidence.get("swap_limit_mib") != 0:
-        raise ReadinessError("agent_vm_resource_evidence_resource_limit_invalid")
+        raise ReadinessError("resource_evidence_resource_limit_invalid")
     required_gates = (
         "source_ack_meets_ten_x_segments",
         "source_ack_meets_ten_x_bytes",
@@ -170,8 +170,8 @@ def validate_resource_evidence(raw: str | None, target_sha: str) -> str:
         "repository_apply_meets_ten_x_bytes",
     )
     if any(evidence.get(gate) is not True for gate in required_gates):
-        raise ReadinessError("agent_vm_resource_evidence_ten_x_gate_failed")
-    return f"agent_vm_resource_evidence_verified:{log_sha}"
+        raise ReadinessError("resource_evidence_ten_x_gate_failed")
+    return f"resource_evidence_verified:{log_sha}"
 
 
 def validate_resource_evidence_files(
@@ -186,19 +186,19 @@ def validate_resource_evidence_files(
         raw = evidence_file.read_text(encoding="utf-8")
         log_bytes = log_file.read_bytes()
     except OSError as exc:
-        raise ReadinessError("agent_vm_resource_evidence_files_unreadable") from exc
+        raise ReadinessError("resource_evidence_files_unreadable") from exc
     detail = validate_resource_evidence(raw, target_sha)
     evidence = json.loads(raw)
     actual_log_sha = hashlib.sha256(log_bytes).hexdigest()
     if evidence["log_sha"] != actual_log_sha:
-        raise ReadinessError("agent_vm_resource_evidence_log_sha_mismatch")
+        raise ReadinessError("resource_evidence_log_sha_mismatch")
     log_text = log_bytes.decode("utf-8", errors="replace")
     if "test result: ok" not in log_text or "source_journal_resource" not in log_text:
-        raise ReadinessError("agent_vm_resource_evidence_log_incomplete")
+        raise ReadinessError("resource_evidence_log_incomplete")
     if re.search(r"^test result: FAILED\b", log_text, re.MULTILINE) or re.search(
         r"^test [^\n]+ \.\.\. FAILED\b", log_text, re.MULTILINE
     ):
-        raise ReadinessError("agent_vm_resource_evidence_workload_failed")
+        raise ReadinessError("resource_evidence_workload_failed")
     for workload in (
         "xp_source_delivery_journal_memory_e2e",
         "xp_repository_summary_memory_e2e",
@@ -206,7 +206,7 @@ def validate_resource_evidence_files(
         if not re.search(
             rf"^test {re.escape(workload)} \.\.\. ok$", log_text, re.MULTILINE
         ):
-            raise ReadinessError(f"agent_vm_resource_evidence_workload_incomplete:{workload}")
+            raise ReadinessError(f"resource_evidence_workload_incomplete:{workload}")
     metric_line = next(
         (
             line
@@ -216,7 +216,7 @@ def validate_resource_evidence_files(
         None,
     )
     if metric_line is None:
-        raise ReadinessError("agent_vm_resource_evidence_metrics_missing")
+        raise ReadinessError("resource_evidence_metrics_missing")
     metric_fields = (
         "sample_window_seconds",
         "generated_segments",
@@ -232,18 +232,18 @@ def validate_resource_evidence_files(
     for field in metric_fields:
         match = re.search(rf"(?:^|\s){re.escape(field)}=(\d+)(?:\s|$)", metric_line)
         if match is None:
-            raise ReadinessError(f"agent_vm_resource_evidence_metric_missing:{field}")
+            raise ReadinessError(f"resource_evidence_metric_missing:{field}")
         value = int(match.group(1))
         evidence_value = evidence.get(field)
         if not isinstance(evidence_value, int) or isinstance(evidence_value, bool):
-            raise ReadinessError(f"agent_vm_resource_evidence_metric_invalid:{field}")
+            raise ReadinessError(f"resource_evidence_metric_invalid:{field}")
         if evidence_value != value:
-            raise ReadinessError(f"agent_vm_resource_evidence_metric_mismatch:{field}")
+            raise ReadinessError(f"resource_evidence_metric_mismatch:{field}")
         metrics[field] = value
     if metrics["sample_window_seconds"] < 300:
-        raise ReadinessError("agent_vm_resource_evidence_window_observed_invalid")
+        raise ReadinessError("resource_evidence_window_observed_invalid")
     if metrics["peak_generated_segments"] == 0 or metrics["peak_generated_bytes"] == 0:
-        raise ReadinessError("agent_vm_resource_evidence_generation_missing")
+        raise ReadinessError("resource_evidence_generation_missing")
     computed_gates = {
         "source_ack_meets_ten_x_segments": metrics["acknowledged_segments"]
         >= metrics["peak_generated_segments"] * 10,
@@ -256,7 +256,7 @@ def validate_resource_evidence_files(
     }
     for field, computed in computed_gates.items():
         if evidence.get(field) is not computed:
-            raise ReadinessError(f"agent_vm_resource_evidence_gate_mismatch:{field}")
+            raise ReadinessError(f"resource_evidence_gate_mismatch:{field}")
     return detail
 
 
@@ -286,7 +286,7 @@ def run() -> int:
     try:
         if args.resource_evidence_file or args.resource_log_file:
             if not args.resource_evidence_file or not args.resource_log_file:
-                raise ReadinessError("agent_vm_resource_evidence_files_incomplete")
+                raise ReadinessError("resource_evidence_files_incomplete")
             resource_detail = validate_resource_evidence_files(
                 args.resource_evidence_file,
                 args.resource_log_file,

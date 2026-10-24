@@ -82,6 +82,10 @@ vi.mock("../components/auth", async (importOriginal) => {
 	};
 });
 
+vi.mock("../backend/PrimaryBackendProvider", () => ({
+	usePrimaryBackend: () => ({ primaryOrigin: "https://primary.example" }),
+}));
+
 function renderPage(queryClient = createQueryClient()) {
 	const view = render(
 		<QueryClientProvider client={queryClient}>
@@ -686,6 +690,9 @@ describe("<UserDetailsPage />", () => {
 		setupMocks();
 		renderPage();
 		fireEvent.click(await screenByRole("button", "Copy subscription URL"));
+		expect(writeText.mock.calls[0]?.[0]).toContain(
+			"https://primary.example/api/sub/",
+		);
 		expect(writeText).toHaveBeenCalledWith(
 			expect.not.stringContaining("external_resources=mirror"),
 		);

@@ -4,13 +4,15 @@ set -euo pipefail
 # High-cost Web local upgrade regression suite on the shared testbox.
 #
 # This follows the shared-testbox-runner rules:
-# - per-run isolation under /srv/codex/workspaces/$USER
+# - per-run isolation under the caller-provided remote root
 # - no local Docker usage
 # - no global Docker cleanup
 # - docker run uses cap-drop=ALL for LXC compatibility
 # - cleanup only removes this run's container and run directory
 
-TESTBOX="${TESTBOX:-codex-testbox}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=runner-env.sh
+source "$SCRIPT_DIR/runner-env.sh"
 RUST_IMAGE="${RUST_IMAGE:-rust:1.96-bookworm}"
 ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.22}"
 
@@ -26,6 +28,7 @@ PY
 )"
 
 REPO_NAME="$(basename "$REPO_ROOT")"
+testbox_validate_component repository "$REPO_NAME"
 PATH_HASH8="$(python3 - "$REPO_ROOT" <<'PY'
 import hashlib, os, sys
 p = os.path.realpath(sys.argv[1]).encode()
@@ -34,36 +37,49 @@ PY
 )"
 
 GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
-RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$GIT_SHA"
+RUN_NONCE="$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
+RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA}_${RUN_NONCE}"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 
-REMOTE_BASE="/srv/codex/workspaces/$USER"
+REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
+REMOTE_RUN_CREATED=0
+cleanup_remote_run() {
+  local status="${1:-$?}"
+  set +e
+  if [ "$REMOTE_RUN_CREATED" = "1" ] && [ "$status" -eq 0 ]; then
+    testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
+  fi
+  return "$status"
+}
+on_signal() {
+  local status="$1"
+  trap - EXIT INT TERM
+  cleanup_remote_run "$status"
+  exit "$status"
+}
+trap cleanup_remote_run EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+testbox_remote_root_preflight
+REMOTE_RUN_CREATED=1
+REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
+REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
 
 CONTAINER_RAW="codex_${WORKSPACE_SLUG}_web_upgrade_${RUN_ID}"
-CONTAINER_NAME="$(python3 - "$CONTAINER_RAW" <<'PY'
-import re, sys
-s = sys.argv[1].lower()
-s = re.sub(r'[^a-z0-9_.-]+', '_', s).strip('_.-')
-print(s[:63] if len(s) > 63 else s)
-PY
-)"
+CONTAINER_NAME="$(testbox_bounded_name "$CONTAINER_RAW")"
 OPENRC_CONTAINER_RAW="codex_${WORKSPACE_SLUG}_openrc_upgrade_${RUN_ID}"
-OPENRC_CONTAINER_NAME="$(python3 - "$OPENRC_CONTAINER_RAW" <<'PY'
-import re, sys
-s = sys.argv[1].lower()
-s = re.sub(r'[^a-z0-9_.-]+', '_', s).strip('_.-')
-print(s[:63] if len(s) > 63 else s)
-PY
-)"
+OPENRC_CONTAINER_NAME="$(testbox_bounded_name "$OPENRC_CONTAINER_RAW")"
 
 REMOTE_RUN_B64="$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')"
+TESTBOX_REMOTE_ROOT_B64="$(printf '%s' "$TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')"
 REMOTE_WORKSPACE_B64="$(printf '%s' "$REMOTE_WORKSPACE" | base64 | tr -d '\n')"
 CONTAINER_NAME_B64="$(printf '%s' "$CONTAINER_NAME" | base64 | tr -d '\n')"
 RUST_IMAGE_B64="$(printf '%s' "$RUST_IMAGE" | base64 | tr -d '\n')"
 OPENRC_CONTAINER_NAME_B64="$(printf '%s' "$OPENRC_CONTAINER_NAME" | base64 | tr -d '\n')"
 ALPINE_IMAGE_B64="$(printf '%s' "$ALPINE_IMAGE" | base64 | tr -d '\n')"
+RUN_ID_B64="$(printf '%s' "$RUN_ID" | base64 | tr -d '\n')"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
@@ -74,12 +90,13 @@ echo "alpine_image=$ALPINE_IMAGE"
 
 CREATED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ssh -o BatchMode=yes "$TESTBOX" \
-  "mkdir -p '$REMOTE_RUN' && cat > '$REMOTE_WORKSPACE/workspace.txt'" <<TXT
+  "cat > '$REMOTE_WORKSPACE/workspace.txt'" <<TXT
 local_repo_root=$REPO_ROOT
 created_utc=$CREATED_UTC
 TXT
 
-rsync -az --delete \
+rsync -az --no-perms --delete \
+  --exclude '.codex-run-id' \
   --exclude '.git/' \
   --exclude 'node_modules/' \
   --exclude 'target/' \
@@ -89,35 +106,98 @@ rsync -az --delete \
 
 ssh -o BatchMode=yes "$TESTBOX" bash -s \
   "$REMOTE_RUN_B64" \
+  "$TESTBOX_REMOTE_ROOT_B64" \
   "$REMOTE_WORKSPACE_B64" \
   "$CONTAINER_NAME_B64" \
   "$RUST_IMAGE_B64" \
   "$OPENRC_CONTAINER_NAME_B64" \
-  "$ALPINE_IMAGE_B64" <<'REMOTE'
+  "$ALPINE_IMAGE_B64" \
+  "$RUN_ID_B64" <<'REMOTE'
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${1:?}" | base64 -d)"
-REMOTE_WORKSPACE="$(printf '%s' "${2:?}" | base64 -d)"
-CONTAINER_NAME="$(printf '%s' "${3:?}" | base64 -d)"
-RUST_IMAGE="$(printf '%s' "${4:?}" | base64 -d)"
-OPENRC_CONTAINER_NAME="$(printf '%s' "${5:?}" | base64 -d)"
-ALPINE_IMAGE="$(printf '%s' "${6:?}" | base64 -d)"
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${2:?}" | base64 -d)"
+REMOTE_WORKSPACE="$(printf '%s' "${3:?}" | base64 -d)"
+CONTAINER_NAME="$(printf '%s' "${4:?}" | base64 -d)"
+RUST_IMAGE="$(printf '%s' "${5:?}" | base64 -d)"
+OPENRC_CONTAINER_NAME="$(printf '%s' "${6:?}" | base64 -d)"
+ALPINE_IMAGE="$(printf '%s' "${7:?}" | base64 -d)"
+RUN_ID="$(printf '%s' "${8:?}" | base64 -d)"
+REMOTE_RUN_ID="$RUN_ID"
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    if [ -L "$path" ]; then
+      return 2
+    fi
+    path="$(dirname "$path")"
+  done
+}
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
+remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
+case "$remote_run_real" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
+REMOTE_RUN="$remote_run_real"
+source "$REMOTE_RUN/scripts/testbox/remote-run-guard.sh"
 CARGO_HOME_DIR="$REMOTE_WORKSPACE/cargo-home"
 RUSTUP_HOME_DIR="$REMOTE_WORKSPACE/rustup-home"
 
-cleanup() {
-  set +e
-  if [ -n "${CONTAINER_NAME:-}" ]; then
-    docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  fi
-  if [ -n "${OPENRC_CONTAINER_NAME:-}" ]; then
-    docker rm -f "$OPENRC_CONTAINER_NAME" >/dev/null 2>&1 || true
-  fi
-  if [ -n "${REMOTE_RUN:-}" ]; then
-    rm -rf "$REMOTE_RUN" >/dev/null 2>&1 || true
+remove_container() {
+  local name="$1"
+  if docker inspect "$name" >/dev/null 2>&1; then
+    docker rm -f "$name" >/dev/null 2>&1
+  else
+    docker info >/dev/null 2>&1
   fi
 }
-trap cleanup EXIT INT TERM
+cleanup() {
+  local status="${1:-$?}"
+  set +e
+  local cleanup_ok=1
+  if [ -n "${CONTAINER_NAME:-}" ]; then
+    remove_container "$CONTAINER_NAME" || cleanup_ok=0
+  fi
+  if [ -n "${OPENRC_CONTAINER_NAME:-}" ]; then
+    remove_container "$OPENRC_CONTAINER_NAME" || cleanup_ok=0
+  fi
+  if [ "$cleanup_ok" = "1" ] && [ -n "${REMOTE_RUN:-}" ]; then
+    if assert_remote_run && remove_remote_run >/dev/null 2>&1; then
+      :
+    else
+      cleanup_ok=0
+    fi
+  fi
+  if [ "$cleanup_ok" != "1" ] && [ "$status" -eq 0 ]; then
+    status=1
+  fi
+  return "$status"
+}
+on_signal() {
+  local status="$1"
+  trap - EXIT INT TERM
+  cleanup
+  exit "$status"
+}
+trap - EXIT INT TERM
+on_exit() {
+  local status=$?
+  trap - EXIT
+  cleanup "$status"
+  local cleanup_status=$?
+  if [ "$status" -eq 0 ] && [ "$cleanup_status" -ne 0 ]; then
+    status="$cleanup_status"
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 mkdir -p "$CARGO_HOME_DIR" "$RUSTUP_HOME_DIR"
 

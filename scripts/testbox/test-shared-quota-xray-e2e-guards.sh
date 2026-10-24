@@ -17,35 +17,292 @@ expect_failure() {
 }
 
 expect_failure \
+  'TESTBOX: set TESTBOX to an authorized SSH target' \
+  env XP_TESTBOX_REMOTE_ROOT=/tmp/xp-testbox-guard "$RUNNER"
+
+expect_failure \
+  'XP_TESTBOX_REMOTE_ROOT: set XP_TESTBOX_REMOTE_ROOT to a writable remote root' \
+  env TESTBOX=ssh-target "$RUNNER"
+
+expect_failure \
+  'XP_TESTBOX_REMOTE_ROOT must contain only safe path characters' \
+  env \
+    TESTBOX=ssh-target \
+    XP_TESTBOX_REMOTE_ROOT='/tmp/xp-testbox guard' \
+    "$RUNNER"
+
+expect_failure \
+  'USER must contain only safe path characters' \
+  env \
+    TESTBOX=ssh-target \
+    USER='unsafe user' \
+    XP_TESTBOX_REMOTE_ROOT=/tmp/xp-testbox-guard \
+    "$RUNNER"
+
+expect_failure \
   'XP_TESTBOX_CARGO_CACHE_ROOT and XP_TESTBOX_CARGO_HOME are required' \
-  env XP_RUN_MESH_RESOURCE=1 "$RUNNER"
+  env \
+    TESTBOX=ssh-target \
+    XP_TESTBOX_REMOTE_ROOT=/tmp/xp-testbox-guard \
+    XP_RUN_MESH_RESOURCE=1 \
+    "$RUNNER"
 
 expect_failure \
   'XP_TESTBOX_CACHE_SMOKE must be 0 or 1' \
   env \
+    TESTBOX=ssh-target \
+    XP_TESTBOX_REMOTE_ROOT=/tmp/xp-testbox-guard \
     XP_RUN_MESH_RESOURCE=1 \
-    XP_TESTBOX_CARGO_CACHE_ROOT=/srv/codex/agents/test/cache \
-    XP_TESTBOX_CARGO_HOME=/srv/codex/caches/linux-amd64/cargo \
+    XP_TESTBOX_CARGO_CACHE_ROOT=/tmp/xp-testbox-guard/agents/test/cache \
+    XP_TESTBOX_CARGO_HOME=/tmp/xp-testbox-guard/cargo-home \
     XP_TESTBOX_CACHE_SMOKE=2 \
     "$RUNNER"
 
 expect_failure \
   'the final Mesh resource gate requires XP_MESH_RESOURCE_DURATION_SECS=900' \
   env \
+    TESTBOX=ssh-target \
+    XP_TESTBOX_REMOTE_ROOT=/tmp/xp-testbox-guard \
     XP_RUN_MESH_RESOURCE=1 \
-    XP_TESTBOX_CARGO_CACHE_ROOT=/srv/codex/agents/test/cache \
-    XP_TESTBOX_CARGO_HOME=/srv/codex/caches/linux-amd64/cargo \
+    XP_TESTBOX_CARGO_CACHE_ROOT=/tmp/xp-testbox-guard/agents/test/cache \
+    XP_TESTBOX_CARGO_HOME=/tmp/xp-testbox-guard/cargo-home \
     XP_MESH_RESOURCE_DURATION_SECS=600 \
     "$RUNNER"
 
 expect_failure \
   'cache smoke requires XP_MESH_RESOURCE_DURATION_SECS=600' \
   env \
+    TESTBOX=ssh-target \
+    XP_TESTBOX_REMOTE_ROOT=/tmp/xp-testbox-guard \
     XP_RUN_MESH_RESOURCE=1 \
-    XP_TESTBOX_CARGO_CACHE_ROOT=/srv/codex/agents/test/cache \
-    XP_TESTBOX_CARGO_HOME=/srv/codex/caches/linux-amd64/cargo \
+    XP_TESTBOX_CARGO_CACHE_ROOT=/tmp/xp-testbox-guard/agents/test/cache \
+    XP_TESTBOX_CARGO_HOME=/tmp/xp-testbox-guard/cargo-home \
     XP_TESTBOX_CACHE_SMOKE=1 \
     XP_MESH_RESOURCE_DURATION_SECS=900 \
     "$RUNNER"
+
+(
+  set -euo pipefail
+  guard_root="$(mktemp -d "${TMPDIR:-/tmp}/xp-testbox-remote-guard.XXXXXX")"
+  guard_root="$(cd "$guard_root" && pwd -P)"
+  readlink() {
+    case "${1:-}" in
+      -f|-m)
+        shift
+        [ "${1:-}" = "--" ] && shift
+        python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"
+        ;;
+      *) command readlink "$@" ;;
+    esac
+  }
+  export -f readlink
+  ssh() {
+    shift 3
+    bash -c "$1"
+  }
+  TESTBOX=local
+  XP_TESTBOX_REMOTE_ROOT="$guard_root/root"
+  USER=ivan
+  # shellcheck source=runner-env.sh
+  source "$SCRIPT_DIR/runner-env.sh"
+  mkdir -p "$guard_root/outside"
+  ln -s "$guard_root/outside" "$guard_root/root-alias"
+  bad_root_b64="$(printf '%s' "$guard_root/root-alias/nested" | base64 | tr -d '\n')"
+  if TESTBOX_REMOTE_ROOT_B64="$bad_root_b64" python3 "$SCRIPT_DIR/remote-run-guard.py" ensure-root; then
+    echo 'expected symlinked root ancestor guard to fail' >&2
+    exit 1
+  fi
+  test ! -e "$guard_root/outside/nested"
+  long_name_raw="$(printf 'repository%.0s' {1..20})"
+  long_name="$(testbox_bounded_name "$long_name_raw")"
+  test "${#long_name}" -eq 63
+  test "${long_name##*_}" = "$(python3 - "$long_name_raw" <<'PY'
+import hashlib
+import sys
+print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:12])
+PY
+)"
+  testbox_remote_root_preflight
+  chmod 0755 "$XP_TESTBOX_REMOTE_ROOT"
+  if TESTBOX_REMOTE_ROOT_B64="$(printf '%s' "$XP_TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')" \
+    python3 "$SCRIPT_DIR/remote-run-guard.py" ensure-root; then
+    echo 'expected non-private remote root guard to fail' >&2
+    exit 1
+  fi
+  chmod 0700 "$XP_TESTBOX_REMOTE_ROOT"
+  guarded_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1")"
+  test "$guarded_run" = "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1"
+  test "$(cat "$guarded_run/.codex-run-id")" = run-1
+  testbox_remote_cleanup "$guarded_run" run-1
+  test ! -e "$guarded_run"
+  python3 - "$guard_root" "$SCRIPT_DIR/remote-run-guard.py" <<'PY'
+import importlib.util
+import os
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]) / "rename-noreplace"
+root.mkdir()
+(root / "source").mkdir()
+(root / "target").mkdir()
+spec = importlib.util.spec_from_file_location("remote_run_guard", sys.argv[2])
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+parent_fd = os.open(root, module.OPEN_FLAGS)
+try:
+    assert not module.rename_noreplace(parent_fd, "source", "target")
+finally:
+    os.close(parent_fd)
+assert (root / "source").is_dir()
+assert (root / "target").is_dir()
+PY
+  guarded_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-3")"
+  test "$(cat "$guarded_run/.codex-run-id")" = run-3
+  if TESTBOX_REMOTE_ROOT="$XP_TESTBOX_REMOTE_ROOT" \
+    REMOTE_RUN="$guarded_run" \
+    REMOTE_RUN_ID=run-2 \
+    REMOTE_WORKSPACE="$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo" \
+    bash "$SCRIPT_DIR/remote-run-guard.sh"; then
+    echo 'expected remote marker guard to fail' >&2
+    exit 1
+  fi
+  fifo_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-fifo")"
+  rm "$fifo_run/.codex-run-id"
+  mkfifo "$fifo_run/.codex-run-id"
+  if testbox_remote_cleanup "$fifo_run" run-fifo; then
+    echo 'expected non-regular remote run marker guard to fail' >&2
+    exit 1
+  fi
+  rm -rf "$fifo_run"
+  testbox_remote_cleanup "$guarded_run" run-3
+  test ! -e "$guarded_run"
+  mesh_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/agents/thread-1/runs/run-mesh" run-mesh)"
+  (
+    export TESTBOX_REMOTE_ROOT="$XP_TESTBOX_REMOTE_ROOT"
+    export REMOTE_RUN="$mesh_run"
+    export REMOTE_RUN_ID=run-mesh
+    export REMOTE_WORKSPACE="$XP_TESTBOX_REMOTE_ROOT/agents/thread-1/workspace"
+    source "$SCRIPT_DIR/remote-run-guard.sh"
+    test "$REMOTE_WORKSPACE" = "$XP_TESTBOX_REMOTE_ROOT/agents/thread-1/workspace"
+  )
+  testbox_remote_cleanup "$mesh_run" run-mesh
+  test ! -e "$mesh_run"
+  mkdir -p "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/insecure"
+  chmod 0777 "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/insecure"
+  if testbox_remote_run_create \
+    "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/insecure/runs/run-insecure"; then
+    echo 'expected writable remote run parent guard to fail' >&2
+    exit 1
+  fi
+  claim_dir="$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims/10_203_0_0_24"
+  mkdir -p "$claim_dir"
+  chmod 700 \
+    "$XP_TESTBOX_REMOTE_ROOT/agents" \
+    "$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims" \
+    "$claim_dir"
+  python3 - "$XP_TESTBOX_REMOTE_ROOT" "$claim_dir" "$SCRIPT_DIR/remote-run-guard.py" <<'PY'
+import fcntl
+import os
+import subprocess
+import sys
+
+root, claim, helper = sys.argv[1:]
+lock_path = os.path.join(root, "agents", ".shared-testbox-subnet-claims", ".codex-run-lock")
+with open(lock_path, "a+") as lock_file:
+    fcntl.flock(lock_file, fcntl.LOCK_EX)
+    subprocess.run(
+        ["python3", helper, "claim-cleanup-locked", root, claim],
+        check=True,
+    )
+assert not os.path.exists(claim)
+PY
+  quarantine_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-quarantine" run-quarantine)"
+  quarantine_claim="$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims/10_203_1_0_24"
+  mkdir -p "$quarantine_claim"
+  chmod 700 \
+    "$XP_TESTBOX_REMOTE_ROOT/agents" \
+    "$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims" \
+    "$quarantine_claim"
+  printf '%s\n' codex-quarantine > "$quarantine_claim/compose_project"
+  printf '%s\n' "$quarantine_run" > "$quarantine_claim/run_path"
+  printf '%s\n' 10.203.1.0/24 > "$quarantine_claim/subnet"
+  chmod 0755 "$quarantine_claim"
+  if RUN_ID=run-quarantine python3 "$SCRIPT_DIR/remote-run-guard.py" \
+    cleanup-with-claim "$XP_TESTBOX_REMOTE_ROOT" "$quarantine_run" "$quarantine_claim"; then
+    echo 'expected unsafe claim cleanup to fail closed' >&2
+    exit 1
+  fi
+  test -e "$quarantine_run"
+  chmod 0700 "$quarantine_claim"
+  python3 - "$XP_TESTBOX_REMOTE_ROOT" "$quarantine_run" "$quarantine_claim" "$SCRIPT_DIR/remote-run-guard.py" <<'PY'
+import fcntl
+import os
+import subprocess
+import sys
+
+root, run, claim, helper = sys.argv[1:]
+lock_path = os.path.join(root, "agents", ".shared-testbox-subnet-claims", ".codex-run-lock")
+environment = os.environ.copy()
+environment["RUN_ID"] = "run-quarantine"
+with open(lock_path, "a+") as lock_file:
+    fcntl.flock(lock_file, fcntl.LOCK_EX)
+    subprocess.run(
+        ["python3", helper, "cleanup-with-claim-locked", root, run, claim],
+        check=True,
+        env=environment,
+        timeout=5,
+    )
+PY
+  test ! -e "$quarantine_run"
+  test ! -e "$quarantine_claim"
+  transaction_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-transaction" run-transaction)"
+  transaction_claim="$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims/10_203_2_0_24"
+  mkdir -p "$transaction_claim/nested" "$transaction_run/nested"
+  chmod 700 "$transaction_claim"
+  printf '%s\n' codex-transaction > "$transaction_claim/compose_project"
+  printf '%s\n' "$transaction_run" > "$transaction_claim/run_path"
+  printf '%s\n' 10.203.2.0/24 > "$transaction_claim/subnet"
+  printf 'claim data\n' > "$transaction_claim/nested/file"
+  printf 'keep me\n' > "$transaction_run/nested/file"
+  chmod 500 "$transaction_run/nested"
+  if RUN_ID=run-transaction python3 "$SCRIPT_DIR/remote-run-guard.py" \
+    cleanup-with-claim "$XP_TESTBOX_REMOTE_ROOT" "$transaction_run" "$transaction_claim"; then
+    echo 'expected run cleanup failure to preserve run and claim' >&2
+    exit 1
+  fi
+  test -d "$transaction_run"
+  test -d "$transaction_claim"
+  chmod 700 "$transaction_run/nested"
+  chmod 500 "$transaction_claim/nested"
+  if RUN_ID=run-transaction python3 "$SCRIPT_DIR/remote-run-guard.py" \
+    cleanup-with-claim "$XP_TESTBOX_REMOTE_ROOT" "$transaction_run" "$transaction_claim"; then
+    echo 'expected claim cleanup failure to preserve run and claim' >&2
+    exit 1
+  fi
+  test -d "$transaction_run"
+  test -d "$transaction_claim"
+  chmod 700 "$transaction_claim/nested"
+  RUN_ID=run-transaction python3 "$SCRIPT_DIR/remote-run-guard.py" \
+    cleanup-with-claim "$XP_TESTBOX_REMOTE_ROOT" "$transaction_run" "$transaction_claim"
+  test ! -e "$transaction_run"
+  test ! -e "$transaction_claim"
+  rm -rf "$XP_TESTBOX_REMOTE_ROOT/agents"
+  mkdir -p "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan"
+  mkdir -p "$guard_root/outside"
+  rm -rf "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo"
+  ln -s "$guard_root/outside" "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo"
+  test -L "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo"
+  if testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-2"; then
+    echo 'expected intermediate symlink guard to fail' >&2
+    exit 1
+  fi
+  mkdir -p "$guard_root/agents-outside"
+  ln -s "$guard_root/agents-outside" "$XP_TESTBOX_REMOTE_ROOT/agents"
+  if testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/agents/ivan/runs/run-4"; then
+    echo 'expected agents symlink guard to fail' >&2
+    exit 1
+  fi
+)
 
 printf 'shared testbox runner guard tests: passed\n'

@@ -25,7 +25,7 @@
   或改写 gap，不改变 source epoch、outbox、generation 或 `partial` 语义。
 - 进一步限定 source bridge 只能使用 `source_retention_expired` 证据；当 tombstone 或其他 stream
   在轮转页中排在前面时，首个请求携带同页可桥接证据并保持 tombstone-first，避免改变删除优先级；发布
-  readiness 同时把 Agent VM 日志中的实际计数器与签名 10x 声明逐项绑定，伪造或截短日志 fail closed。
+  readiness 同时把资源工作负载日志中的实际计数器与签名 10x 声明逐项绑定，伪造或截短日志 fail closed。
 - 后续生产观察发现保留窗口会在延迟重试期间继续前移。新增有界、独立摘要绑定的
   `retained_stream_boundaries`，只有源端声明的最小保留序号与首个返回 segment 精确相等时，
   consumed checkpoint 才能原地封存新证据范围；v1 `response_id` 和旧 peer fallback 保持不变。
@@ -104,7 +104,7 @@
 - Source journal order repair now commits up to sixteen bounded pages per five-second source cycle,
   preserving the durable repair cursor and pausing delivery until the repair completes.
 - Original observation time, source identity and recovery generation remain unchanged.
-- Release readiness now fails closed without an exact-target Agent VM attestation recording the
+- Release readiness now fails closed without an exact-target resource attestation recording the
   300-second no-swap resource run, workload-log digest, and all four segment/byte 10x gates. The
   owner-dispatched workflow verifies an evidence commit with the target as its only parent and
   recomputes the digest from its two evidence files before publication, requiring a GitHub-verified
