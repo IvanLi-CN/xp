@@ -242,13 +242,37 @@ def remove_directory_entry(parent_fd: int, name: str, directory_fd: int) -> None
         )
         if not rename_noreplace(parent_fd, name, quarantine):
             continue
-        same_directory(parent_fd, quarantine, directory_fd)
-        os.rmdir(quarantine, dir_fd=parent_fd)
+        try:
+            same_directory(parent_fd, quarantine, directory_fd)
+            os.rmdir(quarantine, dir_fd=parent_fd)
+        except BaseException:
+            if not rename_noreplace(parent_fd, quarantine, name):
+                fail("cannot restore testbox cleanup quarantine")
+            raise
         return
     fail("cannot allocate a testbox cleanup quarantine name")
 
 
-def remove_tree(parent_fd: int, name: str, directory_fd: int | None = None) -> None:
+def restore_marker(run_fd: int, marker_data: bytes) -> None:
+    marker_fd = os.open(
+        ".codex-run-id",
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW,
+        0o600,
+        dir_fd=run_fd,
+    )
+    try:
+        os.write(marker_fd, marker_data)
+        os.fsync(marker_fd)
+    finally:
+        os.close(marker_fd)
+
+
+def remove_tree(
+    parent_fd: int,
+    name: str,
+    directory_fd: int | None = None,
+    marker_data: bytes | None = None,
+) -> None:
     owns_fd = directory_fd is None
     if directory_fd is None:
         directory_fd = os.open(name, OPEN_FLAGS, dir_fd=parent_fd)
@@ -256,6 +280,8 @@ def remove_tree(parent_fd: int, name: str, directory_fd: int | None = None) -> N
     try:
         for entry in os.scandir(directory_fd):
             entry_name = entry.name
+            if marker_data is not None and entry_name == ".codex-run-id":
+                continue
             try:
                 entry_stat = os.stat(entry_name, dir_fd=directory_fd, follow_symlinks=False)
             except FileNotFoundError:
@@ -267,25 +293,49 @@ def remove_tree(parent_fd: int, name: str, directory_fd: int | None = None) -> N
     finally:
         same_directory(parent_fd, name, directory_fd)
     try:
-        remove_directory_entry(parent_fd, name, directory_fd)
+        if marker_data is None:
+            remove_directory_entry(parent_fd, name, directory_fd)
+        else:
+            os.unlink(".codex-run-id", dir_fd=directory_fd)
+            try:
+                remove_directory_entry(parent_fd, name, directory_fd)
+            except BaseException:
+                restore_marker(directory_fd, marker_data)
+                raise
     finally:
         if owns_fd:
             os.close(directory_fd)
 
 
-def marker_matches(run_fd: int, expected: str) -> None:
+def marker_matches(run_fd: int, expected: str) -> bytes:
     if not expected:
         fail("testbox run marker is required")
     try:
-        marker_fd = os.open(".codex-run-id", os.O_RDONLY | NOFOLLOW, dir_fd=run_fd)
+        marker_fd = os.open(
+            ".codex-run-id",
+            os.O_RDONLY | os.O_NONBLOCK | NOFOLLOW,
+            dir_fd=run_fd,
+        )
     except OSError as exc:
         fail(f"cannot open testbox run marker safely: {exc}")
     try:
-        marker = os.read(marker_fd, 256).decode("utf-8").strip()
+        marker_stat = os.fstat(marker_fd)
+        if (
+            not stat.S_ISREG(marker_stat.st_mode)
+            or marker_stat.st_uid != os.geteuid()
+            or marker_stat.st_mode & 0o077
+        ):
+            fail("testbox run marker is not a private regular file")
+        marker_data = os.read(marker_fd, 256)
     finally:
         os.close(marker_fd)
+    try:
+        marker = marker_data.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        fail(f"testbox run marker is not valid UTF-8: {exc}")
     if marker != expected:
         fail("testbox run marker does not match the owning run")
+    return marker_data
 
 
 def create_run(root: str, run: str, expected: str) -> None:
@@ -350,9 +400,9 @@ def verify_or_cleanup(root: str, run: str, expected: str, remove: bool) -> None:
         except OSError as exc:
             fail(f"testbox run directory is not safe: {exc}")
         try:
-            marker_matches(run_fd, expected)
+            marker_data = marker_matches(run_fd, expected)
             if remove:
-                remove_tree(parent_fd, parts[-1], run_fd)
+                remove_tree(parent_fd, parts[-1], run_fd, marker_data)
         finally:
             os.close(run_fd)
     finally:

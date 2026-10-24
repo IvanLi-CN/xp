@@ -160,6 +160,14 @@ PY
     echo 'expected remote marker guard to fail' >&2
     exit 1
   fi
+  fifo_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-fifo")"
+  rm "$fifo_run/.codex-run-id"
+  mkfifo "$fifo_run/.codex-run-id"
+  if testbox_remote_cleanup "$fifo_run" run-fifo; then
+    echo 'expected non-regular remote run marker guard to fail' >&2
+    exit 1
+  fi
+  rm -rf "$fifo_run"
   testbox_remote_cleanup "$guarded_run" run-3
   test ! -e "$guarded_run"
   mkdir -p "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/insecure"
