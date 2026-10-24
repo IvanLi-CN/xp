@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	DEFAULT_SUBSCRIPTION_FORMAT,
 	SUBSCRIPTION_FORMAT_OPTIONS,
@@ -25,21 +26,21 @@ describe("subscription format contract", () => {
 		expect(
 			buildSubscriptionUrl({
 				origin: "https://node.example",
-				subscriptionToken: "token/one",
+				subscriptionToken: fixtureCatalog.token.fixture254(),
 				format: "mihomo",
 				externalResources: "mirror",
 			}),
 		).toBe(
-			"https://node.example/api/sub/token%2Fone?format=mihomo&external_resources=mirror",
+			"https://node.example/api/sub/fixture-token-254?format=mihomo&external_resources=mirror",
 		);
 	});
 
 	it("keeps server-side URLs relative when no origin is available", () => {
 		expect(
 			buildSubscriptionUrl({
-				subscriptionToken: "token",
+				subscriptionToken: fixtureCatalog.token.fixture257(),
 				format: "raw",
 			}),
-		).toBe("/api/sub/token?format=raw");
+		).toBe("/api/sub/fixture-token-257?format=raw");
 	});
 });
