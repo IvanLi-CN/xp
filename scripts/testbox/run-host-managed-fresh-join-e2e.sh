@@ -45,6 +45,7 @@ echo "compose_project=$COMPOSE_PROJECT"
 
 ssh -o BatchMode=yes "$TESTBOX" "set -e; mkdir -p '$REMOTE_WORKSPACE/cargo-home' '$REMOTE_WORKSPACE/rustup-home' '$REMOTE_WORKSPACE/host-join-musl-target' '$REMOTE_WORKSPACE/receipts'"
 rsync -az --delete \
+  --exclude '.codex-run-id' \
   --exclude '.git/' \
   --exclude 'target/' \
   --exclude 'node_modules/' \

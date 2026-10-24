@@ -208,18 +208,19 @@ def verify_or_cleanup(root: str, run: str, expected: str, remove: bool) -> None:
         os.close(parent_fd)
 
 
-def cleanup_claim(root: str, claim: str) -> None:
+def cleanup_claim(root: str, claim: str, lock: bool) -> None:
     root, parts = claim_parts(root, claim)
     root_fd = open_root(root)
     parent_fd = open_parent(root_fd, parts[:-1], create=False)
-    lock_fd = lock_parent(parent_fd)
+    lock_fd = lock_parent(parent_fd) if lock else None
     try:
         try:
             remove_tree(parent_fd, parts[-1])
         except FileNotFoundError:
             pass
     finally:
-        os.close(lock_fd)
+        if lock_fd is not None:
+            os.close(lock_fd)
         os.close(parent_fd)
 
 
@@ -258,7 +259,9 @@ def main() -> None:
     elif mode == "cleanup":
         verify_or_cleanup(root, run, expected, remove=True)
     elif mode == "claim-cleanup":
-        cleanup_claim(root, run)
+        cleanup_claim(root, run, lock=True)
+    elif mode == "claim-cleanup-locked":
+        cleanup_claim(root, run, lock=False)
     else:
         raise SystemExit(f"unknown testbox guard mode: {mode}")
 

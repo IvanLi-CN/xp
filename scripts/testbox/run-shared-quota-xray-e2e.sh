@@ -166,7 +166,11 @@ fi
 REMOTE_SUBNET_CLAIMS="$TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims"
 testbox_remote_root_preflight
 REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
-REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
+if [ "$RUN_MESH_RESOURCE" = "1" ]; then
+  REMOTE_WORKSPACE="$REMOTE_AGENT_DIR/workspace"
+else
+  REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
+fi
 REMOTE_RUN_CREATED=1
 REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
@@ -333,7 +337,11 @@ case "$remote_run_real" in
 esac
 assert_no_symlink_path "$remote_run_real"
 REMOTE_RUN="$remote_run_real"
-REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
+if [[ "$REMOTE_RUN" == "$TESTBOX_REMOTE_ROOT"/agents/*/runs/* ]]; then
+  REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")/workspace"
+else
+  REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
+fi
 if [[ "$REMOTE_RUN" == "$TESTBOX_REMOTE_ROOT"/agents/*/runs/* ]]; then
   agent_base="$TESTBOX_REMOTE_ROOT/agents"
   agent_dir="$(dirname "$REMOTE_WORKSPACE")"
@@ -437,7 +445,7 @@ cleanup() {
   fi
   if [ -n "${SUBNET_CLAIM_DIR:-}" ]; then
     python3 "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" \
-      claim-cleanup "$TESTBOX_REMOTE_ROOT" "$SUBNET_CLAIM_DIR" >/dev/null 2>&1 || true
+      claim-cleanup-locked "$TESTBOX_REMOTE_ROOT" "$SUBNET_CLAIM_DIR" >/dev/null 2>&1 || true
   fi
   if [ -n "${REMOTE_RUN:-}" ]; then
     if assert_remote_run; then
@@ -744,7 +752,7 @@ def cleanup_claim_dir(path):
         [
             "python3",
             str(guard_script),
-            "claim-cleanup",
+            "claim-cleanup-locked",
             str(remote_root),
             str(path),
         ],

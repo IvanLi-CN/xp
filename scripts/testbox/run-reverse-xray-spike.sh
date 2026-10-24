@@ -66,7 +66,7 @@ REMOTE_CLEANUP
 }
 trap cleanup EXIT INT TERM
 
-rsync -az --delete --exclude '.git/' --exclude 'target/' --exclude 'web/node_modules/' \
+rsync -az --delete --exclude '.codex-run-id' --exclude '.git/' --exclude 'target/' --exclude 'web/node_modules/' \
   "$REPO_ROOT/" "$TESTBOX:$REMOTE_RUN/"
 ssh -o BatchMode=yes "$TESTBOX" "cd '$REMOTE_RUN' && \
   REVERSE_SPIKE_RVS_API_PORT=\$(python3 - <<'PY'

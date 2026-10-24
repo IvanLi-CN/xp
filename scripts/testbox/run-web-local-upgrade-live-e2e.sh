@@ -78,6 +78,7 @@ created_utc=$CREATED_UTC
 TXT
 
 rsync -az --delete \
+  --exclude '.codex-run-id' \
   --exclude '.git/' \
   --exclude 'node_modules/' \
   --exclude 'target/' \

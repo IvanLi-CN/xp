@@ -132,6 +132,25 @@ PY
   fi
   testbox_remote_cleanup "$guarded_run" run-3
   test ! -e "$guarded_run"
+  claim_dir="$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims/10_203_0_0_24"
+  mkdir -p "$claim_dir"
+  python3 - "$XP_TESTBOX_REMOTE_ROOT" "$claim_dir" "$SCRIPT_DIR/remote-run-guard.py" <<'PY'
+import fcntl
+import os
+import subprocess
+import sys
+
+root, claim, helper = sys.argv[1:]
+lock_path = os.path.join(root, "agents", ".shared-testbox-subnet-claims", ".codex-run-lock")
+with open(lock_path, "a+") as lock_file:
+    fcntl.flock(lock_file, fcntl.LOCK_EX)
+    subprocess.run(
+        ["python3", helper, "claim-cleanup-locked", root, claim],
+        check=True,
+    )
+assert not os.path.exists(claim)
+PY
+  rm -rf "$XP_TESTBOX_REMOTE_ROOT/agents"
   mkdir -p "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan"
   mkdir -p "$guard_root/outside"
   rm -rf "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo"
