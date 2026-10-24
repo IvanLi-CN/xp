@@ -292,7 +292,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
 
     def test_ci_runs_testbox_launcher_contracts(self) -> None:
         workflow = (Path(__file__).parents[1] / "workflows" / "ci.yml").read_text()
-        self.assertIn("bash -n scripts/testbox/*.sh", workflow)
+        self.assertIn('for script in scripts/testbox/*.sh; do bash -n "$script"; done', workflow)
         self.assertIn("python3 -m py_compile scripts/testbox/remote-run-guard.py", workflow)
         self.assertIn("scripts/testbox/test-shared-quota-xray-e2e-guards.sh", workflow)
 

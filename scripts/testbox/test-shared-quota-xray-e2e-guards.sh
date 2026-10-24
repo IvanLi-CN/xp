@@ -224,10 +224,48 @@ PY
   fi
   test -e "$quarantine_run"
   chmod 0700 "$quarantine_claim"
-  RUN_ID=run-quarantine python3 "$SCRIPT_DIR/remote-run-guard.py" \
-    cleanup-with-claim "$XP_TESTBOX_REMOTE_ROOT" "$quarantine_run" "$quarantine_claim"
+  python3 - "$XP_TESTBOX_REMOTE_ROOT" "$quarantine_run" "$quarantine_claim" "$SCRIPT_DIR/remote-run-guard.py" <<'PY'
+import fcntl
+import os
+import subprocess
+import sys
+
+root, run, claim, helper = sys.argv[1:]
+lock_path = os.path.join(root, "agents", ".shared-testbox-subnet-claims", ".codex-run-lock")
+environment = os.environ.copy()
+environment["RUN_ID"] = "run-quarantine"
+with open(lock_path, "a+") as lock_file:
+    fcntl.flock(lock_file, fcntl.LOCK_EX)
+    subprocess.run(
+        ["python3", helper, "cleanup-with-claim-locked", root, run, claim],
+        check=True,
+        env=environment,
+        timeout=5,
+    )
+PY
   test ! -e "$quarantine_run"
   test ! -e "$quarantine_claim"
+  transaction_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-transaction" run-transaction)"
+  transaction_claim="$XP_TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims/10_203_2_0_24"
+  mkdir -p "$transaction_claim" "$transaction_run/nested"
+  chmod 700 "$transaction_claim"
+  printf '%s\n' codex-transaction > "$transaction_claim/compose_project"
+  printf '%s\n' "$transaction_run" > "$transaction_claim/run_path"
+  printf '%s\n' 10.203.2.0/24 > "$transaction_claim/subnet"
+  printf 'keep me\n' > "$transaction_run/nested/file"
+  chmod 500 "$transaction_run/nested"
+  if RUN_ID=run-transaction python3 "$SCRIPT_DIR/remote-run-guard.py" \
+    cleanup-with-claim "$XP_TESTBOX_REMOTE_ROOT" "$transaction_run" "$transaction_claim"; then
+    echo 'expected run cleanup failure to preserve run and claim' >&2
+    exit 1
+  fi
+  test -d "$transaction_run"
+  test -d "$transaction_claim"
+  chmod 700 "$transaction_run/nested"
+  RUN_ID=run-transaction python3 "$SCRIPT_DIR/remote-run-guard.py" \
+    cleanup-with-claim "$XP_TESTBOX_REMOTE_ROOT" "$transaction_run" "$transaction_claim"
+  test ! -e "$transaction_run"
+  test ! -e "$transaction_claim"
   rm -rf "$XP_TESTBOX_REMOTE_ROOT/agents"
   mkdir -p "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan"
   mkdir -p "$guard_root/outside"

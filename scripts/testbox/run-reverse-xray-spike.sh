@@ -88,7 +88,7 @@ REMOTE_RUN_CREATED=1
 REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
 
-rsync -az --delete --exclude '.codex-run-id' --exclude '.git/' --exclude 'target/' --exclude 'web/node_modules/' \
+rsync -az --no-perms --delete --exclude '.codex-run-id' --exclude '.git/' --exclude 'target/' --exclude 'web/node_modules/' \
   "$REPO_ROOT/" "$TESTBOX:$REMOTE_RUN/"
 ssh -o BatchMode=yes "$TESTBOX" "cd '$REMOTE_RUN' && \
   REVERSE_SPIKE_RVS_API_PORT=\$(python3 - <<'PY'

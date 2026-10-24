@@ -468,37 +468,85 @@ def cleanup_claim(root: str, claim: str, lock: bool) -> None:
         os.close(parent_fd)
 
 
-def cleanup_run_and_claim(root: str, run: str, claim: str, expected: str) -> None:
-    root, parts = run_parts(root, run)
-    root_fd = open_root(root)
-    parent_fd = open_parent(root_fd, parts[:-1], create=False)
-    lock_fd = lock_parent(parent_fd)
+def cleanup_run_and_claim(
+    root: str,
+    run: str,
+    claim: str,
+    expected: str,
+    claim_lock: bool,
+) -> None:
+    root, run_path_parts = run_parts(root, run)
+    claim_root, claim_path_parts = claim_parts(root, claim)
+    if claim_root != root:
+        fail("testbox run and claim roots do not match")
+    run_root_fd = open_root(root)
+    run_parent_fd = open_parent(run_root_fd, run_path_parts[:-1], create=False)
+    claim_root_fd = open_root(root)
+    claim_parent_fd = open_parent(claim_root_fd, claim_path_parts[:-1], create=False)
+    claim_lock_fd: int | None = None
+    run_lock_fd: int | None = None
     run_fd: int | None = None
+    claim_fd: int | None = None
     quarantine: str | None = None
+    claim_quarantine: str | None = None
     try:
-        run_fd = os.open(parts[-1], OPEN_FLAGS, dir_fd=parent_fd)
+        if claim_lock:
+            claim_lock_fd = lock_parent(claim_parent_fd)
+        run_lock_fd = lock_parent(run_parent_fd)
+        run_fd = os.open(run_path_parts[-1], OPEN_FLAGS, dir_fd=run_parent_fd)
         validate_directory(run_fd, owner_required=True, allow_sticky=False, private_required=True)
         marker_data = marker_matches(run_fd, expected)
-        quarantine = quarantine_directory_entry(parent_fd, parts[-1], run_fd)
         try:
-            cleanup_claim(root, claim, lock=True)
+            claim_fd = os.open(claim_path_parts[-1], OPEN_FLAGS, dir_fd=claim_parent_fd)
+        except FileNotFoundError:
+            fail("testbox claim directory does not exist")
+        validate_directory(
+            claim_fd,
+            owner_required=True,
+            allow_sticky=False,
+            private_required=True,
+        )
+        quarantine = quarantine_directory_entry(run_parent_fd, run_path_parts[-1], run_fd)
+        try:
+            claim_quarantine = quarantine_directory_entry(
+                claim_parent_fd, claim_path_parts[-1], claim_fd
+            )
         except BaseException:
-            restore_directory_entry(parent_fd, parts[-1], quarantine, run_fd)
+            restore_directory_entry(run_parent_fd, run_path_parts[-1], quarantine, run_fd)
             quarantine = None
             raise
         try:
-            remove_tree(parent_fd, quarantine, run_fd, marker_data)
+            remove_tree(run_parent_fd, quarantine, run_fd, marker_data)
             quarantine = None
+            remove_tree(claim_parent_fd, claim_quarantine, claim_fd)
+            claim_quarantine = None
         except BaseException:
+            if claim_quarantine is not None:
+                restore_directory_entry(
+                    claim_parent_fd, claim_path_parts[-1], claim_quarantine, claim_fd
+                )
+                claim_quarantine = None
             if quarantine is not None:
-                restore_directory_entry(parent_fd, parts[-1], quarantine, run_fd)
+                restore_directory_entry(run_parent_fd, run_path_parts[-1], quarantine, run_fd)
                 quarantine = None
             raise
     finally:
+        if claim_quarantine is not None:
+            restore_directory_entry(
+                claim_parent_fd, claim_path_parts[-1], claim_quarantine, claim_fd
+            )
+        if quarantine is not None:
+            restore_directory_entry(run_parent_fd, run_path_parts[-1], quarantine, run_fd)
+        if claim_fd is not None:
+            os.close(claim_fd)
         if run_fd is not None:
             os.close(run_fd)
-        os.close(lock_fd)
-        os.close(parent_fd)
+        if run_lock_fd is not None:
+            os.close(run_lock_fd)
+        if claim_lock_fd is not None:
+            os.close(claim_lock_fd)
+        os.close(claim_parent_fd)
+        os.close(run_parent_fd)
 
 
 def decode_env_paths() -> tuple[str, str]:
@@ -549,8 +597,14 @@ def main() -> None:
         verify_or_cleanup(root, run, expected, remove=False)
     elif mode == "cleanup":
         verify_or_cleanup(root, run, expected, remove=True)
-    elif mode == "cleanup-with-claim" and claim is not None:
-        cleanup_run_and_claim(root, run, claim, expected)
+    elif mode in {"cleanup-with-claim", "cleanup-with-claim-locked"} and claim is not None:
+        cleanup_run_and_claim(
+            root,
+            run,
+            claim,
+            expected,
+            claim_lock=mode == "cleanup-with-claim",
+        )
     elif mode == "claim-cleanup":
         cleanup_claim(root, run, lock=True)
     elif mode == "claim-cleanup-locked":

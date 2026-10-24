@@ -307,8 +307,11 @@ case "$final_run" in
 esac
 REMOTE_CLEANUP
     then
-    if testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1; then
-      :
+      if testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1; then
+        :
+      else
+        status=1
+      fi
     else
       status=1
     fi
@@ -719,8 +722,17 @@ YAML
   done
 } > "$caps_override"
 
+claim_pid="$$"
+claim_start_ticks="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
+case "$claim_start_ticks" in
+  ''|*[!0-9]*)
+    echo "cannot determine shared-testbox lease start time" >&2
+    exit 1
+    ;;
+esac
+
 mapfile -t subnet_claim_info < <(
-  python3 - "$SUBNET_CLAIM_ROOT" "$REMOTE_RUN" "$COMPOSE_PROJECT" "$TESTBOX_REMOTE_ROOT" <<'PY'
+  python3 - "$SUBNET_CLAIM_ROOT" "$REMOTE_RUN" "$COMPOSE_PROJECT" "$TESTBOX_REMOTE_ROOT" "$claim_pid" "$claim_start_ticks" <<'PY'
 import fcntl
 import ipaddress
 import json
@@ -730,12 +742,16 @@ import re
 import stat
 import subprocess
 import sys
-import time
 
 claim_root = pathlib.Path(sys.argv[1])
 remote_run = pathlib.Path(sys.argv[2])
 compose_project = sys.argv[3]
 remote_root = pathlib.Path(os.path.normpath(sys.argv[4]))
+claim_pid = int(sys.argv[5])
+claim_start_ticks = int(sys.argv[6])
+if claim_pid <= 0 or claim_start_ticks <= 0:
+    print("invalid shared-testbox lease identity", file=sys.stderr)
+    sys.exit(1)
 
 if remote_root.is_symlink() or remote_root.resolve() != remote_root:
     print("shared-testbox remote root is not canonical", file=sys.stderr)
@@ -845,6 +861,27 @@ def cleanup_claim_dir(path):
     return result.returncode == 0
 
 
+def write_claim_lease(path):
+    temporary = path / ".lease.tmp"
+    try:
+        fd = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        with os.fdopen(fd, "w") as lease_file:
+            lease_file.write(f"pid={claim_pid}\nstart_ticks={claim_start_ticks}\n")
+            lease_file.flush()
+            os.fsync(lease_file.fileno())
+        os.replace(temporary, path / "lease")
+    except BaseException:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def read_claim_file(path, label):
     if path.is_symlink() or not path.is_file():
         print(f"shared-testbox claim metadata is missing or unsafe: {label}", file=sys.stderr)
@@ -911,7 +948,7 @@ def cleanup_stale_run(path, claim_dir):
         [
             "python3",
             str(guard_script),
-            "cleanup-with-claim",
+            "cleanup-with-claim-locked",
             str(remote_root),
             str(path),
             str(claim_dir),
@@ -1080,6 +1117,7 @@ try:
             (claim_dir / "run_path").write_text(f"{remote_run}\n")
             (claim_dir / "compose_project").write_text(f"{compose_project}\n")
             (claim_dir / "subnet").write_text(f"{candidate}\n")
+            write_claim_lease(claim_dir)
         except BaseException:
             cleanup_claim_dir(claim_dir)
             raise
@@ -1101,12 +1139,6 @@ SUBNET_CLAIM_DIR="${subnet_claim_info[1]:-}"
 if [ -z "$TESTBOX_SUBNET" ] || [ -z "$SUBNET_CLAIM_DIR" ]; then
   echo "failed to allocate isolated shared-testbox subnet claim" >&2
   exit 1
-fi
-
-claim_start_ticks="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
-if [ -n "$claim_start_ticks" ]; then
-  printf 'pid=%s\nstart_ticks=%s\n' "$$" "$claim_start_ticks" > "$SUBNET_CLAIM_DIR/lease"
-  chmod 600 "$SUBNET_CLAIM_DIR/lease"
 fi
 
 cat > "$net_override" <<YAML
