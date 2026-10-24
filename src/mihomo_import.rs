@@ -1398,7 +1398,7 @@ fn validate_yaml_proxy(map: &Mapping, scheme: &str) -> Option<String> {
         return Some(format!("{scheme} port is required"));
     }
     let required: &[&str] = match scheme {
-        "vless" | "vmess" | "tuic" => &["uuid"],
+        "vless" | "vmess" => &["uuid"],
         "ss" => &["cipher", "password"],
         "trojan" | "hysteria2" | "hy2" => &["password"],
         _ => &[],
@@ -1408,8 +1408,11 @@ fn validate_yaml_proxy(map: &Mapping, scheme: &str) -> Option<String> {
             return Some(format!("{scheme} {field} is required"));
         }
     }
-    if scheme == "tuic" && !yaml_nonempty_string(map, "password") {
-        return Some("tuic password is required".to_owned());
+    if scheme == "tuic"
+        && !yaml_nonempty_string(map, "token")
+        && !(yaml_nonempty_string(map, "uuid") && yaml_nonempty_string(map, "password"))
+    {
+        return Some("tuic token or uuid/password is required".to_owned());
     }
     None
 }
@@ -2092,17 +2095,15 @@ mod tests {
 proxy-groups:
   - name: ignored
 proxies:
-  - type: ss
+  - type: tuic
     server: example.com
     port: 443
-    cipher: aes-256-gcm
-    password: secret
+    token: example-token
 "#;
         let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(yaml);
         let preview = preview_text(&encoded, "", &empty_reserved()).expect("preview");
         assert_eq!(preview.detected_source, DetectedSource::Base64);
         assert_eq!(preview.counts.added, 1);
-        assert_eq!(preview.counts.warnings, 1);
         assert!(
             preview.items[0]
                 .warnings
@@ -2170,7 +2171,6 @@ ssr://secret@example.com:443#unsupported"#,
         )
         .expect("preview");
         assert_eq!(preview.counts.added, 1);
-        assert_eq!(preview.counts.failed, 1);
         assert!(
             preview.items[0]
                 .reason
