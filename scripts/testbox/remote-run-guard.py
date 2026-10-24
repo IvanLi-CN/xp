@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import base64
+import ctypes
+import errno
 import fcntl
 import os
+import secrets
 import stat
 import sys
 from typing import NoReturn
@@ -166,18 +169,49 @@ def same_directory(parent_fd: int, name: str, directory_fd: int) -> None:
         fail("testbox directory changed during cleanup")
 
 
+def rename_noreplace(parent_fd: int, source: str, target: str) -> bool:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "linux":
+        rename = getattr(libc, "renameat2", None)
+        flag = 1
+    elif sys.platform == "darwin":
+        rename = getattr(libc, "renameatx_np", None)
+        flag = 4
+    else:
+        fail("testbox cleanup requires an atomic no-replace rename primitive")
+    if rename is None:
+        fail("testbox cleanup requires an atomic no-replace rename primitive")
+    rename.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    rename.restype = ctypes.c_int
+    result = rename(
+        parent_fd,
+        os.fsencode(source),
+        parent_fd,
+        os.fsencode(target),
+        flag,
+    )
+    if result == 0:
+        return True
+    error = ctypes.get_errno()
+    if error == errno.EEXIST:
+        return False
+    raise OSError(error, os.strerror(error))
+
+
 def remove_directory_entry(parent_fd: int, name: str, directory_fd: int) -> None:
     same_directory(parent_fd, name, directory_fd)
     for attempt in range(16):
-        quarantine = f".codex-run-quarantine-{os.getpid()}-{attempt}"
-        try:
-            os.rename(
-                name,
-                quarantine,
-                src_dir_fd=parent_fd,
-                dst_dir_fd=parent_fd,
-            )
-        except FileExistsError:
+        quarantine = (
+            f".codex-run-quarantine-{os.getpid()}-"
+            f"{secrets.token_hex(16)}-{attempt}"
+        )
+        if not rename_noreplace(parent_fd, name, quarantine):
             continue
         same_directory(parent_fd, quarantine, directory_fd)
         os.rmdir(quarantine, dir_fd=parent_fd)

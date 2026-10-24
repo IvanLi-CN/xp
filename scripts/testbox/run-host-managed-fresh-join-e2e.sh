@@ -28,14 +28,22 @@ REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 COMPOSE_PROJECT="$(testbox_bounded_name "codex_${WORKSPACE_SLUG}_host_join_${RUN_ID}")"
 REMOTE_RUN_CREATED=0
 cleanup_remote_run() {
-  local status=$?
+  local status="${1:-$?}"
   set +e
   if [ "$REMOTE_RUN_CREATED" = "1" ]; then
     testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
   fi
   return "$status"
 }
-trap cleanup_remote_run EXIT INT TERM
+on_signal() {
+  local status="$1"
+  trap - EXIT INT TERM
+  cleanup_remote_run "$status"
+  exit "$status"
+}
+trap cleanup_remote_run EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 testbox_remote_root_preflight
 REMOTE_RUN_CREATED=1
 REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"

@@ -456,7 +456,7 @@ cleanup() {
   fi
   if [ -n "${SUBNET_CLAIM_DIR:-}" ]; then
     python3 "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" \
-      claim-cleanup-locked "$TESTBOX_REMOTE_ROOT" "$SUBNET_CLAIM_DIR" >/dev/null 2>&1 || true
+      claim-cleanup "$TESTBOX_REMOTE_ROOT" "$SUBNET_CLAIM_DIR" >/dev/null 2>&1 || true
   fi
   if [ -n "${REMOTE_RUN:-}" ]; then
     if assert_remote_run; then
@@ -914,10 +914,14 @@ try:
         ensure_directory(claim_root, create=False)
         if claim_dir.exists() or claim_dir.is_symlink():
             continue
-        claim_dir.mkdir()
-        (claim_dir / "run_path").write_text(f"{remote_run}\n")
-        (claim_dir / "compose_project").write_text(f"{compose_project}\n")
-        (claim_dir / "subnet").write_text(f"{candidate}\n")
+        claim_dir.mkdir(mode=0o700)
+        try:
+            (claim_dir / "run_path").write_text(f"{remote_run}\n")
+            (claim_dir / "compose_project").write_text(f"{compose_project}\n")
+            (claim_dir / "subnet").write_text(f"{candidate}\n")
+        except BaseException:
+            cleanup_claim_dir(claim_dir)
+            raise
         print(candidate)
         print(claim_dir)
         sys.exit(0)

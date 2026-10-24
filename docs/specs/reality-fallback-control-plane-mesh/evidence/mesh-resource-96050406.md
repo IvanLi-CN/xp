@@ -8,7 +8,7 @@
   `scripts/testbox/run-shared-mesh-resource-e2e.sh`
 - Status: blocked before the runner could start.
 - Historical execution target (not current infrastructure inventory):
-  `codex-testbox` / `192.168.31.15`
+  历史共享 Linux 测试主机
 - Observed on 2026-10-01: TCP port 22 was reachable, but both 10-second and 30-second
   `ssh -o BatchMode=yes -o ConnectionAttempts=1` attempts ended with
   `Connection timed out during banner exchange`.

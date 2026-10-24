@@ -8,7 +8,7 @@
   `scripts/testbox/run-shared-mesh-resource-e2e.sh`
 - Status: pending final-candidate run after the testbox restart and body-completion state fix.
 - Historical execution target (not current infrastructure inventory):
-  `codex-testbox` / `192.168.31.15`
+  历史共享 Linux 测试主机
 - The prior non-current `f933bd92` run passed the isolated workload: baseline XP total/anon PSS
   `32752/17868 KiB`, candidate `32506/16488 KiB`, stack peaks `42688/42442 KiB`, 50 TLS accepts,
   zero non-H2 requests, repository summary peak `28990 KiB`, and source journal peak `27903 KiB`.

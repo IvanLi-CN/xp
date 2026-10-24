@@ -128,6 +128,28 @@ PY
   test "$(cat "$guarded_run/.codex-run-id")" = run-1
   testbox_remote_cleanup "$guarded_run" run-1
   test ! -e "$guarded_run"
+  python3 - "$guard_root" "$SCRIPT_DIR/remote-run-guard.py" <<'PY'
+import importlib.util
+import os
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]) / "rename-noreplace"
+root.mkdir()
+(root / "source").mkdir()
+(root / "target").mkdir()
+spec = importlib.util.spec_from_file_location("remote_run_guard", sys.argv[2])
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+parent_fd = os.open(root, module.OPEN_FLAGS)
+try:
+    assert not module.rename_noreplace(parent_fd, "source", "target")
+finally:
+    os.close(parent_fd)
+assert (root / "source").is_dir()
+assert (root / "target").is_dir()
+PY
   guarded_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-3")"
   test "$(cat "$guarded_run/.codex-run-id")" = run-3
   if TESTBOX_REMOTE_ROOT="$XP_TESTBOX_REMOTE_ROOT" \

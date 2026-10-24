@@ -53,7 +53,7 @@ COMPOSE_DIR="$REMOTE_RUN/scripts/testbox"
 COMPOSE_FILE="compose-host-managed-fresh-join.yml"
 
 cleanup() {
-  local status=$?
+  local status="${1:-$?}"
   set +e
   if [ "$status" -ne 0 ]; then
     printf '%s\n' \
@@ -82,7 +82,15 @@ cleanup() {
   fi
   return "$status"
 }
-trap cleanup EXIT INT TERM
+on_signal() {
+  local status="$1"
+  trap - EXIT INT TERM
+  cleanup "$status"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 cd "$COMPOSE_DIR"
 

@@ -9,7 +9,7 @@
 - Status: failed in two exact-candidate runs; the shared testbox completed both workload windows,
   but the CPU relative budget failed. A4 is not passed.
 - Historical execution target (not current infrastructure inventory):
-  `codex-testbox` / `192.168.31.15`
+  历史共享 Linux 测试主机
 - Retry manifest: `20261001_153236_7712c651ccd6_876724b6` completed with `status=failed`.
   Baseline CPU was `153` ticks and candidate CPU was `162` ticks; the calculated 5% limit was
   `161` ticks. TLS accepts (`50`), non-H2 requests (`0`), one active connection per peer, and

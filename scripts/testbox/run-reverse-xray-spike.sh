@@ -33,7 +33,7 @@ COMPOSE_PROJECT="codex_${REPO_NAME}_${PATH_HASH8}_${RUN_ID}"
 COMPOSE_PROJECT="$(testbox_bounded_name "$COMPOSE_PROJECT")"
 REMOTE_RUN_CREATED=0
 cleanup() {
-  local status=$?
+  local status="${1:-$?}"
   set +e
   if [[ "$REMOTE_RUN_CREATED" = "1" && "$status" != 0 ]] && testbox_remote_run_verify "$REMOTE_RUN" "$RUN_ID"; then
     ssh -o BatchMode=yes "$TESTBOX" "test \"\$(cat -- '$REMOTE_RUN/.codex-run-id')\" = '$RUN_ID' && cd '$REMOTE_RUN' && docker compose -p '$COMPOSE_PROJECT' -f scripts/testbox/reverse-xray-spike-compose.yml logs --no-color rendezvous target" >&2
@@ -57,7 +57,15 @@ REMOTE_CLEANUP
   fi
   return "$status"
 }
-trap cleanup EXIT INT TERM
+on_signal() {
+  local status="$1"
+  trap - EXIT INT TERM
+  cleanup "$status"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 testbox_remote_root_preflight
 REMOTE_RUN_CREATED=1
 REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"

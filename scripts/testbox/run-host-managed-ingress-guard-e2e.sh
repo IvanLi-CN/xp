@@ -17,7 +17,7 @@ REMOTE_RUN="$TESTBOX_REMOTE_ROOT/workspaces/$USER/${REPO_NAME}__${PATH_HASH8}/ru
 CONTAINER="$(testbox_bounded_name "codex_${REPO_NAME}_${PATH_HASH8}_ingress_${RUN_ID}")"
 REMOTE_RUN_CREATED=0
 cleanup() {
-  local status=$?
+  local status="${1:-$?}"
   set +e
   if [ "$REMOTE_RUN_CREATED" != "1" ]; then
     return "$status"
@@ -26,7 +26,15 @@ cleanup() {
   testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
   return "$status"
 }
-trap cleanup EXIT INT TERM
+on_signal() {
+  local status="$1"
+  trap - EXIT INT TERM
+  cleanup "$status"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 testbox_remote_root_preflight
 REMOTE_RUN_CREATED=1
 REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
