@@ -128,7 +128,7 @@ class ReadinessTests(unittest.TestCase):
         ]}
         self.assertEqual(readiness.evaluate(payload, sha), ("ready", "all_required_workflows_success"))
 
-    def test_agent_vm_resource_evidence_is_bound_to_target_sha(self) -> None:
+    def test_resource_evidence_is_bound_to_target_sha(self) -> None:
         sha = "1" * 40
         valid = {
             "schema": readiness.RESOURCE_EVIDENCE_SCHEMA,
@@ -152,7 +152,7 @@ class ReadinessTests(unittest.TestCase):
             "repository_apply_meets_ten_x_bytes": True,
         }
         detail = readiness.validate_resource_evidence(json.dumps(valid), sha)
-        self.assertIn("agent_vm_resource_evidence_verified", detail)
+        self.assertIn("resource_evidence_verified", detail)
 
         invalid = dict(valid, target_sha="3" * 40)
         with self.assertRaises(readiness.ReadinessError):
@@ -174,7 +174,7 @@ class ReadinessTests(unittest.TestCase):
             valid["log_sha"] = hashlib.sha256(log_path.read_bytes()).hexdigest()
             evidence_path.write_text(json.dumps(valid), encoding="utf-8")
             self.assertIn(
-                "agent_vm_resource_evidence_verified",
+                "resource_evidence_verified",
                 readiness.validate_resource_evidence_files(evidence_path, log_path, sha),
             )
             tampered = dict(valid, acknowledged_segments=1)
@@ -266,16 +266,18 @@ class WorkflowIntegrationTests(unittest.TestCase):
         ):
             self.assertIn(f"      {input_name}:", workflow)
         self.assertIn("release_readiness.py", workflow)
-        self.assertIn("agent-vm-resource-evidence.json", workflow)
-        self.assertIn("agent-vm-resource.log", workflow)
+        self.assertIn("resource-evidence.json", workflow)
+        self.assertIn("resource-workload.log", workflow)
         self.assertIn("commit.verification.verified", workflow)
         self.assertIn("GITHUB_TRIGGERING_ACTOR", workflow)
         self.assertIn("git verify-commit --raw", workflow)
         self.assertIn("39CE251C234BA4C727C5BEA061F8690632D072E2", workflow)
-        self.assertIn("agent-vm-evidence-${{ github.run_id }}", workflow)
+        self.assertIn("resource-evidence-${{ github.run_id }}", workflow)
         self.assertIn("include-hidden-files: true", workflow)
         self.assertIn("if-no-files-found: error", workflow)
-        self.assertIn("agent-vm-evidence-manifest.txt", workflow)
+        self.assertIn("resource-evidence-manifest.txt", workflow)
+        self.assertNotIn("Agent VM", workflow)
+        self.assertNotIn("agent-vm", workflow)
         self.assertNotIn("workflow_run:", workflow)
         self.assertIn("resource_evidence_ref:\n        description:", workflow)
         self.assertIn("        required: true\n        type: string", workflow)

@@ -7,18 +7,18 @@ derive them from a host name or an Agent identifier.
 ## Cache ownership
 
 `CARGO_HOME` may be shared by compatible Linux agents for Cargo's registry and
-Git dependency downloads:
+Git dependency downloads. Its location is supplied by the runner operator:
 
 ```text
-/srv/codex/caches/linux-amd64/cargo/
+<shared-cargo-home>/cargo/
 ```
 
 Compiled project output stays private to the current Agent Directory. For a
-shared-testbox task, select a cache root inside the directory returned by
-`testbox-agent-dir.sh`, for example:
+shared-testbox task, select a cache root inside the directory derived from the
+caller-provided `XP_TESTBOX_REMOTE_ROOT`, for example:
 
 ```text
-/srv/codex/agents/<CODEX_THREAD_ID>/xp-cargo-cache/
+<XP_TESTBOX_REMOTE_ROOT>/agents/<CODEX_THREAD_ID>/xp-cargo-cache/
   source/candidate/
   source/baseline/
   target/<rustc-fingerprint>/candidate/
@@ -32,17 +32,20 @@ never shared between Agents and is removed only with the owning Agent Directory.
 
 ## Runner usage
 
-Resource runs require both explicit paths:
+Resource runs require the explicit host, remote root and cache paths:
 
 ```bash
-XP_TESTBOX_CARGO_CACHE_ROOT=/srv/codex/agents/$CODEX_THREAD_ID/xp-cargo-cache \
-XP_TESTBOX_CARGO_HOME=/srv/codex/caches/linux-amd64/cargo \
+TESTBOX=<ssh-target> \
+XP_TESTBOX_REMOTE_ROOT=<remote-root> \
+XP_TESTBOX_CARGO_CACHE_ROOT=<remote-root>/agents/$CODEX_THREAD_ID/xp-cargo-cache \
+XP_TESTBOX_CARGO_HOME=<shared-cargo-home>/cargo \
 XP_RUN_MESH_RESOURCE=1 \
 scripts/testbox/run-shared-quota-xray-e2e.sh
 ```
 
-The runner synchronizes immutable candidate and baseline source snapshots into
-stable cache slots, builds through `scripts/cargo-cache/with-cargo-target.sh`,
+The runner requires `TESTBOX` and `XP_TESTBOX_REMOTE_ROOT` for every remote run. It synchronizes
+immutable candidate and baseline source snapshots into stable cache slots, builds through
+`scripts/cargo-cache/with-cargo-target.sh`,
 and copies the resolved XP and resource-test executables into the disposable
 run before measurement. The run directory is cleaned by the existing runner
 trap; it is not a cache.
@@ -55,7 +58,8 @@ Use `scripts/cargo-cache/status.sh --cache-root PATH` to inspect both slots.
 The status command is read-only. `scripts/cargo-cache/test.sh` is the local
 fixture for the wrapper's Cargo invalidation, path, slot and lock behavior.
 `scripts/testbox/test-shared-quota-xray-e2e-guards.sh` exercises the runner's
-early cache and formal/smoke gate guards without connecting to testbox.
+early environment, cache and formal/smoke gate guards without connecting to a
+remote host.
 
 ## Gate rules
 

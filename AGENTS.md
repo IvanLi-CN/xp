@@ -303,10 +303,12 @@
 - UI regression: `cd web && bun run storybook`, `cd web && bun run test-storybook`
 - E2E: `cd web && bun run test:e2e` (Playwright)
 
-For Mesh resource runs on shared testbox, use the project cache contract in
-`docs/ops/cargo-cache.md`: share only the compatible Cargo download cache,
-keep candidate and baseline targets in the current Agent Directory, and pass
-both `XP_TESTBOX_CARGO_CACHE_ROOT` and `XP_TESTBOX_CARGO_HOME` explicitly.
+For remote runs on a shared test host, pass `TESTBOX` and
+`XP_TESTBOX_REMOTE_ROOT` explicitly. For Mesh resource runs, also use the
+project cache contract in `docs/ops/cargo-cache.md`: share only the compatible
+Cargo download cache, keep candidate and baseline targets in the current Agent
+Directory, and pass both `XP_TESTBOX_CARGO_CACHE_ROOT` and
+`XP_TESTBOX_CARGO_HOME` explicitly.
 
 ## Coding Style & Naming Conventions
 

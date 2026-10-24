@@ -2,7 +2,9 @@
 set -euo pipefail
 
 # Fixed-Xray Reality Mesh Reverse spike. All Docker state is scoped to one remote run.
-TESTBOX="${TESTBOX:-codex-testbox}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=runner-env.sh
+source "$SCRIPT_DIR/runner-env.sh"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_ROOT="$(python3 - "$REPO_ROOT" <<'PY'
 import os, sys
@@ -22,7 +24,7 @@ PY
 GIT_SHA="$(git rev-parse HEAD)"
 GIT_SHA_SHORT="$(git rev-parse --short HEAD)"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA_SHORT}_reverse"
-REMOTE_BASE="/srv/codex/workspaces/$USER"
+REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/${REPO_NAME}__${PATH_HASH8}"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 COMPOSE_PROJECT="codex_${REPO_NAME}_${PATH_HASH8}_${RUN_ID}"

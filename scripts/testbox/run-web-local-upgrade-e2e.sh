@@ -4,13 +4,15 @@ set -euo pipefail
 # High-cost Web local upgrade regression suite on the shared testbox.
 #
 # This follows the shared-testbox-runner rules:
-# - per-run isolation under /srv/codex/workspaces/$USER
+# - per-run isolation under the caller-provided remote root
 # - no local Docker usage
 # - no global Docker cleanup
 # - docker run uses cap-drop=ALL for LXC compatibility
 # - cleanup only removes this run's container and run directory
 
-TESTBOX="${TESTBOX:-codex-testbox}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=runner-env.sh
+source "$SCRIPT_DIR/runner-env.sh"
 RUST_IMAGE="${RUST_IMAGE:-rust:1.96-bookworm}"
 ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.22}"
 
@@ -37,7 +39,7 @@ GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$GIT_SHA"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 
-REMOTE_BASE="/srv/codex/workspaces/$USER"
+REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 

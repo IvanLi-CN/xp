@@ -9,7 +9,9 @@ set -euo pipefail
 # - failure path rolls xp back and keeps the old service available
 # - state written before upgrade remains readable after restart
 
-TESTBOX="${TESTBOX:-codex-testbox}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=runner-env.sh
+source "$SCRIPT_DIR/runner-env.sh"
 RUST_IMAGE="${RUST_IMAGE:-rust:1.96-bookworm}"
 
 if REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -35,7 +37,7 @@ GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$GIT_SHA"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 
-REMOTE_BASE="/srv/codex/workspaces/$USER"
+REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 

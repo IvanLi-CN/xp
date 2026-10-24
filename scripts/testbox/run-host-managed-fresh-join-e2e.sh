@@ -2,9 +2,11 @@
 set -euo pipefail
 
 # Exercise official host-managed fresh joins inside Docker init containers on
-# codex-testbox. This runner never targets a VPS or local Docker.
+# the configured shared test host. This runner never targets a VPS or local Docker.
 
-TESTBOX="${TESTBOX:-codex-testbox}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=runner-env.sh
+source "$SCRIPT_DIR/runner-env.sh"
 RUST_IMAGE="${RUST_IMAGE:-rust:1.96.0-bookworm}"
 XP_TEST_IMAGE="${XP_TEST_IMAGE:-xp-fresh-join-candidate}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -19,7 +21,7 @@ SOURCE_ARCHIVE_SHA256="$(git -C "$REPO_ROOT" archive --format=tar "$GIT_SHA" | s
 RUN_NONCE="$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${RUN_NONCE}_${GIT_SHA:0:12}"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
-REMOTE_BASE="/srv/codex/workspaces/$USER"
+REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 COMPOSE_PROJECT="$(python3 -c 'import re, sys; print(re.sub(r"[^a-z0-9_-]+", "_", sys.argv[1].lower()).strip("_")[:63])' "codex_${WORKSPACE_SLUG}_host_join_${RUN_ID}")"

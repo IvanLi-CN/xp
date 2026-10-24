@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run real-xray e2e tests on the shared testbox (codex-testbox).
+# Run real-Xray e2e tests on the configured shared test host.
 #
 # This follows the shared-testbox-runner rules:
 # - per-run isolation under the current shared-testbox Agent Directory
@@ -9,7 +9,9 @@ set -euo pipefail
 # - LXC cap compatibility override
 # - safe cleanup (only resources created by this run)
 
-TESTBOX="${TESTBOX:-codex-testbox}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=runner-env.sh
+source "$SCRIPT_DIR/runner-env.sh"
 RUN_MESH_RESOURCE="${XP_RUN_MESH_RESOURCE:-0}"
 ONLY_MESH_RESOURCE="${XP_E2E_ONLY_MESH_RESOURCE:-0}"
 MESH_RESOURCE_SUMMARY_ONLY="${XP_MESH_RESOURCE_SUMMARY_ONLY:-0}"
@@ -156,17 +158,17 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
       exit 2
       ;;
   esac
-  REMOTE_AGENT_DIR="/srv/codex/agents/$CODEX_THREAD_ID"
+  REMOTE_AGENT_DIR="$TESTBOX_REMOTE_ROOT/agents/$CODEX_THREAD_ID"
   REMOTE_WORKSPACE="$REMOTE_AGENT_DIR/workspace"
   REMOTE_RUN="$REMOTE_AGENT_DIR/runs/$RUN_ID"
 else
-  REMOTE_BASE="/srv/codex/workspaces/$USER"
+  REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
   REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
   REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 fi
 # Subnet claims are host-global so concurrent runs from different users cannot
 # select the same Docker network range.
-REMOTE_SUBNET_CLAIMS="/srv/codex/agents/.shared-testbox-subnet-claims"
+REMOTE_SUBNET_CLAIMS="$TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims"
 REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
@@ -178,6 +180,7 @@ print(s[:63] if len(s)>63 else s)
 PY
 )"
 REMOTE_RUN_B64="$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')"
+TESTBOX_REMOTE_ROOT_B64="$(printf '%s' "$TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')"
 COMPOSE_PROJECT_B64="$(printf '%s' "$COMPOSE_PROJECT" | base64 | tr -d '\n')"
 SUBNET_CLAIM_ROOT_B64="$(printf '%s' "$REMOTE_SUBNET_CLAIMS" | base64 | tr -d '\n')"
 REMOTE_RESOURCE_BASELINE_B64="$(printf '%s' "$REMOTE_RESOURCE_BASELINE" | base64 | tr -d '\n')"
@@ -229,13 +232,14 @@ cleanup_local() {
   fi
   if [ "${REMOTE_RUN_CREATED:-0}" = "1" ]; then
     ssh -o BatchMode=yes "$TESTBOX" \
-      "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1 || true
+      "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1 || true
 set -euo pipefail
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
 case "$REMOTE_RUN" in
-  /srv/codex/agents/*/runs/*|/srv/codex/workspaces/*/runs/*) ;;
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
   *) exit 2 ;;
 esac
 scope_unit="codex-xp-source-journal-${RUN_ID}.scope"
@@ -283,12 +287,13 @@ web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA
 WORKSPACE_METADATA_B64="$(printf '%s' "$WORKSPACE_METADATA" | base64 | tr -d '\n')"
 REMOTE_RUN_CREATED=1
 ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' WORKSPACE_METADATA_B64='$WORKSPACE_METADATA_B64' bash -s" <<'REMOTE_BOOTSTRAP'
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' WORKSPACE_METADATA_B64='$WORKSPACE_METADATA_B64' bash -s" <<'REMOTE_BOOTSTRAP'
 set -euo pipefail
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_WORKSPACE="$(printf '%s' "${REMOTE_WORKSPACE_B64:?}" | base64 -d)"
-if [[ "$REMOTE_RUN" == /srv/codex/agents/*/runs/* ]]; then
-  agent_base=/srv/codex/agents
+if [[ "$REMOTE_RUN" == "$TESTBOX_REMOTE_ROOT"/agents/*/runs/* ]]; then
+  agent_base="$TESTBOX_REMOTE_ROOT/agents"
   agent_dir="$(dirname "$REMOTE_WORKSPACE")"
   [[ -d "$agent_base" && ! -L "$agent_base" ]]
   [[ "$(readlink -f -- "$agent_base")" == "$agent_base" ]]
@@ -325,10 +330,11 @@ BASELINE_ARCHIVE_SHA_B64="$(printf '%s' "${BASELINE_ARCHIVE_SHA:-none}" | base64
 
 # 5) Run on testbox.
 if ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_CACHE_SMOKE_B64='$MESH_RESOURCE_CACHE_SMOKE_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' GIT_SHA_FULL_B64='$GIT_SHA_FULL_B64' RUN_ID_B64='$RUN_ID_B64' TESTBOX_CARGO_CACHE_ROOT_B64='$TESTBOX_CARGO_CACHE_ROOT_B64' TESTBOX_CARGO_HOME_B64='$TESTBOX_CARGO_HOME_B64' SOURCE_ARCHIVE_SHA_B64='$SOURCE_ARCHIVE_SHA_B64' WEB_DIST_ARCHIVE_SHA_B64='$WEB_DIST_ARCHIVE_SHA_B64' BASELINE_ARCHIVE_SHA_B64='$BASELINE_ARCHIVE_SHA_B64' bash -s" 2>&1 <<'REMOTE' | tee "$EVIDENCE_OUTPUT_PATH"
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_CACHE_SMOKE_B64='$MESH_RESOURCE_CACHE_SMOKE_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' GIT_SHA_FULL_B64='$GIT_SHA_FULL_B64' RUN_ID_B64='$RUN_ID_B64' TESTBOX_CARGO_CACHE_ROOT_B64='$TESTBOX_CARGO_CACHE_ROOT_B64' TESTBOX_CARGO_HOME_B64='$TESTBOX_CARGO_HOME_B64' SOURCE_ARCHIVE_SHA_B64='$SOURCE_ARCHIVE_SHA_B64' WEB_DIST_ARCHIVE_SHA_B64='$WEB_DIST_ARCHIVE_SHA_B64' BASELINE_ARCHIVE_SHA_B64='$BASELINE_ARCHIVE_SHA_B64' bash -s" 2>&1 <<'REMOTE' | tee "$EVIDENCE_OUTPUT_PATH"
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 SUBNET_CLAIM_ROOT="$(printf '%s' "${SUBNET_CLAIM_ROOT_B64:?}" | base64 -d)"
 REMOTE_RESOURCE_BASELINE="$(printf '%s' "${REMOTE_RESOURCE_BASELINE_B64:?}" | base64 -d)"
@@ -411,11 +417,13 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
       exit 2
     fi
   done
+  remote_root_real="$(readlink -f -- "$TESTBOX_REMOTE_ROOT")"
+  [ -n "$remote_root_real" ] || exit 2
   agent_root="$(dirname "$REMOTE_WORKSPACE")"
   agent_root_real="$(readlink -f -- "$agent_root")"
   [ -n "$agent_root_real" ] || exit 2
   case "$agent_root_real" in
-    /srv/codex/agents/*) ;;
+    "$remote_root_real"/agents/*) ;;
     *)
       echo "remote workspace is not inside the shared-testbox Agent Directory" >&2
       exit 2
@@ -443,21 +451,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
       exit 2
       ;;
   esac
-  cargo_home_parent_real="$(readlink -f -- "$(dirname "$TESTBOX_CARGO_HOME")")"
-  case "$TESTBOX_CARGO_HOME" in
-    /srv/codex/caches/linux-amd64/cargo) ;;
-    *)
-      echo "Cargo Home must be /srv/codex/caches/linux-amd64/cargo" >&2
-      exit 2
-      ;;
-  esac
-  case "$cargo_home_parent_real" in
-    /srv/codex/caches/linux-amd64) ;;
-    *)
-      echo "Cargo Home must be inside the shared Cargo cache root" >&2
-      exit 2
-      ;;
-  esac
+  mkdir -p "$TESTBOX_CARGO_HOME"
   command -v flock >/dev/null 2>&1 || {
     echo "flock is required on the shared testbox" >&2
     exit 2
@@ -522,7 +516,7 @@ fi
 cd "$REMOTE_RUN/scripts/e2e"
 
 if ! command -v make >/dev/null 2>&1; then
-  echo "missing 'make' on codex-testbox; vendored OpenSSL builds require it" >&2
+  echo "missing 'make' on the configured test host; vendored OpenSSL builds require it" >&2
   echo "repair with shared-testbox-bootstrap before running real-Xray suites" >&2
   exit 2
 fi
@@ -594,7 +588,7 @@ YAML
 } > "$caps_override"
 
 mapfile -t subnet_claim_info < <(
-  python3 - "$SUBNET_CLAIM_ROOT" "$REMOTE_RUN" "$COMPOSE_PROJECT" <<'PY'
+  python3 - "$SUBNET_CLAIM_ROOT" "$REMOTE_RUN" "$COMPOSE_PROJECT" "$TESTBOX_REMOTE_ROOT" <<'PY'
 import ipaddress
 import json
 import os
@@ -607,6 +601,7 @@ import time
 claim_root = pathlib.Path(sys.argv[1])
 remote_run = pathlib.Path(sys.argv[2])
 compose_project = sys.argv[3]
+remote_root = pathlib.Path(sys.argv[4]).resolve()
 lock_dir = claim_root / ".allocator.lock"
 lock_timeout_seconds = 30
 lock_poll_seconds = 0.2
@@ -679,8 +674,8 @@ try:
                 return
             run_real = run_path.resolve(strict=False)
             allowed_roots = (
-                pathlib.Path("/srv/codex/agents").resolve(),
-                pathlib.Path("/srv/codex/workspaces").resolve(),
+                remote_root / "agents",
+                remote_root / "workspaces",
             )
             if not any(
                 run_real == root or root in run_real.parents for root in allowed_roots

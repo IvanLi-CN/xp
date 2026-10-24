@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Validate the host-managed nft admission transaction in an isolated privileged testbox.
+# Validate the host-managed nft admission transaction in an isolated privileged test host.
 # This is test infrastructure only; Docker/Compose remains outside the deployment contract.
 
-TESTBOX="${TESTBOX:-codex-testbox}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=runner-env.sh
+source "$SCRIPT_DIR/runner-env.sh"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_NAME="$(basename "$REPO_ROOT")"
 PATH_HASH8="$(printf '%s' "$(realpath "$REPO_ROOT")" | shasum -a 256 | cut -c1-8)"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$$_$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
-REMOTE_RUN="/srv/codex/workspaces/$USER/${REPO_NAME}__${PATH_HASH8}/runs/$RUN_ID"
+REMOTE_RUN="$TESTBOX_REMOTE_ROOT/workspaces/$USER/${REPO_NAME}__${PATH_HASH8}/runs/$RUN_ID"
 CONTAINER="codex_${REPO_NAME}_${PATH_HASH8}_ingress_${RUN_ID}"
 
 echo "testbox=$TESTBOX"

@@ -44,5 +44,5 @@ keep `replica_converged=false`.
 Tests cover legacy response identity fallback, boundary digest binding, exact boundary acceptance
 without a transient gap, mismatched boundaries, and bounded repair serialization.
 
-Agent VM resource validation and live 101 summary, Ready stability and deep verification remain
-delivery gates.
+Resource validation and live 101 summary, Ready stability and deep verification remain delivery
+gates.
