@@ -73,13 +73,21 @@ fn parse_vless(
     if !supported_network(network) {
         return Err("vless transport is unsupported".to_owned());
     }
+    let vless_http = network == "tcp"
+        && query
+            .get("headerType")
+            .is_some_and(|value| value.eq_ignore_ascii_case("http"));
     let security = query.get("security").map(String::as_str).unwrap_or("none");
     if !matches!(security, "none" | "tls" | "reality") {
         return Err("vless security is unsupported".to_owned());
     }
     let mut map = base_proxy("vless", &server, port);
     insert_string(&mut map, "uuid", uuid);
-    insert_string(&mut map, "network", network);
+    insert_string(
+        &mut map,
+        "network",
+        if vless_http { "http" } else { network },
+    );
     insert_bool(&mut map, "udp", true);
     insert_bool(&mut map, "tls", security != "none");
     if let Some(encryption) = query.get("encryption") {
@@ -103,9 +111,7 @@ fn parse_vless(
             .get("pbk")
             .filter(|value| !value.is_empty())
             .ok_or_else(|| "vless reality public key is required".to_owned())?;
-        let short_id = query
-            .get("sid")
-            .ok_or_else(|| "vless reality short id is required".to_owned())?;
+        let short_id = query.get("sid").cloned().unwrap_or_default();
         let mut reality = Mapping::new();
         insert_string(&mut reality, "public-key", public_key.clone());
         insert_string(&mut reality, "short-id", short_id.clone());
@@ -118,6 +124,8 @@ fn parse_vless(
         add_ws_options(&mut map, &query);
     } else if network == "grpc" {
         add_grpc_options(&mut map, &query);
+    } else if vless_http {
+        add_http_options(&mut map, query.get("path"), query.get("host"));
     }
     if query.contains_key("packet-encoding") {
         warnings.push("ignored_optional_parameter:packet-encoding".to_owned());
@@ -285,6 +293,9 @@ fn parse_vmess(
     if let Some(sni) = json_string(&payload, "sni").or_else(|| json_string(&payload, "host")) {
         insert_string(&mut map, "servername", sni);
     }
+    if let Some(alpn) = json_string(&payload, "alpn") {
+        insert_alpn(&mut map, &alpn);
+    }
     if network == "ws" {
         let mut ws = Mapping::new();
         if let Some(path) = json_string(&payload, "path") {
@@ -341,20 +352,25 @@ fn parse_trojan(
     if let Some(fp) = query.get("fp") {
         insert_string(&mut map, "client-fingerprint", fp.clone());
     }
+    if let Some(alpn) = query.get("alpn") {
+        insert_alpn(&mut map, alpn);
+    }
     if network == "ws" {
         add_ws_options(&mut map, &query);
     } else if network == "grpc" {
         add_grpc_options(&mut map, &query);
     }
     if query
-        .get("allowInsecure")
+        .get("insecure")
+        .or_else(|| query.get("allowInsecure"))
         .or_else(|| query.get("allow-insecure"))
         .is_some()
     {
         insert_bool(
             &mut map,
             "skip-cert-verify",
-            query_bool(&query, "allowInsecure")
+            query_bool(&query, "insecure")
+                .or_else(|| query_bool(&query, "allowInsecure"))
                 .or_else(|| query_bool(&query, "allow-insecure"))
                 .unwrap_or(false),
         );
@@ -589,6 +605,32 @@ fn add_ws_options(map: &mut Mapping, query: &BTreeMap<String, String>) {
     }
 }
 
+fn add_http_options(map: &mut Mapping, path: Option<&String>, host: Option<&String>) {
+    let mut http = Mapping::new();
+    if let Some(path) = path {
+        http.insert(
+            Value::String("path".to_owned()),
+            Value::Sequence(vec![Value::String(path.clone())]),
+        );
+    }
+    if let Some(host) = host {
+        let hosts = host
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| Value::String(value.to_owned()))
+            .collect::<Vec<_>>();
+        if !hosts.is_empty() {
+            let mut headers = Mapping::new();
+            headers.insert(Value::String("Host".to_owned()), Value::Sequence(hosts));
+            http.insert(Value::String("headers".to_owned()), Value::Mapping(headers));
+        }
+    }
+    if !http.is_empty() {
+        map.insert(Value::String("http-opts".to_owned()), Value::Mapping(http));
+    }
+}
+
 fn add_grpc_options(map: &mut Mapping, query: &BTreeMap<String, String>) {
     if let Some(service) = query
         .get("serviceName")
@@ -601,30 +643,9 @@ fn add_grpc_options(map: &mut Mapping, query: &BTreeMap<String, String>) {
 }
 
 fn add_vmess_http_options(map: &mut Mapping, payload: &serde_json::Value) {
-    let mut http = Mapping::new();
-    if let Some(path) = json_string(payload, "path") {
-        http.insert(
-            Value::String("path".to_owned()),
-            Value::Sequence(vec![Value::String(path)]),
-        );
-    }
-    if let Some(host) = json_string(payload, "host") {
-        let mut headers = Mapping::new();
-        headers.insert(
-            Value::String("Host".to_owned()),
-            Value::Sequence(
-                host.split(',')
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(|value| Value::String(value.to_owned()))
-                    .collect(),
-            ),
-        );
-        http.insert(Value::String("headers".to_owned()), Value::Mapping(headers));
-    }
-    if !http.is_empty() {
-        map.insert(Value::String("http-opts".to_owned()), Value::Mapping(http));
-    }
+    let path = json_string(payload, "path");
+    let host = json_string(payload, "host");
+    add_http_options(map, path.as_ref(), host.as_ref());
 }
 
 fn decode_component(value: &str) -> Option<String> {
@@ -765,6 +786,33 @@ mod tests {
     }
 
     #[test]
+    fn defaults_missing_reality_short_id_to_empty() {
+        let url = Url::parse(concat!(
+            "vless://00000000-0000-0000-0000-000000000001@example.com:443?",
+            "security=reality&pbk=public-key#reality"
+        ))
+        .expect("URL");
+        let (proxy, _, _, _) = parse_vless(url, None).expect("proxy");
+        assert_eq!(proxy["reality-opts"]["short-id"].as_str(), Some(""));
+    }
+
+    #[test]
+    fn preserves_vless_tcp_http_disguise() {
+        let url = Url::parse(concat!(
+            "vless://00000000-0000-0000-0000-000000000001@example.com:443?",
+            "type=tcp&headerType=http&path=%2Fvideo&host=cdn.example%2Ccdn-2.example"
+        ))
+        .expect("URL");
+        let (proxy, _, _, _) = parse_vless(url, None).expect("proxy");
+        assert_eq!(proxy["network"].as_str(), Some("http"));
+        assert_eq!(proxy["http-opts"]["path"][0].as_str(), Some("/video"));
+        assert_eq!(
+            proxy["http-opts"]["headers"]["Host"][1].as_str(),
+            Some("cdn-2.example")
+        );
+    }
+
+    #[test]
     fn preserves_vmess_http_transport_options() {
         let payload = serde_json::json!({
             "v": "2",
@@ -777,6 +825,7 @@ mod tests {
             "path": "/video",
             "host": "cdn.example, cdn-2.example",
             "insecure": "1",
+            "alpn": "h2,http/1.1",
         });
         let encoded = base64::engine::general_purpose::STANDARD.encode(payload.to_string());
         let url = Url::parse(&format!("vmess://{encoded}")).expect("URL");
@@ -792,6 +841,18 @@ mod tests {
             Some("cdn-2.example")
         );
         assert_eq!(proxy["skip-cert-verify"].as_bool(), Some(true));
+        assert_eq!(proxy["alpn"][0].as_str(), Some("h2"));
+        assert_eq!(proxy["alpn"][1].as_str(), Some("http/1.1"));
+    }
+
+    #[test]
+    fn preserves_trojan_alpn_and_insecure_alias() {
+        let url = Url::parse("trojan://secret@example.com:443?alpn=h2%2Chttp%2F1.1&insecure=1")
+            .expect("URL");
+        let (proxy, _, _, _) = parse_trojan(url, None).expect("proxy");
+        assert_eq!(proxy["skip-cert-verify"].as_bool(), Some(true));
+        assert_eq!(proxy["alpn"][0].as_str(), Some("h2"));
+        assert_eq!(proxy["alpn"][1].as_str(), Some("http/1.1"));
     }
 
     #[test]

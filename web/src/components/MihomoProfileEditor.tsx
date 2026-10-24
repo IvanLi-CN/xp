@@ -167,6 +167,7 @@ export function MihomoProfileEditor({
 		if (userId.length === 0) return;
 		setSelectedDocument("mixin_yaml");
 		setExpanded(false);
+		setImportOpen(false);
 		setFilesOpen(false);
 	}, [userId]);
 
