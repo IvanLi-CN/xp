@@ -16,14 +16,13 @@ RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$$_${RUN_NONCE}_$(git -C "$REPO_ROOT" rev-pars
 REMOTE_RUN="$TESTBOX_REMOTE_ROOT/workspaces/$USER/${REPO_NAME}__${PATH_HASH8}/runs/$RUN_ID"
 CONTAINER="$(testbox_bounded_name "codex_${REPO_NAME}_${PATH_HASH8}_ingress_${RUN_ID}")"
 testbox_remote_root_preflight
-REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
+REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
 echo "container=$CONTAINER"
 
 REMOTE_RUN_CREATED=1
-ssh -o BatchMode=yes "$TESTBOX" "set -e; mkdir -p '$(dirname "$REMOTE_RUN")' && mkdir '$REMOTE_RUN' && REMOTE_RUN='$REMOTE_RUN'; trap 'rm -rf -- \"\$REMOTE_RUN\"' EXIT; printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id'; trap - EXIT"
 cleanup() {
   set +e
   if [ "$REMOTE_RUN_CREATED" != "1" ]; then

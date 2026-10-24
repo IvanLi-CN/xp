@@ -115,15 +115,13 @@ print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:12])
 PY
 )"
   testbox_remote_root_preflight
-  guarded_run="$(testbox_remote_run_guard "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1")"
+  guarded_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1")"
   test "$guarded_run" = "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-1"
-  mkdir -p "$guarded_run"
-  printf 'run-1\n' > "$guarded_run/.codex-run-id"
+  test "$(cat "$guarded_run/.codex-run-id")" = run-1
   testbox_remote_cleanup "$guarded_run" run-1
   test ! -e "$guarded_run"
-  guarded_run="$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-3"
-  mkdir -p "$guarded_run"
-  printf 'run-3\n' > "$guarded_run/.codex-run-id"
+  guarded_run="$(testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-3")"
+  test "$(cat "$guarded_run/.codex-run-id")" = run-3
   if TESTBOX_REMOTE_ROOT="$XP_TESTBOX_REMOTE_ROOT" \
     REMOTE_RUN="$guarded_run" \
     REMOTE_RUN_ID=run-2 \
@@ -139,13 +137,13 @@ PY
   rm -rf "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo"
   ln -s "$guard_root/outside" "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo"
   test -L "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo"
-  if testbox_remote_run_guard "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-2"; then
+  if testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/workspaces/ivan/repo/runs/run-2"; then
     echo 'expected intermediate symlink guard to fail' >&2
     exit 1
   fi
   mkdir -p "$guard_root/agents-outside"
   ln -s "$guard_root/agents-outside" "$XP_TESTBOX_REMOTE_ROOT/agents"
-  if testbox_remote_run_guard "$XP_TESTBOX_REMOTE_ROOT/agents/ivan/runs/run-4"; then
+  if testbox_remote_run_create "$XP_TESTBOX_REMOTE_ROOT/agents/ivan/runs/run-4"; then
     echo 'expected agents symlink guard to fail' >&2
     exit 1
   fi

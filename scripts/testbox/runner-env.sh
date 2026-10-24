@@ -58,13 +58,30 @@ testbox_remote_root_preflight() {
     "set -euo pipefail; root='$TESTBOX_REMOTE_ROOT'; mkdir -p -- \"\$root\"; test -d \"\$root\"; test ! -L \"\$root\"; test \"\$(readlink -f -- \"\$root\")\" = \"\$root\""
 }
 
-testbox_remote_run_guard() {
+testbox_remote_run_create() {
   local remote_run="$1"
-  local root_b64 remote_run_b64
+  local run_id="${2:-${RUN_ID:-$(basename "$remote_run")}}"
+  local root_b64 remote_run_b64 run_id_b64
   root_b64="$(printf '%s' "$TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')"
   remote_run_b64="$(printf '%s' "$remote_run" | base64 | tr -d '\n')"
+  run_id_b64="$(printf '%s' "$run_id" | base64 | tr -d '\n')"
   ssh -o BatchMode=yes "$TESTBOX" \
-    "TESTBOX_REMOTE_ROOT_B64='$root_b64' REMOTE_RUN_B64='$remote_run_b64' RUN_ID_B64='' python3 - guard" < "$TESTBOX_REMOTE_GUARD_HELPER"
+    "TESTBOX_REMOTE_ROOT_B64='$root_b64' REMOTE_RUN_B64='$remote_run_b64' RUN_ID_B64='$run_id_b64' python3 - guard" < "$TESTBOX_REMOTE_GUARD_HELPER"
+}
+
+testbox_remote_run_guard() {
+  testbox_remote_run_create "$@"
+}
+
+testbox_remote_run_verify() {
+  local remote_run="$1"
+  local run_id="${2:-${RUN_ID:-$(basename "$remote_run")}}"
+  local root_b64 remote_run_b64 run_id_b64
+  root_b64="$(printf '%s' "$TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')"
+  remote_run_b64="$(printf '%s' "$remote_run" | base64 | tr -d '\n')"
+  run_id_b64="$(printf '%s' "$run_id" | base64 | tr -d '\n')"
+  ssh -o BatchMode=yes "$TESTBOX" \
+    "TESTBOX_REMOTE_ROOT_B64='$root_b64' REMOTE_RUN_B64='$remote_run_b64' RUN_ID_B64='$run_id_b64' python3 - verify" < "$TESTBOX_REMOTE_GUARD_HELPER" >/dev/null
 }
 
 testbox_remote_cleanup() {

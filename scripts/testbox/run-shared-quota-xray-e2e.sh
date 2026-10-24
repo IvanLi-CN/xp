@@ -165,8 +165,9 @@ fi
 # select the same Docker network range.
 REMOTE_SUBNET_CLAIMS="$TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims"
 testbox_remote_root_preflight
-REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
+REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
+REMOTE_RUN_CREATED=1
 REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
@@ -214,7 +215,6 @@ echo "remote_run=$REMOTE_RUN"
 echo "compose_project=$COMPOSE_PROJECT"
 echo "evidence_manifest=$EVIDENCE_PATH"
 
-REMOTE_RUN_CREATED=0
 cleanup_local() {
   set +e
   write_evidence_manifest "${EVIDENCE_STATUS:-interrupted}"
@@ -282,10 +282,8 @@ case "$final_run" in
   "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
   *) exit 2 ;;
 esac
-test -f "$final_run/.codex-run-id"
-test "$(cat -- "$final_run/.codex-run-id")" = "$RUN_ID"
-rm -rf -- "$final_run"
 REMOTE_CLEANUP
+    testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
   fi
 }
 on_local_signal() {
@@ -314,6 +312,8 @@ REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_WORKSPACE="$(printf '%s' "${REMOTE_WORKSPACE_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
+test -f "$REMOTE_RUN/.codex-run-id"
+test "$(cat -- "$REMOTE_RUN/.codex-run-id")" = "$RUN_ID"
 assert_no_symlink_path() {
   local path="$1"
   while [ "$path" != "/" ] && [ "$path" != "." ]; do
@@ -347,13 +347,8 @@ if [[ "$REMOTE_RUN" == "$TESTBOX_REMOTE_ROOT"/agents/*/runs/* ]]; then
   [[ "$(readlink -f -- "$agent_dir")" == "$agent_dir" ]]
 fi
 mkdir -p "$REMOTE_WORKSPACE"
-mkdir "$REMOTE_RUN"
-trap 'rm -rf -- "$REMOTE_RUN"' EXIT
-printf '%s\n' "$RUN_ID" > "$REMOTE_RUN/.codex-run-id"
 printf '%s' "${WORKSPACE_METADATA_B64:?}" | base64 -d > "$REMOTE_WORKSPACE/workspace.txt"
-trap - EXIT
 REMOTE_BOOTSTRAP
-REMOTE_RUN_CREATED=1
 
 # 4) Sync the immutable tracked tree, then overlay the generated Web shell.
 rsync -a "$SOURCE_ARCHIVE" "$TESTBOX:$REMOTE_RUN/source.tar"
@@ -429,17 +424,20 @@ cleanup() {
   CLEANUP_DONE=1
   set +e
   if [ -n "${REMOTE_RUN:-}" ] && [ -d "$REMOTE_RUN/scripts/e2e" ]; then
-    cd "$REMOTE_RUN/scripts/e2e" || return 0
-    if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
-      cleanup_files=(-f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml")
-      if [ -f ".codex.user-compat.yaml" ]; then
-        cleanup_files+=(-f ".codex.user-compat.yaml")
+    (
+      cd "$REMOTE_RUN/scripts/e2e" || exit 1
+      if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
+        cleanup_files=(-f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml")
+        if [ -f ".codex.user-compat.yaml" ]; then
+          cleanup_files+=(-f ".codex.user-compat.yaml")
+        fi
+        docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
       fi
-      docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
-    fi
+    ) || true
   fi
-  if [ -n "${SUBNET_CLAIM_DIR:-}" ] && [ -d "$SUBNET_CLAIM_DIR" ]; then
-    rm -rf "$SUBNET_CLAIM_DIR" >/dev/null 2>&1 || true
+  if [ -n "${SUBNET_CLAIM_DIR:-}" ]; then
+    python3 "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" \
+      claim-cleanup "$TESTBOX_REMOTE_ROOT" "$SUBNET_CLAIM_DIR" >/dev/null 2>&1 || true
   fi
   if [ -n "${REMOTE_RUN:-}" ]; then
     if assert_remote_run; then
@@ -658,11 +656,11 @@ YAML
 
 mapfile -t subnet_claim_info < <(
   python3 - "$SUBNET_CLAIM_ROOT" "$REMOTE_RUN" "$COMPOSE_PROJECT" "$TESTBOX_REMOTE_ROOT" <<'PY'
+import fcntl
 import ipaddress
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
 import time
@@ -671,9 +669,7 @@ claim_root = pathlib.Path(sys.argv[1])
 remote_run = pathlib.Path(sys.argv[2])
 compose_project = sys.argv[3]
 remote_root = pathlib.Path(os.path.normpath(sys.argv[4]))
-lock_dir = claim_root / ".allocator.lock"
-lock_timeout_seconds = 30
-lock_poll_seconds = 0.2
+lock_path = claim_root / ".codex-run-lock"
 pending_claim_grace_seconds = 120
 
 if remote_root.is_symlink() or remote_root.resolve() != remote_root:
@@ -718,19 +714,61 @@ def path_has_symlink(path):
     return False
 
 
+def is_allowed_run(path):
+    if path_has_symlink(path):
+        return False
+    try:
+        parts = path.relative_to(remote_root).parts
+    except ValueError:
+        return False
+    return (
+        len(parts) == 4
+        and parts[0] == "agents"
+        and parts[2] == "runs"
+        and all(parts)
+    ) or (
+        len(parts) == 5
+        and parts[0] == "workspaces"
+        and parts[3] == "runs"
+        and all(parts)
+    )
+
+
+guard_script = remote_run / "scripts/testbox/remote-run-guard.py"
+
+
+def cleanup_claim_dir(path):
+    if path_has_symlink(path) or not guard_script.is_file():
+        return
+    subprocess.run(
+        [
+            "python3",
+            str(guard_script),
+            "claim-cleanup",
+            str(remote_root),
+            str(path),
+        ],
+        check=False,
+    )
+
+
+def cleanup_stale_run(path):
+    if path_has_symlink(path) or not path.is_dir() or not is_allowed_run(path):
+        return
+    environment = os.environ.copy()
+    environment["RUN_ID"] = path.name
+    subprocess.run(
+        ["python3", str(guard_script), "cleanup", str(remote_root), str(path)],
+        check=False,
+        env=environment,
+    )
+
+
 ensure_directory(remote_root / "agents", create=True)
 ensure_directory(claim_root, create=True)
 
-deadline = time.time() + lock_timeout_seconds
-while True:
-    try:
-        os.mkdir(lock_dir)
-        break
-    except FileExistsError:
-        if time.time() >= deadline:
-            print("timed out waiting for shared-testbox subnet allocator lock", file=sys.stderr)
-            sys.exit(1)
-        time.sleep(lock_poll_seconds)
+lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
 used = []
 claimed = []
@@ -773,35 +811,21 @@ try:
         if claim_dir.name.startswith("."):
             continue
         if claim_dir.is_symlink():
-            claim_dir.unlink()
             continue
         if not claim_dir.is_dir() or path_has_symlink(claim_dir):
-            shutil.rmtree(claim_dir, ignore_errors=True)
+            cleanup_claim_dir(claim_dir)
             continue
 
         run_path_file = claim_dir / "run_path"
         subnet_file = claim_dir / "subnet"
         if not run_path_file.exists() or not subnet_file.exists():
-            shutil.rmtree(claim_dir, ignore_errors=True)
+            cleanup_claim_dir(claim_dir)
             continue
 
         run_path = pathlib.Path(run_path_file.read_text().strip())
 
         def remove_stale_run():
-            if path_has_symlink(run_path) or not run_path.is_dir():
-                return
-            run_real = run_path.resolve(strict=False)
-            if path_has_symlink(run_real):
-                return
-            allowed_roots = (
-                remote_root / "agents",
-                remote_root / "workspaces",
-            )
-            if not any(
-                run_real == root or root in run_real.parents for root in allowed_roots
-            ):
-                return
-            shutil.rmtree(run_path, ignore_errors=True)
+            cleanup_stale_run(run_path)
 
         active = False
         lease_file = claim_dir / "lease"
@@ -831,14 +855,14 @@ try:
         if not active:
             remove_stale_run()
             if not path_has_symlink(claim_dir):
-                shutil.rmtree(claim_dir, ignore_errors=True)
+                cleanup_claim_dir(claim_dir)
             continue
 
         try:
             claimed.append(ipaddress.ip_network(subnet_file.read_text().strip(), strict=False))
         except ValueError:
             if not path_has_symlink(claim_dir):
-                shutil.rmtree(claim_dir, ignore_errors=True)
+                cleanup_claim_dir(claim_dir)
 
     for octet in range(0, 256):
         candidate = ipaddress.ip_network(f"10.203.{octet}.0/24")
@@ -866,10 +890,8 @@ try:
     print("failed to find free subnet for shared testbox compose run", file=sys.stderr)
     sys.exit(1)
 finally:
-    try:
-        os.rmdir(lock_dir)
-    except FileNotFoundError:
-        pass
+    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    os.close(lock_fd)
 PY
 )
 
@@ -1076,7 +1098,6 @@ fi
 REMOTE
 then
   EVIDENCE_STATUS=passed
-REMOTE_RUN_CREATED=1
 else
   status=${PIPESTATUS[0]}
   EVIDENCE_STATUS=failed

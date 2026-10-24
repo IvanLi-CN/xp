@@ -64,14 +64,16 @@ cleanup() {
       "exit_status=$status" > "$RECEIPT_PATH"
     if [ -d "$COMPOSE_DIR" ]; then
       (
-        cd "$COMPOSE_DIR" || exit 0
+        cd "$COMPOSE_DIR" || exit 1
         XP_TEST_IMAGE="$XP_TEST_IMAGE" XP_HOST_IMAGE_PREFIX="$XP_HOST_IMAGE_PREFIX" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" logs --no-color
       ) >> "$RECEIPT_PATH" 2>&1 || true
     fi
   fi
   if [ -d "$COMPOSE_DIR" ]; then
-    cd "$COMPOSE_DIR" || exit 0
-    XP_TEST_IMAGE="$XP_TEST_IMAGE" XP_HOST_IMAGE_PREFIX="$XP_HOST_IMAGE_PREFIX" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1 || true
+    (
+      cd "$COMPOSE_DIR" || exit 1
+      XP_TEST_IMAGE="$XP_TEST_IMAGE" XP_HOST_IMAGE_PREFIX="$XP_HOST_IMAGE_PREFIX" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1
+    ) || true
   fi
   docker rm -f "$BUILDER_NAME" "$SOURCE_NAME" >/dev/null 2>&1 || true
   docker image rm "$XP_HOST_IMAGE_PREFIX-leader" "$XP_HOST_IMAGE_PREFIX-systemd" "$XP_HOST_IMAGE_PREFIX-openrc" >/dev/null 2>&1 || true

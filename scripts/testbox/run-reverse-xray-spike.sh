@@ -32,14 +32,14 @@ REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 COMPOSE_PROJECT="codex_${REPO_NAME}_${PATH_HASH8}_${RUN_ID}"
 COMPOSE_PROJECT="$(testbox_bounded_name "$COMPOSE_PROJECT")"
 testbox_remote_root_preflight
-REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
+REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
 
 REMOTE_RUN_CREATED=1
 cleanup() {
   local status=$?
   set +e
-  if [[ "$REMOTE_RUN_CREATED" = "1" && "$status" != 0 ]] && testbox_remote_run_guard "$REMOTE_RUN"; then
+  if [[ "$REMOTE_RUN_CREATED" = "1" && "$status" != 0 ]] && testbox_remote_run_verify "$REMOTE_RUN" "$RUN_ID"; then
     ssh -o BatchMode=yes "$TESTBOX" "test \"\$(cat -- '$REMOTE_RUN/.codex-run-id')\" = '$RUN_ID' && cd '$REMOTE_RUN' && docker compose -p '$COMPOSE_PROJECT' -f scripts/testbox/reverse-xray-spike-compose.yml logs --no-color rendezvous target" >&2
   fi
   if [[ "$REMOTE_RUN_CREATED" != "1" ]]; then
@@ -52,39 +52,20 @@ TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
-if [ -f "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" ]; then
-  RUN_ID="$RUN_ID" python3 "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" verify "$TESTBOX_REMOTE_ROOT" "$REMOTE_RUN"
-  remote_run_real="$REMOTE_RUN"
-else
-  assert_no_symlink_path() {
-    local path="$1"
-    while [ "$path" != "/" ] && [ "$path" != "." ]; do
-      if [ -L "$path" ]; then
-        return 2
-      fi
-      path="$(dirname "$path")"
-    done
-  }
-  test ! -L "$TESTBOX_REMOTE_ROOT"
-  test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
-  test ! -L "$REMOTE_RUN"
-  assert_no_symlink_path "$REMOTE_RUN"
-  remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
-  test -f "$remote_run_real/.codex-run-id"
-  test "$(cat -- "$remote_run_real/.codex-run-id")" = "$RUN_ID"
+GUARD_SCRIPT="$REMOTE_RUN/scripts/testbox/remote-run-guard.py"
+if [ ! -f "$GUARD_SCRIPT" ]; then
+  exit 0
 fi
+RUN_ID="$RUN_ID" python3 "$GUARD_SCRIPT" verify "$TESTBOX_REMOTE_ROOT" "$REMOTE_RUN"
+remote_run_real="$REMOTE_RUN"
 cd "$remote_run_real"
 docker compose -p "$COMPOSE_PROJECT" -f scripts/testbox/reverse-xray-spike-compose.yml -f .codex.caps-compat.yml down -v --remove-orphans || true
-if [ -f "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" ]; then
-  RUN_ID="$RUN_ID" python3 "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" cleanup "$TESTBOX_REMOTE_ROOT" "$REMOTE_RUN"
-else
-  rm -rf -- "$remote_run_real"
-fi
+RUN_ID="$RUN_ID" python3 "$GUARD_SCRIPT" cleanup "$TESTBOX_REMOTE_ROOT" "$REMOTE_RUN"
 REMOTE_CLEANUP
+  testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
-ssh -o BatchMode=yes "$TESTBOX" "set -e; mkdir -p '$(dirname "$REMOTE_RUN")' && mkdir '$REMOTE_RUN' && REMOTE_RUN='$REMOTE_RUN'; trap 'rm -rf -- \"\$REMOTE_RUN\"' EXIT; printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id'; trap - EXIT"
 rsync -az --delete --exclude '.git/' --exclude 'target/' --exclude 'web/node_modules/' \
   "$REPO_ROOT/" "$TESTBOX:$REMOTE_RUN/"
 ssh -o BatchMode=yes "$TESTBOX" "cd '$REMOTE_RUN' && \

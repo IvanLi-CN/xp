@@ -43,7 +43,7 @@ REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 testbox_remote_root_preflight
-REMOTE_RUN="$(testbox_remote_run_guard "$REMOTE_RUN")"
+REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
 
 REMOTE_RUN_CREATED=1
@@ -72,7 +72,7 @@ echo "rust_image=$RUST_IMAGE"
 
 CREATED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ssh -o BatchMode=yes "$TESTBOX" \
-  "set -e; mkdir -p '$(dirname "$REMOTE_RUN")' && mkdir '$REMOTE_RUN' && REMOTE_RUN='$REMOTE_RUN'; trap 'rm -rf -- \"\$REMOTE_RUN\"' EXIT; printf '%s\\n' '$RUN_ID' > '$REMOTE_RUN/.codex-run-id' && cat > '$REMOTE_WORKSPACE/workspace.txt'; trap - EXIT" <<TXT
+  "cat > '$REMOTE_WORKSPACE/workspace.txt'" <<TXT
 local_repo_root=$REPO_ROOT
 created_utc=$CREATED_UTC
 TXT
