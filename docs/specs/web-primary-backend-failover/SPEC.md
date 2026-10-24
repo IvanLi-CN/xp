@@ -55,6 +55,11 @@ ADR 0012 and does not alter this embedded-PWA contract.
   relative `/api/*` requests and SSE requests through centralized transport
   rewriting. Static resources, navigation, Service Worker traffic, and the
   existing full-page `Open on node` handoff MUST remain on the page origin.
+- **REQ-EXTERNAL-URL**: Any absolute URL emitted for an external consumer,
+  including a copied subscription URL, MUST use the current verified Primary
+  Backend origin. It MUST be directly consumable without the Web app's
+  JavaScript, Service Worker, local storage, or fetch rewrite. The URL's format
+  and temporary Mihomo mirror query MUST match the content selected in the UI.
 - **REQ-PROFILE**: Verified backend profiles MUST be persisted by `cluster_id`
   and contain the selected origin and verified candidates. A different cluster
   MUST NOT reuse another cluster's credentials, candidates, or cached profile.
@@ -90,6 +95,9 @@ ADR 0012 and does not alter this embedded-PWA contract.
   `cd web && bun run test:e2e -- primary-backend-switcher --workers=1` verify
   API and SSE rewriting to a controlled recovery origin while assets stay on
   the page origin.
+- **VER-EXTERNAL-URL** covers: REQ-EXTERNAL-URL. Subscription URL unit and
+  UserDetails tests verify that copied URLs use the active backend origin and
+  preserve format and mirror parameters instead of using the static page origin.
 - **VER-PROFILE** covers: REQ-PROFILE. The transport/profile tests verify
   cluster-keyed persistence, cached candidates during reachability failure,
   and no cross-cluster credential reuse.
