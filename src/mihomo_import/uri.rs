@@ -471,19 +471,37 @@ fn parse_tuic(
     url: Url,
     name: Option<String>,
 ) -> Result<(Value, Option<String>, String, Vec<String>), String> {
-    let uuid = decode_component(url.username())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "tuic uuid is required".to_owned())?;
-    let password = url
-        .password()
-        .and_then(decode_component)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "tuic password is required".to_owned())?;
+    let username = decode_component(url.username()).filter(|value| !value.is_empty());
+    let (uuid, password, token) = if url.password().is_some() {
+        (
+            Some(username.ok_or_else(|| "tuic uuid is required".to_owned())?),
+            Some(
+                url.password()
+                    .and_then(decode_component)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| "tuic password is required".to_owned())?,
+            ),
+            None,
+        )
+    } else {
+        (
+            None,
+            None,
+            Some(username.ok_or_else(|| "tuic token is required".to_owned())?),
+        )
+    };
     let (server, port) = host_port(&url, "tuic")?;
     let query = query_map(&url);
     let mut map = base_proxy("tuic", &server, port);
-    insert_string(&mut map, "uuid", uuid);
-    insert_string(&mut map, "password", password);
+    if let Some(uuid) = uuid {
+        insert_string(&mut map, "uuid", uuid);
+    }
+    if let Some(password) = password {
+        insert_string(&mut map, "password", password);
+    }
+    if let Some(token) = token {
+        insert_string(&mut map, "token", token);
+    }
     if let Some(sni) = query.get("sni") {
         insert_string(&mut map, "sni", sni.clone());
     }

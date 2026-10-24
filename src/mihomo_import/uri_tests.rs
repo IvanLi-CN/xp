@@ -166,3 +166,12 @@ fn preserves_tuic_allow_insecure_alias() {
     let (proxy, _, _, _) = parse_tuic(url, None).expect("proxy");
     assert_eq!(proxy["skip-cert-verify"].as_bool(), Some(true));
 }
+
+#[test]
+fn preserves_tuic_v4_token() {
+    let url = Url::parse("tuic://example-token@tuic.example:443#v4").expect("URL");
+    let (proxy, _, _, _) = parse_tuic(url, None).expect("proxy");
+    assert_eq!(proxy["token"].as_str(), Some("example-token"));
+    assert!(proxy.get("uuid").is_none());
+    assert!(proxy.get("password").is_none());
+}
