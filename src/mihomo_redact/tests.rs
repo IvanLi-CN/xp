@@ -229,6 +229,27 @@ async fn public_only_url_loader_rejects_redirects_to_loopback() {
 }
 
 #[tokio::test]
+async fn url_loader_reports_invalid_upstream_redirect_as_network_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/redirect"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", "http://[invalid"))
+        .mount(&server)
+        .await;
+
+    let err = load_text_from_url(
+        &format!("{}/redirect", server.uri()),
+        5,
+        UrlLoadPolicy::AllowAny,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(err.kind, RedactErrorKind::Network);
+    assert!(err.message.contains("redirect location"));
+}
+
+#[tokio::test]
 async fn url_loader_allows_ten_redirects_before_final_response() {
     let server = MockServer::start().await;
     for index in 0..10 {

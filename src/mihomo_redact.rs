@@ -298,14 +298,12 @@ async fn fetch_url_source(
                 ))
             })?;
             current = current.join(location).map_err(|e| {
-                RedactError::invalid_input(format!(
-                    "invalid_input: redirect location is invalid: {e}"
-                ))
+                RedactError::network(format!("network_error: redirect location is invalid: {e}"))
             })?;
 
             if !matches!(current.scheme(), "http" | "https") {
-                return Err(RedactError::invalid_input(
-                    "invalid_input: source url must use http or https",
+                return Err(RedactError::network(
+                    "network_error: source url must use http or https",
                 ));
             }
 

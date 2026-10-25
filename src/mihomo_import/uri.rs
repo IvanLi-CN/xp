@@ -867,8 +867,25 @@ fn insert_number(map: &mut Mapping, key: &str, value: u64) {
 
 pub(super) fn safe_name(value: &str) -> Option<String> {
     let value = value.trim();
-    if value.is_empty() || value.chars().any(char::is_control) || value.chars().count() > 256 {
+    if value.is_empty()
+        || value.chars().any(char::is_control)
+        || value.chars().count() > 256
+        || is_sensitive_name(value)
+    {
         return None;
     }
     Some(value.to_owned())
+}
+
+pub(super) fn is_sensitive_name(value: &str) -> bool {
+    value.contains("://")
+}
+
+pub(super) fn safe_label(value: &str) -> Option<String> {
+    let value = value.trim().to_ascii_lowercase();
+    (!value.is_empty()
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        }))
+    .then_some(value)
 }

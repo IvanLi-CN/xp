@@ -1319,6 +1319,7 @@ fn yaml_candidate(proxy: &Value) -> Candidate {
     let name = match map.get(Value::String("name".to_owned())) {
         None => None,
         Some(Value::String(name)) if name.trim().is_empty() => None,
+        Some(Value::String(name)) if uri::is_sensitive_name(name) => None,
         Some(Value::String(name)) => match uri::safe_name(name) {
             Some(name) => Some(name),
             None => {
@@ -1362,7 +1363,7 @@ fn yaml_candidate(proxy: &Value) -> Candidate {
     let scheme = scheme.trim().to_ascii_lowercase();
     if let Some(reason) = validate_yaml_proxy(map, &scheme) {
         return Candidate {
-            scheme: Some(scheme),
+            scheme: yaml_scheme(map),
             name,
             proxy: None,
             warnings: Vec::new(),
@@ -1371,7 +1372,7 @@ fn yaml_candidate(proxy: &Value) -> Candidate {
     }
 
     Candidate {
-        scheme: Some(scheme),
+        scheme: yaml_scheme(map),
         name,
         proxy: Some(Value::Mapping(map.clone())),
         warnings: Vec::new(),
@@ -1383,6 +1384,7 @@ fn yaml_scheme(map: &Mapping) -> Option<String> {
     map.get(Value::String("type".to_owned()))
         .and_then(Value::as_str)
         .map(|value| value.trim().to_ascii_lowercase())
+        .map(|value| uri::safe_label(&value).unwrap_or_else(|| "unknown".to_owned()))
 }
 
 fn validate_yaml_proxy(map: &Mapping, scheme: &str) -> Option<String> {
@@ -1556,8 +1558,10 @@ fn build_preview(
             continue;
         };
 
+        let source_name = import_names::source_name(&proxy).or_else(|| candidate.name.clone());
+        let pending_dialer_proxy = names.remap_known_dialer_proxy(&mut proxy);
         let fingerprint = canonical_proxy(&proxy);
-        if names.is_duplicate(&fingerprint, candidate.name.as_deref()) {
+        if names.is_duplicate(&fingerprint, source_name.as_deref()) {
             counts.skipped += 1;
             items.push(ImportItem {
                 source_index,
@@ -1592,7 +1596,8 @@ fn build_preview(
             counts.warnings += 1;
         }
         proxy = assign_name(proxy, &final_name);
-        names.accept(fingerprint, candidate.name.as_deref(), final_name.clone());
+        names.defer_dialer_proxy(pending_dialer_proxy, &final_name);
+        names.accept(fingerprint, source_name.as_deref(), final_name.clone());
         accepted.push(proxy);
         counts.added += 1;
         items.push(ImportItem {
@@ -1605,7 +1610,7 @@ fn build_preview(
         });
     }
 
-    names.remap_dialer_proxies(&mut accepted);
+    names.remap_pending_dialer_proxies(&mut accepted);
 
     let added_proxies_yaml = if accepted.is_empty() {
         String::new()
