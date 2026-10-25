@@ -356,6 +356,15 @@ const API_ROUTES_320 = [
 	"GET /api/sub/{subscription_token}",
 ] as const;
 type ResponseSchemaMap = Readonly<Record<string, readonly string[]>>;
+const MIHOMO_PROFILE_GET =
+	"GET /api/admin/users/{user_id}/subscription-mihomo-profile";
+const MIHOMO_PROFILE_PUT =
+	"PUT /api/admin/users/{user_id}/subscription-mihomo-profile";
+const MIHOMO_PROFILE_FIELDS = [
+	"mixin_yaml",
+	"extra_proxies_yaml",
+	"extra_proxy_providers_yaml",
+] as const;
 const WEB_CALLSITES_322 = [
 	"adminAlerts",
 	"adminAuth",
@@ -495,40 +504,11 @@ const RESPONSE_FIELDS_320 = {
 		"admin_token_present",
 		"admin_token_masked",
 	],
+	[MIHOMO_PROFILE_GET]: MIHOMO_PROFILE_FIELDS,
 	"GET /api/sub/{subscription_token}": ["text/plain"],
 } as const;
 
-const RESPONSE_FIELDS_321 = {
-	"GET /api/health": ["status"],
-	"GET /api/cluster/info": [
-		"cluster_id",
-		"node_id",
-		"role",
-		"leader_api_base_url",
-		"term",
-		"xp_version",
-	],
-	"GET /api/admin/nodes": ["items"],
-	"GET /api/admin/nodes/runtime": ["partial", "unreachable_nodes", "items"],
-	"GET /api/admin/status/events": ["hello", "snapshot"],
-	"GET /api/version/check": ["current", "latest", "has_update", "checked_at"],
-	"GET /api/admin/config": [
-		"bind",
-		"xray_api_addr",
-		"data_dir",
-		"node_name",
-		"access_host",
-		"api_base_url",
-		"vless_https_canary_bind",
-		"quota_poll_interval_secs",
-		"quota_auto_unban",
-		"ip_geo_enabled",
-		"ip_geo_origin",
-		"admin_token_present",
-		"admin_token_masked",
-	],
-	"GET /api/sub/{subscription_token}": ["text/plain"],
-} as const;
+const RESPONSE_FIELDS_321 = RESPONSE_FIELDS_320;
 
 const RESPONSE_FIELDS_322 = {
 	"GET /api/health": ["status"],
@@ -559,6 +539,7 @@ const RESPONSE_FIELDS_322 = {
 		"admin_token_present",
 		"admin_token_masked",
 	],
+	[MIHOMO_PROFILE_GET]: MIHOMO_PROFILE_FIELDS,
 	"GET /api/admin/status/events": ["hello", "snapshot", "mesh_revision"],
 	"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": [
 		"detected_source",
@@ -598,31 +579,10 @@ const REQUEST_SCHEMAS_320: ResponseSchemaMap = {
 	"PUT /api/admin/quota-policy/nodes/{node_id}/policy": ["inherit_global"],
 	"POST /api/admin/tools/mihomo/redact": ["AdminMihomoRedactRequest"],
 	"POST /api/admin/upgrade/start": ["target_tag"],
+	[MIHOMO_PROFILE_PUT]: MIHOMO_PROFILE_FIELDS,
 };
 
-const REQUEST_SCHEMAS_321: ResponseSchemaMap = {
-	"POST /api/admin/cluster/join-tokens": ["AdminJoinTokenRequest"],
-	"PATCH /api/admin/nodes/{node_id}": ["AdminNodePatchRequest"],
-	"POST /api/admin/endpoints": ["AdminEndpointCreateRequest"],
-	"PATCH /api/admin/endpoints/{endpoint_id}": ["AdminEndpointPatchRequest"],
-	"POST /api/admin/reality-domains": ["AdminRealityDomainCreateRequest"],
-	"PATCH /api/admin/reality-domains/{domain_id}": [
-		"AdminRealityDomainPatchRequest",
-	],
-	"POST /api/admin/reality-domains/reorder": ["domain_ids"],
-	"POST /api/admin/users": ["AdminUserCreateRequest"],
-	"PATCH /api/admin/users/{user_id}": ["AdminUserPatchRequest"],
-	"PUT /api/admin/users/{user_id}/access": ["PutAdminUserAccessRequest"],
-	"PUT /api/admin/users/{user_id}/node-quotas/{node_id}": [
-		"quota_limit_bytes",
-		"quota_reset_source",
-	],
-	"PUT /api/admin/users/{user_id}/node-weights/{node_id}": ["weight"],
-	"PUT /api/admin/quota-policy/global-weight-rows/{user_id}": ["weight"],
-	"PUT /api/admin/quota-policy/nodes/{node_id}/policy": ["inherit_global"],
-	"POST /api/admin/tools/mihomo/redact": ["AdminMihomoRedactRequest"],
-	"POST /api/admin/upgrade/start": ["target_tag"],
-};
+const REQUEST_SCHEMAS_321 = REQUEST_SCHEMAS_320;
 
 const REQUEST_SCHEMAS_322: ResponseSchemaMap = {
 	"POST /api/admin/cluster/join-tokens": ["AdminJoinTokenRequest"],
@@ -646,6 +606,7 @@ const REQUEST_SCHEMAS_322: ResponseSchemaMap = {
 	"PUT /api/admin/quota-policy/nodes/{node_id}/policy": ["inherit_global"],
 	"POST /api/admin/tools/mihomo/redact": ["AdminMihomoRedactRequest"],
 	"POST /api/admin/upgrade/start": ["target_tag"],
+	[MIHOMO_PROFILE_PUT]: MIHOMO_PROFILE_FIELDS,
 	"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": [
 		"AdminMihomoImportPreviewRequest",
 	],
@@ -795,6 +756,15 @@ export const RELEASE_COMPATIBILITY_CONTRACTS: readonly ReleaseCompatibilityContr
 		return legacyContracts;
 	});
 
+const mihomoProfileFixture = (): ReleaseFixtureResponse => ({
+	contentType: "application/json",
+	body: {
+		mixin_yaml: "port: 7890\n",
+		extra_proxies_yaml: "",
+		extra_proxy_providers_yaml: "",
+	},
+});
+
 const RELEASE_FIXTURE_RESPONSES: Readonly<
 	Record<string, Readonly<Record<string, ReleaseFixtureResponse>>>
 > = {
@@ -871,6 +841,7 @@ const RELEASE_FIXTURE_RESPONSES: Readonly<
 				events: [],
 			},
 		},
+		[MIHOMO_PROFILE_GET]: mihomoProfileFixture(),
 		"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": {
 			contentType: "application/json",
 			body: {
@@ -955,6 +926,7 @@ const RELEASE_FIXTURE_RESPONSES: Readonly<
 				admin_token_masked: "****",
 			},
 		},
+		[MIHOMO_PROFILE_GET]: mihomoProfileFixture(),
 		"GET /api/sub/{subscription_token}": {
 			contentType: "text/plain",
 			body: "proxy-provider-fixture-3.21",
@@ -1022,6 +994,7 @@ const RELEASE_FIXTURE_RESPONSES: Readonly<
 				admin_token_masked: "****",
 			},
 		},
+		[MIHOMO_PROFILE_GET]: mihomoProfileFixture(),
 		"GET /api/sub/{subscription_token}": {
 			contentType: "text/plain",
 			body: "proxy-provider-fixture-3.20",

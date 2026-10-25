@@ -6,6 +6,8 @@ use std::collections::BTreeSet;
 
 use crate::mihomo_redact::{self, RedactErrorKind, UrlLoadPolicy};
 
+#[path = "mihomo_import_names.rs"]
+mod import_names;
 mod uri;
 
 pub const MAX_SOURCE_BYTES: usize = 2 * 1024 * 1024;
@@ -1515,17 +1517,7 @@ fn build_preview(
         return Err(ImportError::invalid("source contains no candidate nodes"));
     }
 
-    let mut used_names = reserved_names.clone();
-    let mut existing_fingerprints = BTreeSet::new();
-    for proxy in &existing {
-        if let Value::Mapping(map) = proxy
-            && let Some(Value::String(name)) = map.get(Value::String("name".to_owned()))
-        {
-            used_names.insert(name.clone());
-        }
-        existing_fingerprints.insert(canonical_proxy(proxy));
-    }
-    let mut seen_fingerprints = existing_fingerprints.clone();
+    let mut names = import_names::ImportNameState::new(reserved_names, &existing);
     let mut accepted = Vec::new();
     let mut items = Vec::with_capacity(candidates.len());
     let mut counts = ImportCounts {
@@ -1565,7 +1557,7 @@ fn build_preview(
         };
 
         let fingerprint = canonical_proxy(&proxy);
-        if seen_fingerprints.contains(&fingerprint) {
+        if names.is_duplicate(&fingerprint, candidate.name.as_deref()) {
             counts.skipped += 1;
             items.push(ImportItem {
                 source_index,
@@ -1580,8 +1572,8 @@ fn build_preview(
 
         let base_name = candidate
             .name
-            .or_else(|| Some(format!("imported-{source_index:03}")))
-            .unwrap_or_default();
+            .clone()
+            .unwrap_or_else(|| format!("imported-{source_index:03}"));
         if reserved_names.contains(&base_name) {
             counts.failed += 1;
             items.push(ImportItem {
@@ -1594,14 +1586,13 @@ fn build_preview(
             });
             continue;
         }
-        let final_name = allocate_name(&base_name, &used_names);
+        let final_name = names.allocate(&base_name);
         if final_name != base_name {
             warnings.push("name_collision_suffix_allocated".to_owned());
             counts.warnings += 1;
         }
         proxy = assign_name(proxy, &final_name);
-        seen_fingerprints.insert(fingerprint);
-        used_names.insert(final_name.clone());
+        names.accept(fingerprint, candidate.name.as_deref(), final_name.clone());
         accepted.push(proxy);
         counts.added += 1;
         items.push(ImportItem {
@@ -1613,6 +1604,8 @@ fn build_preview(
             reason: None,
         });
     }
+
+    names.remap_dialer_proxies(&mut accepted);
 
     let added_proxies_yaml = if accepted.is_empty() {
         String::new()
@@ -2538,4 +2531,6 @@ proxies: []
         .expect("preview");
         assert_eq!(preview.counts.added, 2);
     }
+
+    include!("mihomo_import_extra_tests.rs");
 }
