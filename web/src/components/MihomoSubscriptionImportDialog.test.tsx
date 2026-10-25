@@ -111,6 +111,62 @@ describe("MihomoSubscriptionImportDialog", () => {
 		);
 	});
 
+	it("shows a preview error without changing the draft", async () => {
+		const user = userEvent.setup();
+		const onAdd = vi.fn();
+		const previewRequest = vi
+			.fn()
+			.mockRejectedValue(new Error("preview unavailable"));
+		renderDialog({ onAdd, previewRequest });
+
+		await user.type(
+			screen.getByLabelText("Subscription or node content"),
+			"ss://example",
+		);
+		await user.click(screen.getByRole("button", { name: "Preview" }));
+
+		await expect(screen.findByRole("alert")).resolves.toHaveTextContent(
+			"preview unavailable",
+		);
+		expect(onAdd).not.toHaveBeenCalled();
+		expect(
+			screen.getByRole("button", { name: "Add valid nodes" }),
+		).toBeDisabled();
+	});
+
+	it("aborts a pending preview when cancelled", async () => {
+		const user = userEvent.setup();
+		const onOpenChange = vi.fn();
+		let resolvePreview:
+			| ((preview: AdminMihomoImportPreview) => void)
+			| undefined;
+		let requestSignal: AbortSignal | undefined;
+		const pendingPreview = new Promise<AdminMihomoImportPreview>((resolve) => {
+			resolvePreview = resolve;
+		});
+		const previewRequest = vi.fn(
+			(_source: string, _existing: string, signal?: AbortSignal) => {
+				requestSignal = signal;
+				return pendingPreview;
+			},
+		);
+		renderDialog({ onOpenChange, previewRequest });
+
+		await user.type(
+			screen.getByLabelText("Subscription or node content"),
+			"ss://example",
+		);
+		await user.click(screen.getByRole("button", { name: "Preview" }));
+		await waitFor(() => expect(previewRequest).toHaveBeenCalled());
+		expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
+
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+		expect(requestSignal?.aborted).toBe(true);
+		expect(onOpenChange).toHaveBeenCalledWith(false);
+		resolvePreview?.(PREVIEW);
+	});
+
 	it("keeps long node names readable instead of truncating them", async () => {
 		const user = userEvent.setup();
 		const longName = `imported-${"very-long-node-name-".repeat(8)}`;

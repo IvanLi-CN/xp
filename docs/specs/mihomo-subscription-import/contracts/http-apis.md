@@ -53,8 +53,7 @@
       "status": "added",
       "name": "imported-001",
       "scheme": "ss",
-      "warnings": [],
-      "reason": null
+      "warnings": []
     },
     {
       "source_index": 2,
@@ -67,7 +66,6 @@
     {
       "source_index": 3,
       "status": "failed",
-      "name": null,
       "scheme": "ssr",
       "warnings": [],
       "reason": "unsupported scheme"
