@@ -170,20 +170,26 @@ type Story = StoryObj<typeof meta>;
 
 export const Inline: Story = {};
 
+async function openImportPreview(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	await userEvent.click(canvas.getByRole("button", { name: "Import nodes" }));
+	const dialog = await within(document.body).findByRole("dialog");
+	await userEvent.type(
+		within(dialog).getByLabelText("Subscription or node content"),
+		"vless://00000000-0000-0000-0000-000000000001@edge.example.com:443#imported-edge",
+	);
+	await userEvent.click(
+		within(dialog).getByRole("button", { name: "Preview" }),
+	);
+	await expect(dialog).toHaveTextContent("Preview report");
+	return dialog;
+}
+
 export const ImportPreview: Story = {
 	args: { importAvailable: true },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByRole("button", { name: "Import nodes" }));
-		const dialog = await within(document.body).findByRole("dialog");
-		await userEvent.type(
-			within(dialog).getByLabelText("Subscription or node content"),
-			"vless://00000000-0000-0000-0000-000000000001@edge.example.com:443#imported-edge",
-		);
-		await userEvent.click(
-			within(dialog).getByRole("button", { name: "Preview" }),
-		);
-		await expect(dialog).toHaveTextContent("Preview report");
+		const dialog = await openImportPreview(canvasElement);
 		await expect(dialog).toHaveTextContent("imported-edge");
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "Add valid nodes" }),
@@ -205,6 +211,9 @@ export const ImportPreview: Story = {
 
 export const ImportPreviewReport: Story = {
 	args: { importAvailable: true },
+	play: async ({ canvasElement }) => {
+		await openImportPreview(canvasElement);
+	},
 };
 
 export const ImportPreviewMobile: Story = {
@@ -222,18 +231,8 @@ export const ImportPreviewMobile: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByRole("button", { name: "Import nodes" }));
-		const dialog = await within(document.body).findByRole("dialog");
+		const dialog = await openImportPreview(canvasElement);
 		await expect(dialog).toHaveClass("bottom-0", "rounded-t-2xl");
-		await userEvent.type(
-			within(dialog).getByLabelText("Subscription or node content"),
-			"vless://00000000-0000-0000-0000-000000000001@edge.example.com:443#imported-edge",
-		);
-		await userEvent.click(
-			within(dialog).getByRole("button", { name: "Preview" }),
-		);
-		await expect(dialog).toHaveTextContent("Preview report");
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "Add valid nodes" }),
 		);
@@ -246,6 +245,10 @@ export const ImportPreviewMobile: Story = {
 export const ImportPreviewReportMobile: Story = {
 	args: { importAvailable: true },
 	parameters: ImportPreviewMobile.parameters,
+	play: async ({ canvasElement }) => {
+		const dialog = await openImportPreview(canvasElement);
+		await expect(dialog).toHaveClass("bottom-0", "rounded-t-2xl");
+	},
 };
 
 export const Expanded: Story = {

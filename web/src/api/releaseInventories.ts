@@ -767,6 +767,24 @@ const mihomoProfileFixture = (): ReleaseFixtureResponse => ({
 	},
 });
 
+export const MIHOMO_IMPORT_PREVIEW_FIXTURE = {
+	contentType: "application/json",
+	body: {
+		detected_source: "raw",
+		added_proxies_yaml: "- name: imported\n  type: ss\n",
+		counts: { added: 1, skipped: 0, failed: 0, warnings: 0 },
+		items: [
+			{
+				source_index: 1,
+				status: "added",
+				name: "imported",
+				scheme: "ss",
+				warnings: [],
+			},
+		],
+	},
+} satisfies ReleaseFixtureResponse;
+
 const RELEASE_FIXTURE_RESPONSES: Readonly<
 	Record<string, Readonly<Record<string, ReleaseFixtureResponse>>>
 > = {
@@ -845,23 +863,8 @@ const RELEASE_FIXTURE_RESPONSES: Readonly<
 		},
 		[MIHOMO_PROFILE_GET]: mihomoProfileFixture(),
 		[MIHOMO_PROFILE_PUT]: mihomoProfileFixture(),
-		"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": {
-			contentType: "application/json",
-			body: {
-				detected_source: "raw",
-				added_proxies_yaml: "- name: imported\n  type: ss\n",
-				counts: { added: 1, skipped: 0, failed: 0, warnings: 0 },
-				items: [
-					{
-						source_index: 1,
-						status: "added",
-						name: "imported",
-						scheme: "ss",
-						warnings: [],
-					},
-				],
-			},
-		},
+		"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview":
+			MIHOMO_IMPORT_PREVIEW_FIXTURE,
 		"GET /api/sub/{subscription_token}": {
 			contentType: "text/plain",
 			body: "proxy-provider-fixture-3.22",

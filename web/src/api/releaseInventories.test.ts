@@ -21,6 +21,7 @@ import {
 	API_CAPABILITIES,
 	API_CAPABILITIES_PATH,
 	API_COMPATIBILITY_WINDOW,
+	MIHOMO_IMPORT_PREVIEW_FIXTURE,
 	RELEASE_API_FIXTURES,
 	RELEASE_COMPATIBILITY_CONTRACTS,
 	RELEASE_INVENTORIES,
@@ -188,6 +189,11 @@ function executeFixtureRequest(
 }
 
 describe("immutable release inventories", () => {
+	it("validates the current-only Mihomo preview fixture wire shape", () => {
+		expect(MIHOMO_IMPORT_PREVIEW_FIXTURE.contentType).toBe("application/json");
+		AdminMihomoImportPreviewSchema.parse(MIHOMO_IMPORT_PREVIEW_FIXTURE.body);
+	});
+
 	it("pins the latest stable tag and source commit for every compatibility minor", () => {
 		expect(RELEASE_INVENTORIES.map((inventory) => inventory.minor)).toEqual(
 			API_COMPATIBILITY_WINDOW,
