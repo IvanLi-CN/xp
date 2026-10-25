@@ -292,10 +292,16 @@ fn parse_vmess(
             json_u64(&payload, "aid").ok_or_else(|| "vmess alterId is invalid".to_owned())?;
         insert_number(&mut map, "alterId", alter_id);
     }
-    let tls = json_string(&payload, "tls")
-        .map(|value| value == "tls" || value == "true")
-        .or_else(|| payload.get("tls").and_then(serde_json::Value::as_bool))
-        .unwrap_or(false);
+    let tls = match payload.get("tls") {
+        None => false,
+        Some(serde_json::Value::Bool(value)) => *value,
+        Some(serde_json::Value::String(value)) => match value.to_ascii_lowercase().as_str() {
+            "" | "none" | "false" | "0" => false,
+            "tls" | "true" | "1" => true,
+            _ => return Err("vmess tls mode is unsupported".to_owned()),
+        },
+        Some(_) => return Err("vmess tls mode is invalid".to_owned()),
+    };
     insert_bool(&mut map, "tls", tls);
     if let Some(insecure) = json_bool(&payload, "insecure") {
         insert_bool(&mut map, "skip-cert-verify", insecure);

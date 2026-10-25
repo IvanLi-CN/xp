@@ -123,6 +123,21 @@ fn preserves_vmess_certificate_constraints_without_multi_host_sni() {
 }
 
 #[test]
+fn rejects_vmess_unsupported_tls_mode() {
+    let payload = serde_json::json!({
+        "add": "vmess.example",
+        "port": "443",
+        "id": "00000000-0000-0000-0000-000000000001",
+        "net": "tcp",
+        "tls": "reality",
+    });
+    let encoded = base64::engine::general_purpose::STANDARD.encode(payload.to_string());
+    let url = Url::parse(&format!("vmess://{encoded}")).expect("URL");
+    let error = parse_vmess(url, None, &encoded).expect_err("unsupported TLS must fail");
+    assert_eq!(error, "vmess tls mode is unsupported");
+}
+
+#[test]
 fn preserves_trojan_alpn_and_insecure_alias() {
     let url = Url::parse(concat!(
         "trojan://secret@example.com:443?alpn=h2%2Chttp%2F1.1&",
