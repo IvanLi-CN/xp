@@ -24,7 +24,6 @@ import {
 import { VersionCheckResponseSchema } from "./versionCheck";
 
 const parseKnownWireSchema = (route: string, body: unknown) =>
-	route.startsWith("PUT ") &&
 	route.endsWith("/subscription-mihomo-profile") &&
 	AdminUserMihomoProfileSchema.parse(body);
 
@@ -413,7 +412,8 @@ describe("immutable release inventories", () => {
 				const requestBody = Object.fromEntries(
 					request.requestSchema.map((field) => [field, "fixture"]),
 				);
-				parseKnownWireSchema(request.route, requestBody);
+				request.method === "PUT" &&
+					parseKnownWireSchema(request.route, requestBody);
 				const executedRequest = new Request(requestUrl, {
 					method: request.method,
 					...(request.requestSchema.length > 0
