@@ -39,13 +39,23 @@ const sheetVariants = cva(
 const SheetContent = React.forwardRef<
 	React.ElementRef<typeof DialogPrimitive.Content>,
 	React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> &
-		VariantProps<typeof sheetVariants> & { showClose?: boolean }
+		VariantProps<typeof sheetVariants> & {
+			portalContainer?: HTMLElement | null;
+			showClose?: boolean;
+		}
 >(
 	(
-		{ side = "right", className, children, showClose = true, ...props },
+		{
+			side = "right",
+			className,
+			children,
+			showClose = true,
+			portalContainer,
+			...props
+		},
 		ref,
 	) => (
-		<SheetPortal>
+		<SheetPortal container={portalContainer}>
 			<SheetOverlay />
 			<DialogPrimitive.Content
 				ref={ref}

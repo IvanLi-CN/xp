@@ -69,6 +69,8 @@ function EditorStory({
 	const [isSaving, setIsSaving] = useState(startSaving);
 	const [saveAttempts, setSaveAttempts] = useState(0);
 	const [error, setError] = useState<string | null>(null);
+	const [visualEvidenceTarget, setVisualEvidenceTarget] =
+		useState<HTMLDivElement | null>(null);
 	const pendingSaveResolve = useRef<(() => void) | null>(null);
 
 	const save = async () => {
@@ -96,7 +98,10 @@ function EditorStory({
 			className="min-h-[34rem] w-full bg-background p-12 text-foreground"
 			data-visual-evidence-surface="mihomo-profile-editor"
 		>
-			<div data-visual-evidence-target="mihomo-profile-editor">
+			<div
+				ref={setVisualEvidenceTarget}
+				data-visual-evidence-target="mihomo-profile-editor"
+			>
 				<MihomoProfileEditor
 					userName="Mira Sato"
 					userId="story-user"
@@ -115,6 +120,7 @@ function EditorStory({
 					previewImport={
 						(async () => IMPORT_PREVIEW) satisfies MihomoImportPreviewRequestFn
 					}
+					portalContainer={visualEvidenceTarget}
 					onChange={(documentId, value) => {
 						setDraft((current) => {
 							switch (documentId) {

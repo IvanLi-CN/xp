@@ -64,6 +64,7 @@ type MihomoProfileEditorProps = {
 	adminToken?: string;
 	importAvailable?: boolean;
 	previewImport?: MihomoImportPreviewRequestFn;
+	portalContainer?: HTMLElement | null;
 };
 
 type VisualViewportMetrics = {
@@ -130,6 +131,7 @@ export function MihomoProfileEditor({
 	adminToken = "",
 	importAvailable = false,
 	previewImport,
+	portalContainer,
 }: MihomoProfileEditorProps) {
 	const [expanded, setExpanded] = useState(false);
 	const [importOpen, setImportOpen] = useState(false);
@@ -642,6 +644,7 @@ export function MihomoProfileEditor({
 				readOnly={readOnly}
 				onAdd={(nextValue) => onChange("extra_proxies_yaml", nextValue)}
 				previewRequest={previewImport}
+				portalContainer={portalContainer}
 			/>
 			{editorContent}
 		</>

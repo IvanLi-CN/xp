@@ -254,3 +254,18 @@ fn sanitizes_raw_failure_scheme() {
     let item = preview.items.first().expect("item");
     assert_eq!(item.scheme, None);
 }
+
+#[test]
+fn accepts_many_shallow_yaml_nodes_with_explicit_scalar_tags() {
+    let mut source = String::from("proxies:\n");
+    for index in 0..=super::MAX_YAML_NESTING_DEPTH {
+        source.push_str(&format!(
+            "  - name: node-{index}\n    type: vendor-private\n"
+        ));
+        source.push_str(&format!(
+            "    server: node-{index}.example.com\n    port: !!int 443\n"
+        ));
+    }
+    let preview = preview_text(&source, "", &BTreeSet::new()).expect("shallow nodes");
+    assert_eq!(preview.counts.added, super::MAX_YAML_NESTING_DEPTH + 1);
+}

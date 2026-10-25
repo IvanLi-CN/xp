@@ -769,7 +769,6 @@ fn yaml_lex_exceeds_nesting(source: &str) -> bool {
     let mut block_indents = Vec::new();
     let mut sequence_prefixes: Vec<(usize, usize)> = Vec::new();
     let mut tag_chain_depth: usize = 0;
-    let mut node_property_count: usize = 0;
     let mut previous_significant = None;
     let mut previous_string_is_quoted = false;
     let mut previous_scalar_line_indent = None;
@@ -986,19 +985,6 @@ fn yaml_lex_exceeds_nesting(source: &str) -> bool {
             previous_significant,
             previous_string_is_quoted,
         );
-        if matches!(
-            kind,
-            yaml_edit::SyntaxKind::TAG
-                | yaml_edit::SyntaxKind::ANCHOR
-                | yaml_edit::SyntaxKind::REFERENCE
-        ) && structural_property
-        {
-            node_property_count = node_property_count.saturating_add(1);
-            if node_property_count > MAX_YAML_NESTING_DEPTH {
-                return true;
-            }
-        }
-
         while block_indents
             .last()
             .is_some_and(|indent| *indent > line_indent)
@@ -1051,6 +1037,16 @@ fn yaml_lex_exceeds_nesting(source: &str) -> bool {
                 flow_line_breaks.pop();
             }
             yaml_edit::SyntaxKind::TAG if structural_property => {
+                if !matches!(
+                    previous_significant,
+                    Some(
+                        yaml_edit::SyntaxKind::TAG
+                            | yaml_edit::SyntaxKind::ANCHOR
+                            | yaml_edit::SyntaxKind::REFERENCE
+                    )
+                ) {
+                    tag_chain_depth = 0;
+                }
                 tag_chain_depth = tag_chain_depth.saturating_add(1);
             }
             yaml_edit::SyntaxKind::PIPE | yaml_edit::SyntaxKind::GREATER

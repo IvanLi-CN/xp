@@ -31,6 +31,7 @@ type MihomoSubscriptionImportDialogProps = {
 	readOnly?: boolean;
 	onAdd: (nextExtraProxiesYaml: string) => void;
 	previewRequest?: MihomoImportPreviewRequestFn;
+	portalContainer?: HTMLElement | null;
 };
 
 const SOURCE_LABELS: Record<
@@ -72,6 +73,7 @@ export function MihomoSubscriptionImportDialog({
 	readOnly = false,
 	onAdd,
 	previewRequest,
+	portalContainer,
 }: MihomoSubscriptionImportDialogProps) {
 	const [source, setSource] = useState("");
 	const [preview, setPreview] = useState<AdminMihomoImportPreview | null>(null);
@@ -194,6 +196,7 @@ export function MihomoSubscriptionImportDialog({
 			<SheetContent
 				side="bottom"
 				data-testid="mihomo-import-panel"
+				portalContainer={portalContainer}
 				aria-busy={isLoading}
 				className={cn(
 					"grid h-auto max-h-[min(46rem,calc(100dvh-1rem))] w-full max-w-none",
