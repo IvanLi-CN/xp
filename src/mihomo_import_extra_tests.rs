@@ -82,6 +82,44 @@ fn remaps_references_before_duplicate_detection() {
 }
 
 #[test]
+fn preserves_forward_dialer_reference_before_duplicate_detection() {
+    let existing = r#"- name: app
+  type: ss
+  server: app.example
+  port: 443
+  cipher: aes-256-gcm
+  password: secret
+  dialer-proxy: hop
+- name: hop
+  type: ss
+  server: hop.example
+  port: 443
+  cipher: aes-256-gcm
+  password: secret
+"#;
+    let source = r#"proxies:
+  - name: app
+    type: ss
+    server: app.example
+    port: 443
+    cipher: aes-256-gcm
+    password: secret
+    dialer-proxy: hop
+  - name: hop
+    type: ss
+    server: imported.example
+    port: 443
+    cipher: aes-256-gcm
+    password: secret
+"#;
+    let preview = preview_text(source, existing, &BTreeSet::new()).expect("preview");
+    assert_eq!(preview.counts.added, 2);
+    assert_eq!(preview.counts.skipped, 0);
+    assert!(preview.added_proxies_yaml.contains("name: app-2"));
+    assert!(preview.added_proxies_yaml.contains("dialer-proxy: hop-2"));
+}
+
+#[test]
 fn removes_ambiguous_same_name_self_reference() {
     let source = r#"proxies:
   - name: hop
@@ -100,7 +138,9 @@ fn removes_ambiguous_same_name_self_reference() {
 "#;
     let preview = preview_text(source, "", &BTreeSet::new()).expect("preview");
     assert_eq!(preview.counts.added, 2);
-    assert!(!preview.added_proxies_yaml.contains("dialer-proxy"));
+    assert!(preview.added_proxies_yaml.contains("name: hop-2"));
+    assert!(preview.added_proxies_yaml.contains("dialer-proxy: hop\n"));
+    assert!(!preview.added_proxies_yaml.contains("dialer-proxy: hop-2"));
 }
 
 #[test]
@@ -138,4 +178,11 @@ fn sanitizes_sensitive_report_fields() {
     let item = preview.items.first().expect("item");
     assert_eq!(item.name.as_deref(), Some("imported-001"));
     assert_eq!(item.scheme.as_deref(), Some("unknown"));
+}
+
+#[test]
+fn sanitizes_raw_failure_scheme() {
+    let preview = preview_text("user:secret@host://bad", "", &BTreeSet::new()).expect("preview");
+    let item = preview.items.first().expect("item");
+    assert_eq!(item.scheme, None);
 }

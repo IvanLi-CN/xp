@@ -65,7 +65,6 @@ impl ImportNameState {
 
     pub(super) fn remap_known_dialer_proxy(&self, proxy: &mut Value) -> bool {
         let key = Value::String("dialer-proxy".to_owned());
-        let name_key = Value::String("name".to_owned());
         let Value::Mapping(map) = proxy else {
             return false;
         };
@@ -75,11 +74,7 @@ impl ImportNameState {
         let Some(target_name) = self.source_name_targets.get(&reference) else {
             return true;
         };
-        if map.get(&name_key).and_then(Value::as_str) == Some(target_name.as_str()) {
-            map.remove(&key);
-        } else {
-            map.insert(key, Value::String(target_name.clone()));
-        }
+        map.insert(key, Value::String(target_name.clone()));
         false
     }
 
@@ -97,6 +92,20 @@ impl ImportNameState {
             if self.pending_dialer_names.contains(&name) {
                 self.remap_known_dialer_proxy(proxy);
             }
+            Self::remove_self_dialer_proxy(proxy);
+        }
+    }
+
+    fn remove_self_dialer_proxy(proxy: &mut Value) {
+        let Value::Mapping(map) = proxy else {
+            return;
+        };
+        let name_key = Value::String("name".to_owned());
+        let dialer_key = Value::String("dialer-proxy".to_owned());
+        if map.get(&name_key).and_then(Value::as_str)
+            == map.get(&dialer_key).and_then(Value::as_str)
+        {
+            map.remove(&dialer_key);
         }
     }
 

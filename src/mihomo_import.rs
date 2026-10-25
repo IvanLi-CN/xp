@@ -1561,7 +1561,7 @@ fn build_preview(
         let source_name = import_names::source_name(&proxy).or_else(|| candidate.name.clone());
         let pending_dialer_proxy = names.remap_known_dialer_proxy(&mut proxy);
         let fingerprint = canonical_proxy(&proxy);
-        if names.is_duplicate(&fingerprint, source_name.as_deref()) {
+        if !pending_dialer_proxy && names.is_duplicate(&fingerprint, source_name.as_deref()) {
             counts.skipped += 1;
             items.push(ImportItem {
                 source_index,

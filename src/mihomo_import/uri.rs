@@ -16,7 +16,8 @@ pub(super) fn parse_raw_candidates(source: &str) -> Result<Vec<Candidate>, Impor
             let line = line.strip_prefix("- ").map(str::trim).unwrap_or(line);
             let scheme = line
                 .split_once("://")
-                .map(|(scheme, _)| scheme.trim().to_ascii_lowercase());
+                .map(|(scheme, _)| scheme.trim().to_ascii_lowercase())
+                .and_then(|scheme| safe_label(&scheme));
             match parse_uri_proxy(line) {
                 Ok((proxy, name, scheme, warnings)) => Candidate {
                     scheme: Some(scheme),

@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+mod redirect;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RedactionLevel {
@@ -49,7 +50,6 @@ pub enum RedactErrorKind {
     TooLarge,
     Network,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactError {
     pub code: i32,
@@ -273,7 +273,9 @@ async fn fetch_url_source(
     let deadline = tokio::time::Instant::now() + timeout;
     let mut current = source;
     for redirect_count in 0..=10 {
-        let client = build_http_client_for_url(&current, deadline, policy).await?;
+        let client = build_http_client_for_url(&current, deadline, policy)
+            .await
+            .map_err(|error| redirect::target_error(error, redirect_count))?;
         let response = client
             .get(current.clone())
             .header(reqwest::header::CACHE_CONTROL, "no-store")

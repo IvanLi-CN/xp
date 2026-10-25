@@ -505,6 +505,7 @@ const RESPONSE_FIELDS_320 = {
 		"admin_token_masked",
 	],
 	[MIHOMO_PROFILE_GET]: MIHOMO_PROFILE_FIELDS,
+	[MIHOMO_PROFILE_PUT]: MIHOMO_PROFILE_FIELDS,
 	"GET /api/sub/{subscription_token}": ["text/plain"],
 } as const;
 
@@ -540,6 +541,7 @@ const RESPONSE_FIELDS_322 = {
 		"admin_token_masked",
 	],
 	[MIHOMO_PROFILE_GET]: MIHOMO_PROFILE_FIELDS,
+	[MIHOMO_PROFILE_PUT]: MIHOMO_PROFILE_FIELDS,
 	"GET /api/admin/status/events": ["hello", "snapshot", "mesh_revision"],
 	"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": [
 		"detected_source",
@@ -842,6 +844,7 @@ const RELEASE_FIXTURE_RESPONSES: Readonly<
 			},
 		},
 		[MIHOMO_PROFILE_GET]: mihomoProfileFixture(),
+		[MIHOMO_PROFILE_PUT]: mihomoProfileFixture(),
 		"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview": {
 			contentType: "application/json",
 			body: {
@@ -927,6 +930,7 @@ const RELEASE_FIXTURE_RESPONSES: Readonly<
 			},
 		},
 		[MIHOMO_PROFILE_GET]: mihomoProfileFixture(),
+		[MIHOMO_PROFILE_PUT]: mihomoProfileFixture(),
 		"GET /api/sub/{subscription_token}": {
 			contentType: "text/plain",
 			body: "proxy-provider-fixture-3.21",
@@ -995,6 +999,7 @@ const RELEASE_FIXTURE_RESPONSES: Readonly<
 			},
 		},
 		[MIHOMO_PROFILE_GET]: mihomoProfileFixture(),
+		[MIHOMO_PROFILE_PUT]: mihomoProfileFixture(),
 		"GET /api/sub/{subscription_token}": {
 			contentType: "text/plain",
 			body: "proxy-provider-fixture-3.20",
