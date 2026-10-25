@@ -190,9 +190,35 @@
 
 ## Visual Evidence
 
-- source_type: storybook_canvas; story_id_or_title: Components/MihomoProfileEditor/ImportPreviewReport; requested_viewport: none; viewport_strategy: storybook-viewport; margin_policy: require_margin; evidence_surface: component; state: preview report; evidence_note: Desktop preview shows pasted content, source detection, compact counts, item report, and Add valid nodes action; sensitive_exclusion: N/A; submission_gate: approved.
+- source_type: storybook_canvas
+  target_program: mock-only
+  capture_scope: element
+  requested_viewport: none
+  viewport_strategy: storybook-viewport
+  margin_policy: require_margin
+  evidence_surface: component
+  surface_selector: '[data-visual-evidence-surface="mihomo-profile-editor"]'
+  target_selector: '[data-visual-evidence-target="mihomo-profile-editor"]'
+  sensitive_exclusion: N/A
+  submission_gate: approved
+  story_id_or_title: Components/MihomoProfileEditor/ImportPreviewReport
+  state: preview report
+  evidence_note: Desktop preview shows pasted content, source detection, compact counts, item report, and Add valid nodes action.
   ![Mihomo import preview desktop](./assets/import-preview-desktop.png)
-- source_type: storybook_canvas; story_id_or_title: Components/MihomoProfileEditor/ImportPreviewReportMobile; requested_viewport: 393x852; viewport_strategy: storybook-viewport; margin_policy: require_margin; evidence_surface: component; state: responsive preview report; evidence_note: Mobile bottom drawer keeps the report readable, compacts counts into one row, and keeps all actions reachable without overflow; sensitive_exclusion: N/A; submission_gate: approved.
+- source_type: storybook_canvas
+  target_program: mock-only
+  capture_scope: element
+  requested_viewport: 393x852
+  viewport_strategy: storybook-viewport
+  margin_policy: require_margin
+  evidence_surface: component
+  surface_selector: '[data-visual-evidence-surface="mihomo-profile-editor"]'
+  target_selector: '[data-visual-evidence-target="mihomo-profile-editor"]'
+  sensitive_exclusion: N/A
+  submission_gate: approved
+  story_id_or_title: Components/MihomoProfileEditor/ImportPreviewReportMobile
+  state: responsive preview report
+  evidence_note: Mobile bottom drawer keeps the report readable, compacts counts into one row, and keeps all actions reachable without overflow.
   ![Mihomo import preview mobile](./assets/import-preview-mobile-393.png)
 
 ## References
