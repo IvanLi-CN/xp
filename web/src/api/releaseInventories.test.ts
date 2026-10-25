@@ -10,7 +10,11 @@ import {
 	AdminStatusEventsHelloSchema,
 	AdminStatusEventsSnapshotSchema,
 } from "./adminStatusEvents";
-import { AdminUserMihomoProfileSchema } from "./adminUsers";
+import {
+	AdminMihomoImportPreviewRequestSchema,
+	AdminMihomoImportPreviewSchema,
+	AdminUserMihomoProfileSchema,
+} from "./adminUsers";
 import { ClusterInfoResponseSchema } from "./clusterInfo";
 import { HealthResponseSchema } from "./health";
 import {
@@ -23,9 +27,39 @@ import {
 } from "./releaseInventories";
 import { VersionCheckResponseSchema } from "./versionCheck";
 
-const parseKnownWireSchema = (route: string, body: unknown) =>
-	route.endsWith("/subscription-mihomo-profile") &&
-	AdminUserMihomoProfileSchema.parse(body);
+const MIHOMO_IMPORT_PREVIEW_ROUTE =
+	"POST /api/admin/users/{user_id}/subscription-mihomo-import/preview";
+
+function parseKnownRequestSchema(method: string, route: string, body: unknown) {
+	if (method === "PUT" && route.endsWith("/subscription-mihomo-profile")) {
+		AdminUserMihomoProfileSchema.parse(body);
+	}
+	if (method === "POST" && route === MIHOMO_IMPORT_PREVIEW_ROUTE) {
+		AdminMihomoImportPreviewRequestSchema.parse(body);
+	}
+}
+
+function parseKnownResponseSchema(route: string, body: unknown) {
+	if (route.endsWith("/subscription-mihomo-profile")) {
+		AdminUserMihomoProfileSchema.parse(body);
+	}
+	if (route === MIHOMO_IMPORT_PREVIEW_ROUTE) {
+		AdminMihomoImportPreviewSchema.parse(body);
+	}
+}
+
+function fixtureRequestBody(
+	route: string,
+	requestSchema: readonly string[],
+): Record<string, string> {
+	if (route === MIHOMO_IMPORT_PREVIEW_ROUTE) {
+		return {
+			source: "vless://fixture@example.com:443",
+			existing_extra_proxies_yaml: "",
+		};
+	}
+	return Object.fromEntries(requestSchema.map((field) => [field, "fixture"]));
+}
 
 function fixturePathMatches(template: string, actual: string): boolean {
 	const templateParts = template.split("/");
@@ -409,11 +443,11 @@ describe("immutable release inventories", () => {
 					/\{[^}]+\}/g,
 					"fixture",
 				)}`;
-				const requestBody = Object.fromEntries(
-					request.requestSchema.map((field) => [field, "fixture"]),
+				const requestBody = fixtureRequestBody(
+					request.route,
+					request.requestSchema,
 				);
-				request.method === "PUT" &&
-					parseKnownWireSchema(request.route, requestBody);
+				parseKnownRequestSchema(request.method, request.route, requestBody);
 				const executedRequest = new Request(requestUrl, {
 					method: request.method,
 					...(request.requestSchema.length > 0
@@ -498,7 +532,7 @@ describe("immutable release inventories", () => {
 				} else if (response.route === "GET /api/admin/config") {
 					AdminConfigResponseSchema.parse(response.body);
 				}
-				parseKnownWireSchema(response.route, response.body);
+				parseKnownResponseSchema(response.route, response.body);
 
 				const body = response.body as Record<string, unknown>;
 				for (const missingField of response.missingFields) {
