@@ -10,6 +10,7 @@ pub(super) struct ImportNameState {
     pending_dialer_names: BTreeSet<String>,
     source_name_targets: BTreeMap<String, String>,
     accepted_source_names: BTreeMap<String, String>,
+    replacement_targets: BTreeMap<String, String>,
 }
 
 impl ImportNameState {
@@ -21,6 +22,7 @@ impl ImportNameState {
             pending_dialer_names: BTreeSet::new(),
             source_name_targets: BTreeMap::new(),
             accepted_source_names: BTreeMap::new(),
+            replacement_targets: BTreeMap::new(),
         };
         for proxy in existing {
             if let Value::Mapping(map) = proxy
@@ -101,7 +103,20 @@ impl ImportNameState {
         items: &mut [super::ImportItem],
         counts: &mut super::ImportCounts,
     ) {
-        for proxy in proxies.iter_mut() {
+        self.remap_pending_dialer_proxies_in_place(proxies);
+        loop {
+            let before = proxies.iter().map(canonical_proxy).collect::<Vec<_>>();
+            self.remap_replaced_dialer_proxies(proxies);
+            self.dedupe_accepted(proxies, items, counts);
+            let after = proxies.iter().map(canonical_proxy).collect::<Vec<_>>();
+            if before == after {
+                break;
+            }
+        }
+    }
+
+    fn remap_pending_dialer_proxies_in_place(&self, proxies: &mut [Value]) {
+        for proxy in proxies {
             let Some(name) = Self::proxy_name(proxy) else {
                 continue;
             };
@@ -110,7 +125,31 @@ impl ImportNameState {
             }
             Self::remove_self_dialer_proxy(proxy);
         }
+    }
 
+    fn remap_replaced_dialer_proxies(&self, proxies: &mut [Value]) {
+        for proxy in proxies {
+            let Value::Mapping(map) = proxy else {
+                continue;
+            };
+            let key = Value::String("dialer-proxy".to_owned());
+            let Some(reference) = map.get(&key).and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(target_name) = self.replacement_targets.get(reference) else {
+                continue;
+            };
+            map.insert(key, Value::String(target_name.clone()));
+            Self::remove_self_dialer_proxy(proxy);
+        }
+    }
+
+    fn dedupe_accepted(
+        &mut self,
+        proxies: &mut Vec<Value>,
+        items: &mut [super::ImportItem],
+        counts: &mut super::ImportCounts,
+    ) {
         let mut seen = self.existing_fingerprints.clone();
         let mut deduped = Vec::with_capacity(proxies.len());
         for proxy in proxies.drain(..) {
@@ -131,8 +170,9 @@ impl ImportNameState {
                     && self.source_name_targets.get(source_name) == Some(&name)
                 {
                     self.source_name_targets
-                        .insert(source_name.clone(), target_name);
+                        .insert(source_name.clone(), target_name.clone());
                 }
+                self.replacement_targets.insert(name, target_name);
                 counts.added = counts.added.saturating_sub(1);
                 counts.skipped += 1;
             } else {

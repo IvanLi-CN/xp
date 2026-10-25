@@ -156,6 +156,38 @@ fn dedupes_after_interleaved_forward_dialer_references_resolve() {
 }
 
 #[test]
+fn remaps_references_after_deduping_an_imported_alias() {
+    let source = r#"proxies:
+  - name: first
+    type: socks5
+    server: hop.example
+    port: 1080
+    dialer-proxy: exit
+  - name: alias
+    type: socks5
+    server: hop.example
+    port: 1080
+    dialer-proxy: exit
+  - name: app
+    type: socks5
+    server: app.example
+    port: 1080
+    dialer-proxy: alias
+  - name: exit
+    type: socks5
+    server: exit.example
+    port: 1080
+"#;
+    let preview = preview_text(source, "", &BTreeSet::new()).expect("preview");
+    assert_eq!(preview.counts.added, 3);
+    assert_eq!(preview.counts.skipped, 1);
+    assert!(preview.added_proxies_yaml.contains("name: first"));
+    assert!(preview.added_proxies_yaml.contains("name: app"));
+    assert!(preview.added_proxies_yaml.contains("dialer-proxy: first"));
+    assert!(!preview.added_proxies_yaml.contains("dialer-proxy: alias"));
+}
+
+#[test]
 fn removes_ambiguous_same_name_self_reference() {
     let source = r#"proxies:
   - name: hop
