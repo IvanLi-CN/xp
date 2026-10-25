@@ -190,9 +190,9 @@
 
 ## Visual Evidence
 
-- source_type: storybook_canvas; story_id_or_title: Components/MihomoProfileEditor/ImportPreviewReport; requested_viewport: none; viewport_strategy: storybook-viewport; margin_policy: require_margin; evidence_surface: component; state: preview report; evidence_note: Desktop preview shows pasted node content, source detection, counts, item report, and explicit Add valid nodes action; sensitive_exclusion: N/A; submission_gate: pending-owner-approval.
+- source_type: storybook_canvas; story_id_or_title: Components/MihomoProfileEditor/ImportPreviewReport; requested_viewport: none; viewport_strategy: storybook-viewport; margin_policy: require_margin; evidence_surface: component; state: preview report; evidence_note: Desktop preview shows pasted content, source detection, compact counts, item report, and Add valid nodes action; sensitive_exclusion: N/A; submission_gate: approved.
   ![Mihomo import preview desktop](./assets/import-preview-desktop.png)
-- source_type: storybook_canvas; story_id_or_title: Components/MihomoProfileEditor/ImportPreviewReportMobile; requested_viewport: 393x852; viewport_strategy: storybook-viewport; margin_policy: require_margin; evidence_surface: component; state: responsive preview report; evidence_note: Mobile preview keeps the report readable, wraps the counters, and keeps Add valid nodes, Preview, and Cancel reachable without horizontal overflow; sensitive_exclusion: N/A; submission_gate: pending-owner-approval.
+- source_type: storybook_canvas; story_id_or_title: Components/MihomoProfileEditor/ImportPreviewReportMobile; requested_viewport: 393x852; viewport_strategy: storybook-viewport; margin_policy: require_margin; evidence_surface: component; state: responsive preview report; evidence_note: Mobile bottom drawer keeps the report readable, compacts counts into one row, and keeps all actions reachable without overflow; sensitive_exclusion: N/A; submission_gate: approved.
   ![Mihomo import preview mobile](./assets/import-preview-mobile-393.png)
 
 ## References
