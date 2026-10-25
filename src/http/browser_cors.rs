@@ -12,7 +12,7 @@ use reqwest::Url;
 use super::AppState;
 
 const ALLOW_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
-const ALLOW_HEADERS: &str = "Authorization, Content-Type, Accept";
+const ALLOW_HEADERS: &str = "Authorization, Content-Type, Accept, Cache-Control";
 pub(super) const STATIC_CONSOLE_ORIGIN: &str = "https://xp.ivanli.cc";
 
 pub(super) fn canonical_https_origin(value: &str) -> Option<String> {

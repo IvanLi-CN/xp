@@ -375,7 +375,12 @@
     "max_line_length": 193
   },
   "src/mihomo_redact.rs": {
-    "source_lines": 1331
+    "source_lines": 1339
+  },
+  "src/mihomo_import.rs": {
+    "long_line_count": 11,
+    "max_line_length": 155,
+    "source_lines": 2541
   },
   "src/mihomo_redact/tests.rs": {
     "long_line_count": 5,
@@ -556,7 +561,8 @@
   },
   "web/src/components/AppShell.tsx": {
     "long_line_count": 5,
-    "max_line_length": 215
+    "max_line_length": 215,
+    "source_lines": 1005
   },
   "web/src/components/AuthGate.stories.tsx": {
     "long_line_count": 1,
@@ -659,10 +665,6 @@
     "long_line_count": 1,
     "max_line_length": 178
   },
-  "web/src/components/ui/button.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 230
-  },
   "web/src/components/ui/card.stories.tsx": {
     "long_line_count": 1,
     "max_line_length": 184
@@ -742,10 +744,6 @@
   "web/src/components/ui/sheet.stories.tsx": {
     "long_line_count": 1,
     "max_line_length": 174
-  },
-  "web/src/components/ui/sheet.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 153
   },
   "web/src/components/ui/table.stories.tsx": {
     "long_line_count": 1,
@@ -921,9 +919,6 @@
   "src/http/history_repository.rs": {
     "source_lines": 1120
   },
-  "web/src/api/releaseInventories.ts": {
-    "source_lines": 1014
-  },
   "docs/specs/remove-grants-hard-cut/IMPLEMENTATION.md": {
     "long_line_count": 1,
     "max_line_length": 126
@@ -963,5 +958,28 @@
   "docs/specs/node-user-inbound-ip-usage/HISTORY.md": {
     "long_line_count": 3,
     "max_line_length": 155
+  },
+  "docs/adr/0028-mihomo-static-subscription-import.md": {
+    "long_line_count": 6,
+    "max_line_length": 393
+  },
+  "docs/specs/mihomo-subscription-import/IMPLEMENTATION.md": {
+    "long_line_count": 12,
+    "max_line_length": 455
+  },
+  "docs/specs/mihomo-subscription-import/HISTORY.md": {
+    "long_line_count": 8,
+    "max_line_length": 307
+  },
+  "docs/specs/mihomo-subscription-import/SPEC.md": {
+    "long_line_count": 63,
+    "max_line_length": 501
+  },
+  "docs/specs/mihomo-subscription-import/contracts/http-apis.md": {
+    "long_line_count": 22,
+    "max_line_length": 225
+  },
+  "web/src/api/releaseInventories.ts": {
+    "source_lines": 1126
   }
 }

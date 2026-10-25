@@ -70,6 +70,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         "admin.node-probes",
         "admin.traffic-usage",
         "admin.mihomo-tools",
+        "admin.mihomo-subscription-import",
         "admin.mihomo-resource-policy",
         "node.mihomo-resource-private-cidrs-v1",
         "cluster.join.staged-v1",
@@ -124,6 +125,11 @@ mod tests {
                 .contains(&"admin.endpoint-conditional-update")
         );
         assert!(response.capabilities.contains(&"admin.status-events"));
+        assert!(
+            response
+                .capabilities
+                .contains(&"admin.mihomo-subscription-import")
+        );
         assert!(
             response
                 .capabilities

@@ -24,6 +24,7 @@ pub mod login_token;
 pub mod managed_default_endpoints;
 mod mesh_gate_body;
 pub mod mesh_telemetry;
+pub mod mihomo_import;
 pub mod mihomo_policy;
 pub mod mihomo_redact;
 pub mod mihomo_resources;

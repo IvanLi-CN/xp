@@ -1678,6 +1678,35 @@ fn mihomo_proxy_reserved_names(
         .collect()
 }
 
+pub fn mihomo_reserved_proxy_names_for_import(
+    cluster_ca_key_pem: &str,
+    user: &User,
+    memberships: &[NodeUserEndpointMembership],
+    endpoints: &[Endpoint],
+    nodes: &[Node],
+) -> Result<std::collections::BTreeSet<String>, SubscriptionError> {
+    let relay_node_ids = build_mihomo_subscribed_node_ids(user, memberships, endpoints, nodes)?;
+    let relay_groups = build_mihomo_relay_groups(memberships, endpoints, nodes, &relay_node_ids);
+    let relay_group_names = collect_mihomo_relay_group_names(&relay_groups);
+    let relay_group_by_node_id =
+        build_mihomo_relay_group_name_by_node_id(memberships, endpoints, nodes, &relay_node_ids);
+    let mut rng = rand::thread_rng();
+    let generated = build_mihomo_generated_proxies(
+        cluster_ca_key_pem,
+        user,
+        memberships,
+        endpoints,
+        nodes,
+        &relay_group_by_node_id,
+        &mut rng,
+    )?;
+    let generated_proxy_names = collect_top_level_proxy_names(&generated);
+    Ok(mihomo_proxy_reserved_names(
+        &generated_proxy_names,
+        &relay_group_names,
+    ))
+}
+
 fn is_mihomo_legacy_region_relay_alias(name: &str) -> bool {
     name.strip_prefix(MIHOMO_RELAY_GROUP_PREFIX)
         .is_some_and(is_mihomo_legacy_region_relay_base)

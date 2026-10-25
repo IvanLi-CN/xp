@@ -29,6 +29,7 @@ mod api_error;
 mod embedded_ui;
 mod endpoint_requests;
 mod mesh;
+mod mihomo_import_api;
 mod mihomo_resource_route;
 mod node_delete;
 mod resource_alerts;
@@ -122,6 +123,7 @@ use mesh::{
     send_mesh_internal_stream_read, spawn_mesh_probe_worker, spawn_reverse_assignment_worker,
     spawn_reverse_link_probe_worker,
 };
+use mihomo_import_api::admin_preview_user_mihomo_import;
 use node_delete::AdminNodeDeletePreviewEndpoint;
 use resource_alerts::admin_get_alerts_response;
 use resource_monitoring::{
@@ -200,6 +202,9 @@ impl ApiError {
     }
     pub fn invalid_request(message: impl Into<String>) -> Self {
         Self::new("invalid_request", StatusCode::BAD_REQUEST, message)
+    }
+    pub fn too_large(message: impl Into<String>) -> Self {
+        Self::new("request_too_large", StatusCode::PAYLOAD_TOO_LARGE, message)
     }
     pub fn unprocessable_entity(message: impl Into<String>) -> Self {
         Self::new("invalid_request", StatusCode::UNPROCESSABLE_ENTITY, message)
@@ -1350,6 +1355,10 @@ pub fn build_router_with_mesh_telemetry(
             get(admin_get_user_mihomo_profile).put(admin_put_user_mihomo_profile),
         )
         .route(
+            "/users/{user_id}/subscription-mihomo-import/preview",
+            post(admin_preview_user_mihomo_import),
+        )
+        .route(
             "/users/{user_id}/reset-credentials",
             post(admin_reset_user_credentials),
         )
@@ -1451,7 +1460,10 @@ pub fn build_router_with_mesh_telemetry(
             get(history_repository::admin_query_history_repository),
         )
         .merge(service_monitors::router())
-        .layer(middleware::from_fn_with_state(auth_state, admin_auth));
+        .layer(middleware::from_fn_with_state(auth_state, admin_auth))
+        .layer(middleware::from_fn(
+            mihomo_resource_route::no_store_mihomo_import_response,
+        ));
 
     let api = Router::new()
         .route("/health", get(health))
@@ -4841,6 +4853,7 @@ async fn admin_delete_node_mihomo_resource_policy(
 fn map_mihomo_redact_error(err: mihomo_redact::RedactError) -> ApiError {
     match err.kind {
         mihomo_redact::RedactErrorKind::InvalidInput => ApiError::invalid_request(err.message),
+        mihomo_redact::RedactErrorKind::TooLarge => ApiError::too_large(err.message),
         mihomo_redact::RedactErrorKind::Network => {
             ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, err.message)
         }

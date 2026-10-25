@@ -33,6 +33,7 @@ mod history_repository;
 mod managed_vless_create;
 #[path = "tests/mihomo_external_resource.rs"]
 mod mihomo_external_resource;
+mod mihomo_import_tests;
 #[path = "tests/mihomo_resource_route.rs"]
 mod mihomo_resource_route;
 mod mihomo_smux;
@@ -1157,7 +1158,6 @@ async fn setup_subscription_fixtures(tmp: &TempDir, app: &axum::Router) -> Subsc
 async fn unauthorized_admin_returns_401_with_error_shape() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
-
     let res = app.oneshot(req("GET", "/api/admin/nodes")).await.unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
