@@ -1610,7 +1610,7 @@ fn build_preview(
         });
     }
 
-    names.remap_pending_dialer_proxies(&mut accepted);
+    names.remap_pending_dialer_proxies(&mut accepted, &mut items, &mut counts);
 
     let added_proxies_yaml = if accepted.is_empty() {
         String::new()
