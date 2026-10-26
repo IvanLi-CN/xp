@@ -246,6 +246,12 @@ fn reserve_local_port() -> u16 {
         .expect("XP bind address")
         .port()
 }
+
+fn shared_xray_api_addr() -> String {
+    std::env::var("XP_E2E_XRAY_API_ADDR")
+        .expect("XP_E2E_XRAY_API_ADDR must point to the shared Xray API")
+}
+
 fn run_init(binary: &Path, data_dir: &Path, bind_port: u16) {
     let status = Command::new(binary)
         .args([
@@ -364,6 +370,7 @@ impl XpProcess {
 
 fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpProcess {
     let cluster = ClusterMetadata::load(data_dir).expect("load XP cluster metadata");
+    let xray_api_addr = shared_xray_api_addr();
     let log_path = data_dir.join(format!("{label}.log"));
     let stdout = File::create(&log_path).expect("create XP resource log");
     let stderr = stdout.try_clone().expect("clone XP resource log");
@@ -416,7 +423,7 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
             "--bind",
             &format!("127.0.0.1:{bind_port}"),
             "--xray-api-addr",
-            "127.0.0.1:9",
+            &xray_api_addr,
             "--xray-health-interval-secs",
             "30",
             "run",
