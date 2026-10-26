@@ -345,7 +345,7 @@ fn runtime_status_exposes_completed_five_minute_window() {
         .find(|scope| scope.target_repository_id == "repository-b")
         .and_then(|scope| scope.last_completed_window)
         .expect("status should expose scoped completed window");
-    assert_eq!(scoped_window.generated_segments, 0);
+    assert_eq!(scoped_window.generated_segments, 1);
     assert_eq!(scoped_window.acknowledged_segments, 1);
     assert!(!scoped_window.meets_ten_x);
 }

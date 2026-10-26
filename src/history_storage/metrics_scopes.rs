@@ -491,7 +491,7 @@ pub(crate) fn increment_acknowledged_scope(
         source_node_id,
         stream,
         target_repository_id,
-        false,
+        true,
     )?;
     rotate_scope_window(
         transaction,
@@ -526,7 +526,7 @@ pub(crate) fn increment_applied_scope(
         source_node_id,
         stream,
         target_repository_id,
-        false,
+        true,
     )?;
     rotate_scope_window(
         transaction,
