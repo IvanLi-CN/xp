@@ -19,6 +19,9 @@ const JOURNAL_THROUGHPUT_SAMPLE_SECONDS: u64 = 5 * 60;
 // byte-based ten-x gate can drain from the same bounded synthetic journal.
 const JOURNAL_BACKLOG_PAYLOAD_BYTES: usize = 3 * 1024;
 const JOURNAL_FIXTURE_PAYLOAD_BYTES: usize = 2 * 1024;
+// Stay below the durable 80% suspension watermark so this workload exercises the real
+// enqueue path while the capacity-specific unit tests cover the suspended state.
+const SOURCE_JOURNAL_RESOURCE_INITIAL_SEGMENTS: i64 = 10_000;
 
 #[derive(Debug, Clone)]
 struct DeliveryWindowSnapshot {
@@ -701,16 +704,18 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
         "x25519_relay_public_key": relay_public_key.clone(),
     }))
     .expect("encode source journal identity");
-    // Keep the 20,000-row backlog within the 128 MiB capacity boundary while leaving
-    // enough canonical bytes for the real enqueue path to prove both ten-x counters.
+    // Keep the synthetic backlog below the 128 MiB capacity boundary so the real enqueue path
+    // can prove both ten-x counters during this throughput workload.
     let payload = vec![0_u8; JOURNAL_BACKLOG_PAYLOAD_BYTES];
     let mut previous_hash = None;
     let mut total_wire_bytes = 0_i64;
-    for batch_start in (0..20_000_i64).step_by(256) {
+    for batch_start in (0..SOURCE_JOURNAL_RESOURCE_INITIAL_SEGMENTS).step_by(256) {
         let transaction = connection
             .unchecked_transaction()
             .expect("begin source journal backlog transaction");
-        for sequence in batch_start..(batch_start + 256).min(20_000) {
+        for sequence in
+            batch_start..(batch_start + 256).min(SOURCE_JOURNAL_RESOURCE_INITIAL_SEGMENTS)
+        {
             let (wire, segment_hash, _) = signed_fixture_wire(
                 &signing_key,
                 &cluster.cluster_id,
@@ -741,21 +746,21 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
     connection
         .execute(
             "UPDATE source_delivery_journal_state
-             SET pending_segments = 20_000,
+             SET pending_segments = ?2,
                  pending_bytes = ?1,
                  epoch_high_water = 1,
                  order_repair_completed = 1,
-                 capacity_suspended = 1,
+                 capacity_suspended = 0,
                  stream_counts_initialized = 1
              WHERE singleton = 1",
-            [total_wire_bytes],
+            rusqlite::params![total_wire_bytes, SOURCE_JOURNAL_RESOURCE_INITIAL_SEGMENTS],
         )
         .expect("record source journal resource backlog");
     connection
         .execute(
             "INSERT OR REPLACE INTO source_delivery_journal_stream_state
-             (stream, pending_segments) VALUES ('runtime', 20_000)",
-            [],
+             (stream, pending_segments) VALUES ('runtime', ?1)",
+            [SOURCE_JOURNAL_RESOURCE_INITIAL_SEGMENTS],
         )
         .expect("record source journal stream backlog");
     let window_started_at = chrono::Utc::now().timestamp();

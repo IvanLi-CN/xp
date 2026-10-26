@@ -763,6 +763,7 @@ impl RepositoryReplicaRuntime {
     pub(crate) fn persist_control_state_with_journal(
         &mut self,
         journal_rows: &[SourceDeliveryJournalRow],
+        target_repository_ids: &[String],
     ) -> Result<(), RepositoryRuntimeError> {
         self.snapshot.tombstones = self.tombstones.checkpoint();
         let bytes = serde_json::to_vec(&self.snapshot_for_persistence())
@@ -770,9 +771,11 @@ impl RepositoryReplicaRuntime {
         if bytes.len() > MAX_RUNTIME_STATE_BYTES {
             return Err(RepositoryRuntimeError::StateLimitExceeded);
         }
-        let result = self
-            .storage
-            .append_source_delivery_journal_and_control(journal_rows, &bytes);
+        let result = self.storage.append_source_delivery_journal_and_control(
+            journal_rows,
+            &bytes,
+            target_repository_ids,
+        );
         self.finish_storage_write(result)
     }
 }
