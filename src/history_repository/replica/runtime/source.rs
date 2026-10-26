@@ -46,7 +46,6 @@ impl LocalSourceState {
     pub(super) fn epoch(&self) -> u64 {
         self.epoch
     }
-
     pub(super) fn node_id(&self) -> Option<&str> {
         (!self.node_id.is_empty()).then_some(self.node_id.as_str())
     }
@@ -143,7 +142,6 @@ impl RepositoryReplicaRuntime {
         }))
     }
     const MAX_HISTORY_BACKFILL_PENDING_SEGMENTS_PER_STREAM: usize = 128;
-
     pub(crate) fn queue_local_source_segments(
         &mut self,
         cluster_id: &str,
@@ -329,7 +327,7 @@ impl RepositoryReplicaRuntime {
                     wire: segment.wire.clone(),
                 })
                 .collect::<Vec<_>>();
-            self.persist_control_state_with_journal(&journal_rows)
+            self.persist_control_state_with_journal(&journal_rows, &[])
         } else {
             self.persist_control_state()
         };
@@ -524,7 +522,9 @@ impl RepositoryReplicaRuntime {
         }
         if self.storage.is_sqlite() && !options.defer_journal {
             if options.persist {
-                if let Err(error) = self.persist_control_state_with_journal(&journal_rows) {
+                if let Err(error) = self
+                    .persist_control_state_with_journal(&journal_rows, options.ready_repositories)
+                {
                     self.snapshot = previous_snapshot;
                     self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
                     return Err(error);

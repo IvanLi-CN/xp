@@ -430,6 +430,8 @@ fn source_delivery_journal_state_tracks_upserts_and_ack_path() {
     assert_eq!(summary.last_delivery_path.as_deref(), Some("direct"));
 }
 
+include!("source_delivery_scope_tests.rs");
+
 #[test]
 fn source_delivery_batch_ack_removes_page_in_one_checkpoint() {
     let temporary = tempfile::tempdir().expect("temporary directory");

@@ -11,6 +11,21 @@ pub(super) use scopes::{
     increment_acknowledged_scope, increment_applied_scope, increment_generated_scope,
 };
 
+pub(crate) fn ensure_delivery_metric_scope(
+    transaction: &rusqlite::Transaction<'_>,
+    source_node_id: &str,
+    stream: &str,
+    target_repository_id: &str,
+) -> Result<()> {
+    scopes::ensure_scope_row(
+        transaction,
+        source_node_id,
+        stream,
+        target_repository_id,
+        true,
+    )
+}
+
 pub(crate) const DELIVERY_RATE_WINDOW_SECONDS: u64 = 5 * 60;
 const CANONICAL_BYTE_COUNTER_UNIT: &str = "canonical-v1";
 

@@ -4,6 +4,7 @@ pub(super) fn insert_journal_rows(
     transaction: &rusqlite::Transaction<'_>,
     rows: &[SourceDeliveryJournalRow],
     count_generated: bool,
+    target_repository_ids: &[String],
 ) -> Result<()> {
     let (pending_segments, pending_bytes) = transaction
         .query_row(
@@ -20,6 +21,20 @@ pub(super) fn insert_journal_rows(
     let mut generated_bytes = 0_u64;
     let mut generated_at = None;
     let mut generated_scopes = std::collections::BTreeMap::<(String, String), (u64, u64)>::new();
+    for row in rows {
+        let segment = SignedSegment::from_wire(&row.wire).map_err(|error| {
+            HistoryStorageError(format!("invalid source delivery journal wire: {error}"))
+        })?;
+        let cursor = segment.canonical().first_cursor();
+        for target_repository_id in target_repository_ids {
+            super::metrics::ensure_delivery_metric_scope(
+                transaction,
+                cursor.source_node_id(),
+                &row.stream,
+                target_repository_id,
+            )?;
+        }
+    }
     for row in rows {
         let wire_len = i64::try_from(row.wire.len()).map_err(|_| {
             HistoryStorageError("journal wire length exceeds SQLite integer".to_owned())
@@ -228,6 +243,14 @@ pub(super) fn insert_journal_rows(
                 bytes,
                 generated_at,
             )?;
+            for target_repository_id in target_repository_ids {
+                super::metrics::ensure_delivery_metric_scope(
+                    transaction,
+                    &source_node_id,
+                    &stream,
+                    target_repository_id,
+                )?;
+            }
         }
     }
     Ok(())

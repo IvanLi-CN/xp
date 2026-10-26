@@ -56,11 +56,12 @@ fn add_scope_counters(
     Ok(())
 }
 
-fn ensure_scope_row(
+pub(super) fn ensure_scope_row(
     transaction: &rusqlite::Transaction<'_>,
     source_node_id: &str,
     stream: &str,
     target_repository_id: &str,
+    inherit_window: bool,
 ) -> Result<()> {
     if target_repository_id.is_empty() {
         transaction
@@ -88,6 +89,56 @@ fn ensure_scope_row(
                                   WHERE source_node_id = ?1 AND stream = ?2
                                     AND target_repository_id = ''), 0)
                  ON CONFLICT(source_node_id, stream, target_repository_id) DO NOTHING",
+                rusqlite::params![source_node_id, stream, target_repository_id],
+            )
+            .map_err(sqlite_error)?;
+    }
+    if inherit_window {
+        // A target known before generation starts shares the aggregate five-minute baseline.
+        transaction
+            .execute(
+                "INSERT INTO repository_delivery_metric_scope_windows
+                     (source_node_id, stream, target_repository_id,
+                      window_started_at, window_generated_segments, window_generated_bytes,
+                      window_acknowledged_segments, window_acknowledged_bytes,
+                      window_applied_segments, window_applied_bytes,
+                      completed_window_started_at, completed_window_ended_at,
+                      completed_generated_segments, completed_generated_bytes,
+                      completed_acknowledged_segments, completed_acknowledged_bytes,
+                      completed_applied_segments, completed_applied_bytes,
+                      completed_peak_generated_segments, completed_peak_generated_bytes)
+                 SELECT ?1, ?2, ?3,
+                        window_started_at, window_generated_segments, window_generated_bytes,
+                        window_acknowledged_segments, window_acknowledged_bytes,
+                        window_applied_segments, window_applied_bytes,
+                        completed_window_started_at, completed_window_ended_at,
+                        completed_generated_segments, completed_generated_bytes,
+                        completed_acknowledged_segments, completed_acknowledged_bytes,
+                        completed_applied_segments, completed_applied_bytes,
+                        completed_peak_generated_segments, completed_peak_generated_bytes
+                 FROM repository_delivery_metric_scope_windows
+                 WHERE source_node_id = ?1 AND stream = ?2 AND target_repository_id = ''
+                 ON CONFLICT(source_node_id, stream, target_repository_id) DO UPDATE SET
+                     window_started_at = excluded.window_started_at,
+                     window_generated_segments = excluded.window_generated_segments,
+                     window_generated_bytes = excluded.window_generated_bytes,
+                     window_acknowledged_segments = excluded.window_acknowledged_segments,
+                     window_acknowledged_bytes = excluded.window_acknowledged_bytes,
+                     window_applied_segments = excluded.window_applied_segments,
+                     window_applied_bytes = excluded.window_applied_bytes,
+                     completed_window_started_at = excluded.completed_window_started_at,
+                     completed_window_ended_at = excluded.completed_window_ended_at,
+                     completed_generated_segments = excluded.completed_generated_segments,
+                     completed_generated_bytes = excluded.completed_generated_bytes,
+                     completed_acknowledged_segments = excluded.completed_acknowledged_segments,
+                     completed_acknowledged_bytes = excluded.completed_acknowledged_bytes,
+                     completed_applied_segments = excluded.completed_applied_segments,
+                     completed_applied_bytes = excluded.completed_applied_bytes,
+                     completed_peak_generated_segments = excluded.completed_peak_generated_segments,
+                     completed_peak_generated_bytes = excluded.completed_peak_generated_bytes
+                 WHERE repository_delivery_metric_scope_windows.window_started_at IS NULL
+                   AND repository_delivery_metric_scope_windows.completed_window_started_at IS NULL
+                   AND repository_delivery_metric_scope_windows.completed_window_ended_at IS NULL",
                 rusqlite::params![source_node_id, stream, target_repository_id],
             )
             .map_err(sqlite_error)?;
@@ -394,11 +445,17 @@ pub(crate) fn increment_generated_scope(
         .map_err(sqlite_error)?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(sqlite_error)?;
-    if targets.is_empty() {
+    if !targets.iter().any(|target| target.is_empty()) {
         targets.push(String::new());
     }
     for target_repository_id in targets {
-        ensure_scope_row(transaction, source_node_id, stream, &target_repository_id)?;
+        ensure_scope_row(
+            transaction,
+            source_node_id,
+            stream,
+            &target_repository_id,
+            false,
+        )?;
         rotate_scope_window(
             transaction,
             source_node_id,
@@ -429,7 +486,13 @@ pub(crate) fn increment_acknowledged_scope(
     bytes: u64,
     progress_at: Option<u64>,
 ) -> Result<()> {
-    ensure_scope_row(transaction, source_node_id, stream, target_repository_id)?;
+    ensure_scope_row(
+        transaction,
+        source_node_id,
+        stream,
+        target_repository_id,
+        false,
+    )?;
     rotate_scope_window(
         transaction,
         source_node_id,
@@ -458,7 +521,13 @@ pub(crate) fn increment_applied_scope(
     bytes: u64,
     progress_at: Option<u64>,
 ) -> Result<()> {
-    ensure_scope_row(transaction, source_node_id, stream, target_repository_id)?;
+    ensure_scope_row(
+        transaction,
+        source_node_id,
+        stream,
+        target_repository_id,
+        false,
+    )?;
     rotate_scope_window(
         transaction,
         source_node_id,
