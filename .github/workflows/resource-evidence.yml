@@ -74,9 +74,9 @@ jobs:
           log="resource-evidence/resource-workload.log"
           : > "$log"
           cargo test --locked --release --test mesh_transport_resource_e2e \
-            xp_source_delivery_journal_memory_e2e --ignored --nocapture 2>&1 | tee -a "$log"
+            xp_source_delivery_journal_memory_e2e -- --ignored --nocapture 2>&1 | tee -a "$log"
           cargo test --locked --release --test mesh_transport_resource_e2e \
-            xp_repository_summary_memory_e2e --ignored --nocapture 2>&1 | tee -a "$log"
+            xp_repository_summary_memory_e2e -- --ignored --nocapture 2>&1 | tee -a "$log"
       - name: build resource attestation
         if: always()
         run: |
