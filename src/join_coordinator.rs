@@ -200,6 +200,7 @@ async fn reconcile_once(
     {
         return Ok(());
     }
+    migrate_one_legacy_join_session(&raft, &store).await?;
     let sessions = store
         .lock()
         .await
@@ -803,7 +804,7 @@ mod tests {
                 JoinSession {
                     node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
                     request_fingerprint: "fingerprint".into(),
-                    signed_cert_pem: "certificate".into(),
+                    signed_cert_pem: String::new(),
                     token_expires_at: (Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
                     activation_deadline: (Utc::now() + chrono::Duration::minutes(10)).to_rfc3339(),
                     required_log_index: 1,
