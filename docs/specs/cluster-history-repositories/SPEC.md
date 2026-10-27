@@ -389,10 +389,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   Linux cgroup with `MemoryMax=128M` and `MemorySwapMax=0`, samples each process through
   `smaps_rollup`, and requires every candidate PSS sample to remain below 64 MiB inside the
   required 128 MiB/no-swap cgroup. This is an
-  operator-run shared-testbox source/release-candidate gate; the runner binds a clean commit and
-  generated Web-shell archive by SHA before building, then persists a SHA-bound manifest and full
-  workload log locally before remote cleanup. GitHub CI and release publication do not access that
-  capacity and cannot replace its evidence.
+  owner-dispatched GitHub Actions source/release-candidate gate; the workflow binds a clean commit
+  and generated Web-shell archive by SHA before building, then uploads a SHA-bound attestation and
+  full workload log. The owner signs those two files into an evidence commit before release
+  publication; ordinary GitHub CI and the release workflow do not synthesize that evidence.
 - The summary-specific resource gate runs `xp_repository_summary_memory_e2e` in the same
   128 MiB/no-swap cgroup with 257 near-limit segments and repeated summary requests; the runner's
   `XP_MESH_RESOURCE_SUMMARY_ONLY=1` mode runs this gate together with the 20,000-row source journal
@@ -401,8 +401,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   resource-workload log digest, the 300-second window, the 128 MiB/no-swap limits, and all four
   segment/byte
   10x results. Missing, malformed, or mismatched attestation fails closed before image, Web, or
-  GitHub Release publication; CI and release workflows cannot synthesize this evidence. The
-  release workflow is owner-dispatched and accepts a v2 evidence commit whose only parent is the
+  GitHub Release publication; generic CI and the release workflow cannot synthesize this evidence.
+  The dedicated resource-evidence workflow produces the raw run artifact, and the
+  release workflow accepts a v2 evidence commit whose only parent is the
   target commit and whose only paths are `resource-evidence.json` and `resource-workload.log`;
   pre-v2 evidence commits must be regenerated. Readiness
   recomputes the log digest from those files and requires a GitHub-verified valid signature by the

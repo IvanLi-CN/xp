@@ -1011,15 +1011,13 @@ Notes:
   - Predecessor rollback cannot read v3-prefixed metadata; its deep checks must fail closed.
   - Redeploy the newer binary for in-place metadata rebuilding.
 
-  The operator-run source/release-candidate validation path
-  `XP_MESH_RESOURCE_SUMMARY_ONLY=1 XP_RUN_MESH_RESOURCE=1` runs the signed summary endpoint against
-  257 near-limit segments and the 20,000-row source journal benchmark in 128 MiB/no-swap cgroups;
+  The release source/release-candidate validation path is the owner-dispatched
+  `resource-evidence` GitHub Actions workflow. It runs the signed summary endpoint against 257
+  near-limit segments and the 20,000-row source journal benchmark in 128 MiB/no-swap cgroups;
   it records the candidate XP `smaps_rollup` PSS peak during request execution before any rollout
-  decision. The runner requires a clean commit, verifies tracked source and generated Web-shell
-  archive SHA256 values, and embeds the commit in the candidate build. GitHub CI and release
-  publication do not access the shared testbox; the runner writes a SHA-bound manifest and full
-  workload log to `${XP_TESTBOX_EVIDENCE_DIR:-$TMPDIR/xp-testbox-evidence}` before cleanup, so
-  attach those files separately before production rollout.
+  decision. The workflow checks out the exact target SHA, builds the generated Web shell from that
+  SHA, and uploads the raw workload log plus a v2 attestation. The owner must then create a signed
+  evidence commit containing exactly those two files before dispatching the release workflow.
   Retained partition mismatches after segment repair drains trigger the same single-authority
   tiered import followed by a fresh deep summary pass; the member cannot enter `ready` while that
   verification remains unresolved.
@@ -1296,7 +1294,9 @@ not authoritative, and historical PR labels must not be edited to trigger a rele
 published only after the target SHA has successful `ci`, `fixture-policy`, and `xray-e2e` push runs
 on `main`.
 
-For a corrective release, an owner dispatches the `release` workflow with the exact merged `head_sha`,
+For a corrective release, an owner first dispatches the `resource-evidence` workflow from the exact
+merged SHA, signs its downloaded two-file artifact as an evidence commit whose only parent is that
+SHA, and then dispatches the `release` workflow with the exact merged `head_sha`,
 `release_type`, `channel`, `expected_version`, `reason`, and the SHA of an owner-supplied resource
 evidence commit.
 The current evidence contract is v2: the evidence commit must have the target as its only parent and

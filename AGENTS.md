@@ -108,9 +108,12 @@
   bound. They validate both historical-source and Ready-tiered opaque cursor formats for length,
   forward progress, page-tail binding and stable snapshot/export state before checkpointing;
   tiered pages use the sender's canonical segment-byte budget.
-  The 128 MiB/no-swap actual-XP summary resource run is a required operator-run source/release-
-  candidate gate before rollout; the runner binds the clean commit and generated Web shell by
-  SHA. GitHub CI and release publication do not provide or replace shared-testbox capacity evidence.
+  The 128 MiB/no-swap actual-XP summary resource run is a required SHA-bound GitHub Actions
+  source/release-candidate gate before rollout. The dedicated `resource-evidence` workflow binds
+  the clean commit and generated Web shell by SHA, runs the candidate in a 128 MiB/no-swap cgroup,
+  and publishes raw evidence as an artifact; an owner-signed two-file evidence commit remains
+  required before release publication. Ordinary GitHub CI and release jobs do not synthesize or
+  replace that evidence.
   Reverse uses XP-owned loopback `127.0.0.1:10086` with authenticated TCP-only SOCKS and does
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
 - Container history recovery requires `--data-dir /var/lib/xp/data` when `xp.env` is absent.
