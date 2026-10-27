@@ -6,6 +6,8 @@ use crate::{
 use chrono::{DateTime, Utc};
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
+
+mod legacy;
 async fn write_applied(
     raft: &Arc<dyn RaftFacade>,
     command: DesiredStateCommand,
@@ -173,17 +175,17 @@ pub async fn migrate_one_legacy_join_session(
         raft,
         DesiredStateCommand::BeginMembershipOperation {
             operation: Box::new(operation.clone()),
-            node: replayable.then_some(node).flatten(),
+            node: replayable.then_some(node.clone()).flatten(),
             join_session: replayable.then_some(session.clone()),
         },
     )
     .await?;
     if !replayable {
         crate::raft_membership_guard::block_membership_operation(raft, operation, evidence).await?;
+        legacy::tombstone_non_replayable_legacy_session(raft, session, node).await?;
     }
     Ok(())
 }
-
 async fn reconcile_once(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -570,13 +572,12 @@ async fn reconcile_once(
     Ok(())
 }
 #[cfg(test)]
+mod legacy_tests;
+#[cfg(test)]
 #[path = "join_coordinator_promotion_tests.rs"]
 mod promotion_tests;
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use tokio::sync::watch;
-
     use super::*;
     use crate::{
         domain::{Node, NodeQuotaReset},
@@ -587,6 +588,8 @@ mod tests {
         },
         state::StoreInit,
     };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::watch;
     #[derive(Clone)]
     struct RecoveringRaft {
         inner: LocalRaft,
