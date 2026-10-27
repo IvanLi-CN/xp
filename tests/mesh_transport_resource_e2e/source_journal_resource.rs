@@ -43,6 +43,8 @@ struct DeliveryWindowSnapshot {
 
 #[derive(Debug, Clone)]
 struct DeliveryScopeSnapshot {
+    source_node_id: String,
+    stream: String,
     target_repository_id: String,
     last_completed_window: Option<DeliveryWindowSnapshot>,
 }
@@ -442,7 +444,10 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         .delivery_scopes
         .iter()
         .find(|scope| {
-            scope.target_repository_id == cluster.node_id && scope.last_completed_window.is_some()
+            scope.source_node_id == cluster.node_id
+                && scope.stream == "runtime"
+                && scope.target_repository_id == cluster.node_id
+                && scope.last_completed_window.is_some()
         })
         .and_then(|scope| scope.last_completed_window.as_ref())
         .expect("status must expose the local target scope completed window");
@@ -656,6 +661,14 @@ async fn request_source_status(
         .expect("delivery scope metrics")
         .iter()
         .map(|scope| DeliveryScopeSnapshot {
+            source_node_id: scope["source_node_id"]
+                .as_str()
+                .expect("delivery scope source")
+                .to_owned(),
+            stream: scope["stream"]
+                .as_str()
+                .expect("delivery scope stream")
+                .to_owned(),
             target_repository_id: scope["target_repository_id"]
                 .as_str()
                 .expect("delivery scope target")
