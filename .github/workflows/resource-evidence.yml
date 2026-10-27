@@ -14,7 +14,7 @@ permissions:
 jobs:
   measure:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
       TARGET_SHA: ${{ inputs.target_sha }}
       CARGO_INCREMENTAL: "0"
