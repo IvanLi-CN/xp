@@ -29,9 +29,9 @@ async fn non_replayable_legacy_session_is_tombstoned_after_blocking() {
     store.lock().await.state_mut().join_sessions.insert(
         stale_node_id.clone(),
         JoinSession {
-            node_id: stale_node_id.clone(),
-            request_fingerprint: "fingerprint".into(),
-            signed_cert_pem: "certificate".into(),
+            node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+            request_fingerprint: xp_test_fixtures::token_fixture512().to_owned(),
+            signed_cert_pem: xp_test_fixtures::token_fixture555().to_owned(),
             token_expires_at: (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339(),
             activation_deadline: (chrono::Utc::now() - chrono::Duration::minutes(10)).to_rfc3339(),
             required_log_index: 1,
