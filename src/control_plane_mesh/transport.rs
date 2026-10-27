@@ -57,6 +57,12 @@ fn authenticated_client_builder(
         .identity(identity))
 }
 
+fn public_direct_client_builder() -> reqwest::ClientBuilder {
+    // Public API origins may terminate HTTP/2 without sending END_STREAM; keep
+    // the signed direct control-plane path on a bounded HTTP/1.1 exchange.
+    reqwest::Client::builder().http1_only()
+}
+
 fn strict_mesh_client(
     builder: reqwest::ClientBuilder,
     policy: MeshTransportPolicy,
@@ -72,7 +78,7 @@ fn strict_mesh_client(
 
 pub(crate) fn build_unauthenticated_mesh_http_client() -> anyhow::Result<MeshAwareHttpClient> {
     let mesh = strict_mesh_client(reqwest::Client::builder(), MeshTransportPolicy::default())?;
-    let public_direct = reqwest::Client::builder().build()?;
+    let public_direct = public_direct_client_builder().build()?;
     Ok(MeshAwareHttpClient::from_transport_clients(
         mesh,
         public_direct,
@@ -103,7 +109,9 @@ pub(crate) fn build_mesh_http_client_with_policy(
         authenticated_client_builder(cluster_ca_pem, &identity_pem)?,
         policy,
     )?;
-    let public_direct = authenticated_client_builder(cluster_ca_pem, &identity_pem)?.build()?;
+    let public_direct = authenticated_client_builder(cluster_ca_pem, &identity_pem)?
+        .http1_only()
+        .build()?;
     let client = MeshAwareHttpClient::from_transport_clients(mesh, public_direct);
     #[cfg(not(test))]
     let client = client.with_direct_validation_required();
