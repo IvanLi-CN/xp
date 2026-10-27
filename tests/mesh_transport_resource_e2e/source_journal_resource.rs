@@ -450,6 +450,25 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         scoped_window.elapsed_seconds,
         JOURNAL_THROUGHPUT_SAMPLE_SECONDS
     );
+    eprintln!(
+        concat!(
+            "source journal local scope generated={} / {} bytes, peak={} / {} bytes, ",
+            "ack={} / {} bytes, apply={} / {} bytes, source_ack={} / {}, ",
+            "repository_apply={} / {}"
+        ),
+        scoped_window.generated_segments,
+        scoped_window.generated_bytes,
+        scoped_window.peak_generated_segments,
+        scoped_window.peak_generated_bytes,
+        scoped_window.acknowledged_segments,
+        scoped_window.acknowledged_bytes,
+        scoped_window.applied_segments,
+        scoped_window.applied_bytes,
+        scoped_window.source_ack_meets_ten_x_segments,
+        scoped_window.source_ack_meets_ten_x_bytes,
+        scoped_window.repository_apply_meets_ten_x_segments,
+        scoped_window.repository_apply_meets_ten_x_bytes,
+    );
     assert!(
         scoped_window.meets_ten_x,
         "local target scope must meet the ten-x gate"
