@@ -47,7 +47,7 @@ pub(super) async fn admin_list_node_versions(
                 };
             }
 
-            let response = match client
+            let (response, deadline) = match client
                 .send_registered_public_read(
                     &node.api_base_url,
                     "/api/cluster/info",
@@ -75,7 +75,7 @@ pub(super) async fn admin_list_node_versions(
 
             let body = match bounded_json::read_bounded_internal_json::<ClusterInfoVersionResponse>(
                 response,
-                CLUSTER_RUNTIME_FANOUT_TIMEOUT,
+                deadline.saturating_duration_since(std::time::Instant::now()),
             )
             .await
             {
