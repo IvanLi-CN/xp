@@ -246,6 +246,18 @@ describe("primary backend transport", () => {
 		expect(normalizeReleaseVersion(" v3.21.4 ")).toBe("3.21.4");
 		expect(recognizedReleaseVersion("3.22.5-buildhash")).toBeNull();
 		expect(currentWebReleaseVersion()).toBe("3.22.5");
+
+		hydrateBackendVersions([]);
+		expect(getPrimaryBackendSnapshot().candidates).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					nodeId: fixtureCatalog.identifier.nodePrimary(),
+					serviceVersion: null,
+					versionState: "unknown",
+					lastError: "unknown",
+				}),
+			]),
+		);
 	});
 
 	it("allows manual switching after the mutation barrier times out without replay", async () => {
@@ -353,7 +365,8 @@ describe("primary backend transport", () => {
 			},
 		]);
 		let resolveFirst: (() => void) | undefined;
-		let resolveSecond: (() => void) | undefined;
+		const reentrantResolvers: Array<() => void> = [];
+		const reentrantTransactions: Array<Promise<void>> = [];
 		const first = withPrimaryBackendMutation(
 			() =>
 				new Promise<void>((resolve) => {
@@ -361,17 +374,21 @@ describe("primary backend transport", () => {
 				}),
 		);
 		await Promise.resolve();
-		let second: Promise<void> | undefined;
 		const unsubscribe = subscribePrimaryBackend((snapshot) => {
-			if (snapshot.state !== "switching" || snapshot.pendingMutations !== 0) {
+			if (
+				snapshot.state !== "switching" ||
+				snapshot.pendingMutations !== 0 ||
+				reentrantTransactions.length >= 2
+			) {
 				return;
 			}
-			second = withPrimaryBackendMutation(
+			const transaction = withPrimaryBackendMutation(
 				() =>
 					new Promise<void>((resolve) => {
-						resolveSecond = resolve;
+						reentrantResolvers.push(resolve);
 					}),
 			);
+			reentrantTransactions.push(transaction);
 		});
 
 		const switchPromise = switchPrimaryBackend({
@@ -385,12 +402,19 @@ describe("primary backend transport", () => {
 		resolveFirst?.();
 		await first;
 		await Promise.resolve();
-		expect(second).toBeDefined();
+		expect(reentrantTransactions).toHaveLength(1);
 		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
 			window.location.origin,
 		);
-		resolveSecond?.();
-		await second;
+		reentrantResolvers.shift()?.();
+		await reentrantTransactions[0];
+		await Promise.resolve();
+		expect(reentrantTransactions).toHaveLength(2);
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
+		reentrantResolvers.shift()?.();
+		await reentrantTransactions[1];
 		await switchPromise;
 		unsubscribe();
 		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(

@@ -68,13 +68,19 @@ export function useBackendDirectory(args: {
 	]);
 	const refreshBackendCandidates = useCallback(() => {
 		if (!args.adminToken || !args.primaryClusterId) return;
+		if (args.staticConsole && !args.runtimePolicyReady) {
+			void args.refreshRuntimePolicy();
+			return;
+		}
 		if (args.staticConsole) void args.refreshRuntimePolicy();
+		hydrateBackendVersions([]);
 		void backendNodes.refetch();
 		void nodeVersions.refetch();
 	}, [
 		args.adminToken,
 		args.primaryClusterId,
 		args.refreshRuntimePolicy,
+		args.runtimePolicyReady,
 		args.staticConsole,
 		backendNodes.refetch,
 		nodeVersions.refetch,

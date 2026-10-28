@@ -325,9 +325,12 @@ export function hydratePrimaryBackendProfile(
 	}>,
 ) {
 	if (isStaticWebConsole()) {
-		const candidatesByOrigin = new Map(
-			state.candidates.map((candidate) => [candidate.origin, candidate]),
-		);
+		const candidatesByOrigin = new Map<string, BackendCandidate>();
+		if (nodes === undefined) {
+			for (const candidate of state.candidates) {
+				candidatesByOrigin.set(candidate.origin, candidate);
+			}
+		}
 		for (const node of nodes ?? []) {
 			const origin = canonicalBackendOrigin(node.api_base_url);
 			if (!origin) continue;
@@ -497,7 +500,14 @@ export function hydrateBackendVersions(
 		...state,
 		candidates: state.candidates.map((candidate) => {
 			const item = versions.get(candidate.nodeId);
-			if (!item) return candidate;
+			if (!item) {
+				return {
+					...candidate,
+					serviceVersion: null,
+					versionState: "unknown",
+					lastError: "unknown",
+				};
+			}
 			return {
 				...candidate,
 				serviceVersion: item.xp_version
@@ -662,22 +672,25 @@ export async function verifyBackendCandidate(args: {
 }
 
 async function waitForMutations(): Promise<boolean> {
-	if (state.pendingMutations === 0) return false;
-	return new Promise((resolve) => {
-		let settled = false;
-		const settle = (timedOut: boolean) => {
-			if (settled) return;
-			settled = true;
-			window.clearTimeout(timeoutId);
-			mutationWaiters.delete(settle);
-			resolve(timedOut);
-		};
-		const timeoutId = window.setTimeout(
-			() => settle(true),
-			PRIMARY_BACKEND_SWITCH_TIMEOUT_MS,
-		);
-		mutationWaiters.add(settle);
-	});
+	const deadline = Date.now() + PRIMARY_BACKEND_SWITCH_TIMEOUT_MS;
+	while (state.pendingMutations > 0) {
+		const remainingMs = deadline - Date.now();
+		if (remainingMs <= 0) return true;
+		const timedOut = await new Promise<boolean>((resolve) => {
+			let settled = false;
+			const settle = (didTimeOut: boolean) => {
+				if (settled) return;
+				settled = true;
+				window.clearTimeout(timeoutId);
+				mutationWaiters.delete(settle);
+				resolve(didTimeOut);
+			};
+			const timeoutId = window.setTimeout(() => settle(true), remainingMs);
+			mutationWaiters.add(settle);
+		});
+		if (timedOut) return true;
+	}
+	return false;
 }
 
 export async function switchPrimaryBackend(
@@ -690,11 +703,7 @@ export async function switchPrimaryBackend(
 	}
 	if (origin === state.primaryOrigin) return { timedOut: false };
 	updateState({ state: "switching", lastSwitchTimedOut: false });
-	const timedOut = await waitForMutations();
-	// A drain notification can synchronously start another mutation through a
-	// subscriber. Re-check after the first await before committing the switch.
-	const redrained = !timedOut && (await waitForMutations());
-	const barrierTimedOut = timedOut || redrained;
+	const barrierTimedOut = await waitForMutations();
 	if (barrierTimedOut) {
 		state = {
 			...state,

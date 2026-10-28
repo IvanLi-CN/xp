@@ -32,7 +32,8 @@
   `connect-src`.
 - Static Web directory queries wait for a matching, unexpired Runtime Policy. Service-version
   reads are enabled only while the selector is open, refresh once on open, and do not refetch on
-  mount, reconnect, or window focus.
+  mount, reconnect, or window focus. Explicit refreshes are also blocked until that policy gate is
+  ready, and a successful inventory response replaces stale static rows.
 - The selector keeps switching and full-page node opening as separate actions. Node opening uses
   the existing path/query/hash and login handoff, targets a new tab with `noopener noreferrer`, and
   disables only invalid HTTPS targets. A bounded authenticated version fan-out reads each node's
