@@ -30,6 +30,21 @@ function hostLabel(origin: string) {
 	}
 }
 
+function switchStatusLabel(candidate: BackendCandidate, isCurrent: boolean) {
+	if (isCurrent) return "Current";
+	if (candidate.switchable !== false) return null;
+	if (candidate.switchBlockedReason === "HTTPS is required for this node.") {
+		return "HTTPS required";
+	}
+	if (
+		candidate.switchBlockedReason ===
+		"This node is not available to the static console."
+	) {
+		return "Not in console policy";
+	}
+	return candidate.switchBlockedReason ?? "Unavailable";
+}
+
 export function PrimaryBackendSwitcher(props: {
 	adminToken: string;
 	clusterId: string | null;
@@ -140,7 +155,7 @@ export function PrimaryBackendSwitcher(props: {
 					Primary backend
 				</DropdownMenuLabel>
 				<p className="px-1 text-xs text-muted-foreground">
-					Choose the API backend or open a node console in a new tab.
+					Select a backend or open its console.
 				</p>
 				<div className="mt-2 space-y-1">
 					{candidates.length === 0 ? (
@@ -153,6 +168,7 @@ export function PrimaryBackendSwitcher(props: {
 							const isChecking = checkingOrigin === candidate.origin;
 							const resolved = buildNodePageHref(candidate.origin);
 							const version = versionLabel(candidate);
+							const switchStatus = switchStatusLabel(candidate, isCurrent);
 							return (
 								<div
 									key={candidate.origin}
@@ -172,7 +188,9 @@ export function PrimaryBackendSwitcher(props: {
 										aria-label={
 											isCurrent
 												? `${candidate.nodeName}, current backend`
-												: candidate.nodeName
+												: switchStatus
+													? `${candidate.nodeName}, ${switchStatus}`
+													: candidate.nodeName
 										}
 									>
 										<Icon
@@ -186,20 +204,19 @@ export function PrimaryBackendSwitcher(props: {
 											</span>
 											<span className="block truncate text-xs text-muted-foreground">
 												{hostLabel(candidate.origin)}
+												{switchStatus ? ` · ${switchStatus}` : null}
+												{version ? (
+													<span
+														className={
+															version.startsWith("Service v")
+																? "font-medium text-warning"
+																: undefined
+														}
+													>
+														{` · ${version}`}
+													</span>
+												) : null}
 											</span>
-											<span className="block truncate text-xs text-muted-foreground">
-												{isCurrent
-													? "Current backend"
-													: candidate.switchable === false
-														? (candidate.switchBlockedReason ??
-															"Unavailable for switching")
-														: "Select to use this backend"}
-											</span>
-											{version ? (
-												<span className="mt-0.5 block truncate text-xs font-medium text-warning">
-													{version}
-												</span>
-											) : null}
 										</span>
 										{isChecking ? (
 											<span className="text-xs text-muted-foreground">
