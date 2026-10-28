@@ -8,6 +8,7 @@ import {
 	switchPrimaryBackend,
 	verifyBackendCandidate,
 } from "@/backend/primaryBackend";
+import { cn } from "@/lib/utils";
 import { buildNodePageHref } from "@/utils/navigation";
 
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
@@ -150,7 +151,11 @@ export function PrimaryBackendSwitcher(props: {
 							return (
 								<div
 									key={candidate.origin}
-									className="grid grid-cols-[minmax(0,1fr)_auto] gap-1"
+									className={cn(
+										"grid grid-cols-[minmax(0,1fr)_auto] gap-1",
+										isCurrent &&
+											"rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15",
+									)}
 								>
 									<DropdownMenuItem
 										disabled={
@@ -163,11 +168,7 @@ export function PrimaryBackendSwitcher(props: {
 											event.preventDefault();
 											void handleSelect(candidate);
 										}}
-										className={
-											isCurrent
-												? "items-start bg-primary/10 py-2 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
-												: "items-start py-2"
-										}
+										className="items-start py-2"
 										aria-label={
 											isCurrent
 												? `${candidate.nodeName}, current backend`

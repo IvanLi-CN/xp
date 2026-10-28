@@ -110,7 +110,8 @@ test("shows the registered node list from the AppShell switcher", async ({
 	const currentItem = page.getByRole("menuitem", { name: /Current page/ });
 	await expect(currentItem).not.toBeDisabled();
 	await expect(currentItem).toHaveAttribute("aria-current", "true");
-	await expect(currentItem).toHaveClass(/bg-primary\/10/);
+	const currentRow = currentItem.locator("..");
+	await expect(currentRow).toHaveClass(/bg-primary\/10/);
 });
 
 test("shows version differences and separate frontend links", async ({
@@ -126,6 +127,9 @@ test("shows version differences and separate frontend links", async ({
 	const menuBox = await menu.boundingBox();
 	if (!menuBox) throw new Error("Primary backend menu has no bounding box");
 	expect(menuBox.width).toBeLessThanOrEqual(336);
+	const currentRow = page.locator('[aria-current="true"]').locator("..");
+	await expect(currentRow).toHaveClass(/bg-primary\/10/);
+	await expect(currentRow.locator('a[target="_blank"]')).toBeVisible();
 	await expect(page.getByText("v3.21.11")).toBeVisible();
 	await expect(page.getByText("Service v3.21.11")).toHaveCount(0);
 	await expect(page.getByText("Version unknown")).toHaveCount(0);
