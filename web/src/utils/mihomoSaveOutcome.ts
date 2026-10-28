@@ -35,6 +35,19 @@ export class MihomoSaveOutcomeUnknownError extends Error {
 	}
 }
 
+export class MihomoSavePreflightError extends Error {
+	readonly originalError: unknown;
+
+	constructor(originalError: unknown) {
+		super(
+			"The current Mihomo profile could not be verified before saving. " +
+				"Nothing was sent; review the profile and try again.",
+		);
+		this.name = "MihomoSavePreflightError";
+		this.originalError = originalError;
+	}
+}
+
 export function mihomoProfilesEqual(
 	left: AdminUserMihomoProfile,
 	right: AdminUserMihomoProfile,

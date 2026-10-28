@@ -152,6 +152,7 @@ Response:
 
 错误消息和详情不得包含配置正文、凭据、内部 URL 或原始异常。客户端收到
 `raft_write_outcome_unknown` 时必须保留草稿、只读核对一次并允许手动再次核对，不得自动重试写入。
+保存前用于冲突检查的只读基线读取失败不代表 PUT 已派发；客户端必须保留草稿并报告预检失败，不能按结果未知自动核对。
 
 ## GET `/api/mihomo/resources/{resource_id}`
 
