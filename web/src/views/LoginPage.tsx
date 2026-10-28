@@ -136,13 +136,21 @@ export function LoginPage({
 		void (async () => {
 			try {
 				if (!staticConsole) {
-					const result = await probeBackendOrigin({
+					const probeResult = await probeBackendOrigin({
 						origin: window.location.origin,
 					});
-					if (result.clusterId !== backend.clusterId) {
-						hydratePrimaryBackendProfile(result.clusterId);
+					if (probeResult.clusterId !== backend.clusterId) {
+						hydratePrimaryBackendProfile(probeResult.clusterId);
 					}
-					await selectPreAuthBackend(window.location.origin);
+					const selectionResult = await selectPreAuthBackend(
+						window.location.origin,
+					);
+					if (selectionResult.timedOut) {
+						setServerError(
+							"The previous write result is unknown. Verify the service node before retrying.",
+						);
+						return;
+					}
 				}
 				await submitToken(loginToken);
 			} catch (error) {
@@ -246,7 +254,7 @@ export function LoginPage({
 							{bootstrapCompatibilityPending ? (
 								<LoginBootstrapCompatibilityPending />
 							) : serverError ? (
-								<div className="xp-alert xp-alert-error px-4 py-3">
+								<div role="alert" className="xp-alert xp-alert-error px-4 py-3">
 									{serverError}
 								</div>
 							) : null}
