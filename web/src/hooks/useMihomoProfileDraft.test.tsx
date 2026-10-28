@@ -271,4 +271,47 @@ describe("useMihomoProfileDraft", () => {
 		expect(result.current.draft.mixin_yaml).toBe("latest draft\n");
 		expect(result.current.dirty).toBe(false);
 	});
+
+	it("recovers a same-tab draft and requires an explicit conflict choice", async () => {
+		window.sessionStorage.clear();
+		const saveProfile = vi.fn(
+			async (profile: AdminUserMihomoProfile) => profile,
+		);
+		const first = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-recovery",
+				userId: "user-recovery",
+				profile: PROFILE_A,
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
+		act(() =>
+			first.result.current.setField("mixin_yaml", "draft after reload\n"),
+		);
+		await waitFor(() => expect(first.result.current.dirty).toBe(true));
+		first.unmount();
+
+		const second = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-recovery",
+				userId: "user-recovery",
+				profile: { ...PROFILE_A, mixin_yaml: "server changed\n" },
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(second.result.current.conflict).not.toBeNull());
+		expect(second.result.current.draft.mixin_yaml).toBe("draft after reload\n");
+		act(() => second.result.current.continueDraft());
+		expect(second.result.current.conflict).toBeNull();
+		expect(second.result.current.dirty).toBe(true);
+		await act(async () => {
+			expect(await second.result.current.save()).toBe(true);
+		});
+		expect(
+			window.sessionStorage.getItem(
+				"xp-mihomo-draft:v1:cluster-recovery:user-recovery:mihomo-profile",
+			),
+		).toBeNull();
+	});
 });

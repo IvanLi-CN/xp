@@ -21,6 +21,13 @@ pub(super) struct RuntimePolicyResponse {
     pub issued_at: String,
     pub expires_at: String,
     pub api_origins: Vec<String>,
+    pub node_states: Vec<RuntimePolicyNodeState>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct RuntimePolicyNodeState {
+    pub origin: String,
+    pub state: &'static str,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,20 +52,36 @@ pub(super) async fn get_runtime_policy(
             } else {
                 remote_node_supports_static_console(&state, &node).await
             };
-            compatible.then_some(origin)
+            Some(RuntimePolicyNodeState {
+                origin,
+                state: if compatible {
+                    "allowed"
+                } else {
+                    "temporarily_unavailable"
+                },
+            })
         }
     }))
     .await;
 
-    let api_origins = origin_checks
-        .into_iter()
-        .flatten()
+    let node_states = origin_checks.into_iter().flatten().collect::<Vec<_>>();
+    let mut node_states = node_states;
+    node_states.sort_by(|left, right| {
+        left.origin
+            .cmp(&right.origin)
+            .then_with(|| left.state.cmp(right.state))
+    });
+    node_states.dedup_by(|left, right| left.origin == right.origin);
+    let api_origins = node_states
+        .iter()
+        .filter(|node| node.state == "allowed")
+        .map(|node| node.origin.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
     let issued_at = Utc::now();
     let expires_at = issued_at + POLICY_TTL;
-    let policy_id = policy_id(&state.cluster.cluster_id, &api_origins);
+    let policy_id = policy_id(&state.cluster.cluster_id, &node_states);
 
     Ok(Json(RuntimePolicyResponse {
         policy_id,
@@ -66,6 +89,7 @@ pub(super) async fn get_runtime_policy(
         issued_at: issued_at.to_rfc3339_opts(SecondsFormat::Secs, true),
         expires_at: expires_at.to_rfc3339_opts(SecondsFormat::Secs, true),
         api_origins,
+        node_states,
     }))
 }
 
@@ -101,13 +125,15 @@ async fn remote_node_supports_static_console(state: &AppState, node: &crate::dom
         })
 }
 
-fn policy_id(cluster_id: &str, api_origins: &[String]) -> String {
+fn policy_id(cluster_id: &str, node_states: &[RuntimePolicyNodeState]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"xp-static-console-runtime-policy-v1\n");
+    hasher.update(b"xp-static-console-runtime-policy-v2\n");
     hasher.update(cluster_id.as_bytes());
     hasher.update(b"\n");
-    for origin in api_origins {
-        hasher.update(origin.as_bytes());
+    for node in node_states {
+        hasher.update(node.origin.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(node.state.as_bytes());
         hasher.update(b"\n");
     }
     format!("rcp-{}", hex::encode(hasher.finalize()))
@@ -115,21 +141,25 @@ fn policy_id(cluster_id: &str, api_origins: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::policy_id;
+    use super::{RuntimePolicyNodeState, policy_id};
 
     #[test]
-    fn policy_id_is_stable_for_same_sorted_origins() {
+    fn policy_id_is_stable_for_same_sorted_node_states() {
         let origins = vec![
             "https://a.example".to_string(),
             "https://b.example".to_string(),
         ];
-        assert_eq!(
-            policy_id("cluster", &origins),
-            policy_id("cluster", &origins)
-        );
+        let states = origins
+            .iter()
+            .map(|origin| RuntimePolicyNodeState {
+                origin: origin.clone(),
+                state: "allowed",
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(policy_id("cluster", &states), policy_id("cluster", &states));
         assert_ne!(
-            policy_id("cluster", &origins),
-            policy_id("other-cluster", &origins)
+            policy_id("cluster", &states),
+            policy_id("other-cluster", &states)
         );
     }
 }

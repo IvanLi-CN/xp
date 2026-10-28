@@ -5,7 +5,9 @@ import { fixtureCatalog } from "@/fixture-policy/catalog";
 import {
 	canonicalBackendOrigin,
 	getPrimaryBackendSnapshot,
+	getStaticRuntimePolicyOrigins,
 	hydratePrimaryBackendProfile,
+	hydrateStaticRuntimePolicy,
 	installPrimaryBackendTransport,
 	resetPrimaryBackendTransportForTests,
 	switchPrimaryBackend,
@@ -193,6 +195,40 @@ describe("primary backend transport", () => {
 				(candidate) => candidate.origin === fixtureCatalog.url.secondaryApi(),
 			),
 		).toBe(false);
+	});
+
+	it("stages policy origins and preserves temporarily unavailable candidates", () => {
+		hydrateStaticRuntimePolicy(
+			fixtureCatalog.cluster.fixture84(),
+			[fixtureCatalog.url.secondaryApi(), fixtureCatalog.url.primaryApi()],
+			{
+				policyId: "rcp-staged",
+				nodeStates: [
+					{
+						origin: fixtureCatalog.url.secondaryApi(),
+						state: "allowed",
+					},
+					{
+						origin: fixtureCatalog.url.primaryApi(),
+						state: "temporarily_unavailable",
+					},
+				],
+			},
+		);
+		const snapshot = getPrimaryBackendSnapshot();
+		expect(
+			snapshot.candidates.find(
+				(candidate) => candidate.origin === fixtureCatalog.url.secondaryApi(),
+			)?.runtimeState,
+		).toBe("staged");
+		expect(
+			snapshot.candidates.find(
+				(candidate) => candidate.origin === fixtureCatalog.url.primaryApi(),
+			)?.runtimeState,
+		).toBe("temporarily_unavailable");
+		expect(getStaticRuntimePolicyOrigins()).toEqual([
+			"https://101-xp.ivanli.cc",
+		]);
 	});
 
 	it("allows manual switching after the mutation barrier times out without replay", async () => {

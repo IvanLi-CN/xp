@@ -24,7 +24,9 @@
   successful manual switch; the existing full-page node handoff remains unchanged.
 - Static Web mode uses `https://101-xp.ivanli.cc` as its bootstrap origin and never reads the
   authenticated node inventory. The Bearer-protected runtime-policy route supplies only canonical
-  compatible API origins; a ten-minute policy grant is held in memory by the Service Worker per
+  compatible API origins plus allowed/temporarily-unavailable node states. Policy refreshes stage
+  new origins without reloading the current document; only an explicit reload confirmation activates
+  the staged policy. A ten-minute policy grant is held in memory by the Service Worker per
   controlled client and rewrites only the next navigation's `connect-src`.
 - External subscription URLs are built from the current verified Primary Backend origin, so copied
   URLs remain directly consumable by clients that do not execute the Web app runtime.
@@ -39,3 +41,4 @@
 - `./SPEC.md`
 - `./HISTORY.md`
 - `../../adr/0011-cross-origin-primary-backend-for-embedded-pwa.md`
+- `../../adr/0012-edgeone-static-web-console.md`

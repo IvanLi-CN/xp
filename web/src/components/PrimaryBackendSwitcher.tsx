@@ -3,9 +3,12 @@ import { useMemo, useState } from "react";
 import {
 	type BackendCandidate,
 	canonicalBackendOrigin,
+	isStaticRuntimePolicyExpired,
 	switchPrimaryBackend,
 	verifyBackendCandidate,
 } from "@/backend/primaryBackend";
+import { writeAppliedRuntimePolicyId } from "@/offline/runtimePolicySession";
+import { setServiceWorkerRuntimePolicy } from "@/offline/serviceWorkerPolicy";
 
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
 import { Button } from "./Button";
@@ -37,6 +40,8 @@ export function PrimaryBackendSwitcher(props: {
 	const [open, setOpen] = useState(false);
 	const [checkingOrigin, setCheckingOrigin] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [reloadCandidate, setReloadCandidate] =
+		useState<BackendCandidate | null>(null);
 	const candidates = useMemo(
 		() =>
 			[...backend.candidates].sort((left, right) => {
@@ -54,6 +59,21 @@ export function PrimaryBackendSwitcher(props: {
 		}
 		if (canonicalBackendOrigin(candidate.origin) === backend.primaryOrigin) {
 			setOpen(false);
+			return;
+		}
+		if (candidate.runtimeState === "temporarily_unavailable") {
+			setError(
+				"This node is temporarily unreachable and remains out of service.",
+			);
+			return;
+		}
+		if (candidate.runtimeState === "staged") {
+			if (isStaticRuntimePolicyExpired()) {
+				setError("Runtime policy has expired; backend switching is locked.");
+				return;
+			}
+			setReloadCandidate(candidate);
+			setError(null);
 			return;
 		}
 		setCheckingOrigin(candidate.origin);
@@ -122,7 +142,11 @@ export function PrimaryBackendSwitcher(props: {
 							return (
 								<DropdownMenuItem
 									key={candidate.origin}
-									disabled={Boolean(checkingOrigin) || isCurrent}
+									disabled={
+										Boolean(checkingOrigin) ||
+										isCurrent ||
+										candidate.runtimeState === "temporarily_unavailable"
+									}
 									onSelect={(event) => {
 										event.preventDefault();
 										void handleSelect(candidate);
@@ -147,6 +171,16 @@ export function PrimaryBackendSwitcher(props: {
 											Checking
 										</span>
 									) : null}
+									{candidate.runtimeState === "staged" ? (
+										<span className="text-xs text-warning-foreground">
+											Reload required
+										</span>
+									) : null}
+									{candidate.runtimeState === "temporarily_unavailable" ? (
+										<span className="text-xs text-muted-foreground">
+											Unavailable
+										</span>
+									) : null}
 								</DropdownMenuItem>
 							);
 						})
@@ -161,6 +195,42 @@ export function PrimaryBackendSwitcher(props: {
 					<p className="mt-2 rounded-md bg-warning/15 px-2 py-1.5 text-xs text-warning-foreground">
 						The previous change result is unknown.
 					</p>
+				) : null}
+				{reloadCandidate ? (
+					<div className="mt-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs">
+						<p role="alert" className="text-warning-foreground">
+							{hostLabel(reloadCandidate.origin)} is not in this page's active
+							policy. Confirm one reload to activate it; your current page stays
+							intact if you cancel.
+						</p>
+						<div className="mt-2 flex justify-end gap-2">
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={() => setReloadCandidate(null)}
+							>
+								Cancel
+							</Button>
+							<Button
+								size="sm"
+								onClick={() => {
+									if (reloadCandidate.runtimePolicyGrant) {
+										setServiceWorkerRuntimePolicy(
+											reloadCandidate.runtimePolicyGrant,
+										);
+									}
+									if (reloadCandidate.runtimePolicyId) {
+										writeAppliedRuntimePolicyId(
+											reloadCandidate.runtimePolicyId,
+										);
+									}
+									window.location.reload();
+								}}
+							>
+								Reload once
+							</Button>
+						</div>
+					</div>
 				) : null}
 				{error ? (
 					<>

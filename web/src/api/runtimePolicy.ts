@@ -33,6 +33,32 @@ export const RuntimePolicySchema = z
 					}, "origin must be a canonical HTTPS origin"),
 			)
 			.max(128),
+		node_states: z
+			.array(
+				z.object({
+					origin: z
+						.string()
+						.url()
+						.refine((value) => {
+							try {
+								const url = new URL(value);
+								return (
+									url.protocol === "https:" &&
+									(url.pathname === "" || url.pathname === "/") &&
+									!url.search &&
+									!url.hash &&
+									!url.username &&
+									!url.password
+								);
+							} catch {
+								return false;
+							}
+						}, "origin must be a canonical HTTPS origin"),
+					state: z.enum(["allowed", "temporarily_unavailable"]),
+				}),
+			)
+			.max(128)
+			.default([]),
 	})
 	.superRefine((policy, context) => {
 		const issuedAt = Date.parse(policy.issued_at);
