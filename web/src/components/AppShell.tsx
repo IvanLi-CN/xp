@@ -18,7 +18,11 @@ import {
 import { startAdminStatusEvents } from "@/api/adminStatusEvents";
 import { fetchRuntimePolicy } from "@/api/runtimePolicy";
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
-import { isStaticWebConsole } from "@/backend/primaryBackend";
+import {
+	STATIC_BOOTSTRAP_ORIGIN,
+	canonicalBackendOrigin,
+	isStaticWebConsole,
+} from "@/backend/primaryBackend";
 import { useBackendDirectory } from "@/backend/useBackendDirectory";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -205,6 +209,20 @@ export function AppShell({
 		refetchIntervalInBackground: true,
 		retry: false,
 	});
+	const activeBackendOrigin = canonicalBackendOrigin(
+		primaryBackend.primaryOrigin,
+	);
+	const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
+	const runtimePolicyReady =
+		!staticConsole ||
+		(runtimePolicy.data !== undefined &&
+			runtimePolicy.data.cluster_id === clusterInfo.data?.cluster_id &&
+			Date.parse(runtimePolicy.data.expires_at) > Date.now() &&
+			activeBackendOrigin !== null &&
+			(activeBackendOrigin === bootstrapOrigin ||
+				runtimePolicy.data.api_origins.some(
+					(origin) => canonicalBackendOrigin(origin) === activeBackendOrigin,
+				)));
 	const compatibilityError =
 		staticConsole &&
 		adminToken.length > 0 &&
@@ -224,11 +242,7 @@ export function AppShell({
 		primaryOrigin: primaryBackend.primaryOrigin,
 		runtimeOnline: runtime.isOnline,
 		staticConsole,
-		runtimePolicyReady:
-			!staticConsole ||
-			(runtimePolicy.data !== undefined &&
-				runtimePolicy.data.cluster_id === clusterInfo.data?.cluster_id &&
-				Date.parse(runtimePolicy.data.expires_at) > Date.now()),
+		runtimePolicyReady,
 		selectorOpen: backendSelectorOpen,
 		refreshRuntimePolicy: runtimePolicy.refetch,
 	});

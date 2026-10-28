@@ -25,7 +25,11 @@ export function useBackendDirectory(args: {
 		args.clusterId === args.primaryClusterId &&
 		args.runtimeOnline &&
 		(!args.staticConsole || args.runtimePolicyReady);
-	const queryKeySuffix = [args.adminToken, args.primaryOrigin] as const;
+	const queryKeySuffix = [
+		args.adminToken,
+		args.primaryOrigin,
+		args.clusterId,
+	] as const;
 	const backendNodes = useQuery({
 		queryKey: ["adminNodes", ...queryKeySuffix],
 		enabled,

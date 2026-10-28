@@ -333,21 +333,25 @@ export function hydratePrimaryBackendProfile(
 			}
 		}
 		for (const node of nodes ?? []) {
-			const origin = canonicalBackendOrigin(node.api_base_url);
-			if (!origin) continue;
-			const existing = candidatesByOrigin.get(origin);
-			const switchable = staticAllowedOrigins.has(origin);
-			candidatesByOrigin.set(origin, {
+			const rawOrigin = node.api_base_url.trim();
+			const origin = canonicalBackendOrigin(rawOrigin);
+			const candidateKey = origin ?? `invalid:${node.node_id}`;
+			const existing = candidatesByOrigin.get(candidateKey);
+			const switchable = origin !== null && staticAllowedOrigins.has(origin);
+			candidatesByOrigin.set(candidateKey, {
 				...existing,
-				origin,
+				origin: origin ?? rawOrigin,
 				nodeId: node.node_id,
-				nodeName: displayNodeName(node.node_name, origin),
+				nodeName: displayNodeName(node.node_name, origin ?? rawOrigin),
 				verifiedAt: existing?.verifiedAt ?? null,
 				lastError: existing?.lastError ?? null,
 				switchable,
-				switchBlockedReason: switchable
-					? undefined
-					: "This node is not available to the static console.",
+				switchBlockedReason:
+					origin === null
+						? "HTTPS is required for this node."
+						: switchable
+							? undefined
+							: "This node is not available to the static console.",
 			});
 		}
 		const currentOrigin = canonicalBackendOrigin(state.primaryOrigin);
@@ -385,17 +389,19 @@ export function hydratePrimaryBackendProfile(
 		}
 	}
 	for (const node of nodes ?? []) {
-		const origin = canonicalBackendOrigin(node.api_base_url);
-		if (!origin) continue;
-		const existing = candidatesByOrigin.get(origin);
-		candidatesByOrigin.set(origin, {
-			origin,
+		const rawOrigin = node.api_base_url.trim();
+		const origin = canonicalBackendOrigin(rawOrigin);
+		const candidateKey = origin ?? `invalid:${node.node_id}`;
+		const existing = candidatesByOrigin.get(candidateKey);
+		candidatesByOrigin.set(candidateKey, {
+			origin: origin ?? rawOrigin,
 			nodeId: node.node_id,
-			nodeName: displayNodeName(node.node_name, origin),
+			nodeName: displayNodeName(node.node_name, origin ?? rawOrigin),
 			verifiedAt: existing?.verifiedAt ?? null,
 			lastError: existing?.lastError ?? null,
-			switchable: true,
-			switchBlockedReason: undefined,
+			switchable: origin !== null,
+			switchBlockedReason:
+				origin === null ? "HTTPS is required for this node." : undefined,
 		});
 	}
 	const pageOrigin = getPageOrigin();
