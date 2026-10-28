@@ -176,9 +176,8 @@ test("persists all three Mihomo documents through the production save path", asy
 		const editor = page.locator(
 			`[data-mihomo-document="${documentId}"] .cm-content`,
 		);
-		await editor.click();
-		await page.keyboard.press("ControlOrMeta+A");
-		await page.keyboard.insertText(value);
+		await editor.fill(value);
+		await expect(editor).toContainText(value.trim().split("\n")[0]);
 	}
 	const saveButton = page
 		.getByRole("button", { name: "Save configuration" })

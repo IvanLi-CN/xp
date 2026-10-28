@@ -399,6 +399,51 @@ describe("useMihomoProfileDraft", () => {
 		expect(result.current.error).toContain("original profile is unavailable");
 	});
 
+	it("separates a duplicated tab claim before retaining its draft", async () => {
+		const tabStorageKey = "xp.mihomo-profile.tab-id.v1";
+		const originalTabId = window.sessionStorage.getItem(tabStorageKey);
+		const { result, unmount } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile: vi.fn(async (profile) => profile),
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "duplicated draft\n"));
+		const claimKey = await waitFor(() => {
+			const key = Object.keys(window.localStorage).find((candidate) =>
+				candidate.startsWith("xp.mihomo-profile.tab-claim.v1:"),
+			);
+			expect(key).toBeDefined();
+			return key as string;
+		});
+		const foreignClaim = JSON.stringify({ instanceId: "foreign-tab" });
+		act(() => {
+			window.localStorage.setItem(claimKey, foreignClaim);
+			window.dispatchEvent(
+				new StorageEvent("storage", {
+					key: claimKey,
+					newValue: foreignClaim,
+					storageArea: window.localStorage,
+				}),
+			);
+		});
+
+		await waitFor(() =>
+			expect(window.sessionStorage.getItem(tabStorageKey)).not.toBe(
+				originalTabId,
+			),
+		);
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		expect(result.current.draft.mixin_yaml).toBe("duplicated draft\n");
+		unmount();
+		if (originalTabId) {
+			window.sessionStorage.setItem(tabStorageKey, originalTabId);
+		}
+	});
+
 	it("adopts a clean draft written by another tab", async () => {
 		const { result } = renderHook(() =>
 			useMihomoProfileDraft({

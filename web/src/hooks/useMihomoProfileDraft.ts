@@ -50,6 +50,15 @@ function profileKey(profile: AdminUserMihomoProfile | undefined): string {
 export const MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX =
 	"xp.mihomo-profile-draft.v1:";
 const MIHOMO_PROFILE_TAB_ID_STORAGE_KEY = "xp.mihomo-profile.tab-id.v1";
+const MIHOMO_PROFILE_TAB_CLAIM_STORAGE_KEY_PREFIX =
+	"xp.mihomo-profile.tab-claim.v1:";
+let mihomoBrowserTabInstanceId: string | null = null;
+
+function randomBrowserIdentifier(): string {
+	return typeof crypto !== "undefined" && "randomUUID" in crypto
+		? crypto.randomUUID()
+		: `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 type PersistedMihomoDraft = {
 	draft: AdminUserMihomoProfile;
@@ -65,14 +74,36 @@ function browserTabId(): string {
 			MIHOMO_PROFILE_TAB_ID_STORAGE_KEY,
 		);
 		if (existing) return existing;
-		const generated =
-			typeof crypto !== "undefined" && "randomUUID" in crypto
-				? crypto.randomUUID()
-				: `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		const generated = randomBrowserIdentifier();
 		window.sessionStorage.setItem(MIHOMO_PROFILE_TAB_ID_STORAGE_KEY, generated);
 		return generated;
 	} catch {
 		return `ephemeral-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	}
+}
+
+function browserTabInstanceId(): string {
+	if (mihomoBrowserTabInstanceId) return mihomoBrowserTabInstanceId;
+	const generated = randomBrowserIdentifier();
+	mihomoBrowserTabInstanceId = generated;
+	return generated;
+}
+
+function mihomoTabClaimStorageKey(tabId: string): string {
+	return `${MIHOMO_PROFILE_TAB_CLAIM_STORAGE_KEY_PREFIX}${encodeURIComponent(tabId)}`;
+}
+
+function tabClaimInstanceId(value: string | null): string | null {
+	if (!value) return null;
+	try {
+		const parsed: unknown = JSON.parse(value);
+		if (typeof parsed !== "object" || parsed === null) return null;
+		const instanceId = (parsed as Record<string, unknown>).instanceId;
+		return typeof instanceId === "string" && instanceId.length > 0
+			? instanceId
+			: null;
+	} catch {
+		return null;
 	}
 }
 
@@ -230,9 +261,12 @@ export function useMihomoProfileDraft({
 	formatError = (error) =>
 		error instanceof Error ? error.message : String(error),
 }: UseMihomoProfileDraftProps) {
-	const tabIdRef = useRef<string | null>(null);
-	if (tabIdRef.current === null) tabIdRef.current = browserTabId();
-	const tabId = tabIdRef.current;
+	const [tabId, setTabId] = useState(browserTabId);
+	const tabInstanceIdRef = useRef<string | null>(null);
+	if (tabInstanceIdRef.current === null) {
+		tabInstanceIdRef.current = browserTabInstanceId();
+	}
+	const tabInstanceId = tabInstanceIdRef.current;
 	const storageKey = mihomoDraftStorageKey(userId, tabId);
 	const storagePrefix = mihomoDraftStoragePrefix(userId);
 	const initialPersistedDraft =
@@ -254,6 +288,8 @@ export function useMihomoProfileDraft({
 	const [loadedUserId, setLoadedUserId] = useState<string | null>(
 		profile ? userId : null,
 	);
+	const incomingProfileKey = profileKey(profile);
+	const isLoaded = loadedUserId === userId && profile !== undefined;
 	const [isSaving, setIsSaving] = useState(false);
 	const [isVerifying, setIsVerifying] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -269,6 +305,16 @@ export function useMihomoProfileDraft({
 	const savePromiseRef = useRef<Promise<boolean> | null>(null);
 	const acceptedProfileKeyRef = useRef(profileKey(profile));
 	const lastSavedProfileKeyRef = useRef<string | null>(null);
+	const draftRef = useRef(draft);
+	const baselineRef = useRef(baseline);
+	const baselineKnownRef = useRef(baselineKnown);
+	const saveFeedbackRef = useRef(saveFeedback);
+	const isLoadedRef = useRef(isLoaded);
+	draftRef.current = draft;
+	baselineRef.current = baseline;
+	baselineKnownRef.current = baselineKnown;
+	saveFeedbackRef.current = saveFeedback;
+	isLoadedRef.current = isLoaded;
 
 	const dirty = useMemo(
 		() =>
@@ -277,6 +323,63 @@ export function useMihomoProfileDraft({
 			),
 		[draft, baseline],
 	);
+
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		const claimKey = mihomoTabClaimStorageKey(tabId);
+		const claim = (): boolean => {
+			try {
+				window.localStorage.setItem(
+					claimKey,
+					JSON.stringify({ instanceId: tabInstanceId, updatedAt: Date.now() }),
+				);
+				return true;
+			} catch {
+				// Browser storage can be unavailable; the current tab ID remains usable.
+				return false;
+			}
+		};
+		const rotateIfClaimLost = () => {
+			try {
+				if (
+					tabClaimInstanceId(window.localStorage.getItem(claimKey)) ===
+					tabInstanceId
+				)
+					return;
+				const nextTabId = randomBrowserIdentifier();
+				if (isLoadedRef.current && (dirty || saveFeedbackRef.current)) {
+					persistMihomoDraft(
+						mihomoDraftStorageKey(userId, nextTabId),
+						draftRef.current,
+						baselineKnownRef.current ? baselineRef.current : null,
+						saveFeedbackRef.current,
+					);
+				}
+				try {
+					window.sessionStorage.setItem(
+						MIHOMO_PROFILE_TAB_ID_STORAGE_KEY,
+						nextTabId,
+					);
+				} catch {
+					// Continue with the in-memory tab ID when session storage is unavailable.
+				}
+				setTabId(nextTabId);
+				hydratedStorageKeyRef.current = null;
+				setLoadedUserId(null);
+			} catch {
+				// Browser storage can be unavailable; the current tab ID remains usable.
+			}
+		};
+		const claimEstablished = claim();
+		if (claimEstablished) rotateIfClaimLost();
+		const handleStorage = (event: StorageEvent) => {
+			if (claimEstablished && event.key === claimKey && event.newValue) {
+				rotateIfClaimLost();
+			}
+		};
+		window.addEventListener("storage", handleStorage);
+		return () => window.removeEventListener("storage", handleStorage);
+	}, [dirty, tabId, tabInstanceId, userId]);
 
 	useEffect(() => {
 		if (resetSessionIdentityRef.current === sessionIdentity) return;
@@ -298,8 +401,6 @@ export function useMihomoProfileDraft({
 		setSaveFeedback(null);
 	}, [profile, sessionIdentity, userId]);
 
-	const incomingProfileKey = profileKey(profile);
-	const isLoaded = loadedUserId === userId && profile !== undefined;
 	useEffect(() => {
 		if (
 			!profile ||
