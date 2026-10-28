@@ -171,7 +171,11 @@ function MihomoSaveFeedbackPanel({
 		["Support ID", feedback.diagnostics.supportId],
 	].filter(([, value]) => value);
 	return (
-		<output className="xp-alert xp-alert-warning space-y-2 px-4 py-3">
+		<output
+			className="xp-alert xp-alert-warning space-y-2 px-4 py-3"
+			aria-live="polite"
+			aria-atomic="true"
+		>
 			<div className="flex items-start gap-2">
 				<Icon
 					name="tabler:alert-triangle"

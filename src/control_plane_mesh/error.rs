@@ -49,6 +49,24 @@ pub(super) fn public_timeout(
     )
 }
 
+pub(super) fn preserve_ambiguous_dispatch(
+    error: MeshRequestError,
+    prior_dispatch_ambiguous: bool,
+) -> MeshRequestError {
+    if prior_dispatch_ambiguous
+        && matches!(
+            error,
+            MeshRequestError::InvalidTarget(_)
+                | MeshRequestError::PreDispatchAuth(_)
+                | MeshRequestError::PreDispatchTimeout
+        )
+    {
+        MeshRequestError::OutcomeUnknown
+    } else {
+        error
+    }
+}
+
 impl From<internal_auth::AuthError> for MeshRequestError {
     fn from(value: internal_auth::AuthError) -> Self {
         Self::Auth(value)
@@ -90,5 +108,30 @@ impl std::error::Error for MeshRequestError {
             Self::Public(value) => Some(value),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_pre_dispatch_failure_after_ambiguous_mesh_is_unknown() {
+        assert!(matches!(
+            preserve_ambiguous_dispatch(MeshRequestError::PreDispatchTimeout, true),
+            MeshRequestError::OutcomeUnknown
+        ));
+        assert!(matches!(
+            preserve_ambiguous_dispatch(MeshRequestError::InvalidTarget("bad".into()), true),
+            MeshRequestError::OutcomeUnknown
+        ));
+    }
+
+    #[test]
+    fn pre_dispatch_failure_without_prior_dispatch_stays_confirmed() {
+        assert!(matches!(
+            preserve_ambiguous_dispatch(MeshRequestError::PreDispatchTimeout, false),
+            MeshRequestError::PreDispatchTimeout
+        ));
     }
 }

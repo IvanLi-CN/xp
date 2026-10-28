@@ -41,7 +41,7 @@ use circuit::{
     PublicHalfOpenProbeGuard, endpoint_fingerprint, mesh_attempt_budget,
 };
 pub use error::MeshRequestError;
-use error::{classify_mesh_failure, public_timeout};
+use error::{classify_mesh_failure, preserve_ambiguous_dispatch, public_timeout};
 pub(crate) use request::CapabilityProbeResponse;
 use request::PeerRequestResponse;
 pub use request::{MeshRequest, PeerDirectPath};
@@ -868,7 +868,7 @@ impl MeshAwareHttpClient {
                     request_deadline,
                 )
                 .await;
-                return Err(error);
+                return Err(preserve_ambiguous_dispatch(error, mesh_outcome_ambiguous));
             }
         };
         let response = match self
@@ -895,7 +895,7 @@ impl MeshAwareHttpClient {
                     request_deadline,
                 )
                 .await;
-                return Err(error);
+                return Err(preserve_ambiguous_dispatch(error, mesh_outcome_ambiguous));
             }
             Err(error) => {
                 let operation_id = self.circuits.next_operation();

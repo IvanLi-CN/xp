@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
 import { MihomoSaveOutcomeUnknownError } from "../utils/mihomoSaveOutcome";
@@ -18,6 +18,10 @@ const PROFILE_B: AdminUserMihomoProfile = {
 };
 
 describe("useMihomoProfileDraft", () => {
+	beforeEach(() => {
+		window.localStorage.clear();
+	});
+
 	it("keeps an unloaded profile read-only until its data arrives", async () => {
 		const saveProfile = vi.fn(
 			async (profile: AdminUserMihomoProfile) => profile,
@@ -166,6 +170,86 @@ describe("useMihomoProfileDraft", () => {
 		expect(verifyProfile).toHaveBeenCalledTimes(2);
 		expect(result.current.dirty).toBe(false);
 		expect(result.current.saveFeedback?.verification).toBe("matches");
+
+		verifyProfile.mockRejectedValueOnce(new Error("read-back unavailable"));
+		await act(async () => expect(await result.current.verify()).toBe(false));
+		expect(result.current.saveFeedback?.verification).toBe("unavailable");
+	});
+
+	it("keeps an unavailable unknown result after remounting", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "persisted unknown\n" };
+		const saveProfile = vi.fn(async () => {
+			throw new MihomoSaveOutcomeUnknownError(
+				new TypeError("Failed to fetch"),
+				submitted,
+			);
+		});
+		const verifyProfile = vi.fn(async () => {
+			throw new Error("read-back unavailable");
+		});
+		const first = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+				verifyProfile,
+			}),
+		);
+
+		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
+		act(() =>
+			first.result.current.setField("mixin_yaml", submitted.mixin_yaml),
+		);
+		await act(async () =>
+			expect(await first.result.current.save()).toBe(false),
+		);
+		expect(first.result.current.saveFeedback?.verification).toBe("unavailable");
+		first.unmount();
+
+		const second = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+				verifyProfile,
+			}),
+		);
+		await waitFor(() => expect(second.result.current.isLoaded).toBe(true));
+		expect(second.result.current.draft).toEqual(submitted);
+		expect(second.result.current.dirty).toBe(true);
+		expect(second.result.current.saveFeedback?.verification).toBe(
+			"unavailable",
+		);
+	});
+
+	it("adopts a clean draft written by another tab", async () => {
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile: vi.fn(async (profile) => profile),
+			}),
+		);
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		const next = { ...PROFILE_A, mixin_yaml: "from another tab\n" };
+		const key = Object.keys(window.localStorage).find((candidate) =>
+			candidate.includes("xp.mihomo-profile-draft.v1"),
+		);
+		const storageKey = key ?? "xp.mihomo-profile-draft.v1:user-a";
+		window.localStorage.setItem(
+			storageKey,
+			JSON.stringify({ draft: next, saveFeedback: null }),
+		);
+		act(() => {
+			window.dispatchEvent(
+				new StorageEvent("storage", {
+					key: storageKey,
+					newValue: window.localStorage.getItem(storageKey),
+				}),
+			);
+		});
+		await waitFor(() => expect(result.current.draft).toEqual(next));
+		expect(result.current.dirty).toBe(true);
 	});
 
 	it("keeps dirty drafts across refreshes and accepts a complete save response", async () => {
@@ -296,10 +380,15 @@ describe("useMihomoProfileDraft", () => {
 
 		rerender({ sessionKey: "token-b", profile: PROFILE_B });
 		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		expect(result.current.draft.mixin_yaml).toBe("pending\n");
+		expect(result.current.baseline).toEqual(PROFILE_B);
 		act(() => resolveSave?.({ ...PROFILE_A, mixin_yaml: "stale\n" }));
 		if (!savePromise) throw new Error("save request was not created");
 		expect(await savePromise).toBe(false);
-		expect(result.current.draft).toEqual(PROFILE_B);
+		expect(result.current.draft).toEqual({
+			...PROFILE_A,
+			mixin_yaml: "pending\n",
+		});
 		expect(result.current.baseline).toEqual(PROFILE_B);
 	});
 

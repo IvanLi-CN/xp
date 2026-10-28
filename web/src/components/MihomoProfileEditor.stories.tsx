@@ -394,12 +394,20 @@ export const OutcomeUnknown: Story = {
 		await expect(
 			canvas.getByText("Save result is still unknown"),
 		).toBeVisible();
+		await expect(canvas.getByRole("status")).toHaveAttribute(
+			"aria-live",
+			"polite",
+		);
 		await expect(
 			canvas.getByRole("button", { name: "Check again" }),
 		).toBeEnabled();
 		await userEvent.click(canvas.getByRole("button", { name: "Retry save" }));
 		await expect(canvasElement).toHaveTextContent(
 			"Click Retry save again to confirm",
+		);
+		await userEvent.click(canvas.getByRole("button", { name: "Check again" }));
+		await expect(canvas.getByRole("status")).toHaveTextContent(
+			"Read-back matches your draft",
 		);
 	},
 };

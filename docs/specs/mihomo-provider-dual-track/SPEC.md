@@ -148,19 +148,21 @@
 - 用户未配置 Mihomo profile 时请求 `external_resources=mirror` 必须返回 `422 invalid_request`，不得静默忽略镜像选项。
 - 当 `extra_proxy_providers_yaml` 已包含 `xp-system-generated` 时，保存 profile 成功但渲染 provider 路径返回 `400 invalid_request`，提示保留名冲突。
 - 当请求头无法推导外部 origin 时，provider 主配置回退到 `Config.api_base_url` 的规范化 origin。
-- 管理端共享 Raft 写入必须返回稳定、脱敏的错误分类：仅在能证明请求完全没有派发时使用 `raft_write_not_dispatched`；派发后未取得可验证响应、旧后端笼统 `5xx` 或浏览器连接中断均使用 `raft_write_outcome_unknown`。错误详情只包含 `dispatch_state`、安全原因、目标节点标识（若已知）和 `support_id`，不得包含配置正文、凭据、内部 URL 或原始异常。
+- 管理端共享 Raft 写入必须返回稳定、脱敏的错误分类：仅在能证明请求完全没有派发时使用 `raft_write_not_dispatched`；派发后未取得可验证响应、旧后端笼统 `5xx` 或浏览器连接中断均使用 `raft_write_outcome_unknown`。错误详情包含稳定的 `failure_layer`、安全 `cause`、`confidence`、`attempted_path`、`dispatch_state`、`retryable` 和 `support_id`，并可带目标节点标识与远端状态；不得包含配置正文、凭据、内部 URL 或原始异常。
 - Mihomo 编辑器在保存结果未知时必须保留三份草稿，并自动执行一次只读回读；三份内容完全一致时只报告“读回与草稿一致”，不得声称原写入已确认。读回不一致或失败时仍保持结果未知，支持手动再次核对；手动重试前必须警示可能覆盖期间的其他修改，且不得自动重试写入。
+- 结果未知的三份草稿与脱敏反馈必须按用户保存在浏览器本地存储中，以便页面重载、认证会话变更和同一用户的多标签页恢复；收到其它标签页的草稿时，只能在本页没有未保存编辑、写入或核对进行中时采用，不得覆盖本页已有草稿。
 
 ## 接口契约（Interfaces & Contracts）
 
 ### 接口清单（Inventory）
 
-| 接口（Name）                                  | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 使用方（Consumers） |
-| --------------------------------------------- | ------------ | ------------- | -------------- | ------------------------ | ------------------- |
-| `GET /api/sub/{token}?format=mihomo`          | HTTP API     | external      | Changed        | ./contracts/http-apis.md | Mihomo clients      |
-| `GET /api/sub/{token}/mihomo/provider`        | HTTP API     | external      | Existing       | ./contracts/http-apis.md | Mihomo clients      |
-| `GET /api/sub/{token}/mihomo/provider/system` | HTTP API     | external      | New            | ./contracts/http-apis.md | Mihomo clients      |
-| `GET /api/admin/config`                       | HTTP API     | internal      | Changed        | ./contracts/http-apis.md | Web admin           |
+| 接口（Name）                                                 | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 使用方（Consumers） |
+| ------------------------------------------------------------ | ------------ | ------------- | -------------- | ------------------------ | ------------------- |
+| `GET /api/sub/{token}?format=mihomo`                         | HTTP API     | external      | Changed        | ./contracts/http-apis.md | Mihomo clients      |
+| `GET /api/sub/{token}/mihomo/provider`                       | HTTP API     | external      | Existing       | ./contracts/http-apis.md | Mihomo clients      |
+| `GET /api/sub/{token}/mihomo/provider/system`                | HTTP API     | external      | New            | ./contracts/http-apis.md | Mihomo clients      |
+| `GET /api/admin/config`                                      | HTTP API     | internal      | Changed        | ./contracts/http-apis.md | Web admin           |
+| `PUT /api/admin/users/{user_id}/subscription-mihomo-profile` | HTTP API     | internal      | Changed        | ./contracts/http-apis.md | Web admin           |
 
 ### 契约文档（按 Kind 拆分）
 
