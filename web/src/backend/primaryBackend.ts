@@ -352,7 +352,9 @@ export function hydratePrimaryBackendProfile(
 		}
 		const currentOrigin = canonicalBackendOrigin(state.primaryOrigin);
 		const nextPrimary =
-			(currentOrigin && candidatesByOrigin.has(currentOrigin)
+			(currentOrigin &&
+			staticAllowedOrigins.has(currentOrigin) &&
+			candidatesByOrigin.has(currentOrigin)
 				? currentOrigin
 				: bootstrapOrigin) ?? getPageOrigin();
 		const changed = state.clusterId !== clusterId;
