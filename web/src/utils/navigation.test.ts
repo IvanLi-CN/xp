@@ -3,12 +3,29 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	buildNodePageHref,
 	buildRedirectTarget,
+	buildRouterNavigationTarget,
 	resolveLoginRedirectFromHref,
 	sanitizeRedirectPath,
 	stripLoginToken,
 } from "./navigation";
 
 describe("navigation helpers", () => {
+	it("parses router navigation targets without concatenating query strings", () => {
+		vi.stubGlobal("window", {
+			location: { origin: "http://localhost" },
+		});
+
+		expect(
+			buildRouterNavigationTarget(
+				"/nodes/node-fixture-36?tab=traffic&demo=normal#history",
+			),
+		).toEqual({
+			to: "/nodes/node-fixture-36",
+			search: { tab: "traffic", demo: "normal" },
+			hash: "history",
+		});
+	});
+
 	it("sanitizes redirect paths to same-origin relative targets", () => {
 		expect(sanitizeRedirectPath("/nodes?tab=runtime#history")).toBe(
 			"/nodes?tab=runtime#history",

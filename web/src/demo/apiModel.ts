@@ -67,6 +67,7 @@ export function createDemoApi(controls: DemoControls) {
 	}
 	const mock = createMockApi({
 		identityNamespace: "demo",
+		trafficNowMs: () => Date.now(),
 		failNodeRuntimeNodeIds:
 			controls.scene === "incident" ? [fixtureCatalog.nodeId.fixture36()] : [],
 		data: {

@@ -48,6 +48,15 @@ export function resolveLoginRedirectFromHref(href: string): string {
 	}
 }
 
+export function buildRouterNavigationTarget(href: string) {
+	const target = new URL(href, window.location.origin);
+	return {
+		to: target.pathname,
+		search: Object.fromEntries(target.searchParams.entries()),
+		hash: target.hash ? target.hash.slice(1) : undefined,
+	};
+}
+
 export function buildNodePageHref(
 	apiBaseUrl: string,
 	currentHref: string = window.location.href,

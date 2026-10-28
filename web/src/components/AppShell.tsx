@@ -77,6 +77,7 @@ import { shouldRefreshAfterUpgradeTransition } from "../offline/upgradeRefreshPo
 import { useRuntimePolicyExpiry } from "../offline/useRuntimePolicyExpiry";
 import { useStaticRuntimePolicy } from "../offline/useStaticRuntimePolicy";
 import { useUpgradeObservation } from "../offline/useUpgradeObservation";
+import { buildRouterNavigationTarget } from "../utils/navigation";
 import {
 	type AppNavigationGroup,
 	AppResourceNavigation,
@@ -218,7 +219,6 @@ export function AppShell({
 				: !runtime.isOnline && compatibility === null
 					? "API compatibility is unavailable while offline."
 					: null;
-
 	const backendNodes = useQuery({
 		queryKey: ["adminNodes", adminToken],
 		enabled:
@@ -525,7 +525,7 @@ export function AppShell({
 
 	function navigateLink(href: string) {
 		setMobileNavOpen(false);
-		void navigate({ to: href as never });
+		void navigate(buildRouterNavigationTarget(href) as never);
 	}
 
 	function navigateResource(href: string) {

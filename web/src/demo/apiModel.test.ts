@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { AdminNodeIpUsageResponseSchema } from "../api/adminIpUsage";
+import { AdminNodeTcpConnectionsResponseSchema } from "../api/adminTcpConnections";
+import { AdminNodeTrafficResponseSchema } from "../api/adminTraffic";
 import {
 	type AdminUser,
 	AdminUserSchema,
 	AdminUserTokenResponseSchema,
 	AdminUsersResponseSchema,
 } from "../api/adminUsers";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { createDemoApi } from "./apiModel";
 import { DEFAULT_DEMO_CONTROLS } from "./shareState";
 
@@ -97,5 +101,80 @@ describe("demo API model", () => {
 		);
 
 		expect(response.status).toBe(405);
+	});
+
+	it("refreshes normal traffic fixtures after a five-minute bucket advances", async () => {
+		const clock = vi.spyOn(Date, "now");
+		clock.mockReturnValue(Date.parse("2026-10-28T17:29:59Z"));
+		const api = createDemoApi(DEFAULT_DEMO_CONTROLS);
+		const url = new URL(
+			`/api/admin/nodes/${fixtureCatalog.nodeId.fixture32()}/traffic?window=24h`,
+			"https://demo.example",
+		);
+
+		try {
+			clock.mockReturnValue(Date.parse("2026-10-28T17:30:01Z"));
+			const response = AdminNodeTrafficResponseSchema.parse(
+				await (await api.handle(new Request(url))).json(),
+			);
+
+			expect(response.traffic.window_end_at).toBe("2026-10-28T17:30:00.000Z");
+			expect(response.traffic.last_sample_at).toBe("2026-10-28T17:30:00.000Z");
+			expect(response.traffic.partial).toBe(false);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it("seeds distinct node detail metrics for each node", async () => {
+		const api = createDemoApi(DEFAULT_DEMO_CONTROLS);
+		const firstNodeId = fixtureCatalog.nodeId.fixture32();
+		const secondNodeId = fixtureCatalog.nodeId.fixture36();
+		const request = (nodeId: string, resource: string) =>
+			api.handle(
+				new Request(
+					`https://demo.example/api/admin/nodes/${nodeId}/${resource}`,
+				),
+			);
+
+		const [firstTraffic, secondTraffic] = await Promise.all([
+			request(firstNodeId, "traffic?window=24h"),
+			request(secondNodeId, "traffic?window=24h"),
+		]);
+		const [firstIpUsage, secondIpUsage] = await Promise.all([
+			request(firstNodeId, "ip-usage?window=24h"),
+			request(secondNodeId, "ip-usage?window=24h"),
+		]);
+		const [firstTcp, secondTcp] = await Promise.all([
+			request(firstNodeId, "tcp-connections?window=24h"),
+			request(secondNodeId, "tcp-connections?window=24h"),
+		]);
+
+		const firstTrafficReport = AdminNodeTrafficResponseSchema.parse(
+			await firstTraffic.json(),
+		);
+		const secondTrafficReport = AdminNodeTrafficResponseSchema.parse(
+			await secondTraffic.json(),
+		);
+		const firstIpUsageReport = AdminNodeIpUsageResponseSchema.parse(
+			await firstIpUsage.json(),
+		);
+		const secondIpUsageReport = AdminNodeIpUsageResponseSchema.parse(
+			await secondIpUsage.json(),
+		);
+		const firstTcpReport = AdminNodeTcpConnectionsResponseSchema.parse(
+			await firstTcp.json(),
+		);
+		const secondTcpReport = AdminNodeTcpConnectionsResponseSchema.parse(
+			await secondTcp.json(),
+		);
+
+		expect(firstTrafficReport.traffic.summary).not.toEqual(
+			secondTrafficReport.traffic.summary,
+		);
+		expect(firstIpUsageReport.ips).not.toEqual(secondIpUsageReport.ips);
+		expect(firstTcpReport.per_endpoint_series).not.toEqual(
+			secondTcpReport.per_endpoint_series,
+		);
 	});
 });

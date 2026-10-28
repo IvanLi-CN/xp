@@ -192,6 +192,44 @@ describe("<ResourceNavigation />", () => {
 		expect(onNavigate).not.toHaveBeenCalled();
 	});
 
+	it("keeps a query-bearing child selected by pathname", () => {
+		const nodesItem = groups[0].items.find((item) => item.id === "nodes");
+		const nodeChild = nodesItem?.children?.[0];
+		if (!nodesItem || !nodeChild)
+			throw new Error("Nodes fixture is incomplete.");
+
+		const queryGroups: ResourceNavigationGroup[] = [
+			{
+				title: "Nav",
+				items: [
+					{
+						...nodesItem,
+						children: [
+							{
+								...nodeChild,
+								href: "/nodes/node-01?tab=traffic",
+							},
+						],
+					},
+				],
+			},
+		];
+		render(
+			<ResourceNavigation
+				ariaLabel="Primary navigation"
+				groups={queryGroups}
+				pathname="/nodes/node-01"
+				onNavigate={vi.fn()}
+			/>,
+		);
+
+		const activeNode = screen.getByRole("link", {
+			name: "Node 01 (node-01)",
+		});
+		expect(activeNode).toHaveClass("bg-primary/10");
+		expect(activeNode).toHaveAttribute("aria-current", "page");
+	});
+
 	it("uses instance-specific disclosures and requests data outside the state updater", () => {
 		const onResourceRequested = vi.fn();
 		const { container } = render(
