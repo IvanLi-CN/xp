@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { Switch } from "./switch";
@@ -50,5 +51,24 @@ describe("<Switch />", () => {
 
 		fireEvent.click(control);
 		expect(onCheckedChange).not.toHaveBeenCalled();
+	});
+
+	it("exposes unknown state and supports keyboard activation", async () => {
+		const user = userEvent.setup();
+		const onCheckedChange = vi.fn();
+		render(
+			<Switch
+				aria-label="Unknown feature"
+				indeterminate
+				onCheckedChange={onCheckedChange}
+			/>,
+		);
+
+		const control = screen.getByRole("switch", { name: "Unknown feature" });
+		expect(control).toHaveAttribute("aria-checked", "mixed");
+		expect(control).toHaveAttribute("data-state", "indeterminate");
+		await user.tab();
+		await user.keyboard("{Enter}");
+		expect(onCheckedChange).toHaveBeenCalledWith(true);
 	});
 });

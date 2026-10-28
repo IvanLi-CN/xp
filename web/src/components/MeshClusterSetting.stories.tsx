@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn, within } from "@storybook/test";
 
 import { demoMeshStatus } from "@/demo/DemoSystemStatusPage";
+import { fixtureCatalog } from "@/fixture-policy/catalog";
 
 import { MeshClusterSetting } from "./MeshClusterSetting";
 
@@ -87,6 +88,7 @@ export const UnknownOffline: Story = {
 		await expect(canvas.getAllByText("Unknown", { exact: true })).toHaveLength(
 			2,
 		);
+		await expect(canvas.getByText("Stale or incomplete")).toBeInTheDocument();
 	},
 };
 
@@ -130,9 +132,9 @@ export const ConfirmEnable: Story = {
 export const UnknownResultLocked: Story = {
 	args: {
 		unknownLock: {
-			clusterId: demoMeshStatus.local.cluster_id,
+			clusterId: fixtureCatalog.cluster.fixture53(),
 			targetEnabled: true,
-			createdAt: Date.now() - 5_000,
+			createdAt: fixtureCatalog.number.value123(),
 		},
 	},
 	play: async ({ canvasElement }) => {

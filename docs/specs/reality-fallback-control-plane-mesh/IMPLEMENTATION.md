@@ -11,8 +11,11 @@
 - Cluster Mesh Web control: implemented in Service config with a single cluster-wide Reality
   Direct Mesh switch, read-only Public/Native Reverse status, observer path summary,
   compatibility and freshness gates, confirmation for both directions, structured preflight
-  failure presentation, and a durable browser-local unknown-result lock. System Status remains
-  diagnostic and links to Service config.
+  failure presentation, and a durable browser-local unknown-result lock held with the Web Locks
+  API to prevent concurrent same-cluster mutations across tabs. Configuration writes are gated
+  independently by the compatibility inventory's server route set; unknown values use an
+  indeterminate switch and stale or unsampled peer observations are labeled explicitly. System
+  Status remains diagnostic and links to Service config.
 
 ## Confirmed Recovery Gap
 

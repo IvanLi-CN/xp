@@ -26,6 +26,7 @@ type Story = StoryObj<typeof meta>;
 function SwitchField(props: {
 	defaultChecked?: boolean;
 	disabled?: boolean;
+	indeterminate?: boolean;
 	label: string;
 	description: string;
 }) {
@@ -36,6 +37,7 @@ function SwitchField(props: {
 				aria-label={props.label}
 				checked={checked}
 				disabled={props.disabled}
+				indeterminate={props.indeterminate}
 				onCheckedChange={setChecked}
 			/>
 			<div>
@@ -48,7 +50,8 @@ function SwitchField(props: {
 	);
 }
 
-function expectThumbSlot(control: HTMLElement, checked: boolean) {
+async function expectThumbSlot(control: HTMLElement, checked: boolean) {
+	await new Promise((resolve) => setTimeout(resolve, 200));
 	const thumb = control.firstElementChild;
 	if (!(thumb instanceof HTMLElement)) {
 		throw new Error("Switch thumb is missing");
@@ -74,10 +77,10 @@ export const Unchecked: Story = {
 			name: "Automatic updates",
 		});
 		await expect(control).toHaveAttribute("aria-checked", "false");
-		expectThumbSlot(control, false);
+		await expectThumbSlot(control, false);
 		await control.click();
 		await expect(control).toHaveAttribute("aria-checked", "true");
-		expectThumbSlot(control, true);
+		await expectThumbSlot(control, true);
 	},
 };
 
@@ -89,6 +92,23 @@ export const Checked: Story = {
 			description="Use the cluster-wide signed control-plane path."
 		/>
 	),
+};
+
+export const Indeterminate: Story = {
+	render: () => (
+		<SwitchField
+			indeterminate
+			label="Unknown observation"
+			description="The cluster value is not safe to interpret as enabled or disabled."
+		/>
+	),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const control = canvas.getByRole("switch", {
+			name: "Unknown observation",
+		});
+		await expect(control).toHaveAttribute("aria-checked", "mixed");
+	},
 };
 
 export const Disabled: Story = {

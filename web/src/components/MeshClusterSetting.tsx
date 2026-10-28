@@ -178,6 +178,14 @@ export function MeshClusterSetting({
 	const [unlockConfirmOpen, setUnlockConfirmOpen] = useState(false);
 	const value = status?.cluster_mesh_enabled;
 	const counts = pathSummary(status);
+	const observerDataIncomplete =
+		!statusFresh ||
+		status?.peers.some(
+			(peer) =>
+				peer.stale ||
+				peer.current_path === null ||
+				peer.last_sample_at === null,
+		) === true;
 	const lock = unknownLock ?? statusUnavailableLock;
 	const isLocked = lock !== undefined && lock !== null;
 	const canEdit =
@@ -250,6 +258,7 @@ export function MeshClusterSetting({
 							checked={value === true}
 							className="mt-0.5"
 							disabled={!canEdit}
+							indeterminate={value === undefined}
 							onCheckedChange={onRequestChange}
 						/>
 					</div>
@@ -385,6 +394,16 @@ export function MeshClusterSetting({
 						<div className="font-semibold">{counts.unknown}</div>
 						<div className="text-xs text-muted-foreground">Unknown</div>
 					</div>
+				</div>
+				<div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+					<Badge variant={observerDataIncomplete ? "outline" : "secondary"}>
+						{observerDataIncomplete ? "Stale or incomplete" : "Current sample"}
+					</Badge>
+					{observerDataIncomplete ? (
+						<span className="text-muted-foreground">
+							Some peer observations are stale or unsampled.
+						</span>
+					) : null}
 				</div>
 				<p className="mt-2 text-xs text-muted-foreground">
 					{status?.peers.length === 0

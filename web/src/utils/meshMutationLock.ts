@@ -4,6 +4,13 @@ export type MeshMutationLock = {
 	createdAt: number;
 };
 
+export type MeshMutationLockRunResult<T> =
+	| { acquired: true; value: T }
+	| {
+			acquired: false;
+			reason: "held" | "persistence" | "unavailable";
+	  };
+
 const STORAGE_KEY = "xp-mesh-config-mutation-locks";
 
 function storage(): Storage | null {
@@ -12,6 +19,23 @@ function storage(): Storage | null {
 		return window.localStorage;
 	} catch {
 		return null;
+	}
+}
+
+function persistLock(lock: MeshMutationLock): boolean {
+	const store = storage();
+	if (!store || !lock.clusterId) return false;
+	try {
+		const next = { ...readAll(), [lock.clusterId]: lock };
+		store.setItem(STORAGE_KEY, JSON.stringify(next));
+		const persisted = readMeshMutationLock(lock.clusterId);
+		return (
+			persisted?.clusterId === lock.clusterId &&
+			persisted.targetEnabled === lock.targetEnabled &&
+			persisted.createdAt === lock.createdAt
+		);
+	} catch {
+		return false;
 	}
 }
 
@@ -52,24 +76,30 @@ export function readMeshMutationLocks(): MeshMutationLock[] {
 }
 
 /**
- * The mutation must not be sent unless the browser can prove this lock was
- * persisted. A localStorage write that cannot be read back fails closed.
+ * Persist the lock before running the mutation while holding a browser-wide
+ * exclusive lock. The Web Locks API closes the read-modify-write race between
+ * tabs; unsupported browsers fail closed and never run the operation.
  */
-export function acquireMeshMutationLock(lock: MeshMutationLock): boolean {
-	const store = storage();
-	if (!store || !lock.clusterId) return false;
-	try {
-		const next = { ...readAll(), [lock.clusterId]: lock };
-		store.setItem(STORAGE_KEY, JSON.stringify(next));
-		const persisted = readMeshMutationLock(lock.clusterId);
-		return (
-			persisted?.clusterId === lock.clusterId &&
-			persisted.targetEnabled === lock.targetEnabled &&
-			persisted.createdAt === lock.createdAt
-		);
-	} catch {
-		return false;
+export async function withMeshMutationLock<T>(
+	lock: MeshMutationLock,
+	operation: () => Promise<T>,
+): Promise<MeshMutationLockRunResult<T>> {
+	if (typeof navigator === "undefined" || !navigator.locks) {
+		return { acquired: false, reason: "unavailable" };
 	}
+	return navigator.locks.request(
+		`xp-mesh-config:${lock.clusterId}`,
+		{ mode: "exclusive", ifAvailable: true },
+		async (heldLock) => {
+			if (!heldLock || readMeshMutationLock(lock.clusterId)) {
+				return { acquired: false, reason: "held" };
+			}
+			if (!persistLock(lock)) {
+				return { acquired: false, reason: "persistence" };
+			}
+			return { acquired: true, value: await operation() };
+		},
+	);
 }
 
 export function clearMeshMutationLock(clusterId: string): boolean {

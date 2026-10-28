@@ -51,6 +51,15 @@ function renderPage() {
 }
 
 function setupMocks() {
+	vi.stubGlobal("navigator", {
+		locks: {
+			request: async (
+				_name: string,
+				_options: LockOptions,
+				callback: (lock: Lock | null) => Promise<unknown>,
+			) => callback({ name: fixtureCatalog.cluster.fixture53() } as Lock),
+		},
+	});
 	vi.mocked(fetchHealth).mockResolvedValue({ status: "ok" });
 	vi.mocked(fetchClusterInfo).mockResolvedValue({
 		cluster_id: fixtureCatalog.cluster.fixture53(),
@@ -91,6 +100,7 @@ describe("ServiceConfigPage", () => {
 	afterEach(() => {
 		cleanup();
 		clearAllMeshMutationLocksForTests();
+		vi.unstubAllGlobals();
 		vi.clearAllMocks();
 	});
 
@@ -203,5 +213,37 @@ describe("ServiceConfigPage", () => {
 			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
 		);
 		expect(updateAdminMeshConfig).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not submit after canceling the confirmation refresh", async () => {
+		const user = userEvent.setup();
+		let resolveRefresh!: (value: typeof demoMeshStatus) => void;
+		const pendingRefresh = new Promise<typeof demoMeshStatus>((resolve) => {
+			resolveRefresh = resolve;
+		});
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus)
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockImplementationOnce(() => pendingRefresh);
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+		resolveRefresh({ ...demoMeshStatus, cluster_mesh_enabled: false });
+
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("alertdialog", {
+					name: "Enable Reality Direct Mesh?",
+				}),
+			).toBeNull(),
+		);
+		expect(updateAdminMeshConfig).not.toHaveBeenCalled();
 	});
 });

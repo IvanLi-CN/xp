@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 export interface SwitchProps
 	extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onChange"> {
 	checked?: boolean;
+	indeterminate?: boolean;
 	onCheckedChange?: (checked: boolean) => void;
 }
 
@@ -14,6 +15,7 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
 			checked = false,
 			className,
 			disabled,
+			indeterminate = false,
 			onCheckedChange,
 			onClick,
 			...props
@@ -25,9 +27,11 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
 			ref={ref}
 			type="button"
 			role="switch"
-			aria-checked={checked}
+			aria-checked={indeterminate ? "mixed" : checked}
 			disabled={disabled}
-			data-state={checked ? "checked" : "unchecked"}
+			data-state={
+				indeterminate ? "indeterminate" : checked ? "checked" : "unchecked"
+			}
 			onClick={(event) => {
 				onClick?.(event);
 				if (!event.defaultPrevented) onCheckedChange?.(!checked);
@@ -47,7 +51,11 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
 				className={cn(
 					"pointer-events-none block size-5 rounded-full bg-background shadow-xs",
 					"transition-transform motion-reduce:transition-none",
-					checked ? "translate-x-5" : "translate-x-0",
+					indeterminate
+						? "translate-x-2.5"
+						: checked
+							? "translate-x-5"
+							: "translate-x-0",
 				)}
 			/>
 		</button>

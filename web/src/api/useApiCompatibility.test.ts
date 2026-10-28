@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveApiCompatibility } from "./apiCompatibility";
 import {
 	getApiCapabilityState,
+	getApiRouteState,
 	persistCompatibility,
 	readPersistedCompatibility,
 } from "./useApiCompatibility";
@@ -29,6 +30,20 @@ describe("API capability state", () => {
 		expect(state.available).toBe(false);
 		expect(state.pending).toBe(false);
 		expect(state.reason).toMatch(/admin\.mesh/);
+	});
+
+	it("does not expose a write route absent from the selected server profile", () => {
+		const compatibility = resolveApiCompatibility({
+			releaseTag: "v3.22.5",
+		});
+		const state = getApiRouteState(
+			compatibility,
+			"admin.mesh",
+			"PUT /api/admin/mesh/config",
+		);
+
+		expect(state.available).toBe(false);
+		expect(state.reason).toMatch(/PUT \/api\/admin\/mesh\/config/);
 	});
 
 	it("keeps probe-only capabilities disabled after persistence and restore", () => {
