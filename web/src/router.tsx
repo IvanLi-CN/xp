@@ -27,10 +27,7 @@ import { EndpointProbeStatsPage } from "./views/EndpointProbeStatsPage";
 import { EndpointsPage } from "./views/EndpointsPage";
 import { HomePage } from "./views/HomePage";
 import { LoginPage } from "./views/LoginPage";
-import {
-	NODE_DETAILS_TAB_VALUES,
-	NodeDetailsPage,
-} from "./views/NodeDetailsPage";
+import { NodeDetailsPage } from "./views/NodeDetailsPage";
 import { NodesPage } from "./views/NodesPage";
 import { QuotaPolicyPage } from "./views/QuotaPolicyPage";
 import { ServiceConfigPage } from "./views/ServiceConfigPage";
@@ -45,6 +42,7 @@ import { ToolsPage } from "./views/ToolsPage";
 import { UserDetailsPage } from "./views/UserDetailsPage";
 import { UserNewPage } from "./views/UserNewPage";
 import { UsersPage } from "./views/UsersPage";
+import { NODE_DETAILS_TAB_VALUES } from "./views/nodeDetailsTabs";
 
 const UiDemoSystemStatusPage = lazyRouteComponent(
 	() => import("./demo/DemoSystemStatusPage"),

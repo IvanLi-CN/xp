@@ -4,6 +4,10 @@
 
 - The node-service observability behavior described in `SPEC.md` is implemented.
 - `NodeDetailsPage` stores the selected tab in the route search and restores it on refresh.
+- Node resource navigation carries the current valid tab when switching between node details.
+  Non-node-detail links and invalid tab values remain unmodified.
+- Node detail tabs render in this order on desktop and mobile: Service runtime, Resources,
+  Node metadata, Traffic, IP usage, TCP connections, Node settings.
 - Missing or invalid tab values default to Service runtime.
 - Runtime aggregation, persistent status, and Web presentation remain maintained in their sources.
 

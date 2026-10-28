@@ -49,6 +49,7 @@ describe("<AppResourceNavigation />", () => {
 					groups={groups}
 					localNodeId={null}
 					pathname="/users"
+					search=""
 					onNavigate={vi.fn()}
 					onResourceNavigate={vi.fn()}
 					onRetryCompatibility={onRetryCompatibility}
@@ -100,6 +101,7 @@ describe("<AppResourceNavigation />", () => {
 					groups={nodeGroups}
 					localNodeId={fixtureCatalog.identifier.nodePrimary()}
 					pathname={`/nodes/${fixtureCatalog.identifier.nodeSecondary()}`}
+					search="?tab=runtime"
 					onNavigate={vi.fn()}
 					onResourceNavigate={vi.fn()}
 					onRetryCompatibility={vi.fn()}
@@ -131,6 +133,81 @@ describe("<AppResourceNavigation />", () => {
 			"tabler:server-2",
 		);
 		expect(ordinaryNode).toHaveAttribute("data-leading-icon-tone", "muted");
+		expect(ordinaryNode).toHaveAttribute(
+			"href",
+			`/nodes/${encodeURIComponent(fixtureCatalog.identifier.nodeSecondary())}?tab=runtime`,
+		);
+	});
+
+	it("preserves only a valid node detail tab while switching nodes", () => {
+		const queryClient = createQueryClient();
+		queryClient.setQueryData(["adminNodes", "admintoken"], {
+			items: [
+				{
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+					node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+					api_base_url: fixtureCatalog.url.primaryApi(),
+					access_host: fixtureCatalog.host.primary(),
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.reset(),
+				},
+			],
+		});
+		const compatibility = resolveApiCompatibility({
+			capabilities: ["admin.nodes"],
+		});
+
+		const { rerender } = render(
+			<QueryClientProvider client={queryClient}>
+				<AppResourceNavigation
+					adminToken="admintoken"
+					compatibility={compatibility}
+					compatibilityError={null}
+					compatibilityPending={false}
+					groups={nodeGroups}
+					localNodeId={null}
+					pathname={`/nodes/${fixtureCatalog.identifier.nodeSecondary()}`}
+					search="?tab=not-a-tab"
+					onNavigate={vi.fn()}
+					onResourceNavigate={vi.fn()}
+					onRetryCompatibility={vi.fn()}
+				/>
+			</QueryClientProvider>,
+		);
+
+		const nodeLink = () =>
+			screen.getByRole("link", {
+				name: `Node ${formatNodeLabel(
+					fixtureCatalog.identifier.nodeNamePrimary(),
+					fixtureCatalog.identifier.nodePrimary(),
+				)}`,
+			});
+		expect(nodeLink()).toHaveAttribute(
+			"href",
+			`/nodes/${encodeURIComponent(fixtureCatalog.identifier.nodePrimary())}`,
+		);
+
+		rerender(
+			<QueryClientProvider client={queryClient}>
+				<AppResourceNavigation
+					adminToken="admintoken"
+					compatibility={compatibility}
+					compatibilityError={null}
+					compatibilityPending={false}
+					groups={nodeGroups}
+					localNodeId={null}
+					pathname={`/nodes/${fixtureCatalog.identifier.nodeSecondary()}`}
+					search="?tab=traffic"
+					onNavigate={vi.fn()}
+					onResourceNavigate={vi.fn()}
+					onRetryCompatibility={vi.fn()}
+				/>
+			</QueryClientProvider>,
+		);
+		expect(nodeLink()).toHaveAttribute(
+			"href",
+			`/nodes/${encodeURIComponent(fixtureCatalog.identifier.nodePrimary())}?tab=traffic`,
+		);
 	});
 
 	it("marks only endpoints on the current hosting node with a special icon", () => {
@@ -174,6 +251,7 @@ describe("<AppResourceNavigation />", () => {
 					groups={endpointGroups}
 					localNodeId={localNodeId}
 					pathname={`/endpoints/${remoteEndpointId}`}
+					search="?tab=traffic"
 					onNavigate={vi.fn()}
 					onResourceNavigate={vi.fn()}
 					onRetryCompatibility={vi.fn()}

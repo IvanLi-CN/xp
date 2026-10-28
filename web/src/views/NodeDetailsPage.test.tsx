@@ -552,11 +552,11 @@ describe("<NodeDetailsPage />", () => {
 		renderPage();
 		await waitFor(() => expect(fetchAdminNode).toHaveBeenCalled());
 		await screenByRole("tab", "Node settings");
-
 		const tabs = screen.getAllByRole("tab");
+		expect(tabs[0]).toHaveAttribute("aria-selected", "true");
 		expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
-			"Resources",
 			"Service runtime",
+			"Resources",
 			"Node metadata",
 			"Traffic",
 			"IP usage",

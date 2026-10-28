@@ -4,6 +4,21 @@
 
 None
 
+## Context and Scope
+
+本主题也定义 Node details 的 tab URL 与节点间导航行为。节点详情 tab 是当前页面状态，
+通过合法 `tab` 查询参数恢复；左侧节点列表在节点详情之间切换时沿用该状态。
+未从节点详情切换、缺失参数或非法参数继续使用 Service runtime 默认页。
+
+## Requirements
+
+- REQ-NODE-TAB-URL: Node details 必须将当前合法 tab 写入 URL，并在刷新或直接打开时
+  恢复；缺失或非法 tab 必须回退到 Service runtime。
+- REQ-NODE-TAB-CONTINUITY: 从一个 Node details 页面通过左侧节点列表切换到另一节点时，
+  目标链接必须携带当前合法 tab；其他资源导航不得携带该参数。
+- REQ-NODE-TAB-ORDER: Node details 的 tab 顺序必须固定为 Service runtime、Resources、
+  Node metadata、Traffic、IP usage、TCP connections、Node settings，桌面和移动端一致。
+
 ## 背景 / 问题陈述
 
 - 当前 Web 仅能看到节点静态元数据，缺少 `xp/xray/cloudflared` 运行态与近期趋势。
@@ -79,7 +94,11 @@ None
 - 管理员进入节点列表：前端并行拉取静态节点信息 + 运行态摘要，渲染摘要与趋势条。
 - 管理员进入节点详情：拉取运行态详情并建立 SSE 流，实时更新组件状态与事件列表。
 - 管理员切到节点详情 metadata 页：读取节点静态字段与最新 `egress_probe` 摘要；需要时点击刷新按钮触发单节点立即重探。
-- 管理员在节点详情切换任一 tab 时，当前 tab 标识必须写入该节点详情 URL；刷新或直接打开相同 URL 时恢复该 tab，缺失或非法 tab 回退到 Service runtime。
+- 管理员在节点详情切换任一 tab 时，当前 tab 标识必须写入该节点详情 URL；刷新或直接打开
+  相同 URL 时恢复该 tab，缺失或非法 tab 回退到 Service runtime。通过节点详情左侧列表切换
+  到另一节点时，若当前 URL 带有合法 tab，目标节点必须保留该 tab；从其他页面进入节点详情且
+  未携带 tab 时仍使用 Service runtime 默认页。标签顺序固定为 Service runtime、Resources、
+  Node metadata、Traffic、IP usage、TCP connections、Node settings。
 - leader 节点调用 runtime 聚合接口时，使用 internal signature 并发请求其他节点 local runtime。
 
 ### Edge cases / errors
@@ -117,11 +136,25 @@ None
 - Given 打开节点详情，When 组件状态变化，Then 页面通过 SSE 自动更新组件卡片和事件列表。
 - Given 打开节点详情 metadata 页，When 节点存在最近一次主动探测结果，Then 页面显示出口 IP、Geo、订阅地区与 stale 状态，并允许手动刷新。
 - Given 当前节点详情 URL 带有合法 tab 参数，When 刷新或直接打开该 URL，Then 页面恢复对应 tab；缺失或非法 tab 时默认显示 Service runtime。
+- Given 当前位于带有合法 tab 参数的节点详情，When 通过左侧节点列表切换到另一节点，
+  Then 目标节点 URL 保留该 tab 且页面显示同一 tab；从非节点详情页面进入无 tab 的节点链接时，
+  默认显示 Service runtime。
 - Given cloudflared 未启用，When 打开详情，Then cloudflared 状态为 `disabled` 且无重启事件。
 - Given cloudflared 已启用并故障，When 连续失败达到阈值，Then 记录重启请求与结果事件。
 - Given 节点只有 IPv4 公网出口且无 IPv6 route，When DDNS IPv6 探测失败但 IPv4 探测成功，Then DDNS 不记录 `ddns ipv6 probe` 异常，DNS 仅保持 `A` 记录且节点运行态不因此降级。
 - Given `xp` 进程重启，When 重新打开详情，Then 可看到重启前 7 天窗口内历史槽位与事件。
 - Given 任一远端节点不可达，When 请求 `/api/admin/nodes/runtime`，Then 返回 `partial=true` 且 `unreachable_nodes` 包含该节点。
+
+## Verification
+
+covers: REQ-NODE-TAB-URL, REQ-NODE-TAB-CONTINUITY, REQ-NODE-TAB-ORDER
+
+- VER-NODE-TAB-URL (REQ-NODE-TAB-URL): NodeDetailsPage 路由测试验证合法 tab 的刷新恢复，
+  以及缺失和非法 tab 的 Service runtime 回退。
+- VER-NODE-TAB-CONTINUITY (REQ-NODE-TAB-CONTINUITY): AppResourceNavigation 测试验证节点详情
+  之间保留合法 tab，并验证非法 tab 与其他资源链接不会被携带。
+- VER-NODE-TAB-ORDER (REQ-NODE-TAB-ORDER): NodeDetailsPage 测试验证默认选中的 Service runtime、
+  固定 tab 顺序及桌面标签与移动选择器共享同一选项顺序。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
