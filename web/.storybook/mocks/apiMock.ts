@@ -115,7 +115,7 @@ export type StorybookApiMockConfig = {
 	failVersionCheck?: boolean;
 	nodeDeleteAccepted?: StorybookNodeDeleteAccepted;
 	probe?: import("./endpointProbeMock").StorybookEndpointProbeMock;
-	trafficNowMs?: number;
+	trafficNowMs?: number | (() => number);
 };
 
 export type MockEndpointSeed = AdminEndpoint & {
@@ -155,7 +155,7 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 	failAdminConfig: boolean;
 	failNodeRuntimeNodeIds: string[];
 	failVersionCheck: boolean;
-	trafficNowMs?: number;
+	trafficNowMs?: number | (() => number);
 	nextEndpointId: () => string;
 	nextEndpointTag: () => string;
 	identityNamespace?: "demo";
@@ -907,8 +907,14 @@ function createDefaultSeed(trafficNowMs?: number): MockStateSeed {
 	};
 }
 
+function resolveTrafficNowMs(
+	trafficNowMs: number | (() => number) | undefined,
+): number | undefined {
+	return typeof trafficNowMs === "function" ? trafficNowMs() : trafficNowMs;
+}
+
 function buildState(config?: StorybookApiMockConfig): MockState {
-	const base = createDefaultSeed(config?.trafficNowMs);
+	const base = createDefaultSeed(resolveTrafficNowMs(config?.trafficNowMs));
 	const overrides = config?.data;
 	const merged: MockStateSeed = {
 		...base,
@@ -1380,9 +1386,13 @@ async function handleRequest(
 	if (nodeTrafficMatch && method === "GET") {
 		const nodeId = decodeURIComponent(nodeTrafficMatch[1]);
 		const node = state.nodes.find((item) => item.node_id === nodeId);
+		const dynamicTraffic = typeof state.trafficNowMs === "function";
+		const trafficNowMs = resolveTrafficNowMs(state.trafficNowMs);
 		const entry =
-			state.nodeTrafficByNodeId[nodeId] ??
-			(node ? buildDefaultNodeTraffic(node, state.trafficNowMs) : null);
+			(dynamicTraffic && trafficNowMs !== undefined && node
+				? buildDefaultNodeTraffic(node, trafficNowMs)
+				: state.nodeTrafficByNodeId[nodeId]) ??
+			(node ? buildDefaultNodeTraffic(node, trafficNowMs) : null);
 		if (!entry) return errorResponse(404, "not_found", "node not found");
 		const window = url.searchParams.get("window") === "31d" ? "31d" : "24h";
 		return jsonResponse(selectWindowedNodeTraffic(entry, window));
@@ -1453,11 +1463,13 @@ async function handleRequest(
 	if (userTrafficMatch && method === "GET") {
 		const userId = decodeURIComponent(userTrafficMatch[1]);
 		const user = state.users.find((item) => item.user_id === userId);
+		const dynamicTraffic = typeof state.trafficNowMs === "function";
+		const trafficNowMs = resolveTrafficNowMs(state.trafficNowMs);
 		const entry =
-			state.userTrafficByUserId[userId] ??
-			(user
-				? buildDefaultUserTraffic(user, state.nodes, state.trafficNowMs)
-				: null);
+			(dynamicTraffic && trafficNowMs !== undefined && user
+				? buildDefaultUserTraffic(user, state.nodes, trafficNowMs)
+				: state.userTrafficByUserId[userId]) ??
+			(user ? buildDefaultUserTraffic(user, state.nodes, trafficNowMs) : null);
 		if (!entry) return errorResponse(404, "not_found", "user not found");
 		const window = url.searchParams.get("window") === "31d" ? "31d" : "24h";
 		const selectedNodeId = url.searchParams.get("node_id");

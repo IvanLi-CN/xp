@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { AdminNodeTrafficResponseSchema } from "../api/adminTraffic";
 import {
 	type AdminUser,
 	AdminUserSchema,
 	AdminUserTokenResponseSchema,
 	AdminUsersResponseSchema,
 } from "../api/adminUsers";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { createDemoApi } from "./apiModel";
 import { DEFAULT_DEMO_CONTROLS } from "./shareState";
 
@@ -97,5 +99,28 @@ describe("demo API model", () => {
 		);
 
 		expect(response.status).toBe(405);
+	});
+
+	it("refreshes normal traffic fixtures after a five-minute bucket advances", async () => {
+		const clock = vi.spyOn(Date, "now");
+		clock.mockReturnValue(Date.parse("2026-10-28T17:29:59Z"));
+		const api = createDemoApi(DEFAULT_DEMO_CONTROLS);
+		const url = new URL(
+			`/api/admin/nodes/${fixtureCatalog.nodeId.fixture32()}/traffic?window=24h`,
+			"https://demo.example",
+		);
+
+		try {
+			clock.mockReturnValue(Date.parse("2026-10-28T17:30:01Z"));
+			const response = AdminNodeTrafficResponseSchema.parse(
+				await (await api.handle(new Request(url))).json(),
+			);
+
+			expect(response.traffic.window_end_at).toBe("2026-10-28T17:30:00.000Z");
+			expect(response.traffic.last_sample_at).toBe("2026-10-28T17:30:00.000Z");
+			expect(response.traffic.partial).toBe(false);
+		} finally {
+			clock.mockRestore();
+		}
 	});
 });
