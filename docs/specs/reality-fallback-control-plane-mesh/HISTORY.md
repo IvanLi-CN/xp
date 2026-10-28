@@ -4,6 +4,11 @@
 
 ## Decisions
 
+- Cluster Mesh configuration belongs in Service config, while System Status keeps node-local
+  path diagnosis. A single control reflects the Raft setting; Public fallback and dormant
+  Native Reverse are not independently selectable capabilities. An ambiguous write remains
+  locked until an administrator independently verifies termination and convergence, because
+  a local status read cannot identify the write's outcome.
 - Reality fallback 是普通 HTTPS ingress，不是 VLESS peer tunnel。
 - 应用层重复执行与 TLS 密文重放是不同问题。
 - body hash、稳定 request ID 和 durable idempotency 处理跨路径重复执行。

@@ -8,6 +8,11 @@
   membership-bound validation receipts, and Native Reverse quarantine are implemented.
 - Lifecycle: active.
 - Catalog: supersedes `nbs5f`.
+- Cluster Mesh Web control: implemented in Service config with a single cluster-wide Reality
+  Direct Mesh switch, read-only Public/Native Reverse status, observer path summary,
+  compatibility and freshness gates, confirmation for both directions, structured preflight
+  failure presentation, and a durable browser-local unknown-result lock. System Status remains
+  diagnostic and links to Service config.
 
 ## Confirmed Recovery Gap
 

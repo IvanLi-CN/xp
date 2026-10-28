@@ -1,16 +1,29 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminConfig } from "../api/adminConfig";
+import { fetchAdminMeshStatus, updateAdminMeshConfig } from "../api/adminMesh";
+import { BackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { ToastProvider } from "../components/Toast";
+import { demoMeshStatus } from "../demo/DemoSystemStatusPage";
 import { createQueryClient } from "../queryClient";
+import { clearAllMeshMutationLocksForTests } from "../utils/meshMutationLock";
 import { ServiceConfigPage } from "./ServiceConfigPage";
 
 vi.mock("../api/adminConfig");
+vi.mock("../api/adminMesh", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../api/adminMesh")>();
+	return {
+		...actual,
+		fetchAdminMeshStatus: vi.fn(),
+		updateAdminMeshConfig: vi.fn(),
+	};
+});
 vi.mock("../api/clusterInfo");
 vi.mock("../api/health");
 
@@ -63,6 +76,11 @@ function setupMocks() {
 		admin_token_present: true,
 		admin_token_masked: "********",
 	});
+	vi.mocked(fetchAdminMeshStatus).mockResolvedValue({
+		...demoMeshStatus,
+		cluster_mesh_enabled: false,
+	});
+	vi.mocked(updateAdminMeshConfig).mockResolvedValue({ enabled: true });
 }
 
 describe("ServiceConfigPage", () => {
@@ -72,6 +90,7 @@ describe("ServiceConfigPage", () => {
 
 	afterEach(() => {
 		cleanup();
+		clearAllMeshMutationLocksForTests();
 		vi.clearAllMocks();
 	});
 
@@ -99,5 +118,90 @@ describe("ServiceConfigPage", () => {
 		expect(
 			screen.queryByText("Allow private Mihomo mirror targets"),
 		).toBeNull();
+	});
+
+	it("requires confirmation and refreshes the observed value after enabling Mesh", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const toggle = await screen.findByRole("switch", {
+			name: "Enable Reality Direct Mesh",
+		});
+		await user.click(toggle);
+		await screen.findByRole("alertdialog", {
+			name: "Enable Reality Direct Mesh?",
+		});
+		await user.click(screen.getByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(updateAdminMeshConfig).toHaveBeenCalledWith("admintoken", true),
+		);
+		expect(fetchAdminMeshStatus).toHaveBeenCalledTimes(4);
+	});
+
+	it("shows directed preflight failures without exposing transport details", async () => {
+		const user = userEvent.setup();
+		vi.mocked(updateAdminMeshConfig).mockRejectedValueOnce(
+			new BackendApiError({
+				status: 409,
+				message: "mesh preflight failed",
+				code: "mesh_preflight_failed",
+				details: {
+					failures: [
+						{
+							sender_node_id: demoMeshStatus.local.node_id,
+							target_node_id:
+								demoMeshStatus.peers[0]?.node_id ?? "peer-unknown",
+							kind: "protocol",
+						},
+					],
+				},
+			}),
+		);
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(
+				screen.getByText(/Directed cluster path validation failed/),
+			).toBeInTheDocument(),
+		);
+		expect(screen.getByRole("alert")).not.toHaveTextContent(
+			/socket|certificate|https?:\/\//i,
+		);
+	});
+
+	it("keeps an unknown mutation locked across observation refresh", async () => {
+		const user = userEvent.setup();
+		vi.mocked(updateAdminMeshConfig).mockRejectedValueOnce(
+			new Error("connection interrupted"),
+		);
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		expect(
+			screen.getByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		).toBeDisabled();
+		await user.click(
+			screen.getByRole("button", { name: "Refresh observation" }),
+		);
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		expect(updateAdminMeshConfig).toHaveBeenCalledTimes(1);
 	});
 });
