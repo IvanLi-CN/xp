@@ -23,6 +23,7 @@ pub(super) fn join_url(
         || !base.username().is_empty()
         || base.password().is_some()
         || base.query().is_some()
+        || base.fragment().is_some()
     {
         return Err(MeshRequestError::InvalidTarget(
             "invalid peer base URL".to_string(),

@@ -451,9 +451,7 @@ export function hydrateStaticRuntimePolicy(
 		staticAllowedOrigins.add(origin);
 	}
 	const candidatesByOrigin = new Map(
-		state.candidates
-			.filter((candidate) => staticAllowedOrigins.has(candidate.origin))
-			.map((candidate) => [candidate.origin, candidate]),
+		state.candidates.map((candidate) => [candidate.origin, candidate]),
 	);
 	if (bootstrapOrigin) {
 		const existing = candidatesByOrigin.get(bootstrapOrigin);
