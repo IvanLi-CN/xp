@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendCandidate } from "@/backend/primaryBackend";
 import type { PrimaryBackendSnapshot } from "@/backend/primaryBackend";
+import { fixtureCatalog } from "@/fixture-policy/catalog";
 
 const mockUsePrimaryBackend = vi.hoisted(() => vi.fn());
 
@@ -17,9 +18,9 @@ import {
 } from "./PrimaryBackendSwitcher";
 
 const stagedCandidate: BackendCandidate = {
-	origin: "https://node.example",
-	nodeId: "node-1",
-	nodeName: "Node 1",
+	origin: fixtureCatalog.url.secondaryApi(),
+	nodeId: fixtureCatalog.identifier.nodeSecondary(),
+	nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
 	verifiedAt: Date.now(),
 	lastError: null,
 	runtimeState: "staged",
@@ -27,8 +28,8 @@ const stagedCandidate: BackendCandidate = {
 };
 
 const snapshot = (candidate: BackendCandidate): PrimaryBackendSnapshot => ({
-	clusterId: "cluster-static",
-	primaryOrigin: "https://101-xp.ivanli.cc",
+	clusterId: fixtureCatalog.cluster.fixture84(),
+	primaryOrigin: fixtureCatalog.url.primaryApi(),
 	candidates: [candidate],
 	generation: 1,
 	state: "ready",
@@ -69,14 +70,14 @@ describe("getCurrentReloadCandidate", () => {
 		const view = render(
 			<PrimaryBackendSwitcher
 				adminToken="admin-token"
-				clusterId="cluster-static"
+				clusterId={fixtureCatalog.cluster.fixture84()}
 			/>,
 		);
 
 		await user.click(
 			screen.getByRole("button", { name: "Open primary backend" }),
 		);
-		await user.click(screen.getByRole("menuitem", { name: /Node 1/ }));
+		await user.click(screen.getByRole("menuitem"));
 		expect(screen.getByRole("button", { name: "Reload once" })).toBeVisible();
 
 		mockUsePrimaryBackend.mockReturnValue(
@@ -85,7 +86,7 @@ describe("getCurrentReloadCandidate", () => {
 		view.rerender(
 			<PrimaryBackendSwitcher
 				adminToken="admin-token"
-				clusterId="cluster-static"
+				clusterId={fixtureCatalog.cluster.fixture84()}
 			/>,
 		);
 
