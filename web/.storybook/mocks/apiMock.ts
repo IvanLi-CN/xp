@@ -501,6 +501,19 @@ function refreshGlobalEndpointReality(state: MockState): void {
 }
 
 function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
+	const isSecondary = node.node_id === fixtureCatalog.nodeId.fixture36();
+	const ip = isSecondary
+		? fixtureCatalog.address.documentation192_0_2_143()
+		: fixtureCatalog.address.documentation192_0_2_30();
+	const endpointId = isSecondary
+		? fixtureCatalog.endpointId.fixture43()
+		: fixtureCatalog.endpointId.fixture40();
+	const endpointTag = isSecondary
+		? fixtureCatalog.endpointTag.fixture44()
+		: fixtureCatalog.endpointTag.fixture41();
+	const minutes = isSecondary
+		? fixtureCatalog.number.value4()
+		: fixtureCatalog.number.value2();
 	return {
 		node,
 		window: "24h",
@@ -509,17 +522,32 @@ function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
 		window_end: fixtureCatalog.timestamp.t20260308T000200(),
 		warnings: [],
 		unique_ip_series: [
-			{ minute: fixtureCatalog.timestamp.t20260308T000000(), count: 1 },
-			{ minute: fixtureCatalog.timestamp.t20260308T000100(), count: 2 },
-			{ minute: fixtureCatalog.timestamp.t20260308T000200(), count: 1 },
+			{
+				minute: fixtureCatalog.timestamp.t20260308T000000(),
+				count: isSecondary
+					? fixtureCatalog.number.value2()
+					: fixtureCatalog.number.value1(),
+			},
+			{
+				minute: fixtureCatalog.timestamp.t20260308T000100(),
+				count: isSecondary
+					? fixtureCatalog.number.value3()
+					: fixtureCatalog.number.value2(),
+			},
+			{
+				minute: fixtureCatalog.timestamp.t20260308T000200(),
+				count: isSecondary
+					? fixtureCatalog.number.value2()
+					: fixtureCatalog.number.value1(),
+			},
 		],
 		timeline: [
 			{
-				lane_key: fixtureCatalog.address.documentation192_0_2_30(),
-				endpoint_id: fixtureCatalog.endpointId.fixture27(),
-				endpoint_tag: fixtureCatalog.endpointTag.fixture28(),
-				ip: fixtureCatalog.address.documentation192_0_2_30(),
-				minutes: 2,
+				lane_key: ip,
+				endpoint_id: endpointId,
+				endpoint_tag: endpointTag,
+				ip,
+				minutes,
 				segments: [
 					{
 						start_minute: fixtureCatalog.timestamp.t20260308T000000(),
@@ -530,11 +558,11 @@ function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
 		],
 		ips: [
 			{
-				ip: fixtureCatalog.address.documentation192_0_2_30(),
-				minutes: 2,
-				endpoint_tags: [fixtureCatalog.endpointTag.fixture28()],
-				region: "Japan / Tokyo",
-				operator: "ExampleNet",
+				ip,
+				minutes,
+				endpoint_tags: [endpointTag],
+				region: isSecondary ? "Japan / Osaka" : "Japan / Tokyo",
+				operator: isSecondary ? "CarrierNet" : "ExampleNet",
 				last_seen_at: fixtureCatalog.timestamp.t20260308T000100(),
 			},
 		],
@@ -597,6 +625,53 @@ function buildDefaultUserIpUsage(
 		unreachable_nodes: [],
 		warnings: [],
 		groups,
+	};
+}
+
+function buildDefaultNodeTcpConnections(
+	node: AdminNode,
+): AdminNodeTcpConnectionsResponse {
+	const isSecondary = node.node_id === fixtureCatalog.nodeId.fixture36();
+	const endpoint = isSecondary
+		? {
+				endpoint_id: fixtureCatalog.endpointId.fixture43(),
+				endpoint_tag: fixtureCatalog.endpointTag.fixture44(),
+				port: fixtureCatalog.endpoint.port8443(),
+			}
+		: {
+				endpoint_id: fixtureCatalog.endpointId.fixture40(),
+				endpoint_tag: fixtureCatalog.endpointTag.fixture41(),
+				port: fixtureCatalog.endpoint.port443(),
+			};
+	const firstCount = isSecondary
+		? fixtureCatalog.number.value6()
+		: fixtureCatalog.number.value2();
+	const secondCount = isSecondary
+		? fixtureCatalog.number.value9()
+		: fixtureCatalog.number.value3();
+
+	return {
+		node,
+		window: "24h",
+		window_start: fixtureCatalog.timestamp.t20260307T010000(),
+		window_end: fixtureCatalog.timestamp.t20260308T005900(),
+		warnings: [],
+		endpoints: [endpoint],
+		per_endpoint_series: [
+			{
+				...endpoint,
+				series: [
+					{
+						minute: fixtureCatalog.timestamp.t20260308T005800(),
+						count: firstCount,
+					},
+					{
+						minute: fixtureCatalog.timestamp.t20260308T005900(),
+						count: secondCount,
+					},
+				],
+			},
+		],
 	};
 }
 
@@ -783,60 +858,7 @@ function createDefaultSeed(trafficNowMs?: number): MockStateSeed {
 		},
 	} satisfies Record<string, AdminNodeMihomoResourcePolicy>;
 	const nodeTcpConnectionsByNodeId = Object.fromEntries(
-		nodes.map((node) => [
-			node.node_id,
-			{
-				node,
-				window: "24h" as const,
-				window_start: fixtureCatalog.timestamp.t20260307T010000(),
-				window_end: fixtureCatalog.timestamp.t20260308T005900(),
-				warnings: [],
-				endpoints: [
-					{
-						endpoint_id: fixtureCatalog.endpointId.fixture27(),
-						endpoint_tag: fixtureCatalog.endpointTag.fixture49(),
-						port: fixtureCatalog.endpoint.port443(),
-					},
-					{
-						endpoint_id: fixtureCatalog.endpointId.fixture50(),
-						endpoint_tag: fixtureCatalog.endpointTag.fixture51(),
-						port: fixtureCatalog.endpoint.port8443(),
-					},
-				],
-				per_endpoint_series: [
-					{
-						endpoint_id: fixtureCatalog.endpointId.fixture27(),
-						endpoint_tag: fixtureCatalog.endpointTag.fixture49(),
-						port: fixtureCatalog.endpoint.port443(),
-						series: [
-							{
-								minute: fixtureCatalog.timestamp.t20260308T005800(),
-								count: 2,
-							},
-							{
-								minute: fixtureCatalog.timestamp.t20260308T005900(),
-								count: 3,
-							},
-						],
-					},
-					{
-						endpoint_id: fixtureCatalog.endpointId.fixture50(),
-						endpoint_tag: fixtureCatalog.endpointTag.fixture51(),
-						port: fixtureCatalog.endpoint.port8443(),
-						series: [
-							{
-								minute: fixtureCatalog.timestamp.t20260308T005800(),
-								count: 1,
-							},
-							{
-								minute: fixtureCatalog.timestamp.t20260308T005900(),
-								count: 2,
-							},
-						],
-					},
-				],
-			},
-		]),
+		nodes.map((node) => [node.node_id, buildDefaultNodeTcpConnections(node)]),
 	) satisfies Record<string, AdminNodeTcpConnectionsResponse>;
 	const nodeHistoryByNodeId = Object.fromEntries(
 		nodes.map((node) => [node.node_id, buildNodeHistory(node)]),

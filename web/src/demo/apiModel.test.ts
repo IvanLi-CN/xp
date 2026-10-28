@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { AdminNodeIpUsageResponseSchema } from "../api/adminIpUsage";
+import { AdminNodeTcpConnectionsResponseSchema } from "../api/adminTcpConnections";
 import { AdminNodeTrafficResponseSchema } from "../api/adminTraffic";
 import {
 	type AdminUser,
@@ -122,5 +124,57 @@ describe("demo API model", () => {
 		} finally {
 			clock.mockRestore();
 		}
+	});
+
+	it("seeds distinct node detail metrics for each node", async () => {
+		const api = createDemoApi(DEFAULT_DEMO_CONTROLS);
+		const firstNodeId = fixtureCatalog.nodeId.fixture32();
+		const secondNodeId = fixtureCatalog.nodeId.fixture36();
+		const request = (nodeId: string, resource: string) =>
+			api.handle(
+				new Request(
+					`https://demo.example/api/admin/nodes/${nodeId}/${resource}`,
+				),
+			);
+
+		const [firstTraffic, secondTraffic] = await Promise.all([
+			request(firstNodeId, "traffic?window=24h"),
+			request(secondNodeId, "traffic?window=24h"),
+		]);
+		const [firstIpUsage, secondIpUsage] = await Promise.all([
+			request(firstNodeId, "ip-usage?window=24h"),
+			request(secondNodeId, "ip-usage?window=24h"),
+		]);
+		const [firstTcp, secondTcp] = await Promise.all([
+			request(firstNodeId, "tcp-connections?window=24h"),
+			request(secondNodeId, "tcp-connections?window=24h"),
+		]);
+
+		const firstTrafficReport = AdminNodeTrafficResponseSchema.parse(
+			await firstTraffic.json(),
+		);
+		const secondTrafficReport = AdminNodeTrafficResponseSchema.parse(
+			await secondTraffic.json(),
+		);
+		const firstIpUsageReport = AdminNodeIpUsageResponseSchema.parse(
+			await firstIpUsage.json(),
+		);
+		const secondIpUsageReport = AdminNodeIpUsageResponseSchema.parse(
+			await secondIpUsage.json(),
+		);
+		const firstTcpReport = AdminNodeTcpConnectionsResponseSchema.parse(
+			await firstTcp.json(),
+		);
+		const secondTcpReport = AdminNodeTcpConnectionsResponseSchema.parse(
+			await secondTcp.json(),
+		);
+
+		expect(firstTrafficReport.traffic.summary).not.toEqual(
+			secondTrafficReport.traffic.summary,
+		);
+		expect(firstIpUsageReport.ips).not.toEqual(secondIpUsageReport.ips);
+		expect(firstTcpReport.per_endpoint_series).not.toEqual(
+			secondTcpReport.per_endpoint_series,
+		);
 	});
 });

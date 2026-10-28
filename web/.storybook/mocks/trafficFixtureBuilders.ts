@@ -14,6 +14,82 @@ const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BASELINE_MS = Date.parse(fixtureCatalog.timestamp.baseline());
 
+type TrafficBytes = {
+	uplink_bytes: number;
+	downlink_bytes: number;
+	total_bytes: number;
+};
+
+type TrafficFixtureProfile = {
+	currentEven: TrafficBytes;
+	currentOdd: TrafficBytes;
+	referenceEven: TrafficBytes;
+	referenceOdd: TrafficBytes;
+	summary: TrafficBytes;
+};
+
+const PRIMARY_TRAFFIC_PROFILE: TrafficFixtureProfile = {
+	currentEven: {
+		uplink_bytes: fixtureCatalog.quota.oneGiB(),
+		downlink_bytes: fixtureCatalog.quota.fourGiB(),
+		total_bytes: fixtureCatalog.quota.fiveGiB(),
+	},
+	currentOdd: {
+		uplink_bytes: fixtureCatalog.quota.fiveGiB(),
+		downlink_bytes: fixtureCatalog.quota.tenGiB(),
+		total_bytes: fixtureCatalog.quota.fifteenGiB(),
+	},
+	referenceEven: {
+		uplink_bytes: fixtureCatalog.quota.oneGiB(),
+		downlink_bytes: fixtureCatalog.quota.fourGiB(),
+		total_bytes: fixtureCatalog.quota.fiveGiB(),
+	},
+	referenceOdd: {
+		uplink_bytes: fixtureCatalog.quota.fourGiB(),
+		downlink_bytes: fixtureCatalog.quota.fiveGiB(),
+		total_bytes: fixtureCatalog.quota.tenGiB(),
+	},
+	summary: {
+		uplink_bytes: fixtureCatalog.quota.fiveGiB(),
+		downlink_bytes: fixtureCatalog.quota.tenGiB(),
+		total_bytes: fixtureCatalog.quota.fifteenGiB(),
+	},
+};
+
+const SECONDARY_TRAFFIC_PROFILE: TrafficFixtureProfile = {
+	currentEven: {
+		uplink_bytes: fixtureCatalog.quota.fourGiB(),
+		downlink_bytes: fixtureCatalog.quota.elevenGiB(),
+		total_bytes: fixtureCatalog.quota.fifteenGiB(),
+	},
+	currentOdd: {
+		uplink_bytes: fixtureCatalog.quota.oneGiB(),
+		downlink_bytes: fixtureCatalog.quota.fourGiB(),
+		total_bytes: fixtureCatalog.quota.fiveGiB(),
+	},
+	referenceEven: {
+		uplink_bytes: fixtureCatalog.quota.oneGiB(),
+		downlink_bytes: fixtureCatalog.quota.fourGiB(),
+		total_bytes: fixtureCatalog.quota.fiveGiB(),
+	},
+	referenceOdd: {
+		uplink_bytes: fixtureCatalog.quota.fourGiB(),
+		downlink_bytes: fixtureCatalog.quota.elevenGiB(),
+		total_bytes: fixtureCatalog.quota.fifteenGiB(),
+	},
+	summary: {
+		uplink_bytes: fixtureCatalog.quota.fourGiB(),
+		downlink_bytes: fixtureCatalog.quota.elevenGiB(),
+		total_bytes: fixtureCatalog.quota.fifteenGiB(),
+	},
+};
+
+function trafficFixtureProfile(node: AdminNode): TrafficFixtureProfile {
+	return node.node_id === fixtureCatalog.nodeId.fixture36()
+		? SECONDARY_TRAFFIC_PROFILE
+		: PRIMARY_TRAFFIC_PROFILE;
+}
+
 type WindowedNodeTraffic = Partial<
 	Record<TrafficWindow, AdminNodeTrafficResponse>
 >;
@@ -26,6 +102,7 @@ function buildTrafficPoint(
 	index: number,
 	isCurrentDay: boolean,
 	windowStartMs: number,
+	profile: TrafficFixtureProfile,
 	isGap = false,
 ): TrafficSeriesPoint {
 	const step = window === "24h" ? FIVE_MINUTES_MS : DAY_MS;
@@ -37,16 +114,8 @@ function buildTrafficPoint(
 				total_bytes: fixtureCatalog.optional.none(),
 			}
 		: index % 2 === 0
-			? {
-					uplink_bytes: fixtureCatalog.number.value3(),
-					downlink_bytes: fixtureCatalog.number.value5(),
-					total_bytes: fixtureCatalog.number.value8(),
-				}
-			: {
-					uplink_bytes: fixtureCatalog.number.value4(),
-					downlink_bytes: fixtureCatalog.number.value6(),
-					total_bytes: fixtureCatalog.number.value10(),
-				};
+			? profile.currentEven
+			: profile.currentOdd;
 	return {
 		start_at: catalogTimestampOffset(startMs - BASELINE_MS),
 		end_at: catalogTimestampOffset(startMs + step - BASELINE_MS),
@@ -60,25 +129,16 @@ function buildReferenceTrafficPoint(
 	window: TrafficWindow,
 	index: number,
 	windowStartMs: number,
+	profile: TrafficFixtureProfile,
 ): TrafficSeriesPoint {
 	const step = window === "24h" ? FIVE_MINUTES_MS : DAY_MS;
 	const count = window === "24h" ? 288 : 31;
 	const startMs = windowStartMs + (index - count) * step;
+	const bytes = index % 2 === 0 ? profile.referenceEven : profile.referenceOdd;
 	return {
 		start_at: catalogTimestampOffset(startMs - BASELINE_MS),
 		end_at: catalogTimestampOffset(startMs + step - BASELINE_MS),
-		uplink_bytes:
-			index % 2 === 0
-				? fixtureCatalog.number.value2()
-				: fixtureCatalog.number.value3(),
-		downlink_bytes:
-			index % 2 === 0
-				? fixtureCatalog.number.value3()
-				: fixtureCatalog.number.value4(),
-		total_bytes:
-			index % 2 === 0
-				? fixtureCatalog.number.value5()
-				: fixtureCatalog.number.value7(),
+		...bytes,
 		complete: true,
 		is_current_day: false,
 	};
@@ -108,6 +168,7 @@ function buildTrafficReport(
 	window: TrafficWindow,
 	gap = false,
 	trafficNowMs?: number,
+	profile: TrafficFixtureProfile = PRIMARY_TRAFFIC_PROFILE,
 ): TrafficReport {
 	const count = window === "24h" ? 288 : 31;
 	const step = window === "24h" ? FIVE_MINUTES_MS : DAY_MS;
@@ -119,24 +180,13 @@ function buildTrafficReport(
 			index,
 			window === "31d" && index === count - 1,
 			windowStartMs,
+			profile,
 			gap && index > 112 && index < 124,
 		),
 	);
 	const reference = current.map((_, index) =>
-		buildReferenceTrafficPoint(window, index, windowStartMs),
+		buildReferenceTrafficPoint(window, index, windowStartMs, profile),
 	);
-	const summary =
-		window === "24h"
-			? {
-					uplink_bytes: fixtureCatalog.number.value864(),
-					downlink_bytes: fixtureCatalog.number.value1152(),
-					total_bytes: fixtureCatalog.number.value2016(),
-				}
-			: {
-					uplink_bytes: fixtureCatalog.number.value93(),
-					downlink_bytes: fixtureCatalog.number.value124(),
-					total_bytes: fixtureCatalog.number.value217(),
-				};
 	return {
 		window,
 		window_start_at: catalogTimestampOffset(windowStartMs - BASELINE_MS),
@@ -146,7 +196,7 @@ function buildTrafficReport(
 			mode: "cycle",
 			cycle_start_at: fixtureCatalog.timestamp.baseline(),
 			cycle_end_at: catalogTimestampOffset(windowEndMs - BASELINE_MS),
-			...summary,
+			...profile.summary,
 			complete: !gap,
 			tracking_since: catalogTimestampOffset(windowStartMs - BASELINE_MS),
 		},
@@ -162,9 +212,16 @@ export function buildDefaultNodeTraffic(
 	node: AdminNode,
 	trafficNowMs?: number,
 ): WindowedNodeTraffic {
+	const profile = trafficFixtureProfile(node);
 	return {
-		"24h": { node, traffic: buildTrafficReport("24h", false, trafficNowMs) },
-		"31d": { node, traffic: buildTrafficReport("31d", false, trafficNowMs) },
+		"24h": {
+			node,
+			traffic: buildTrafficReport("24h", false, trafficNowMs, profile),
+		},
+		"31d": {
+			node,
+			traffic: buildTrafficReport("31d", false, trafficNowMs, profile),
+		},
 	};
 }
 

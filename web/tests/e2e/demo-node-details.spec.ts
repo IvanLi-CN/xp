@@ -8,8 +8,12 @@ test("demo preserves node traffic tab and share controls while switching nodes",
 	const secondNodeId = fixtureCatalog.nodeId.fixture36();
 	await page.goto(`/demo/nodes/${firstNodeId}?demo=normal&tab=traffic`);
 
-	await expect(page.getByRole("tabpanel", { name: "Traffic" })).toBeVisible();
+	const trafficPanel = page.getByRole("tabpanel", { name: "Traffic" });
+	await expect(trafficPanel).toBeVisible();
 	await expect(page.getByText("Last sample:")).toBeVisible();
+	await expect(trafficPanel).toContainText("5 GiB");
+	await expect(trafficPanel).toContainText("10 GiB");
+	const firstTrafficText = await trafficPanel.innerText();
 	const secondNodeLink = page.getByRole("link", {
 		name: `Node ${fixtureCatalog.nodeName.fixture37()} (${secondNodeId})`,
 	});
@@ -29,8 +33,11 @@ test("demo preserves node traffic tab and share controls while switching nodes",
 			demo: "normal",
 			tab: "traffic",
 		});
-	await expect(page.getByRole("tabpanel", { name: "Traffic" })).toBeVisible();
+	await expect(trafficPanel).toBeVisible();
 	await expect(page.getByText("Last sample:")).toBeVisible();
+	await expect(trafficPanel).toContainText("4 GiB");
+	await expect(trafficPanel).toContainText("11 GiB");
+	await expect(trafficPanel.innerText()).not.toEqual(firstTrafficText);
 	await expect(
 		page.getByText(
 			"Traffic data is partial. Missing samples remain gaps in the chart.",
