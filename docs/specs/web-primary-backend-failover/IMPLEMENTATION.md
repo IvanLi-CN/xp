@@ -38,6 +38,9 @@
   verification plus subsequent relative API/SSE requests through the selected origin.
 - Cold-start transport restores a canonical persisted primary origin when it is still present in
   the active profile, while the current page origin remains an explicit recovery candidate.
+- A current-origin probe that proves the persisted cluster identity is stale rebinds only the
+  current tab to the new cluster and discards old candidates before authentication; the new
+  profile remains non-durable until authenticated inventory hydration.
 - Successful authenticated node-inventory hydration is the persistence gate for a new primary;
   authentication rejection keeps the login page and unverified token out of local storage.
 - Login submission is gated on the selected target's public probe and the existing mutation

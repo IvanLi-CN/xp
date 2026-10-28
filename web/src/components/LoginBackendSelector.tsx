@@ -4,8 +4,10 @@ import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
 import {
 	type BackendCandidate,
 	canonicalBackendOrigin,
+	hydratePrimaryBackendProfile,
 	isStaticWebConsole,
 	probeBackendCandidate,
+	probeBackendOrigin,
 	selectPreAuthBackend,
 } from "@/backend/primaryBackend";
 
@@ -104,11 +106,18 @@ export function LoginBackendSelector({
 				return next;
 			});
 			try {
-				if (backend.clusterId) {
+				if (origin === pageOrigin) {
+					const result = await probeBackendOrigin({ origin });
+					if (result.clusterId !== backend.clusterId) {
+						hydratePrimaryBackendProfile(result.clusterId);
+					}
+				} else if (backend.clusterId) {
 					await probeBackendCandidate({
 						origin,
 						clusterId: backend.clusterId,
 					});
+				} else {
+					await probeBackendOrigin({ origin });
 				}
 				setProbeStatus((current) => ({ ...current, [origin]: "ready" }));
 			} catch (error) {
@@ -132,9 +141,7 @@ export function LoginBackendSelector({
 	}, [candidates, runProbe, staticConsole]);
 
 	const currentTargetReady =
-		staticConsole ||
-		(!backend.clusterId && backend.primaryOrigin === pageOrigin) ||
-		probeStatus[backend.primaryOrigin] === "ready";
+		staticConsole || probeStatus[backend.primaryOrigin] === "ready";
 
 	useEffect(() => {
 		onProbeStateChange?.(currentTargetReady);
@@ -227,7 +234,9 @@ export function LoginBackendSelector({
 									<DropdownMenuItem
 										key={candidate.origin}
 										disabled={
-											isCurrent || isChecking || Boolean(selectingOrigin)
+											(isCurrent && !isError) ||
+											isChecking ||
+											Boolean(selectingOrigin)
 										}
 										onSelect={(event) => {
 											event.preventDefault();

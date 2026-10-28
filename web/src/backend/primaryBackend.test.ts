@@ -284,6 +284,59 @@ describe("primary backend transport", () => {
 		);
 	});
 
+	it("reads candidates only from the active cluster profile", () => {
+		const activeClusterId = fixtureCatalog.cluster.fixture84();
+		const otherClusterId = fixtureCatalog.cluster.fixture95();
+		window.localStorage.setItem(
+			"xp-primary-backend-profiles",
+			JSON.stringify({
+				activeClusterId,
+				profiles: {
+					[activeClusterId]: {
+						clusterId: activeClusterId,
+						primaryOrigin: fixtureCatalog.url.secondaryApi(),
+						candidates: [
+							{
+								origin: fixtureCatalog.url.secondaryApi(),
+								nodeId: fixtureCatalog.identifier.nodeSecondary(),
+								nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+								verifiedAt: Date.now(),
+								lastError: null,
+							},
+						],
+						updatedAt: Date.now(),
+					},
+					[otherClusterId]: {
+						clusterId: otherClusterId,
+						primaryOrigin: fixtureCatalog.url.primaryApi(),
+						candidates: [
+							{
+								origin: fixtureCatalog.url.primaryApi(),
+								nodeId: fixtureCatalog.identifier.nodePrimary(),
+								nodeName: fixtureCatalog.identifier.nodeNamePrimary(),
+								verifiedAt: Date.now(),
+								lastError: null,
+							},
+						],
+						updatedAt: Date.now(),
+					},
+				},
+			}),
+		);
+		resetPrimaryBackendTransportForTests();
+
+		hydratePrimaryBackendProfile(activeClusterId);
+
+		const snapshot = getPrimaryBackendSnapshot();
+		expect(snapshot.candidates.map((candidate) => candidate.origin)).toEqual([
+			fixtureCatalog.url.secondaryApi(),
+			window.location.origin,
+		]);
+		expect(snapshot.candidates).not.toContainEqual(
+			expect.objectContaining({ origin: fixtureCatalog.url.primaryApi() }),
+		);
+	});
+
 	it("removes stale nodes and falls back when the primary is removed", async () => {
 		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
 			{

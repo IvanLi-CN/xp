@@ -491,22 +491,25 @@ async function probeCompatibility(
 	}
 }
 
-export async function probeBackendCandidate(args: {
+export async function probeBackendOrigin(args: {
 	origin: string;
-	clusterId: string;
 	signal?: AbortSignal;
-}): Promise<void> {
+}): Promise<{ clusterId: string }> {
 	const origin = canonicalBackendOrigin(args.origin);
 	if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
 	if (isStaticWebConsole() && !staticAllowedOrigins.has(origin)) {
 		throw new Error("Backend is not present in the active runtime policy.");
 	}
-	const health = await directJson(
-		origin,
-		"/api/health",
-		undefined,
-		args.signal,
-	);
+	const clusterId = await probeBackendHealthAndCluster(origin, args.signal);
+	await probeCompatibility(origin, args.signal);
+	return { clusterId };
+}
+
+async function probeBackendHealthAndCluster(
+	origin: string,
+	signal?: AbortSignal,
+): Promise<string> {
+	const health = await directJson(origin, "/api/health", undefined, signal);
 	if (
 		!health ||
 		typeof health !== "object" ||
@@ -518,13 +521,30 @@ export async function probeBackendCandidate(args: {
 		origin,
 		"/api/cluster/info",
 		undefined,
-		args.signal,
+		signal,
 	);
-	if (
-		!cluster ||
-		typeof cluster !== "object" ||
-		(cluster as { cluster_id?: string }).cluster_id !== args.clusterId
-	) {
+	const clusterId =
+		cluster && typeof cluster === "object"
+			? (cluster as { cluster_id?: unknown }).cluster_id
+			: undefined;
+	if (typeof clusterId !== "string" || clusterId.length === 0) {
+		throw new Error("Backend did not return a cluster identity.");
+	}
+	return clusterId;
+}
+
+export async function probeBackendCandidate(args: {
+	origin: string;
+	clusterId: string;
+	signal?: AbortSignal;
+}): Promise<void> {
+	const origin = canonicalBackendOrigin(args.origin);
+	if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
+	if (isStaticWebConsole() && !staticAllowedOrigins.has(origin)) {
+		throw new Error("Backend is not present in the active runtime policy.");
+	}
+	const clusterId = await probeBackendHealthAndCluster(origin, args.signal);
+	if (clusterId !== args.clusterId) {
 		throw new Error("Backend belongs to a different cluster.");
 	}
 	await probeCompatibility(origin, args.signal);
