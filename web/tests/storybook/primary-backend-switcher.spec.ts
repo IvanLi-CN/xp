@@ -121,6 +121,10 @@ test("shows version differences and separate frontend links", async ({
 	);
 	await page.getByRole("button", { name: "Open primary backend" }).click();
 
+	const menu = page.getByRole("menu");
+	const menuBox = await menu.boundingBox();
+	if (!menuBox) throw new Error("Primary backend menu has no bounding box");
+	expect(menuBox.width).toBeLessThanOrEqual(336);
 	await expect(page.getByText("v3.21.11")).toBeVisible();
 	await expect(page.getByText("Service v3.21.11")).toHaveCount(0);
 	await expect(page.getByText("Version unknown")).toHaveCount(0);

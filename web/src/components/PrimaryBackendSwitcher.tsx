@@ -133,10 +133,7 @@ export function PrimaryBackendSwitcher(props: {
 					</span>
 				</Button>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent
-				align="end"
-				className="xp-menu-content w-[min(28rem,calc(100vw-1rem))]"
-			>
+			<DropdownMenuContent align="end" className="xp-menu-content">
 				<DropdownMenuLabel className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
 					Primary backend
 				</DropdownMenuLabel>
