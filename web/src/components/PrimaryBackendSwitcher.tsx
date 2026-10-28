@@ -148,7 +148,14 @@ export function PrimaryBackendSwitcher(props: {
 					) : (
 						candidates.map((candidate) => {
 							const isCurrent = candidate.origin === backend.primaryOrigin;
-							const resolved = buildNodePageHref(candidate.origin);
+							const resolved = buildNodePageHref(
+								candidate.origin,
+								window.location.href,
+								props.adminToken,
+								{
+									loginHandoff: "fragment",
+								},
+							);
 							const version = versionLabel(candidate);
 							return (
 								<div

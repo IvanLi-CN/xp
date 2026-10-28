@@ -215,7 +215,7 @@ describe("primary backend transport", () => {
 			{
 				node_id: fixtureCatalog.identifier.nodeTertiary(),
 				node_name: fixtureCatalog.identifier.nodeNameTertiary(),
-				api_base_url: window.location.origin,
+				api_base_url: fixtureCatalog.url.tertiaryApi(),
 			},
 		]);
 
@@ -483,6 +483,59 @@ describe("primary backend transport", () => {
 		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
 			window.location.origin,
 		);
+		expect(getPrimaryBackendSnapshot().state).toBe("ready");
+	});
+
+	it("keeps switching state while inventory refreshes during the barrier", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		let resolveTransaction: (() => void) | undefined;
+		const transaction = withPrimaryBackendMutation(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveTransaction = resolve;
+				}),
+		);
+		await Promise.resolve();
+
+		const switchPromise = switchPrimaryBackend({
+			origin: fixtureCatalog.url.secondaryApi(),
+			nodeId: fixtureCatalog.identifier.nodeSecondary(),
+			nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+			verifiedAt: Date.now(),
+			lastError: null,
+		});
+		await Promise.resolve();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		expect(getPrimaryBackendSnapshot().state).toBe("switching");
+
+		resolveTransaction?.();
+		await transaction;
+		await switchPromise;
+		expect(getPrimaryBackendSnapshot().state).toBe("ready");
 	});
 
 	it("rewrites SSE requests to the selected backend while keeping page assets local", async () => {

@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { fixtureCatalog } from "@/fixture-policy/catalog";
+
 import {
+	buildLoginHandoffHash,
 	buildNodePageHref,
 	buildRedirectTarget,
+	parseLoginHandoffHash,
 	resolveLoginRedirectFromHref,
 	sanitizeRedirectPath,
 	stripLoginToken,
@@ -54,6 +58,27 @@ describe("navigation helpers", () => {
 		expect(resolved.href).toBe(
 			"https://node-b.example.com/nodes?view=table&login_token=fresh-token#history",
 		);
+	});
+
+	it("keeps the new-tab login handoff out of the request URL", () => {
+		const resolved = buildNodePageHref(
+			"https://node-b.example.com",
+			"https://node-a.example.com/nodes?view=table#history",
+			fixtureCatalog.token.fixture45(),
+			{ loginHandoff: "fragment" },
+		);
+
+		expect(resolved.disabled).toBe(false);
+		if (resolved.disabled) return;
+		const target = new URL(resolved.href);
+		expect(target.search).toBe("?view=table");
+		expect(target.hash).toBe(
+			buildLoginHandoffHash(fixtureCatalog.token.fixture45(), "#history"),
+		);
+		expect(parseLoginHandoffHash(target.hash)).toEqual({
+			token: fixtureCatalog.token.fixture45(),
+			redirectHash: "#history",
+		});
 	});
 
 	it("disables cross-node hrefs for invalid base URLs", () => {

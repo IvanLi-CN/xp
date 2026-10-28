@@ -9,8 +9,10 @@ useful selector row. Anonymous bootstrap pages still receive no topology.
 The selector uses the existing manual backend verification and mutation barrier
 for API switching. A separate per-node link opens the registered frontend in a
 new tab, preserving the current path, query and hash and using the existing
-login handoff. It does not proxy API traffic or make a node link a switching
-permission.
+login handoff. Selector links carry that handoff in a fragment-only envelope;
+the destination login route consumes it and replaces the history entry before
+continuing, so the administrator token is not sent in the navigation request
+URL. It does not proxy API traffic or make a node link a switching permission.
 
 Service versions are read through an authenticated aggregate endpoint. The
 aggregate resolves only Raft-registered node IDs and HTTPS addresses, sends the

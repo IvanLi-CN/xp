@@ -19,6 +19,8 @@
 - 注册 HTTPS 地址会拒绝 URL userinfo，出站固定路径拼接也执行同一拒绝，避免地址携带凭据。
 - 节点版本扇出在并发受限的同时共享一个总截止时间，慢节点不会按并发批次累加请求窗口。
 - 前端新标签入口同样要求无凭据、路径、查询或 fragment 的 canonical HTTPS origin，非法地址仅保留禁用入口。
+- 选择器新标签登录交接改用 fragment-only envelope；目标登录路由消费后替换历史记录，避免管理员
+  token 出现在导航请求 URL，而既有节点列表入口保持兼容。
 - mutation barrier 等待期间若节点被移除或策略撤销，提交前复核会拒绝旧候选，避免恢复已失效的后端。
 
 ## Compatibility

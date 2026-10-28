@@ -63,7 +63,10 @@ ADR 0012 and does not alter this embedded-PWA contract.
 - **REQ-NODE-LINK**: The per-node frontend action MUST open a new tab with
   `noopener noreferrer`, preserve the current pathname, query and hash, and
   use the existing login handoff without sending credentials through an API
-  proxy. The action MUST remain available for the current or non-switchable
+  proxy. Selector links MUST carry the handoff in a fragment-only envelope;
+  the destination MUST consume it through the login route and replace the
+  history entry before continuing, so the administrator token is not sent in
+  the navigation request URL. The action MUST remain available for the current or non-switchable
   node when its HTTPS origin is valid. An invalid origin MUST disable only the
   frontend action and explain the reason. Switching and opening a node MUST be
   separate keyboard-accessible controls without nested interactive elements.

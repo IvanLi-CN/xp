@@ -434,7 +434,7 @@ export function hydratePrimaryBackendProfile(
 		primaryOrigin: nextPrimary,
 		candidates: [...candidatesByOrigin.values()],
 		generation: changed ? state.generation + 1 : state.generation,
-		state: "ready",
+		state: state.state === "switching" ? "switching" : "ready",
 	};
 	persistCurrentProfile();
 	notify();
@@ -727,6 +727,11 @@ export async function switchPrimaryBackend(
 		(candidate) => candidate.origin === origin,
 	);
 	if (!currentCandidate || currentCandidate.switchable === false) {
+		state = {
+			...state,
+			state: "ready",
+		};
+		notify();
 		throw new Error("Backend is no longer available for switching.");
 	}
 	const candidates = state.candidates.some((item) => item.origin === origin)
