@@ -499,7 +499,7 @@ export function hydrateStaticRuntimePolicy(
 		primaryOrigin: nextPrimary,
 		candidates: [...candidatesByOrigin.values()],
 		generation: changed ? state.generation + 1 : state.generation,
-		state: "ready",
+		state: state.state === "switching" ? "switching" : "ready",
 	};
 	notify();
 }

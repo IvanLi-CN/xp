@@ -24,6 +24,8 @@
 - mutation barrier 等待期间若节点被移除或策略撤销，提交前复核会拒绝旧候选，避免恢复已失效的后端。
 - mutation barrier drain 或超时后会重新读取认证节点目录，并在静态控制台重新读取运行策略；重验证
   失败恢复 ready 状态且不改变主后端，并拒绝并行切换。
+- 重验证只接受 refetch 成功结果，保留的旧缓存不能掩盖目录或策略读取失败；静态策略 hydration
+  在切换进行时保持 switching 锁。
 
 ## Compatibility
 

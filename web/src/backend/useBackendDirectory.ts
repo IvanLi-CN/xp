@@ -20,7 +20,10 @@ export function useBackendDirectory(args: {
 	staticConsole: boolean;
 	runtimePolicyReady: boolean;
 	selectorOpen: boolean;
-	refreshRuntimePolicy: () => Promise<{ data?: RuntimePolicy }>;
+	refreshRuntimePolicy: () => Promise<{
+		data?: RuntimePolicy;
+		isSuccess: boolean;
+	}>;
 }) {
 	const enabled =
 		args.adminToken.length > 0 &&
@@ -84,6 +87,7 @@ export function useBackendDirectory(args: {
 			const policyResult = await args.refreshRuntimePolicy();
 			const policy = policyResult.data;
 			if (
+				!policyResult.isSuccess ||
 				!policy ||
 				policy.cluster_id !== args.clusterId ||
 				Date.parse(policy.expires_at) <= Date.now()
@@ -96,7 +100,7 @@ export function useBackendDirectory(args: {
 			]);
 		}
 		const inventory = await backendNodes.refetch();
-		if (!inventory.data) return false;
+		if (!inventory.isSuccess || !inventory.data) return false;
 		hydratePrimaryBackendProfile(args.clusterId, inventory.data.items);
 		return true;
 	}, [

@@ -104,8 +104,8 @@ ADR 0012 and does not alter this embedded-PWA contract.
   switch MUST refresh the authenticated registered-node directory and, in
   Static Web mode, the current Runtime Policy before committing. A removed or
   policy-disallowed candidate MUST be rejected, and any revalidation failure
-  MUST restore the selector to a ready state without changing the primary
-  origin.
+  (including a failed refetch that retains cached data) MUST restore the
+  selector to a ready state without changing the primary origin.
 - **REQ-NAV**: The AppShell MUST expose the primary-backend selector as the
   rightmost header control, after Settings, on desktop and narrow viewports.
   It MUST provide accessible labels and keep the selector and adjacent

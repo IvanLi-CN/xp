@@ -46,7 +46,9 @@
 - The mutation barrier rechecks for a mutation opened during drain notification before committing
   a primary switch, and the selected candidate is revalidated against a fresh authenticated
   directory and, for Static Web, Runtime Policy before commit. Failed revalidation restores the
-  ready state; concurrent switch attempts are rejected while one barrier is active.
+  ready state; cached data from an unsuccessful refetch never satisfies the check, and concurrent
+  switch attempts are rejected while one barrier is active. Policy hydration preserves the active
+  switching state until the commit path finishes.
 - Registered HTTPS origins reject URL userinfo at both metadata validation and outbound URL joining,
   so credentials cannot be supplied through a node address.
 - External subscription URLs are built from the current verified Primary Backend origin, so copied

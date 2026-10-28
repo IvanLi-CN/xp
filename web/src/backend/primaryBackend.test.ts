@@ -8,6 +8,7 @@ import {
 	getPrimaryBackendSnapshot,
 	hydrateBackendVersions,
 	hydratePrimaryBackendProfile,
+	hydrateStaticRuntimePolicy,
 	installPrimaryBackendTransport,
 	normalizeReleaseVersion,
 	recognizedReleaseVersion,
@@ -529,6 +530,10 @@ describe("primary backend transport", () => {
 				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
 				api_base_url: fixtureCatalog.url.secondaryApi(),
 			},
+		]);
+		hydrateStaticRuntimePolicy(fixtureCatalog.cluster.fixture84(), [
+			fixtureCatalog.url.primaryApi(),
+			fixtureCatalog.url.secondaryApi(),
 		]);
 		expect(getPrimaryBackendSnapshot().state).toBe("switching");
 
