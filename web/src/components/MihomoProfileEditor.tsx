@@ -257,7 +257,7 @@ export function MihomoProfileEditor({
 	);
 	const viewportMetrics = useVisualViewportMetrics(expanded);
 	const currentStatus = statusLabel(readOnly, dirty);
-	const canImport = importAvailable && !readOnly && isLoaded;
+	const canImport = importAvailable && !readOnly && isLoaded && !isVerifying;
 	const [retryAcknowledged, setRetryAcknowledged] = useState(false);
 	const needsRetryWarning = saveFeedback?.kind === "outcome_unknown" && dirty;
 

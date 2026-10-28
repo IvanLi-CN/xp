@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
 import { MihomoSaveOutcomeUnknownError } from "../utils/mihomoSaveOutcome";
-import { useMihomoProfileDraft } from "./useMihomoProfileDraft";
+import {
+	MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX,
+	useMihomoProfileDraft,
+} from "./useMihomoProfileDraft";
 
 const PROFILE_A: AdminUserMihomoProfile = {
 	mixin_yaml: "port: 0\n",
@@ -176,6 +179,42 @@ describe("useMihomoProfileDraft", () => {
 		expect(result.current.saveFeedback?.verification).toBe("unavailable");
 	});
 
+	it("blocks edits while a manual check is pending", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "unknown write\n" };
+		let resolveVerify: ((profile: AdminUserMihomoProfile) => void) | undefined;
+		const verifyProfile = vi.fn(
+			() =>
+				new Promise<AdminUserMihomoProfile>((resolve) => {
+					resolveVerify = resolve;
+				}),
+		);
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile: vi.fn(async (profile) => profile),
+				verifyProfile,
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", submitted.mixin_yaml));
+		let verifyPromise: Promise<boolean> | undefined;
+		act(() => {
+			verifyPromise = result.current.verify();
+		});
+		await waitFor(() => expect(result.current.isVerifying).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "edited while checking\n"));
+		act(() => result.current.discard());
+		expect(result.current.draft).toEqual(submitted);
+		expect(await result.current.save()).toBe(false);
+
+		act(() => resolveVerify?.(submitted));
+		if (!verifyPromise) throw new Error("verification request was not created");
+		await act(async () => expect(await verifyPromise).toBe(true));
+		expect(result.current.draft).toEqual(submitted);
+	});
+
 	it("keeps an unavailable unknown result after remounting", async () => {
 		const submitted = { ...PROFILE_A, mixin_yaml: "persisted unknown\n" };
 		const saveProfile = vi.fn(async () => {
@@ -235,10 +274,15 @@ describe("useMihomoProfileDraft", () => {
 		const key = Object.keys(window.localStorage).find((candidate) =>
 			candidate.includes("xp.mihomo-profile-draft.v1"),
 		);
-		const storageKey = key ?? "xp.mihomo-profile-draft.v1:user-a";
+		const storageKey =
+			key ??
+			`${MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX}${encodeURIComponent("user-a")}:other-tab`;
 		window.localStorage.setItem(
 			storageKey,
-			JSON.stringify({ draft: next, saveFeedback: null }),
+			JSON.stringify({
+				draft: next,
+				saveFeedback: null,
+			}),
 		);
 		act(() => {
 			window.dispatchEvent(
@@ -250,6 +294,46 @@ describe("useMihomoProfileDraft", () => {
 		});
 		await waitFor(() => expect(result.current.draft).toEqual(next));
 		expect(result.current.dirty).toBe(true);
+	});
+
+	it("keeps another tab's draft when this tab saves", async () => {
+		const saveProfile = vi.fn(async (profile) => profile);
+		const first = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
+		act(() => first.result.current.setField("mixin_yaml", "this tab\n"));
+
+		const otherTabDraft = { ...PROFILE_A, mixin_yaml: "other tab\n" };
+		const otherTabKey = [
+			MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX,
+			encodeURIComponent("user-a"),
+			":other-tab",
+		].join("");
+		window.localStorage.setItem(
+			otherTabKey,
+			JSON.stringify({
+				draft: otherTabDraft,
+				saveFeedback: null,
+			}),
+		);
+		await act(async () => expect(await first.result.current.save()).toBe(true));
+		first.unmount();
+
+		const second = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(second.result.current.isLoaded).toBe(true));
+		expect(second.result.current.draft).toEqual(otherTabDraft);
+		expect(second.result.current.dirty).toBe(true);
 	});
 
 	it("keeps dirty drafts across refreshes and accepts a complete save response", async () => {

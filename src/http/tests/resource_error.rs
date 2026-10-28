@@ -47,6 +47,24 @@ fn raft_write_api_error_exposes_only_safe_outcome_details() {
 }
 
 #[test]
+fn raft_write_not_dispatched_omits_overwrite_warning() {
+    let error = RaftWriteError::not_dispatched(
+        "remote_not_dispatched",
+        Some("node-a".to_string()),
+        "support-a",
+    )
+    .with_remote_status(503);
+    let api_error = super::super::map_raft_write_error(anyhow::Error::new(error));
+
+    assert_eq!(api_error.code, "raft_write_not_dispatched");
+    assert_eq!(api_error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(api_error.details["dispatch_state"], "not_dispatched");
+    assert_eq!(api_error.details["confidence"], "confirmed");
+    assert_eq!(api_error.details["remote_status"], 503);
+    assert!(!api_error.details.contains_key("manual_retry_warning"));
+}
+
+#[test]
 fn unclassified_raft_error_does_not_leak_the_source_message() {
     let api_error = super::super::map_raft_write_error(anyhow::anyhow!(
         "internal URL https://secret.example.invalid and token=secret"

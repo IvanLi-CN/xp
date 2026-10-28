@@ -761,7 +761,7 @@ impl MeshAwareHttpClient {
                                 | MeshRequestError::PreDispatchTimeout
                                 | MeshRequestError::InvalidTarget(_)
                         ) {
-                            return Err(error);
+                            return Err(preserve_ambiguous_dispatch(error, mesh_outcome_ambiguous));
                         }
                         if matches!(
                             &error,

@@ -49,14 +49,38 @@ function profileKey(profile: AdminUserMihomoProfile | undefined): string {
 
 export const MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX =
 	"xp.mihomo-profile-draft.v1:";
+const MIHOMO_PROFILE_TAB_ID_STORAGE_KEY = "xp.mihomo-profile.tab-id.v1";
 
 type PersistedMihomoDraft = {
 	draft: AdminUserMihomoProfile;
 	saveFeedback: MihomoSaveFeedback | null;
+	updatedAt: number;
 };
 
-function mihomoDraftStorageKey(userId: string): string {
-	return `${MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX}${encodeURIComponent(userId)}`;
+function browserTabId(): string {
+	if (typeof window === "undefined") return "server";
+	try {
+		const existing = window.sessionStorage.getItem(
+			MIHOMO_PROFILE_TAB_ID_STORAGE_KEY,
+		);
+		if (existing) return existing;
+		const generated =
+			typeof crypto !== "undefined" && "randomUUID" in crypto
+				? crypto.randomUUID()
+				: `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		window.sessionStorage.setItem(MIHOMO_PROFILE_TAB_ID_STORAGE_KEY, generated);
+		return generated;
+	} catch {
+		return `ephemeral-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	}
+}
+
+function mihomoDraftStoragePrefix(userId: string): string {
+	return `${MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX}${encodeURIComponent(userId)}:`;
+}
+
+function mihomoDraftStorageKey(userId: string, tabId: string): string {
+	return `${mihomoDraftStoragePrefix(userId)}${encodeURIComponent(tabId)}`;
 }
 
 function validProfile(value: unknown): value is AdminUserMihomoProfile {
@@ -107,11 +131,11 @@ function persistedFeedback(value: unknown): MihomoSaveFeedback | null {
 	};
 }
 
-function readPersistedMihomoDraft(userId: string): PersistedMihomoDraft | null {
-	if (typeof window === "undefined") return null;
+function parsePersistedMihomoDraft(
+	raw: string | null,
+): PersistedMihomoDraft | null {
+	if (!raw) return null;
 	try {
-		const raw = window.localStorage.getItem(mihomoDraftStorageKey(userId));
-		if (!raw) return null;
 		const parsed: unknown = JSON.parse(raw);
 		if (typeof parsed !== "object" || parsed === null) return null;
 		const record = parsed as Record<string, unknown>;
@@ -119,32 +143,73 @@ function readPersistedMihomoDraft(userId: string): PersistedMihomoDraft | null {
 		return {
 			draft: cloneProfile(record.draft),
 			saveFeedback: persistedFeedback(record.saveFeedback),
+			updatedAt:
+				typeof record.updatedAt === "number" &&
+				Number.isFinite(record.updatedAt)
+					? record.updatedAt
+					: 0,
 		};
 	} catch {
 		return null;
 	}
 }
 
-function persistMihomoDraft(
+function readPersistedMihomoDraft(
+	storageKey: string,
+): PersistedMihomoDraft | null {
+	if (typeof window === "undefined") return null;
+	try {
+		return parsePersistedMihomoDraft(window.localStorage.getItem(storageKey));
+	} catch {
+		return null;
+	}
+}
+
+function readLatestOtherMihomoDraft(
 	userId: string,
+	tabId: string,
+): PersistedMihomoDraft | null {
+	if (typeof window === "undefined") return null;
+	const prefix = mihomoDraftStoragePrefix(userId);
+	let latest: PersistedMihomoDraft | null = null;
+	try {
+		for (let index = 0; index < window.localStorage.length; index += 1) {
+			const key = window.localStorage.key(index);
+			if (!key || key === mihomoDraftStorageKey(userId, tabId)) continue;
+			if (!key.startsWith(prefix)) continue;
+			const candidate = parsePersistedMihomoDraft(
+				window.localStorage.getItem(key),
+			);
+			if (candidate && (!latest || candidate.updatedAt > latest.updatedAt)) {
+				latest = candidate;
+			}
+		}
+	} catch {
+		return latest;
+	}
+	return latest;
+}
+
+function persistMihomoDraft(
+	storageKey: string,
 	draft: AdminUserMihomoProfile,
 	saveFeedback: MihomoSaveFeedback | null,
 ): void {
 	if (typeof window === "undefined") return;
 	try {
 		window.localStorage.setItem(
-			mihomoDraftStorageKey(userId),
-			JSON.stringify({ draft, saveFeedback }),
+			storageKey,
+			JSON.stringify({ draft, saveFeedback, updatedAt: Date.now() }),
 		);
 	} catch {
 		// Browser storage can be unavailable or full; the in-memory draft remains authoritative.
 	}
 }
 
-function clearPersistedMihomoDraft(userId: string): void {
+function clearPersistedMihomoDraft(storageKey: string): void {
 	if (typeof window === "undefined") return;
 	try {
-		window.localStorage.removeItem(mihomoDraftStorageKey(userId));
+		window.localStorage.removeItem(storageKey);
 	} catch {
 		// Ignore storage failures; clearing local React state is still safe.
 	}
@@ -160,8 +225,14 @@ export function useMihomoProfileDraft({
 	formatError = (error) =>
 		error instanceof Error ? error.message : String(error),
 }: UseMihomoProfileDraftProps) {
-	const storageKey = mihomoDraftStorageKey(userId);
-	const initialPersistedDraft = readPersistedMihomoDraft(userId);
+	const tabIdRef = useRef<string | null>(null);
+	if (tabIdRef.current === null) tabIdRef.current = browserTabId();
+	const tabId = tabIdRef.current;
+	const storageKey = mihomoDraftStorageKey(userId, tabId);
+	const storagePrefix = mihomoDraftStoragePrefix(userId);
+	const initialPersistedDraft =
+		readPersistedMihomoDraft(storageKey) ??
+		readLatestOtherMihomoDraft(userId, tabId);
 	const [draft, setDraftState] = useState<AdminUserMihomoProfile>(() =>
 		cloneProfile(
 			initialPersistedDraft?.draft ?? profile ?? EMPTY_MIHOMO_PROFILE,
@@ -226,7 +297,9 @@ export function useMihomoProfileDraft({
 		)
 			return;
 		if (loadedUserId !== userId) {
-			const persisted = readPersistedMihomoDraft(userId);
+			const persisted =
+				readPersistedMihomoDraft(storageKey) ??
+				readLatestOtherMihomoDraft(userId, tabId);
 			setLoadedUserId(userId);
 			setDraftState(cloneProfile(persisted?.draft ?? profile));
 			setBaseline(cloneProfile(profile));
@@ -257,7 +330,7 @@ export function useMihomoProfileDraft({
 		acceptedProfileKeyRef.current = incomingProfileKey;
 		setError(null);
 		setSaveFeedback(null);
-		clearPersistedMihomoDraft(userId);
+		clearPersistedMihomoDraft(storageKey);
 	}, [
 		dirty,
 		incomingProfileKey,
@@ -266,32 +339,35 @@ export function useMihomoProfileDraft({
 		profile,
 		sessionIdentity,
 		storageKey,
+		tabId,
 		userId,
 	]);
 
 	useEffect(() => {
 		if (!isLoaded || hydratedStorageKeyRef.current !== storageKey) return;
 		if (!dirty && !saveFeedback) {
-			clearPersistedMihomoDraft(userId);
+			clearPersistedMihomoDraft(storageKey);
 			return;
 		}
-		persistMihomoDraft(userId, draft, saveFeedback);
-	}, [draft, dirty, isLoaded, saveFeedback, storageKey, userId]);
+		persistMihomoDraft(storageKey, draft, saveFeedback);
+	}, [draft, dirty, isLoaded, saveFeedback, storageKey]);
 
 	useEffect(() => {
 		if (typeof window === "undefined") return;
 		const handleStorage = (event: StorageEvent) => {
 			if (
-				event.key !== storageKey ||
+				!event.key ||
+				!event.key.startsWith(storagePrefix) ||
+				event.key === storageKey ||
 				!isLoaded ||
 				dirty ||
 				isSaving ||
 				isVerifying
 			)
 				return;
-			const persisted = event.newValue
-				? readPersistedMihomoDraft(userId)
-				: null;
+			const persisted =
+				parsePersistedMihomoDraft(event.newValue) ??
+				readLatestOtherMihomoDraft(userId, tabId);
 			const next =
 				persisted?.draft ?? cloneProfile(profile ?? EMPTY_MIHOMO_PROFILE);
 			setDraftState(next);
@@ -303,19 +379,29 @@ export function useMihomoProfileDraft({
 		};
 		window.addEventListener("storage", handleStorage);
 		return () => window.removeEventListener("storage", handleStorage);
-	}, [dirty, isLoaded, isSaving, isVerifying, profile, storageKey, userId]);
+	}, [
+		dirty,
+		isLoaded,
+		isSaving,
+		isVerifying,
+		profile,
+		storageKey,
+		storagePrefix,
+		tabId,
+		userId,
+	]);
 
 	const setField = useCallback(
 		(documentId: MihomoProfileDocumentId, value: string) => {
-			if (readOnly || isSaving || !isLoaded) return;
+			if (readOnly || isSaving || isVerifying || !isLoaded) return;
 			setDraftState((current) => ({ ...current, [documentId]: value }));
 			setError(null);
 		},
-		[isLoaded, isSaving, readOnly],
+		[isLoaded, isSaving, isVerifying, readOnly],
 	);
 
 	const discard = useCallback(() => {
-		if (isSaving) return;
+		if (isSaving || isVerifying) return;
 		const next = profile ?? baseline;
 		setDraftState(cloneProfile(next));
 		setBaseline(cloneProfile(next));
@@ -324,7 +410,7 @@ export function useMihomoProfileDraft({
 		setLoadedUserId(profile ? userId : loadedUserId);
 		setError(null);
 		setSaveFeedback(null);
-	}, [baseline, isSaving, loadedUserId, profile, userId]);
+	}, [baseline, isSaving, isVerifying, loadedUserId, profile, userId]);
 
 	const acceptProfile = useCallback(
 		(saved: AdminUserMihomoProfile, targetUserId: string) => {
@@ -342,6 +428,7 @@ export function useMihomoProfileDraft({
 		if (
 			readOnly ||
 			!isLoaded ||
+			isVerifying ||
 			!dirty ||
 			currentUserIdRef.current !== userId ||
 			currentSessionIdentityRef.current !== sessionIdentity
@@ -432,6 +519,7 @@ export function useMihomoProfileDraft({
 		isLoaded,
 		readOnly,
 		saveProfile,
+		isVerifying,
 		verifyProfile,
 		sessionIdentity,
 		baseline,
@@ -444,6 +532,7 @@ export function useMihomoProfileDraft({
 			readOnly ||
 			!isLoaded ||
 			isSaving ||
+			isVerifying ||
 			currentUserIdRef.current !== userId ||
 			currentSessionIdentityRef.current !== sessionIdentity
 		)
@@ -496,6 +585,7 @@ export function useMihomoProfileDraft({
 		formatError,
 		isLoaded,
 		isSaving,
+		isVerifying,
 		readOnly,
 		saveFeedback,
 		sessionIdentity,

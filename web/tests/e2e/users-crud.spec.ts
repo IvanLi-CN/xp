@@ -161,6 +161,9 @@ test("persists all three Mihomo documents through the production save path", asy
 	await setupApiMocks(page);
 
 	await page.goto(`/users/${fixtureCatalog.identifier.userPrimary()}`);
+	await expect(
+		page.locator('[data-mihomo-document="mixin_yaml"] .cm-content'),
+	).toHaveAttribute("contenteditable", "true");
 	const values = {
 		mixin_yaml: "port: 7890\n",
 		extra_proxies_yaml: "- name: e2e-proxy\n  type: ss\n",

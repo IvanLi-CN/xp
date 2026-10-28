@@ -252,30 +252,52 @@ async fn forwarded_client_write_failures_keep_safe_outcome_details() {
         .expect("cluster CA");
     let target_id = xp_test_fixtures::primary_node_id().to_owned();
     let sender_id = xp_test_fixtures::tertiary_node_id().to_owned();
-    let cluster_id = xp_test_fixtures::cluster_fixture53().to_owned();
     let command = DesiredStateCommand::SetMeshEnabled { enabled: false };
     let node = crate::domain::Node {
-        node_id: target_id.clone(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
         node_name: xp_test_fixtures::primary_node_name().to_owned(),
         access_host: xp_test_fixtures::primary_host().to_owned(),
-        api_base_url: String::new(),
+        api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: Default::default(),
     };
 
-    for (status, body, cause, remote_status) in [
+    for (status, body, cause, dispatch_state, remote_status) in [
         (
             StatusCode::BAD_GATEWAY,
             r#"{}"#,
             "remote_error_response",
+            RaftWriteDispatchState::DispatchedNoVerifiedResponse,
             Some(502),
         ),
-        (StatusCode::OK, "not-json", "response_decode", None),
+        (
+            StatusCode::OK,
+            "not-json",
+            "response_decode",
+            RaftWriteDispatchState::DispatchedNoVerifiedResponse,
+            None,
+        ),
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            r#"{
+                "error": {
+                    "code": "raft_write_not_dispatched",
+                    "message": "write was not sent to the leader",
+                    "details": {
+                        "dispatch_state": "not_dispatched",
+                        "confidence": "confirmed"
+                    }
+                }
+            }"#,
+            "remote_not_dispatched",
+            RaftWriteDispatchState::NotDispatched,
+            Some(503),
+        ),
     ] {
         let (public_base_url, task) = spawn_forward_response(ForwardResponseState {
             ca_key_pem: ca.key_pem.clone(),
             ca_cert_pem: ca.cert_pem.clone(),
-            cluster_id: cluster_id.clone(),
+            cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
             sender_id: sender_id.clone(),
             target_id: target_id.clone(),
             status,
@@ -289,7 +311,7 @@ async fn forwarded_client_write_failures_keep_safe_outcome_details() {
             &ForwardingAuth {
                 cluster_ca_key_pem: &ca.key_pem,
                 cluster_ca_pem: &ca.cert_pem,
-                cluster_id: &cluster_id,
+                cluster_id: xp_test_fixtures::cluster_fixture53(),
                 sender_id: &sender_id,
             },
             &peer,
@@ -302,10 +324,7 @@ async fn forwarded_client_write_failures_keep_safe_outcome_details() {
             .downcast_ref::<RaftWriteError>()
             .expect("forwarded write error should remain typed");
         assert_eq!(typed.cause(), cause);
-        assert_eq!(
-            typed.dispatch_state(),
-            RaftWriteDispatchState::DispatchedNoVerifiedResponse
-        );
+        assert_eq!(typed.dispatch_state(), dispatch_state);
         assert_eq!(typed.remote_status(), remote_status);
         task.abort();
     }
