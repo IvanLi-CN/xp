@@ -100,6 +100,12 @@ ADR 0012 and does not alter this embedded-PWA contract.
   timeout. A timeout MUST never replay the mutation; after the timeout an
   administrator MAY switch manually and MUST be shown the unknown-result
   state.
+- **REQ-REVALIDATE**: After the mutation barrier drains or times out, a primary
+  switch MUST refresh the authenticated registered-node directory and, in
+  Static Web mode, the current Runtime Policy before committing. A removed or
+  policy-disallowed candidate MUST be rejected, and any revalidation failure
+  MUST restore the selector to a ready state without changing the primary
+  origin.
 - **REQ-NAV**: The AppShell MUST expose the primary-backend selector as the
   rightmost header control, after Settings, on desktop and narrow viewports.
   It MUST provide accessible labels and keep the selector and adjacent
@@ -148,6 +154,10 @@ ADR 0012 and does not alter this embedded-PWA contract.
 - **VER-BARRIER** covers: REQ-BARRIER. The mutation-barrier test advances the
   60-second timeout, checks the unknown-result counter, and proves no replay
   request is generated.
+- **VER-REVALIDATE** covers: REQ-REVALIDATE. Backend unit tests verify that a
+  post-barrier directory rejection restores `ready`, keeps the primary origin,
+  rejects concurrent switches, and preserves `switching` while inventory
+  hydration completes.
 - **VER-UI** covers: REQ-NAV. The Storybook suite
   `primary-backend-switcher.spec.ts` verifies right-edge control ordering,
   narrow-menu bounds, keyboard-accessible labels, and non-overlapping

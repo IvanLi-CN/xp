@@ -22,6 +22,8 @@
 - 选择器新标签登录交接改用 fragment-only envelope；目标登录路由消费后替换历史记录，避免管理员
   token 出现在导航请求 URL，而既有节点列表入口保持兼容。
 - mutation barrier 等待期间若节点被移除或策略撤销，提交前复核会拒绝旧候选，避免恢复已失效的后端。
+- mutation barrier drain 或超时后会重新读取认证节点目录，并在静态控制台重新读取运行策略；重验证
+  失败恢复 ready 状态且不改变主后端，并拒绝并行切换。
 
 ## Compatibility
 

@@ -37,6 +37,7 @@ export function PrimaryBackendSwitcher(props: {
 	onOpened?: () => void;
 	onOpenChange?: (open: boolean) => void;
 	onSwitched?: () => void;
+	revalidateBeforeSwitch?: () => Promise<boolean>;
 	frontendVersion?: string | null;
 }) {
 	const backend = usePrimaryBackend();
@@ -77,7 +78,9 @@ export function PrimaryBackendSwitcher(props: {
 				clusterId: props.clusterId,
 				adminToken: props.adminToken,
 			});
-			await switchPrimaryBackend(verified);
+			await switchPrimaryBackend(verified, {
+				revalidate: props.revalidateBeforeSwitch,
+			});
 			props.onSwitched?.();
 			setOpen(false);
 		} catch (reason) {

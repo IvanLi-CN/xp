@@ -38,6 +38,10 @@ export type SwitchResult = {
 	timedOut: boolean;
 };
 
+export type SwitchOptions = {
+	revalidate?: () => Promise<boolean>;
+};
+
 type StoredProfiles = {
 	activeClusterId?: string;
 	profiles?: Record<string, BackendProfile>;
@@ -707,11 +711,15 @@ async function waitForMutations(): Promise<boolean> {
 
 export async function switchPrimaryBackend(
 	candidate: BackendCandidate,
+	options: SwitchOptions = {},
 ): Promise<SwitchResult> {
 	const origin = canonicalBackendOrigin(candidate.origin);
 	if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
 	if (!candidate.verifiedAt) {
 		throw new Error("Backend must be verified before switching.");
+	}
+	if (state.state === "switching") {
+		throw new Error("Backend switch is already in progress.");
 	}
 	if (origin === state.primaryOrigin) return { timedOut: false };
 	updateState({ state: "switching", lastSwitchTimedOut: false });
@@ -722,6 +730,22 @@ export async function switchPrimaryBackend(
 			unknownMutationCount: state.unknownMutationCount + 1,
 			lastSwitchTimedOut: true,
 		};
+	}
+	let revalidated = true;
+	if (options.revalidate) {
+		try {
+			revalidated = await options.revalidate();
+		} catch {
+			revalidated = false;
+		}
+	}
+	if (!revalidated) {
+		state = {
+			...state,
+			state: "ready",
+		};
+		notify();
+		throw new Error("Backend directory is no longer available for switching.");
 	}
 	const currentCandidate = state.candidates.find(
 		(candidate) => candidate.origin === origin,

@@ -235,17 +235,18 @@ export function AppShell({
 					? "API compatibility is unavailable while offline."
 					: null;
 
-	const { refreshBackendCandidates } = useBackendDirectory({
-		adminToken,
-		clusterId: clusterInfo.data?.cluster_id,
-		primaryClusterId: primaryBackend.clusterId,
-		primaryOrigin: primaryBackend.primaryOrigin,
-		runtimeOnline: runtime.isOnline,
-		staticConsole,
-		runtimePolicyReady,
-		selectorOpen: backendSelectorOpen,
-		refreshRuntimePolicy: runtimePolicy.refetch,
-	});
+	const { refreshBackendCandidates, revalidateBackendCandidate } =
+		useBackendDirectory({
+			adminToken,
+			clusterId: clusterInfo.data?.cluster_id,
+			primaryClusterId: primaryBackend.clusterId,
+			primaryOrigin: primaryBackend.primaryOrigin,
+			runtimeOnline: runtime.isOnline,
+			staticConsole,
+			runtimePolicyReady,
+			selectorOpen: backendSelectorOpen,
+			refreshRuntimePolicy: runtimePolicy.refetch,
+		});
 
 	useStaticRuntimePolicy({
 		enabled: staticConsole,
@@ -935,6 +936,7 @@ export function AppShell({
 									}
 									onOpened={refreshBackendCandidates}
 									onOpenChange={setBackendSelectorOpen}
+									revalidateBeforeSwitch={revalidateBackendCandidate}
 								/>
 							</div>
 						</div>

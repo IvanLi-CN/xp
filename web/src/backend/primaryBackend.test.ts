@@ -538,6 +538,40 @@ describe("primary backend transport", () => {
 		expect(getPrimaryBackendSnapshot().state).toBe("ready");
 	});
 
+	it("restores the ready state when refreshed directory validation fails", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+
+		await expect(
+			switchPrimaryBackend(
+				{
+					origin: fixtureCatalog.url.secondaryApi(),
+					nodeId: fixtureCatalog.identifier.nodeSecondary(),
+					nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+					verifiedAt: Date.now(),
+					lastError: null,
+				},
+				{ revalidate: async () => false },
+			),
+		).rejects.toThrow("directory is no longer available");
+		expect(getPrimaryBackendSnapshot().state).toBe("ready");
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
+	});
+
 	it("rewrites SSE requests to the selected backend while keeping page assets local", async () => {
 		const fetchMock = vi.fn(
 			(_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>

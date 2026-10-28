@@ -3,9 +3,12 @@ import { useCallback, useEffect } from "react";
 
 import { fetchAdminNodeVersions } from "@/api/adminNodeVersions";
 import { fetchAdminNodes } from "@/api/adminNodes";
+import type { RuntimePolicy } from "@/api/runtimePolicy";
 import {
+	STATIC_BOOTSTRAP_ORIGIN,
 	hydrateBackendVersions,
 	hydratePrimaryBackendProfile,
+	hydrateStaticRuntimePolicy,
 } from "./primaryBackend";
 
 export function useBackendDirectory(args: {
@@ -17,7 +20,7 @@ export function useBackendDirectory(args: {
 	staticConsole: boolean;
 	runtimePolicyReady: boolean;
 	selectorOpen: boolean;
-	refreshRuntimePolicy: () => unknown;
+	refreshRuntimePolicy: () => Promise<{ data?: RuntimePolicy }>;
 }) {
 	const enabled =
 		args.adminToken.length > 0 &&
@@ -73,6 +76,37 @@ export function useBackendDirectory(args: {
 		nodeVersionsUpdatedAt,
 		nodeVersions.isSuccess,
 	]);
+	const revalidateBackendCandidate = useCallback(async () => {
+		if (!args.adminToken || !args.primaryClusterId || !args.clusterId) {
+			return false;
+		}
+		if (args.staticConsole) {
+			const policyResult = await args.refreshRuntimePolicy();
+			const policy = policyResult.data;
+			if (
+				!policy ||
+				policy.cluster_id !== args.clusterId ||
+				Date.parse(policy.expires_at) <= Date.now()
+			) {
+				return false;
+			}
+			hydrateStaticRuntimePolicy(args.clusterId, [
+				STATIC_BOOTSTRAP_ORIGIN,
+				...policy.api_origins,
+			]);
+		}
+		const inventory = await backendNodes.refetch();
+		if (!inventory.data) return false;
+		hydratePrimaryBackendProfile(args.clusterId, inventory.data.items);
+		return true;
+	}, [
+		args.adminToken,
+		args.clusterId,
+		args.primaryClusterId,
+		args.refreshRuntimePolicy,
+		args.staticConsole,
+		backendNodes.refetch,
+	]);
 	const refreshBackendCandidates = useCallback(() => {
 		if (!args.adminToken || !args.primaryClusterId) return;
 		if (args.staticConsole && !args.runtimePolicyReady) {
@@ -95,5 +129,5 @@ export function useBackendDirectory(args: {
 		nodeVersions.refetch,
 	]);
 
-	return { nodeVersions, refreshBackendCandidates };
+	return { nodeVersions, refreshBackendCandidates, revalidateBackendCandidate };
 }
