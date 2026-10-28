@@ -36,8 +36,8 @@
   ready, and a successful inventory response replaces stale static rows.
 - The selector keeps switching and full-page node opening as separate actions. Node opening uses
   the existing path/query/hash and login handoff, targets a new tab with `noopener noreferrer`, and
-  disables only invalid HTTPS targets. A bounded authenticated version fan-out reads each node's
-  local release through the fixed `/api/cluster/info` route, verifies the cluster ID,
+  disables invalid or non-canonical HTTPS targets. A bounded authenticated version fan-out reads
+  each node's local release through the fixed `/api/cluster/info` route, verifies the cluster ID,
   and reports only service versions that differ from the recognized frontend release. Unknown
   service versions and unrecognized frontend releases omit the comparison label entirely.
   The bounded fan-out shares one aggregate deadline across all registered nodes.

@@ -720,6 +720,12 @@ export async function switchPrimaryBackend(
 			lastSwitchTimedOut: true,
 		};
 	}
+	const currentCandidate = state.candidates.find(
+		(candidate) => candidate.origin === origin,
+	);
+	if (!currentCandidate || currentCandidate.switchable === false) {
+		throw new Error("Backend is no longer available for switching.");
+	}
 	const candidates = state.candidates.some((item) => item.origin === origin)
 		? state.candidates.map((item) =>
 				item.origin === origin

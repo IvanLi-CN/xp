@@ -58,6 +58,12 @@ describe("navigation helpers", () => {
 
 	it("disables cross-node hrefs for invalid base URLs", () => {
 		expect(buildNodePageHref("http://node-b.example.com").disabled).toBe(true);
+		expect(buildNodePageHref("https://node-b.example.com/path").disabled).toBe(
+			true,
+		);
+		expect(
+			buildNodePageHref("https://user:password@node-b.example.com").disabled,
+		).toBe(true);
 		expect(buildNodePageHref("")).toEqual({
 			disabled: true,
 			reason: "Open on node unavailable: API base URL is empty.",

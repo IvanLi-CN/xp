@@ -77,6 +77,18 @@ export function buildNodePageHref(
 			reason: "Open on node unavailable: API base URL must use HTTPS.",
 		};
 	}
+	if (
+		(baseUrl.pathname !== "" && baseUrl.pathname !== "/") ||
+		baseUrl.search ||
+		baseUrl.hash ||
+		baseUrl.username ||
+		baseUrl.password
+	) {
+		return {
+			disabled: true,
+			reason: "Open on node unavailable: API base URL must be an origin.",
+		};
+	}
 
 	let currentUrl: URL;
 	try {
