@@ -10,11 +10,10 @@ test("demo preserves node traffic tab and share controls while switching nodes",
 
 	await expect(page.getByRole("tabpanel", { name: "Traffic" })).toBeVisible();
 	await expect(page.getByText("Last sample:")).toBeVisible();
-	await page
-		.getByRole("link", {
-			name: `Node ${fixtureCatalog.nodeName.fixture37()} (${secondNodeId})`,
-		})
-		.click();
+	const secondNodeLink = page.getByRole("link", {
+		name: `Node ${fixtureCatalog.nodeName.fixture37()} (${secondNodeId})`,
+	});
+	await secondNodeLink.click();
 
 	await expect
 		.poll(() => {
@@ -32,4 +31,6 @@ test("demo preserves node traffic tab and share controls while switching nodes",
 		});
 	await expect(page.getByRole("tabpanel", { name: "Traffic" })).toBeVisible();
 	await expect(page.getByText("Last sample:")).toBeVisible();
+	await expect(secondNodeLink).toHaveAttribute("aria-current", "page");
+	await expect(secondNodeLink).toHaveClass(/bg-primary\/10/);
 });

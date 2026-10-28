@@ -70,8 +70,13 @@ const retryButtonClass = [
 	"focus-visible:ring-[3px] focus-visible:ring-ring/20",
 ].join(" ");
 
+function pathnameFromHref(href: string) {
+	return new URL(href, "http://xp.local").pathname;
+}
+
 function isRouteMatch(pathname: string, href: string) {
-	return pathname === href || pathname.startsWith(`${href}/`);
+	const routePath = pathnameFromHref(href);
+	return pathname === routePath || pathname.startsWith(`${routePath}/`);
 }
 
 function defaultExpanded(groups: ResourceNavigationGroup[], pathname: string) {
