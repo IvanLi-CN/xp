@@ -145,7 +145,7 @@ Response:
 
 - `503 raft_write_not_dispatched`：只有能证明请求在整个流程中从未派发时使用。
   `details.dispatch_state` 为 `not_dispatched`，不包含重试覆盖警示。
-- `502 raft_write_outcome_unknown`：已派发但没有可验证响应、旧后端笼统 `5xx` 或客户端连接中断。
+- `502 raft_write_outcome_unknown`：已派发但没有可验证响应、旧后端笼统 `5xx`、客户端连接中断，或成功状态但响应正文/Schema 无法验证。
   `details` 只包含 `failure_layer`、`cause`、`confidence`、`attempted_path`、
   `dispatch_state`、`retryable`、`support_id`，以及可确认的目标节点或远端状态；同时包含
   `manual_retry_warning=may_overwrite_concurrent_changes`。

@@ -426,6 +426,7 @@ export function UserDetailsPage() {
 						return await putAdminUserMihomoProfile(adminToken, userId, payload);
 					} catch (error) {
 						if (isMihomoWriteOutcomeUnknown(error)) {
+							if (error instanceof MihomoSaveOutcomeUnknownError) throw error;
 							throw new MihomoSaveOutcomeUnknownError(error, payload);
 						}
 						throw error;

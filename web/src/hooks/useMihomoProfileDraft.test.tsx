@@ -215,6 +215,44 @@ describe("useMihomoProfileDraft", () => {
 		expect(result.current.draft).toEqual(submitted);
 	});
 
+	it("ignores a stale verification rejection after the session changes", async () => {
+		let rejectVerify: ((error: unknown) => void) | undefined;
+		const verifyProfile = vi.fn(
+			() =>
+				new Promise<AdminUserMihomoProfile>((_, reject) => {
+					rejectVerify = reject;
+				}),
+		);
+		const { result, rerender } = renderHook(
+			({ sessionKey }: { sessionKey: string }) =>
+				useMihomoProfileDraft({
+					userId: "user-a",
+					sessionKey,
+					profile: PROFILE_A,
+					saveProfile: vi.fn(async (profile) => profile),
+					verifyProfile,
+				}),
+			{ initialProps: { sessionKey: "session-a" } },
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		let verifyPromise: Promise<boolean> | undefined;
+		act(() => {
+			verifyPromise = result.current.verify();
+		});
+		await waitFor(() => expect(result.current.isVerifying).toBe(true));
+
+		rerender({ sessionKey: "session-b" });
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => rejectVerify?.(new Error("stale read-back failure")));
+		if (!verifyPromise) throw new Error("verification request was not created");
+		await act(async () => expect(await verifyPromise).toBe(false));
+
+		expect(result.current.error).toBeNull();
+		expect(result.current.saveFeedback).toBeNull();
+		expect(result.current.isVerifying).toBe(false);
+	});
+
 	it("keeps an unavailable unknown result after remounting", async () => {
 		const submitted = { ...PROFILE_A, mixin_yaml: "persisted unknown\n" };
 		const saveProfile = vi.fn(async () => {

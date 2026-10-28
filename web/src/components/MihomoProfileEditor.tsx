@@ -462,7 +462,11 @@ export function MihomoProfileEditor({
 
 	return (
 		<>
-			<div className="flex items-center justify-between gap-3">
+			<div
+				className="flex items-center justify-between gap-3"
+				aria-busy={!isLoaded}
+				data-mihomo-editor-loaded={isLoaded ? "true" : "false"}
+			>
 				<div className="min-w-0">
 					<div className="font-medium text-sm">
 						Mihomo mixin config (per user)

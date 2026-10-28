@@ -162,6 +162,9 @@ test("persists all three Mihomo documents through the production save path", asy
 
 	await page.goto(`/users/${fixtureCatalog.identifier.userPrimary()}`);
 	await expect(
+		page.locator('[data-mihomo-editor-loaded="true"]'),
+	).toBeVisible();
+	await expect(
 		page.locator('[data-mihomo-document="mixin_yaml"] .cm-content'),
 	).toHaveAttribute("contenteditable", "true");
 	const values = {

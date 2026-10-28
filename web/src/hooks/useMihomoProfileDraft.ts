@@ -487,16 +487,32 @@ export function useMihomoProfileDraft({
 								diagnostics: mihomoSaveDiagnostics(saveError),
 							});
 						} catch {
+							if (
+								currentUserIdRef.current !== targetUserId ||
+								userSessionRef.current !== targetSession ||
+								currentSessionIdentityRef.current !== sessionIdentity
+							)
+								return false;
 							setSaveFeedback({
 								kind: "outcome_unknown",
 								verification: "unavailable",
 								diagnostics: mihomoSaveDiagnostics(saveError),
 							});
 						} finally {
-							setIsVerifying(false);
+							if (
+								currentUserIdRef.current === targetUserId &&
+								userSessionRef.current === targetSession &&
+								currentSessionIdentityRef.current === sessionIdentity
+							)
+								setIsVerifying(false);
 						}
 					}
-					setError(formatError(saveError));
+					if (
+						currentUserIdRef.current === targetUserId &&
+						userSessionRef.current === targetSession &&
+						currentSessionIdentityRef.current === sessionIdentity
+					)
+						setError(formatError(saveError));
 				}
 				return false;
 			})
@@ -569,6 +585,12 @@ export function useMihomoProfileDraft({
 			);
 			return false;
 		} catch (verificationError) {
+			if (
+				currentUserIdRef.current !== targetUserId ||
+				userSessionRef.current !== targetSession ||
+				currentSessionIdentityRef.current !== sessionIdentity
+			)
+				return false;
 			setSaveFeedback({
 				kind: "outcome_unknown",
 				verification: "unavailable",
@@ -577,7 +599,12 @@ export function useMihomoProfileDraft({
 			setError(formatError(verificationError));
 			return false;
 		} finally {
-			setIsVerifying(false);
+			if (
+				currentUserIdRef.current === targetUserId &&
+				userSessionRef.current === targetSession &&
+				currentSessionIdentityRef.current === sessionIdentity
+			)
+				setIsVerifying(false);
 		}
 	}, [
 		acceptProfile,
