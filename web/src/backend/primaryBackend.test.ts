@@ -231,6 +231,59 @@ describe("primary backend transport", () => {
 		]);
 	});
 
+	it("falls back from a selected backend when it becomes temporarily unavailable", async () => {
+		hydrateStaticRuntimePolicy(
+			fixtureCatalog.cluster.fixture84(),
+			[fixtureCatalog.url.primaryApi()],
+			{
+				policyId: "rcp-active",
+				nodeStates: [
+					{
+						origin: fixtureCatalog.url.primaryApi(),
+						state: "allowed",
+					},
+				],
+				activate: true,
+			},
+		);
+		const primary = getPrimaryBackendSnapshot().candidates.find(
+			(candidate) => candidate.origin === fixtureCatalog.url.primaryApi(),
+		);
+		if (!primary) throw new Error("active candidate missing");
+		await switchPrimaryBackend({ ...primary, verifiedAt: Date.now() });
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			fixtureCatalog.url.primaryApi(),
+		);
+
+		hydrateStaticRuntimePolicy(
+			fixtureCatalog.cluster.fixture84(),
+			[fixtureCatalog.url.primaryApi()],
+			{
+				policyId: "rcp-unavailable",
+				nodeStates: [
+					{
+						origin: fixtureCatalog.url.primaryApi(),
+						state: "temporarily_unavailable",
+					},
+				],
+				candidateOrigins: [
+					"https://101-xp.ivanli.cc",
+					fixtureCatalog.url.primaryApi(),
+				],
+			},
+		);
+		const snapshot = getPrimaryBackendSnapshot();
+		expect(snapshot.primaryOrigin).toBe("https://101-xp.ivanli.cc");
+		expect(getStaticRuntimePolicyOrigins()).toEqual([
+			"https://101-xp.ivanli.cc",
+		]);
+		expect(
+			snapshot.candidates.find(
+				(candidate) => candidate.origin === fixtureCatalog.url.primaryApi(),
+			)?.runtimeState,
+		).toBe("temporarily_unavailable");
+	});
+
 	it("allows manual switching after the mutation barrier times out without replay", async () => {
 		vi.useFakeTimers();
 		let resolveMutation: ((response: Response) => void) | undefined;

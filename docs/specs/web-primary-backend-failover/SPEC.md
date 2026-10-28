@@ -105,11 +105,18 @@ ADR 0012 and does not alter this embedded-PWA contract.
   health/cluster/compatibility ordering, the credential gate, inventory
   membership, and stale-node removal.
 - **VER-STATIC-POLICY** covers: REQ-STATIC-POLICY-STAGING and
-  REQ-STATIC-POLICY-NODE-STATES. The controlled browser scenario
-  `scenario:static-policy-browser@current-head` proves that a policy-id change
-  during dirty editing does not reload the page, a new origin is staged until
-  confirmation, temporary unavailability is excluded from active CSP, removed
-  nodes retire, and expiry blocks switching.
+  REQ-STATIC-POLICY-NODE-STATES. The browser smoke evidence plus this test
+  command prove that a policy-id change is staged without activating a new
+  origin, temporary unavailability is excluded from the
+  active allowlist, a selected unavailable backend falls back to the bootstrap
+  origin, removed nodes retire, and expiry blocks switching. The browser smoke
+  flow remains the owner-facing check for the single explicit reload.
+
+  ```sh
+  cd web && bunx vitest run \
+    src/offline/useStaticRuntimePolicy.test.tsx \
+    src/backend/primaryBackend.test.ts
+  ```
 - **VER-TRANSPORT** covers: REQ-TRANSPORT. The transport tests and
   `cd web && bun run test:e2e -- primary-backend-switcher --workers=1` verify
   API and SSE rewriting to a controlled recovery origin while assets stay on

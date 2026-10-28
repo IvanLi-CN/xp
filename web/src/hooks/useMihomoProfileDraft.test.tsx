@@ -314,4 +314,42 @@ describe("useMihomoProfileDraft", () => {
 			),
 		).toBeNull();
 	});
+
+	it("uses the server version only after an explicit conflict choice", async () => {
+		window.sessionStorage.clear();
+		const saveProfile = vi.fn(
+			async (profile: AdminUserMihomoProfile) => profile,
+		);
+		const first = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-server-choice",
+				userId: "user-server-choice",
+				profile: PROFILE_A,
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
+		act(() => first.result.current.setField("mixin_yaml", "local draft\n"));
+		first.unmount();
+
+		const second = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-server-choice",
+				userId: "user-server-choice",
+				profile: PROFILE_B,
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(second.result.current.conflict).not.toBeNull());
+		act(() => second.result.current.useServer());
+		expect(second.result.current.draft).toEqual(PROFILE_B);
+		expect(second.result.current.baseline).toEqual(PROFILE_B);
+		expect(second.result.current.dirty).toBe(false);
+		expect(second.result.current.conflict).toBeNull();
+		expect(
+			window.sessionStorage.getItem(
+				"xp-mihomo-draft:v1:cluster-server-choice:user-server-choice:mihomo-profile",
+			),
+		).toBeNull();
+	});
 });

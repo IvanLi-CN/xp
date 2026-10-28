@@ -443,8 +443,13 @@ export function hydrateStaticRuntimePolicy(
 		}
 	}
 	const currentOrigin = canonicalBackendOrigin(state.primaryOrigin);
+	const currentCandidate = currentOrigin
+		? candidatesByOrigin.get(currentOrigin)
+		: undefined;
 	const nextPrimary =
-		(currentOrigin && candidatesByOrigin.has(currentOrigin)
+		(currentOrigin &&
+		currentCandidate?.runtimeState === "active" &&
+		staticAllowedOrigins.has(currentOrigin)
 			? currentOrigin
 			: bootstrapOrigin) ?? getPageOrigin();
 	const changed =
