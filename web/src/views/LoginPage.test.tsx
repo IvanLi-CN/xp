@@ -136,6 +136,7 @@ describe("<LoginPage />", () => {
 				lastError: null,
 			},
 		];
+		mocks.selectPreAuthBackend.mockResolvedValue({ timedOut: true });
 
 		render(
 			<UiPrefsProvider>
@@ -160,6 +161,55 @@ describe("<LoginPage />", () => {
 		await waitFor(() => {
 			expect(mocks.selectPreAuthBackend).toHaveBeenCalledWith(secondary);
 		});
+		expect(screen.getByRole("alert")).toHaveTextContent(
+			"previous write result is unknown",
+		);
+	});
+
+	it("keeps a failed candidate and retries its public probe", async () => {
+		window.history.pushState({}, "", "/login");
+		const secondary = "https://secondary.example";
+		let failed = true;
+		mocks.backend.clusterId = "cluster-84";
+		mocks.backend.candidates = [
+			{
+				origin: secondary,
+				nodeId: "node-secondary",
+				nodeName: "Secondary node",
+				verifiedAt: Date.now(),
+				lastError: null,
+			},
+		];
+		mocks.probeBackendCandidate.mockImplementation(
+			async ({ origin }: { origin: string }) => {
+				if (origin === secondary && failed) {
+					throw new Error("secondary probe failed");
+				}
+			},
+		);
+
+		render(
+			<UiPrefsProvider>
+				<LoginPage />
+			</UiPrefsProvider>,
+		);
+
+		const user = userEvent.setup();
+		await user.click(
+			screen.getByRole("button", { name: "Select service node" }),
+		);
+		await waitFor(() => {
+			expect(screen.getByRole("alert")).toHaveTextContent(
+				"secondary probe failed",
+			);
+		});
+		failed = false;
+		await user.click(screen.getByRole("menuitem", { name: /Secondary node/ }));
+
+		await waitFor(() => {
+			expect(mocks.probeBackendCandidate).toHaveBeenCalledTimes(3);
+		});
+		expect(mocks.backend.candidates).toHaveLength(1);
 	});
 
 	it("keeps a selected candidate and unsaved token after a 401", async () => {
@@ -190,6 +240,11 @@ describe("<LoginPage />", () => {
 		);
 		fireEvent.change(screen.getByLabelText("Token"), {
 			target: { value: "unverified-token" },
+		});
+		await waitFor(() => {
+			expect(
+				screen.getByRole("button", { name: "Save & Continue" }),
+			).not.toBeDisabled();
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Save & Continue" }));
 
@@ -237,6 +292,26 @@ describe("<LoginPage />", () => {
 		).not.toBeInTheDocument();
 		expect(localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)).toBeNull();
 		expect(screen.getByLabelText("Token")).toHaveValue("unverified-token");
+	});
+
+	it("keeps static login links on the bootstrap transport", async () => {
+		window.history.pushState({}, "", "/login?login_token=static-token");
+		mocks.isStaticWebConsole.mockReturnValue(true);
+		mocks.verifyAdminToken.mockResolvedValue(undefined);
+
+		render(
+			<UiPrefsProvider>
+				<LoginPage />
+			</UiPrefsProvider>,
+		);
+
+		await waitFor(() => {
+			expect(mocks.verifyAdminToken).toHaveBeenCalledWith("static-token");
+		});
+		expect(mocks.selectPreAuthBackend).not.toHaveBeenCalled();
+		expect(
+			screen.queryByRole("button", { name: "Select service node" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("falls back to root for invalid redirect targets", async () => {

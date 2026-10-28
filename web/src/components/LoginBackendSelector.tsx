@@ -22,6 +22,11 @@ import {
 
 type ProbeStatus = "checking" | "ready" | "error";
 
+type LoginBackendSelectorProps = {
+	onProbeStateChange?: (ready: boolean) => void;
+	staticConsole?: boolean;
+};
+
 function hostLabel(origin: string) {
 	try {
 		return new URL(origin).host;
@@ -50,8 +55,11 @@ function currentPageCandidate(): BackendCandidate | null {
 		: null;
 }
 
-export function LoginBackendSelector() {
-	const staticConsole = isStaticWebConsole();
+export function LoginBackendSelector({
+	onProbeStateChange,
+	staticConsole: staticConsoleProp = false,
+}: LoginBackendSelectorProps) {
+	const staticConsole = staticConsoleProp || isStaticWebConsole();
 	const backend = usePrimaryBackend();
 	const [open, setOpen] = useState(false);
 	const [probeStatus, setProbeStatus] = useState<Record<string, ProbeStatus>>(
@@ -123,6 +131,15 @@ export function LoginBackendSelector() {
 		for (const candidate of candidates) void runProbe(candidate);
 	}, [candidates, runProbe, staticConsole]);
 
+	const currentTargetReady =
+		staticConsole ||
+		(!backend.clusterId && backend.primaryOrigin === pageOrigin) ||
+		probeStatus[backend.primaryOrigin] === "ready";
+
+	useEffect(() => {
+		onProbeStateChange?.(currentTargetReady);
+	}, [currentTargetReady, onProbeStateChange]);
+
 	const handleSelect = async (candidate: BackendCandidate) => {
 		const status = probeStatus[candidate.origin];
 		if (status === "error") {
@@ -135,7 +152,12 @@ export function LoginBackendSelector() {
 		setSelectingOrigin(candidate.origin);
 		setSelectionError(null);
 		try {
-			await selectPreAuthBackend(candidate.origin);
+			const result = await selectPreAuthBackend(candidate.origin);
+			if (result.timedOut) {
+				setSelectionError(
+					"The previous write result is unknown. Verify the service node before retrying.",
+				);
+			}
 			setOpen(false);
 		} catch (error) {
 			setSelectionError(

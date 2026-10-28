@@ -69,7 +69,7 @@ function LoginPageSurface({
 			data-visual-evidence-surface
 			className={[
 				"box-border h-[calc(100vh-2rem)] overflow-hidden bg-background",
-				"p-4 text-foreground sm:p-8",
+				"p-[18px] text-foreground sm:p-8",
 			].join(" ")}
 		>
 			<div data-visual-evidence-target className="h-full overflow-hidden">

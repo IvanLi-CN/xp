@@ -223,6 +223,15 @@ test("uses selected recovery origin and persists after inventory hydration", asy
 		request.url.startsWith(`${recoveryOrigin}/api/admin/alerts`),
 	);
 	expect(authRequest?.authorization).toBe("Bearer valid-admin-token");
+	const alertRequests = apiRequests.filter(
+		(request) => new URL(request.url).pathname === "/api/admin/alerts",
+	);
+	expect(alertRequests.length).toBeGreaterThan(0);
+	expect(
+		alertRequests.every(
+			(request) => request.url === `${recoveryOrigin}/api/admin/alerts`,
+		),
+	).toBe(true);
 });
 
 test("keeps the login page and selected origin after a recovery 401", async ({
@@ -257,4 +266,48 @@ test("keeps the login page and selected origin after a recovery 401", async ({
 			url.startsWith(`${recoveryOrigin}/api/admin/alerts`),
 		),
 	).toBe(true);
+	const alertRequests = apiRequests.filter(
+		(url) => new URL(url).pathname === "/api/admin/alerts",
+	);
+	expect(alertRequests.length).toBeGreaterThan(0);
+	expect(
+		alertRequests.every((url) => url === `${recoveryOrigin}/api/admin/alerts`),
+	).toBe(true);
+});
+
+test("keeps login selector focus and controls inside the mobile viewport", async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 393, height: 852 });
+	await installLoginMocks(page, 200);
+	await page.goto("/login", { waitUntil: "networkidle" });
+
+	const selector = page.getByRole("button", { name: "Select service node" });
+	await selector.click();
+	await expect(page.getByRole("menu")).toBeVisible();
+	await page.keyboard.press("Escape");
+	await expect(selector).toBeFocused();
+
+	const layout = await page.evaluate(() => {
+		const controls = [
+			document.querySelector('button[aria-label="Select service node"]'),
+			document.querySelector('input[name="token"]'),
+		];
+		return {
+			clientWidth: document.documentElement.clientWidth,
+			scrollWidth: document.documentElement.scrollWidth,
+			rects: controls.map((element) => {
+				if (!element) return null;
+				const box = element.getBoundingClientRect();
+				return { left: box.left, right: box.right };
+			}),
+		};
+	});
+
+	expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
+	for (const rect of layout.rects) {
+		expect(rect).not.toBeNull();
+		expect(rect?.left).toBeGreaterThanOrEqual(0);
+		expect(rect?.right).toBeLessThanOrEqual(layout.clientWidth);
+	}
 });
