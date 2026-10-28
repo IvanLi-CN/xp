@@ -74,11 +74,13 @@ export async function ensureMihomoProfileBaseline(
 	baseline: AdminUserMihomoProfile,
 	fetchProfile: () => Promise<AdminUserMihomoProfile>,
 	onConflict: (latestProfile: AdminUserMihomoProfile) => void,
+	allowOverwrite = false,
 ): Promise<void> {
 	try {
 		const latestProfile = await fetchProfile();
 		if (mihomoProfilesEqual(latestProfile, baseline)) return;
 		onConflict(latestProfile);
+		if (allowOverwrite) return;
 		throw new Error(
 			"Mihomo profile changed elsewhere. Refresh the profile and review your draft before retrying.",
 		);

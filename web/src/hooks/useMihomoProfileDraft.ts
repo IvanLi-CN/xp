@@ -24,6 +24,10 @@ export const EMPTY_MIHOMO_PROFILE: AdminUserMihomoProfile = {
 	extra_proxy_providers_yaml: "",
 };
 
+export const MIHOMO_DRAFT_PERSISTENCE_WARNING =
+	"Your Mihomo draft is kept in this tab, but browser storage is unavailable. " +
+	"Keep this tab open or copy the draft before reloading.";
+
 type UseMihomoProfileDraftProps = {
 	userId: string;
 	sessionKey?: string;
@@ -32,6 +36,7 @@ type UseMihomoProfileDraftProps = {
 	saveProfile: (
 		profile: AdminUserMihomoProfile,
 		baseline: AdminUserMihomoProfile,
+		allowOverwrite?: boolean,
 	) => Promise<AdminUserMihomoProfile>;
 	verifyProfile?: (
 		profile: AdminUserMihomoProfile,
@@ -230,15 +235,17 @@ function persistMihomoDraft(
 	draft: AdminUserMihomoProfile,
 	baseline: AdminUserMihomoProfile | null,
 	saveFeedback: MihomoSaveFeedback | null,
-): void {
-	if (typeof window === "undefined") return;
+): boolean {
+	if (typeof window === "undefined") return true;
 	try {
 		window.localStorage.setItem(
 			storageKey,
 			JSON.stringify({ draft, baseline, saveFeedback, updatedAt: Date.now() }),
 		);
+		return true;
 	} catch {
 		// Browser storage can be unavailable or full; the in-memory draft remains authoritative.
+		return false;
 	}
 }
 
@@ -463,12 +470,13 @@ export function useMihomoProfileDraft({
 			clearPersistedMihomoDraft(storageKey);
 			return;
 		}
-		persistMihomoDraft(
+		const persisted = persistMihomoDraft(
 			storageKey,
 			draft,
 			baselineKnown ? baseline : null,
 			saveFeedback,
 		);
+		if (!persisted) setError(MIHOMO_DRAFT_PERSISTENCE_WARNING);
 	}, [
 		baseline,
 		baselineKnown,
@@ -526,6 +534,9 @@ export function useMihomoProfileDraft({
 			if (readOnly || isSaving || isVerifying || !isLoaded) return;
 			setDraftState((current) => ({ ...current, [documentId]: value }));
 			setError(null);
+			setSaveFeedback((current) =>
+				current?.verification === "matches" ? null : current,
+			);
 		},
 		[isLoaded, isSaving, isVerifying, readOnly],
 	);
@@ -556,130 +567,133 @@ export function useMihomoProfileDraft({
 		[],
 	);
 
-	const save = useCallback(async (): Promise<boolean> => {
-		if (
-			readOnly ||
-			!isLoaded ||
-			isVerifying ||
-			!dirty ||
-			currentUserIdRef.current !== userId ||
-			currentSessionIdentityRef.current !== sessionIdentity
-		) {
-			return false;
-		}
-		if (!baselineKnown) {
-			setError(
-				"This draft's original profile is unavailable. Review or discard it before saving.",
-			);
-			return false;
-		}
-		if (savePromiseRef.current) return savePromiseRef.current;
+	const save = useCallback(
+		async (allowOverwrite = false): Promise<boolean> => {
+			if (
+				readOnly ||
+				!isLoaded ||
+				isVerifying ||
+				!dirty ||
+				currentUserIdRef.current !== userId ||
+				currentSessionIdentityRef.current !== sessionIdentity
+			) {
+				return false;
+			}
+			if (!baselineKnown) {
+				setError(
+					"This draft's original profile is unavailable. Review or discard it before saving.",
+				);
+				return false;
+			}
+			if (savePromiseRef.current) return savePromiseRef.current;
 
-		const targetUserId = userId;
-		const targetSession = userSessionRef.current;
-		const payload = cloneProfile(draft);
-		setIsSaving(true);
-		setError(null);
-		const request = saveProfile(payload, baseline)
-			.then((saved) => {
-				if (
-					currentUserIdRef.current !== targetUserId ||
-					userSessionRef.current !== targetSession ||
-					currentSessionIdentityRef.current !== sessionIdentity
-				)
-					return false;
-				acceptProfile(saved, targetUserId);
-				setSaveFeedback(null);
-				return true;
-			})
-			.catch(async (saveError: unknown) => {
-				if (
-					currentUserIdRef.current === targetUserId &&
-					userSessionRef.current === targetSession &&
-					currentSessionIdentityRef.current === sessionIdentity
-				) {
-					if (isMihomoWriteOutcomeUnknown(saveError) && verifyProfile) {
-						const submitted = submittedMihomoProfile(saveError) ?? payload;
-						setIsVerifying(true);
-						try {
-							const latest = await verifyProfile(submitted);
-							if (
-								currentUserIdRef.current !== targetUserId ||
-								userSessionRef.current !== targetSession ||
-								currentSessionIdentityRef.current !== sessionIdentity
-							)
-								return false;
-							if (mihomoProfilesEqual(latest, submitted)) {
-								acceptProfile(latest, targetUserId);
-								setError(null);
+			const targetUserId = userId;
+			const targetSession = userSessionRef.current;
+			const payload = cloneProfile(draft);
+			setIsSaving(true);
+			setError(null);
+			const request = saveProfile(payload, baseline, allowOverwrite)
+				.then((saved) => {
+					if (
+						currentUserIdRef.current !== targetUserId ||
+						userSessionRef.current !== targetSession ||
+						currentSessionIdentityRef.current !== sessionIdentity
+					)
+						return false;
+					acceptProfile(saved, targetUserId);
+					setSaveFeedback(null);
+					return true;
+				})
+				.catch(async (saveError: unknown) => {
+					if (
+						currentUserIdRef.current === targetUserId &&
+						userSessionRef.current === targetSession &&
+						currentSessionIdentityRef.current === sessionIdentity
+					) {
+						if (isMihomoWriteOutcomeUnknown(saveError) && verifyProfile) {
+							const submitted = submittedMihomoProfile(saveError) ?? payload;
+							setIsVerifying(true);
+							try {
+								const latest = await verifyProfile(submitted);
+								if (
+									currentUserIdRef.current !== targetUserId ||
+									userSessionRef.current !== targetSession ||
+									currentSessionIdentityRef.current !== sessionIdentity
+								)
+									return false;
+								if (mihomoProfilesEqual(latest, submitted)) {
+									acceptProfile(latest, targetUserId);
+									setError(null);
+									setSaveFeedback({
+										kind: "outcome_unknown",
+										verification: "matches",
+										diagnostics: mihomoSaveDiagnostics(saveError),
+									});
+									return true;
+								}
 								setSaveFeedback({
 									kind: "outcome_unknown",
-									verification: "matches",
+									verification: "different",
 									diagnostics: mihomoSaveDiagnostics(saveError),
 								});
-								return true;
+							} catch {
+								if (
+									currentUserIdRef.current !== targetUserId ||
+									userSessionRef.current !== targetSession ||
+									currentSessionIdentityRef.current !== sessionIdentity
+								)
+									return false;
+								setSaveFeedback({
+									kind: "outcome_unknown",
+									verification: "unavailable",
+									diagnostics: mihomoSaveDiagnostics(saveError),
+								});
+							} finally {
+								if (
+									currentUserIdRef.current === targetUserId &&
+									userSessionRef.current === targetSession &&
+									currentSessionIdentityRef.current === sessionIdentity
+								)
+									setIsVerifying(false);
 							}
-							setSaveFeedback({
-								kind: "outcome_unknown",
-								verification: "different",
-								diagnostics: mihomoSaveDiagnostics(saveError),
-							});
-						} catch {
-							if (
-								currentUserIdRef.current !== targetUserId ||
-								userSessionRef.current !== targetSession ||
-								currentSessionIdentityRef.current !== sessionIdentity
-							)
-								return false;
-							setSaveFeedback({
-								kind: "outcome_unknown",
-								verification: "unavailable",
-								diagnostics: mihomoSaveDiagnostics(saveError),
-							});
-						} finally {
-							if (
-								currentUserIdRef.current === targetUserId &&
-								userSessionRef.current === targetSession &&
-								currentSessionIdentityRef.current === sessionIdentity
-							)
-								setIsVerifying(false);
 						}
+						if (
+							currentUserIdRef.current === targetUserId &&
+							userSessionRef.current === targetSession &&
+							currentSessionIdentityRef.current === sessionIdentity
+						)
+							setError(formatError(saveError));
 					}
+					return false;
+				})
+				.finally(() => {
 					if (
 						currentUserIdRef.current === targetUserId &&
 						userSessionRef.current === targetSession &&
 						currentSessionIdentityRef.current === sessionIdentity
 					)
-						setError(formatError(saveError));
-				}
-				return false;
-			})
-			.finally(() => {
-				if (
-					currentUserIdRef.current === targetUserId &&
-					userSessionRef.current === targetSession &&
-					currentSessionIdentityRef.current === sessionIdentity
-				)
-					setIsSaving(false);
-				if (savePromiseRef.current === request) savePromiseRef.current = null;
-			});
-		savePromiseRef.current = request;
-		return request;
-	}, [
-		acceptProfile,
-		dirty,
-		draft,
-		formatError,
-		isLoaded,
-		readOnly,
-		saveProfile,
-		baselineKnown,
-		isVerifying,
-		verifyProfile,
-		sessionIdentity,
-		baseline,
-		userId,
-	]);
+						setIsSaving(false);
+					if (savePromiseRef.current === request) savePromiseRef.current = null;
+				});
+			savePromiseRef.current = request;
+			return request;
+		},
+		[
+			acceptProfile,
+			dirty,
+			draft,
+			formatError,
+			isLoaded,
+			readOnly,
+			saveProfile,
+			baselineKnown,
+			isVerifying,
+			verifyProfile,
+			sessionIdentity,
+			baseline,
+			userId,
+		],
+	);
 
 	const verify = useCallback(async (): Promise<boolean> => {
 		if (

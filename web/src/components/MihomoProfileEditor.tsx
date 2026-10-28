@@ -11,6 +11,7 @@ import type { EditorView } from "@uiw/react-codemirror";
 
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
 import {
+	MIHOMO_DRAFT_PERSISTENCE_WARNING,
 	MIHOMO_PROFILE_DOCUMENTS,
 	type MihomoProfileDocumentId,
 } from "../hooks/useMihomoProfileDraft";
@@ -65,7 +66,7 @@ type MihomoProfileEditorProps = {
 	saveFeedback?: MihomoSaveFeedback | null;
 	isLoaded: boolean;
 	onChange: (documentId: MihomoProfileDocumentId, value: string) => void;
-	onSave: () => Promise<boolean>;
+	onSave: (allowOverwrite?: boolean) => Promise<boolean>;
 	onVerify?: () => Promise<boolean>;
 	onExpandAvailabilityChange?: (available: boolean) => void;
 	adminToken?: string;
@@ -270,8 +271,9 @@ export function MihomoProfileEditor({
 			setRetryAcknowledged(true);
 			return;
 		}
+		const allowOverwrite = needsRetryWarning && retryAcknowledged;
 		setRetryAcknowledged(false);
-		void onSave();
+		void onSave(allowOverwrite);
 	}, [needsRetryWarning, onSave, retryAcknowledged]);
 
 	const saveLabel = needsRetryWarning ? "Retry save" : "Save configuration";
@@ -496,7 +498,8 @@ export function MihomoProfileEditor({
 				isVerifying={isVerifying}
 				onVerify={onVerify}
 			/>
-			{error && !saveFeedback ? (
+			{error &&
+			(!saveFeedback || error === MIHOMO_DRAFT_PERSISTENCE_WARNING) ? (
 				<div className="xp-alert xp-alert-error px-4 py-2">{error}</div>
 			) : null}
 			{needsRetryWarning && retryAcknowledged ? (
@@ -713,7 +716,9 @@ export function MihomoProfileEditor({
 									isVerifying={isVerifying}
 									onVerify={onVerify}
 								/>
-								{error && !saveFeedback ? (
+								{error &&
+								(!saveFeedback ||
+									error === MIHOMO_DRAFT_PERSISTENCE_WARNING) ? (
 									<div
 										className="xp-alert xp-alert-error mx-3 mt-3 shrink-0 px-3 py-2 text-xs sm:mx-4"
 										role="alert"

@@ -7,6 +7,7 @@ import {
 	MihomoSavePreflightError,
 } from "../utils/mihomoSaveOutcome";
 import {
+	MIHOMO_DRAFT_PERSISTENCE_WARNING,
 	MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX,
 	useMihomoProfileDraft,
 } from "./useMihomoProfileDraft";
@@ -123,6 +124,29 @@ describe("useMihomoProfileDraft", () => {
 		expect(result.current.draft.mixin_yaml).toBe("preflight draft\n");
 	});
 
+	it("reports when browser storage cannot retain the draft", async () => {
+		const setItem = vi
+			.spyOn(Storage.prototype, "setItem")
+			.mockImplementation(() => {
+				throw new Error("quota exceeded");
+			});
+		const { result, unmount } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile: vi.fn(async (profile) => profile),
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "memory-only draft\n"));
+		await waitFor(() =>
+			expect(result.current.error).toBe(MIHOMO_DRAFT_PERSISTENCE_WARNING),
+		);
+		setItem.mockRestore();
+		unmount();
+	});
+
 	it("checks an unknown write once and accepts a matching read-back", async () => {
 		const submitted = { ...PROFILE_A, mixin_yaml: "unknown write\n" };
 		const saveProfile = vi
@@ -162,7 +186,42 @@ describe("useMihomoProfileDraft", () => {
 			result.current.setField("mixin_yaml", "edited after read-back\n"),
 		);
 		expect(result.current.dirty).toBe(true);
-		expect(result.current.saveFeedback?.verification).toBe("matches");
+		expect(result.current.saveFeedback).toBeNull();
+	});
+
+	it("allows an explicitly confirmed retry after a different read-back", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "unknown write\n" };
+		const saveProfile = vi
+			.fn<
+				(
+					profile: AdminUserMihomoProfile,
+					baseline: AdminUserMihomoProfile,
+					allowOverwrite?: boolean,
+				) => Promise<AdminUserMihomoProfile>
+			>()
+			.mockRejectedValueOnce(
+				new MihomoSaveOutcomeUnknownError(
+					new TypeError("Failed to fetch"),
+					submitted,
+				),
+			)
+			.mockResolvedValueOnce(submitted);
+		const verifyProfile = vi.fn(async () => PROFILE_A);
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+				verifyProfile,
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", submitted.mixin_yaml));
+		await act(async () => expect(await result.current.save()).toBe(false));
+		expect(result.current.saveFeedback?.verification).toBe("different");
+		await act(async () => expect(await result.current.save(true)).toBe(true));
+		expect(saveProfile).toHaveBeenLastCalledWith(submitted, PROFILE_A, true);
 	});
 
 	it("keeps the draft and permits a manual check after a different read-back", async () => {
@@ -366,6 +425,7 @@ describe("useMihomoProfileDraft", () => {
 		expect(saveProfile).toHaveBeenCalledWith(
 			expect.objectContaining({ mixin_yaml: "stored draft\n" }),
 			PROFILE_A,
+			false,
 		);
 	});
 

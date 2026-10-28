@@ -406,9 +406,12 @@ export function UserDetailsPage() {
 		}
 		setUserSaveError(null);
 	}, [user]);
-
 	const saveMihomoProfileRequest = useCallback(
-		async (draft: AdminUserMihomoProfile, baseline: AdminUserMihomoProfile) => {
+		async (
+			draft: AdminUserMihomoProfile,
+			baseline: AdminUserMihomoProfile,
+			allowOverwrite = false,
+		) => {
 			if (!adminToken || !userId)
 				throw new Error("Admin session is unavailable.");
 			const saveKey = `${adminToken}\u0000${userId}`;
@@ -420,6 +423,7 @@ export function UserDetailsPage() {
 					baseline,
 					() => fetchAdminUserMihomoProfile(adminToken, userId),
 					(latestProfile) => queryClient.setQueryData(queryKey, latestProfile),
+					allowOverwrite,
 				);
 				const submit = async (payload: AdminUserMihomoProfile) => {
 					try {
