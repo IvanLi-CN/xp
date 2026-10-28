@@ -1,8 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendCandidate } from "@/backend/primaryBackend";
+import type { PrimaryBackendSnapshot } from "@/backend/primaryBackend";
 
-import { getCurrentReloadCandidate } from "./PrimaryBackendSwitcher";
+const mockUsePrimaryBackend = vi.hoisted(() => vi.fn());
+
+vi.mock("@/backend/PrimaryBackendProvider", () => ({
+	usePrimaryBackend: mockUsePrimaryBackend,
+}));
+
+import {
+	PrimaryBackendSwitcher,
+	getCurrentReloadCandidate,
+} from "./PrimaryBackendSwitcher";
 
 const stagedCandidate: BackendCandidate = {
 	origin: "https://node.example",
@@ -13,6 +25,21 @@ const stagedCandidate: BackendCandidate = {
 	runtimeState: "staged",
 	runtimePolicyId: "rcp-current",
 };
+
+const snapshot = (candidate: BackendCandidate): PrimaryBackendSnapshot => ({
+	clusterId: "cluster-static",
+	primaryOrigin: "https://101-xp.ivanli.cc",
+	candidates: [candidate],
+	generation: 1,
+	state: "ready",
+	pendingMutations: 0,
+	unknownMutationCount: 0,
+	lastSwitchTimedOut: false,
+});
+
+beforeEach(() => {
+	mockUsePrimaryBackend.mockReturnValue(snapshot(stagedCandidate));
+});
 
 describe("getCurrentReloadCandidate", () => {
 	it("rejects a confirmation captured from an older policy", () => {
@@ -32,5 +59,33 @@ describe("getCurrentReloadCandidate", () => {
 		expect(
 			getCurrentReloadCandidate(stagedCandidate, [stagedCandidate]),
 		).toEqual(stagedCandidate);
+	});
+
+	it("hides a reload confirmation after the policy retires its candidate", async () => {
+		const user = userEvent.setup();
+		const view = render(
+			<PrimaryBackendSwitcher
+				adminToken="admin-token"
+				clusterId="cluster-static"
+			/>,
+		);
+
+		await user.click(
+			screen.getByRole("button", { name: "Open primary backend" }),
+		);
+		await user.click(screen.getByRole("menuitem", { name: /Node 1/ }));
+		expect(screen.getByRole("button", { name: "Reload once" })).toBeVisible();
+
+		mockUsePrimaryBackend.mockReturnValue(
+			snapshot({ ...stagedCandidate, runtimeState: "temporarily_unavailable" }),
+		);
+		view.rerender(
+			<PrimaryBackendSwitcher
+				adminToken="admin-token"
+				clusterId="cluster-static"
+			/>,
+		);
+
+		expect(screen.queryByRole("button", { name: "Reload once" })).toBeNull();
 	});
 });
