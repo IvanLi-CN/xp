@@ -502,18 +502,6 @@ function refreshGlobalEndpointReality(state: MockState): void {
 
 function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
 	const isSecondary = node.node_id === fixtureCatalog.nodeId.fixture36();
-	const ip = isSecondary
-		? fixtureCatalog.address.documentation192_0_2_143()
-		: fixtureCatalog.address.documentation192_0_2_30();
-	const endpointId = isSecondary
-		? fixtureCatalog.endpointId.fixture43()
-		: fixtureCatalog.endpointId.fixture40();
-	const endpointTag = isSecondary
-		? fixtureCatalog.endpointTag.fixture44()
-		: fixtureCatalog.endpointTag.fixture41();
-	const minutes = isSecondary
-		? fixtureCatalog.number.value4()
-		: fixtureCatalog.number.value2();
 	return {
 		node,
 		window: "24h",
@@ -543,11 +531,21 @@ function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
 		],
 		timeline: [
 			{
-				lane_key: ip,
-				endpoint_id: endpointId,
-				endpoint_tag: endpointTag,
-				ip,
-				minutes,
+				lane_key: isSecondary
+					? fixtureCatalog.address.documentation192_0_2_143()
+					: fixtureCatalog.address.documentation192_0_2_30(),
+				endpoint_id: isSecondary
+					? fixtureCatalog.endpointId.fixture43()
+					: fixtureCatalog.endpointId.fixture40(),
+				endpoint_tag: isSecondary
+					? fixtureCatalog.endpointTag.fixture44()
+					: fixtureCatalog.endpointTag.fixture41(),
+				ip: isSecondary
+					? fixtureCatalog.address.documentation192_0_2_143()
+					: fixtureCatalog.address.documentation192_0_2_30(),
+				minutes: isSecondary
+					? fixtureCatalog.number.value4()
+					: fixtureCatalog.number.value2(),
 				segments: [
 					{
 						start_minute: fixtureCatalog.timestamp.t20260308T000000(),
@@ -558,9 +556,17 @@ function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
 		],
 		ips: [
 			{
-				ip,
-				minutes,
-				endpoint_tags: [endpointTag],
+				ip: isSecondary
+					? fixtureCatalog.address.documentation192_0_2_143()
+					: fixtureCatalog.address.documentation192_0_2_30(),
+				minutes: isSecondary
+					? fixtureCatalog.number.value4()
+					: fixtureCatalog.number.value2(),
+				endpoint_tags: [
+					isSecondary
+						? fixtureCatalog.endpointTag.fixture44()
+						: fixtureCatalog.endpointTag.fixture41(),
+				],
 				region: isSecondary ? "Japan / Osaka" : "Japan / Tokyo",
 				operator: isSecondary ? "CarrierNet" : "ExampleNet",
 				last_seen_at: fixtureCatalog.timestamp.t20260308T000100(),
