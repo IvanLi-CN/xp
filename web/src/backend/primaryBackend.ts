@@ -1,4 +1,5 @@
 import { resolveApiCompatibility } from "@/api/apiCompatibility";
+import { RELEASE_INVENTORIES } from "@/api/releaseInventories";
 import { isDemoRuntime } from "../demo/runtimeMode";
 
 export const PRIMARY_BACKEND_SWITCH_TIMEOUT_MS = 60_000;
@@ -9,6 +10,10 @@ export type BackendCandidate = {
 	nodeName: string;
 	verifiedAt: number | null;
 	lastError: string | null;
+	switchable?: boolean;
+	switchBlockedReason?: string;
+	serviceVersion?: string | null;
+	versionState?: "ready" | "unknown" | "unavailable";
 };
 
 export type BackendProfile = {
@@ -42,6 +47,7 @@ type NativeFetch = typeof window.fetch;
 
 const STORAGE_KEY = "xp-primary-backend-profiles";
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const RELEASE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 export const STATIC_WEB_ORIGIN = "https://xp.ivanli.cc";
 export const STATIC_BOOTSTRAP_ORIGIN = "https://101-xp.ivanli.cc";
 const listeners = new Set<(snapshot: PrimaryBackendSnapshot) => void>();
@@ -82,7 +88,11 @@ function readInitialState(): PrimaryBackendSnapshot {
 		primaryOrigin: isStaticWebConsole()
 			? STATIC_BOOTSTRAP_ORIGIN
 			: getPageOrigin(),
-		candidates: active?.candidates ?? [],
+		candidates:
+			active?.candidates?.map((candidate) => ({
+				...candidate,
+				nodeName: displayNodeName(candidate.nodeName, candidate.origin),
+			})) ?? [],
 		generation: 0,
 		state: "ready",
 		pendingMutations: 0,
@@ -93,6 +103,32 @@ function readInitialState(): PrimaryBackendSnapshot {
 
 let state: PrimaryBackendSnapshot = readInitialState();
 let staticAllowedOrigins = new Set<string>();
+
+function displayNodeName(nodeName: string, origin: string): string {
+	if (nodeName.trim() && nodeName !== "Verified backend") return nodeName;
+	try {
+		return new URL(origin).host;
+	} catch {
+		return origin;
+	}
+}
+
+export function currentWebReleaseVersion(): string | null {
+	const releaseTag = RELEASE_INVENTORIES[0]?.releaseTag;
+	return recognizedReleaseVersion(releaseTag);
+}
+
+export function normalizeReleaseVersion(value: string): string {
+	return value.trim().replace(/^v/i, "");
+}
+
+export function recognizedReleaseVersion(
+	value: string | null | undefined,
+): string | null {
+	if (!value) return null;
+	const normalized = normalizeReleaseVersion(value);
+	return RELEASE_VERSION_PATTERN.test(normalized) ? normalized : null;
+}
 
 function writeStoredProfiles(value: StoredProfiles) {
 	if (isDemoRuntime()) return;
@@ -289,10 +325,35 @@ export function hydratePrimaryBackendProfile(
 	}>,
 ) {
 	if (isStaticWebConsole()) {
-		hydrateStaticRuntimePolicy(
-			clusterId,
-			(nodes ?? []).map((node) => node.api_base_url),
+		const candidatesByOrigin = new Map(
+			state.candidates.map((candidate) => [candidate.origin, candidate]),
 		);
+		for (const node of nodes ?? []) {
+			const origin = canonicalBackendOrigin(node.api_base_url);
+			if (!origin) continue;
+			const existing = candidatesByOrigin.get(origin);
+			const switchable = staticAllowedOrigins.has(origin);
+			candidatesByOrigin.set(origin, {
+				...existing,
+				origin,
+				nodeId: node.node_id,
+				nodeName: displayNodeName(node.node_name, origin),
+				verifiedAt: existing?.verifiedAt ?? null,
+				lastError: existing?.lastError ?? null,
+				switchable,
+				switchBlockedReason: switchable
+					? undefined
+					: "This node is not available to the static console.",
+			});
+		}
+		const changed = state.clusterId !== clusterId;
+		state = {
+			...state,
+			clusterId,
+			candidates: [...candidatesByOrigin.values()],
+			generation: changed ? state.generation + 1 : state.generation,
+		};
+		notify();
 		return;
 	}
 	const stored = readStoredProfiles();
@@ -301,7 +362,10 @@ export function hydratePrimaryBackendProfile(
 	if (nodes === undefined) {
 		for (const candidate of storedProfile?.candidates ?? []) {
 			if (canonicalBackendOrigin(candidate.origin)) {
-				candidatesByOrigin.set(candidate.origin, { ...candidate });
+				candidatesByOrigin.set(candidate.origin, {
+					...candidate,
+					nodeName: displayNodeName(candidate.nodeName, candidate.origin),
+				});
 			}
 		}
 	}
@@ -312,9 +376,11 @@ export function hydratePrimaryBackendProfile(
 		candidatesByOrigin.set(origin, {
 			origin,
 			nodeId: node.node_id,
-			nodeName: node.node_name,
+			nodeName: displayNodeName(node.node_name, origin),
 			verifiedAt: existing?.verifiedAt ?? null,
 			lastError: existing?.lastError ?? null,
+			switchable: true,
+			switchBlockedReason: undefined,
 		});
 	}
 	const pageOrigin = getPageOrigin();
@@ -325,6 +391,7 @@ export function hydratePrimaryBackendProfile(
 			nodeName: "Current page",
 			verifiedAt: Date.now(),
 			lastError: null,
+			switchable: true,
 		});
 	}
 	const persistedPrimary = canonicalBackendOrigin(
@@ -353,15 +420,21 @@ export function hydrateStaticRuntimePolicy(
 	clusterId: string,
 	origins: readonly string[],
 ) {
-	const candidatesByOrigin = new Map<string, BackendCandidate>();
+	const candidatesByOrigin = new Map(
+		state.candidates.map((candidate) => [candidate.origin, candidate]),
+	);
 	const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
 	if (bootstrapOrigin) {
+		const existing = candidatesByOrigin.get(bootstrapOrigin);
 		candidatesByOrigin.set(bootstrapOrigin, {
+			...existing,
 			origin: bootstrapOrigin,
-			nodeId: "bootstrap",
-			nodeName: "Bootstrap backend",
-			verifiedAt: Date.now(),
-			lastError: null,
+			nodeId: existing?.nodeId ?? "bootstrap",
+			nodeName: existing?.nodeName ?? "Bootstrap backend",
+			verifiedAt: existing?.verifiedAt ?? null,
+			lastError: existing?.lastError ?? null,
+			switchable: true,
+			switchBlockedReason: undefined,
 		});
 	}
 	staticAllowedOrigins = bootstrapOrigin
@@ -373,11 +446,25 @@ export function hydrateStaticRuntimePolicy(
 		staticAllowedOrigins.add(origin);
 		const existing = candidatesByOrigin.get(origin);
 		candidatesByOrigin.set(origin, {
+			...existing,
 			origin,
 			nodeId: existing?.nodeId ?? origin,
-			nodeName: existing?.nodeName ?? "Verified backend",
-			verifiedAt: existing?.verifiedAt ?? Date.now(),
-			lastError: null,
+			nodeName: displayNodeName(existing?.nodeName ?? "", origin),
+			verifiedAt: existing?.verifiedAt ?? null,
+			lastError: existing?.lastError ?? null,
+			switchable: true,
+			switchBlockedReason: undefined,
+		});
+	}
+	for (const [origin, candidate] of candidatesByOrigin) {
+		if (origin === bootstrapOrigin) continue;
+		const switchable = staticAllowedOrigins.has(origin);
+		candidatesByOrigin.set(origin, {
+			...candidate,
+			switchable,
+			switchBlockedReason: switchable
+				? undefined
+				: "This node is not available to the static console.",
 		});
 	}
 	const currentOrigin = canonicalBackendOrigin(state.primaryOrigin);
@@ -395,6 +482,33 @@ export function hydrateStaticRuntimePolicy(
 		generation: changed ? state.generation + 1 : state.generation,
 		state: "ready",
 	};
+	notify();
+}
+
+export function hydrateBackendVersions(
+	items: ReadonlyArray<{
+		node_id: string;
+		xp_version: string | null;
+		error: string | null;
+	}>,
+) {
+	const versions = new Map(items.map((item) => [item.node_id, item]));
+	state = {
+		...state,
+		candidates: state.candidates.map((candidate) => {
+			const item = versions.get(candidate.nodeId);
+			if (!item) return candidate;
+			return {
+				...candidate,
+				serviceVersion: item.xp_version
+					? normalizeReleaseVersion(item.xp_version)
+					: null,
+				versionState: item.xp_version ? "ready" : "unavailable",
+				lastError: item.error,
+			};
+		}),
+	};
+	persistCurrentProfile();
 	notify();
 }
 

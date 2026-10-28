@@ -4,6 +4,7 @@
 
 - [ADR 0011](../../adr/0011-cross-origin-primary-backend-for-embedded-pwa.md)
 - [ADR 0012](../../adr/0012-edgeone-static-web-console.md)
+- [ADR 0013](../../adr/0013-authenticated-node-directory-for-static-console.md)
 
 ## Context and Scope
 
@@ -51,6 +52,30 @@ ADR 0012 and does not alter this embedded-PWA contract.
   probe, the browser MUST verify public health, matching `cluster_id`, an
   immutable compatible API release profile, and the candidate inventory. A
   failed check MUST neither persist nor select the candidate.
+- **REQ-NODE-DIRECTORY**: After authentication, the selector MUST derive its
+  rows from the current cluster's registered node inventory. Each row MUST
+  show the registered node name and HTTPS origin, mark the selected node, and
+  retain an independent frontend-opening action. Static Web Console mode MAY
+  read this inventory only after its authenticated Runtime Policy has admitted
+  the selected backend; anonymous pages MUST NOT discover or enumerate nodes.
+- **REQ-NODE-LINK**: The per-node frontend action MUST open a new tab with
+  `noopener noreferrer`, preserve the current pathname, query and hash, and
+  use the existing login handoff without sending credentials through an API
+  proxy. The action MUST remain available for the current or non-switchable
+  node when its HTTPS origin is valid. An invalid origin MUST disable only the
+  frontend action and explain the reason. Switching and opening a node MUST be
+  separate keyboard-accessible controls without nested interactive elements.
+- **REQ-SERVICE-VERSION**: Opening the selector MUST trigger one authenticated,
+  bounded refresh of registered-node service versions. The server MUST resolve
+  each target by registered node ID and HTTPS address, use only the fixed
+  `/api/cluster/info` route, require the same cluster ID, reject redirects,
+  cap the response body and time budget, and
+  degrade an old or unavailable node to an unknown version. The Web client MUST
+  compare only a recognized formal frontend release version (not a package
+  version, backend version, or build hash), normalize the optional `v` prefix,
+  and display the service version only when it differs. An unrecognized
+  frontend version MUST display that comparison is unavailable; unknown or
+  timed-out node reads MUST NOT block inventory, switching, or node opening.
 - **REQ-TRANSPORT**: The browser MUST use one selected primary origin for all
   relative `/api/*` requests and SSE requests through centralized transport
   rewriting. Static resources, navigation, Service Worker traffic, and the
@@ -91,6 +116,19 @@ ADR 0012 and does not alter this embedded-PWA contract.
   `cd web && bun run test -- src/backend/primaryBackend.test.ts` verifies
   health/cluster/compatibility ordering, the credential gate, inventory
   membership, and stale-node removal.
+- **VER-NODE-DIRECTORY** covers: REQ-NODE-DIRECTORY. The authenticated node
+  inventory and selector Storybook state verify real names, current-node
+  marking, the static-policy gate, and the absence of the old generic
+  `Verified backend` placeholder.
+- **VER-NODE-LINK** covers: REQ-NODE-LINK. The Storybook browser test verifies
+  independent switch/link controls, new-tab attributes, path/query/hash and
+  login-token handoff, while navigation unit tests retain invalid-origin
+  disablement.
+- **VER-SERVICE-VERSION** covers: REQ-SERVICE-VERSION. Rust HTTP tests and
+  the Web API/backend tests verify the fixed authenticated route, cluster
+  binding, bounded fan-out, redirect rejection, old-backend degradation,
+  release-version normalization, mismatch-only display, and unknown/timeout
+  states.
 - **VER-TRANSPORT** covers: REQ-TRANSPORT. The transport tests and
   `cd web && bun run test:e2e -- primary-backend-switcher --workers=1` verify
   API and SSE rewriting to a controlled recovery origin while assets stay on
@@ -145,3 +183,22 @@ ADR 0012 and does not alter this embedded-PWA contract.
   evidence_note: verifies two-row layout, touch-sized controls, and right-edge ordering.
   image:
   ![Mobile header](./assets/app-shell-header-mobile-primary-right.png)
+
+- source_type: storybook_canvas
+  target_program: mock-only
+  capture_scope: browser-viewport
+  requested_viewport: 1280x720
+  viewport_strategy: storybook-viewport
+  margin_policy: trim_only
+  evidence_surface: page
+  surface_selector: N/A (canvas overlay state)
+  target_selector: N/A (canvas overlay state)
+  sensitive_exclusion: N/A
+  submission_gate: approved
+  story_id_or_title: Components/PrimaryBackendSwitcher/VersionMismatchAndLinks
+  state: authenticated node directory with current, unavailable, invalid-address, and
+  mismatched-version entries
+  evidence_note: verifies real node names and hosts, separate new-tab actions, invalid HTTPS
+  handling, unknown versions, and a visible Service v3.21.11 mismatch label.
+  image:
+  ![Primary backend node directory](./assets/primary-backend-selector-version-links.png)

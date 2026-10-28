@@ -55,6 +55,49 @@ const candidates = [
 	},
 ];
 
+const versionedCandidates = [
+	{
+		origin: fixtureCatalog.url.primaryApi(),
+		nodeId: fixtureCatalog.identifier.nodePrimary(),
+		nodeName: fixtureCatalog.identifier.nodeNamePrimary(),
+		verifiedAt: Date.now(),
+		lastError: null,
+		switchable: true,
+		serviceVersion: "3.22.5",
+		versionState: "ready" as const,
+	},
+	{
+		origin: fixtureCatalog.url.secondaryApi(),
+		nodeId: fixtureCatalog.identifier.nodeSecondary(),
+		nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+		verifiedAt: Date.now(),
+		lastError: null,
+		switchable: true,
+		serviceVersion: "3.21.11",
+		versionState: "ready" as const,
+	},
+	{
+		origin: "https://legacy.xp.example",
+		nodeId: "node-legacy",
+		nodeName: "Legacy node",
+		verifiedAt: null,
+		lastError: "unreachable",
+		switchable: false,
+		switchBlockedReason: "This node is not available to the static console.",
+		serviceVersion: null,
+		versionState: "unavailable" as const,
+	},
+	{
+		origin: "http://insecure.xp.example",
+		nodeId: "node-invalid",
+		nodeName: "Invalid address",
+		verifiedAt: null,
+		lastError: "invalid_origin",
+		switchable: false,
+		switchBlockedReason: "HTTPS is required for this node.",
+	},
+];
+
 function withSnapshot(snapshot: PrimaryBackendSnapshot): Story["render"] {
 	return (args) => (
 		<PrimaryBackendProvider snapshot={snapshot}>
@@ -113,5 +156,16 @@ export const MutationBlocked: Story = {
 		candidates,
 		state: "switching",
 		pendingMutations: 1,
+	}),
+};
+
+export const VersionMismatchAndLinks: Story = {
+	args: { frontendVersion: "3.22.5", versionsLoading: false },
+	render: withSnapshot({
+		...getPrimaryBackendSnapshot(),
+		clusterId: "cluster-demo",
+		primaryOrigin: fixtureCatalog.url.primaryApi(),
+		candidates: versionedCandidates,
+		state: "ready",
 	}),
 };

@@ -546,6 +546,17 @@ export async function setupApiMocks(
 			return;
 		}
 
+		if (path === "/api/admin/nodes/versions" && method === "GET") {
+			jsonResponse(route, {
+				items: state.nodes.map((node) => ({
+					node_id: node.node_id,
+					xp_version: state.clusterInfo.xp_version,
+					error: null,
+				})),
+			});
+			return;
+		}
+
 		if (path === "/api/admin/nodes/runtime" && method === "GET") {
 			const items = state.nodes.map(buildNodeRuntimeListItem);
 			jsonResponse(route, {

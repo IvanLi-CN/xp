@@ -15,14 +15,11 @@ import {
 	useState,
 } from "react";
 
-import { fetchAdminNodes } from "@/api/adminNodes";
 import { startAdminStatusEvents } from "@/api/adminStatusEvents";
 import { fetchRuntimePolicy } from "@/api/runtimePolicy";
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
-import {
-	hydratePrimaryBackendProfile,
-	isStaticWebConsole,
-} from "@/backend/primaryBackend";
+import { isStaticWebConsole } from "@/backend/primaryBackend";
+import { useBackendDirectory } from "@/backend/useBackendDirectory";
 import { Badge } from "@/components/ui/badge";
 import {
 	CommandDialog,
@@ -219,40 +216,15 @@ export function AppShell({
 					? "API compatibility is unavailable while offline."
 					: null;
 
-	const backendNodes = useQuery({
-		queryKey: ["adminNodes", adminToken],
-		enabled:
-			!staticConsole &&
-			adminToken.length > 0 &&
-			Boolean(clusterInfo.data?.cluster_id) &&
-			clusterInfo.data?.cluster_id === primaryBackend.clusterId,
-		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
-	});
-
-	const refreshBackendCandidates = useCallback(() => {
-		if (!adminToken || !primaryBackend.clusterId) return;
-		if (staticConsole) void runtimePolicy.refetch();
-		else void backendNodes.refetch();
-	}, [
+	const { nodeVersions, refreshBackendCandidates } = useBackendDirectory({
 		adminToken,
-		backendNodes.refetch,
-		primaryBackend.clusterId,
-		runtimePolicy.refetch,
+		clusterId: clusterInfo.data?.cluster_id,
+		primaryClusterId: primaryBackend.clusterId,
+		primaryOrigin: primaryBackend.primaryOrigin,
+		runtimeOnline: runtime.isOnline,
 		staticConsole,
-	]);
-
-	useEffect(() => {
-		const clusterId = clusterInfo.data?.cluster_id;
-		if (!clusterId) return;
-		hydratePrimaryBackendProfile(
-			clusterId,
-			backendNodes.isSuccess ? backendNodes.data.items : undefined,
-		);
-	}, [
-		clusterInfo.data?.cluster_id,
-		backendNodes.data?.items,
-		backendNodes.isSuccess,
-	]);
+		refreshRuntimePolicy: runtimePolicy.refetch,
+	});
 
 	useStaticRuntimePolicy({
 		enabled: staticConsole,
@@ -941,6 +913,7 @@ export function AppShell({
 										clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
 									}
 									onOpened={refreshBackendCandidates}
+									versionsLoading={nodeVersions.isFetching}
 								/>
 							</div>
 						</div>

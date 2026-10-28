@@ -10,6 +10,9 @@
 - 独立静态 Web 采用 EdgeOne Makers `xp-web` 直接上传；发布先通过 `xp.ivanli.cc` 的公开静态门禁，
   再发布镜像与 GitHub Release。运行时节点 origin 通过受保护的 runtime-policy 和逐客户端
   Service Worker 导航 CSP 授权，不引入匿名拓扑发现、Edge Function 或 API 代理。
+- 选择器在认证后的运行策略门禁内改用注册节点目录，显示真实节点名和地址；每个节点保留独立的
+  新标签前端入口，并继续沿用登录交接与当前路径。版本读取通过固定的认证内部路由受限扇出，
+  只在服务版本不同于可识别的前端正式版本时展示差异。
 
 ## Compatibility
 

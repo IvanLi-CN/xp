@@ -143,6 +143,7 @@ mod join_capability;
 mod join_protocol;
 mod membership_restore;
 mod node_metadata;
+mod node_versions;
 mod service_monitors;
 mod version_check;
 mod web_assets;
@@ -1200,6 +1201,10 @@ pub fn build_router_with_mesh_telemetry(
         .route("/mesh/probes", post(admin_run_mesh_probes))
         .route("/status/events", get(admin_stream_status_events))
         .route("/nodes", get(admin_list_nodes))
+        .route(
+            "/nodes/versions",
+            get(node_versions::admin_list_node_versions),
+        )
         .route(
             "/membership-operations/{operation_id}",
             get(admin_get_membership_operation),

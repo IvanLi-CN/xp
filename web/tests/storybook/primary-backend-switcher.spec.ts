@@ -92,7 +92,7 @@ function expectNonOverlapping(rects: Array<Rect | null>) {
 	}
 }
 
-test("shows the verified backend list from the AppShell switcher", async ({
+test("shows the registered node list from the AppShell switcher", async ({
 	page,
 }) => {
 	await page.goto(storyUrl("components-primarybackendswitcher--default"), {
@@ -104,10 +104,41 @@ test("shows the verified backend list from the AppShell switcher", async ({
 	await expect(
 		page.getByRole("menuitem", {
 			name: fixtureCatalog.identifier.nodeNameSecondary(),
+			exact: true,
 		}),
 	).toBeVisible();
 	await expect(
 		page.getByRole("menuitem", { name: /Current page/ }),
+	).toBeDisabled();
+});
+
+test("shows service version differences and separate frontend links", async ({
+	page,
+}) => {
+	await page.goto(
+		storyUrl("components-primarybackendswitcher--version-mismatch-and-links"),
+		{ waitUntil: "networkidle" },
+	);
+	await page.getByRole("button", { name: "Open primary backend" }).click();
+
+	await expect(page.getByText("Service v3.21.11")).toBeVisible();
+	await expect(page.getByText("Version unknown").first()).toBeVisible();
+	await expect(page.getByText("Verified backend")).toHaveCount(0);
+
+	const nodeLink = page.locator(
+		'a[aria-label="Open Legacy node frontend in a new tab"]',
+	);
+	await expect(nodeLink).toHaveAttribute("target", "_blank");
+	await expect(nodeLink).toHaveAttribute("rel", "noopener noreferrer");
+	await expect(nodeLink).toHaveAttribute(
+		"href",
+		/https:\/\/legacy\.xp\.example\//,
+	);
+
+	await expect(
+		page.getByRole("menuitem", {
+			name: /Open on node unavailable: API base URL must use HTTPS/,
+		}),
 	).toBeDisabled();
 });
 

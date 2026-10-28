@@ -34,6 +34,25 @@ pub enum PeerDirectPath {
 }
 
 impl MeshAwareHttpClient {
+    pub(crate) async fn send_registered_public_read(
+        &self,
+        base_url: &str,
+        path_and_query: &str,
+        budget: Duration,
+    ) -> Result<reqwest::Response, MeshRequestError> {
+        let url = join_url(base_url, path_and_query, true)?;
+        tokio::time::timeout(
+            budget,
+            self.public_direct
+                .get(url)
+                .header(reqwest::header::ACCEPT, "application/json")
+                .send(),
+        )
+        .await
+        .map_err(|_| MeshRequestError::TransportTimeout)?
+        .map_err(MeshRequestError::Public)
+    }
+
     /// Sends through Mesh first, then public only after a retryable transport failure.
     pub async fn send_peer_request(
         &self,

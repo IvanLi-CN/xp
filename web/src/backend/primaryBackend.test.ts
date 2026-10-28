@@ -4,9 +4,13 @@ import { fixtureCatalog } from "@/fixture-policy/catalog";
 
 import {
 	canonicalBackendOrigin,
+	currentWebReleaseVersion,
 	getPrimaryBackendSnapshot,
+	hydrateBackendVersions,
 	hydratePrimaryBackendProfile,
 	installPrimaryBackendTransport,
+	normalizeReleaseVersion,
+	recognizedReleaseVersion,
 	resetPrimaryBackendTransportForTests,
 	switchPrimaryBackend,
 	verifyBackendCandidate,
@@ -193,6 +197,54 @@ describe("primary backend transport", () => {
 				(candidate) => candidate.origin === fixtureCatalog.url.secondaryApi(),
 			),
 		).toBe(false);
+	});
+
+	it("attaches service versions by registered node id and preserves unknowns", () => {
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+
+		hydrateBackendVersions([
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				xp_version: "v3.22.5",
+				error: null,
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				xp_version: null,
+				error: "unreachable",
+			},
+		]);
+
+		const snapshot = getPrimaryBackendSnapshot();
+		expect(snapshot.candidates).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					nodeId: fixtureCatalog.identifier.nodePrimary(),
+					serviceVersion: "3.22.5",
+					versionState: "ready",
+				}),
+				expect.objectContaining({
+					nodeId: fixtureCatalog.identifier.nodeSecondary(),
+					serviceVersion: null,
+					versionState: "unavailable",
+					lastError: "unreachable",
+				}),
+			]),
+		);
+		expect(normalizeReleaseVersion(" v3.21.4 ")).toBe("3.21.4");
+		expect(recognizedReleaseVersion("3.22.5-buildhash")).toBeNull();
+		expect(currentWebReleaseVersion()).toBe("3.22.5");
 	});
 
 	it("allows manual switching after the mutation barrier times out without replay", async () => {
