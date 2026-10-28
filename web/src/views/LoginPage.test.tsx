@@ -131,6 +131,24 @@ describe("<LoginPage />", () => {
 		});
 	});
 
+	it("does not verify login_token after a pre-auth mutation timeout", async () => {
+		mocks.selectPreAuthBackend.mockResolvedValue({ timedOut: true });
+
+		render(
+			<UiPrefsProvider>
+				<LoginPage />
+			</UiPrefsProvider>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByRole("alert")).toHaveTextContent(
+				"previous write result is unknown",
+			);
+		});
+		expect(mocks.verifyAdminToken).not.toHaveBeenCalled();
+		expect(localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)).toBeNull();
+	});
+
 	it("selects a probed profile candidate before token verification", async () => {
 		window.history.pushState({}, "", "/login");
 		const secondary = "https://secondary.example";
