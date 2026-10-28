@@ -497,7 +497,8 @@ fn is_generated_xray_memory_drop_in(raw: &str) -> bool {
     lines.all(|line| {
         matches!(
             line,
-            "" | "Environment=GOMEMLIMIT=32MiB"
+            "" | "Environment=GOMEMLIMIT=48MiB"
+                | "Environment=GOMEMLIMIT=32MiB"
                 | "Environment=GOGC=100"
                 | "Environment=GOMEMLIMIT=16MiB"
                 | "Environment=GOGC=50"

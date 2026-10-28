@@ -27,7 +27,7 @@ None
   不得继续写入。
 - JWT 形态凭据先走 JWT 校验，不得先执行 Argon2；原始 Token 校验使用单 worker
   和有界等待，饱和时返回 `429` 与 `Retry-After`。
-- Xray 默认 `GOMEMLIMIT=32MiB`、`GOGC=100`，level-0 `bufferSize=0`；systemd、OpenRC
+- Xray 默认 `GOMEMLIMIT=48MiB`、`GOGC=100`，level-0 `bufferSize=0`；systemd、OpenRC
   和 Docker/Compose 必须保持该默认，显式 operator override 必须优先且在升级/回滚中保留。
 - cloudflared 默认 `GOMEMLIMIT=12MiB`、`GOGC=50`、`--protocol http2`，并关闭管理诊断采集；
   `XP_CLOUDFLARED_PROTOCOL` 可覆盖传输协议；托管服务定义变更后必须 reload 并重启，

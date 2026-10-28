@@ -104,30 +104,53 @@ pub(crate) fn render_openrc_xray_script(mode: Option<GuardMode>) -> String {
     )
 }
 
-fn legacy_xray_runtime_defaults(rendered: String) -> String {
+fn xray_runtime_defaults(rendered: String, gomemlimit: &str, gogc: &str) -> String {
     rendered
         .replace(
             &format!(
                 "Environment=GOMEMLIMIT={}",
                 crate::ops::MANAGED_XRAY_GOMEMLIMIT
             ),
-            &format!(
-                "Environment=GOMEMLIMIT={}",
-                crate::ops::LEGACY_XRAY_GOMEMLIMIT
-            ),
+            &format!("Environment=GOMEMLIMIT={}", gomemlimit),
         )
         .replace(
             &format!("Environment=GOGC={}", crate::ops::MANAGED_XRAY_GOGC),
-            &format!("Environment=GOGC={}", crate::ops::LEGACY_XRAY_GOGC),
+            &format!("Environment=GOGC={}", gogc),
         )
         .replace(
             &format!("${{GOMEMLIMIT:-{}}}", crate::ops::MANAGED_XRAY_GOMEMLIMIT),
-            &format!("${{GOMEMLIMIT:-{}}}", crate::ops::LEGACY_XRAY_GOMEMLIMIT),
+            &format!("${{GOMEMLIMIT:-{}}}", gomemlimit),
         )
         .replace(
             &format!("${{GOGC:-{}}}", crate::ops::MANAGED_XRAY_GOGC),
-            &format!("${{GOGC:-{}}}", crate::ops::LEGACY_XRAY_GOGC),
+            &format!("${{GOGC:-{}}}", gogc),
         )
+}
+
+fn legacy_xray_runtime_defaults(rendered: String) -> String {
+    xray_runtime_defaults(
+        rendered,
+        crate::ops::LEGACY_XRAY_GOMEMLIMIT,
+        crate::ops::LEGACY_XRAY_GOGC,
+    )
+}
+
+fn previous_managed_xray_runtime_defaults(rendered: String) -> String {
+    xray_runtime_defaults(
+        rendered,
+        crate::ops::PREVIOUS_MANAGED_XRAY_GOMEMLIMIT,
+        crate::ops::MANAGED_XRAY_GOGC,
+    )
+}
+
+fn legacy_xray_runtime_variants(rendered: String) -> [String; 4] {
+    let without_marker = rendered.replacen(XRAY_SERVICE_MARKER, "", 1);
+    [
+        legacy_xray_runtime_defaults(rendered.clone()),
+        legacy_xray_runtime_defaults(without_marker.clone()),
+        previous_managed_xray_runtime_defaults(rendered),
+        previous_managed_xray_runtime_defaults(without_marker),
+    ]
 }
 
 pub(crate) fn is_generated_legacy_systemd_xray_unit(raw: &str) -> bool {
@@ -138,38 +161,37 @@ pub(crate) fn is_generated_legacy_systemd_xray_unit(raw: &str) -> bool {
     else {
         return false;
     };
-    let direct = legacy_xray_runtime_defaults(render_systemd_xray_unit(&work_dir, None));
     [
-        direct.clone(),
-        legacy_xray_runtime_defaults(render_systemd_xray_unit(
-            &work_dir,
-            Some(GuardMode::Enforced),
-        )),
-        legacy_xray_runtime_defaults(render_systemd_xray_unit(
-            &work_dir,
-            Some(GuardMode::Observe),
-        )),
-        direct.replacen(XRAY_SERVICE_MARKER, "", 1),
+        render_systemd_xray_unit(&work_dir, None),
+        render_systemd_xray_unit(&work_dir, Some(GuardMode::Enforced)),
+        render_systemd_xray_unit(&work_dir, Some(GuardMode::Observe)),
     ]
-    .iter()
+    .into_iter()
+    .flat_map(legacy_xray_runtime_variants)
     .any(|expected| raw == expected)
 }
 
 pub(crate) fn is_generated_legacy_openrc_xray_script(raw: &str) -> bool {
-    let direct = legacy_xray_runtime_defaults(render_openrc_xray_script(None));
     [
-        direct.clone(),
-        legacy_xray_runtime_defaults(render_openrc_xray_script(Some(GuardMode::Enforced))),
-        legacy_xray_runtime_defaults(render_openrc_xray_script(Some(GuardMode::Observe))),
-        direct.replacen(XRAY_SERVICE_MARKER, "", 1),
+        render_openrc_xray_script(None),
+        render_openrc_xray_script(Some(GuardMode::Enforced)),
+        render_openrc_xray_script(Some(GuardMode::Observe)),
     ]
-    .iter()
+    .into_iter()
+    .flat_map(legacy_xray_runtime_variants)
     .any(|expected| raw == expected)
 }
 
 pub(crate) fn migrate_legacy_openrc_xray_script(raw: &str) -> String {
     raw.replace(
         &format!("${{GOMEMLIMIT:-{}}}", crate::ops::LEGACY_XRAY_GOMEMLIMIT),
+        &format!("${{GOMEMLIMIT:-{}}}", crate::ops::MANAGED_XRAY_GOMEMLIMIT),
+    )
+    .replace(
+        &format!(
+            "${{GOMEMLIMIT:-{}}}",
+            crate::ops::PREVIOUS_MANAGED_XRAY_GOMEMLIMIT
+        ),
         &format!("${{GOMEMLIMIT:-{}}}", crate::ops::MANAGED_XRAY_GOMEMLIMIT),
     )
     .replace(

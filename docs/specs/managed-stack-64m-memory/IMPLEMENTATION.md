@@ -17,9 +17,10 @@
 
 - Low-memory admin authentication and bounded verification concurrency.
 - Go runtime defaults for host-managed and container deployments.
-- Managed Xray defaults are `GOMEMLIMIT=32MiB` and `GOGC=100` across generated
+- Managed Xray defaults are `GOMEMLIMIT=48MiB` and `GOGC=100` across generated
   systemd/OpenRC assets, container launches, and upgrade backfill; XP-generated
-  legacy `16MiB/50` values migrate while explicit operator overrides remain unchanged.
+  legacy `32MiB/100` and `16MiB/50` values migrate while explicit operator
+  overrides remain unchanged.
 - cloudflared HTTP/2 transport default with an explicit operator override for
   networks that block outbound QUIC/7844, including reload and restart when a
   managed service definition changes.

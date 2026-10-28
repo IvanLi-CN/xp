@@ -15,22 +15,25 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
                 (
                     "GOMEMLIMIT",
                     crate::ops::MANAGED_XRAY_GOMEMLIMIT,
-                    Some(crate::ops::LEGACY_XRAY_GOMEMLIMIT),
+                    &[
+                        crate::ops::PREVIOUS_MANAGED_XRAY_GOMEMLIMIT,
+                        crate::ops::LEGACY_XRAY_GOMEMLIMIT,
+                    ][..],
                 ),
                 (
                     "GOGC",
                     crate::ops::MANAGED_XRAY_GOGC,
-                    Some(crate::ops::LEGACY_XRAY_GOGC),
+                    &[crate::ops::LEGACY_XRAY_GOGC][..],
                 ),
             ][..],
         ),
         (
             "cloudflared",
             &[
-                ("GOMEMLIMIT", "12MiB", Some("8MiB")),
-                ("GOGC", "50", None),
-                ("TUNNEL_MANAGEMENT_DIAGNOSTICS", "false", None),
-                ("XP_CLOUDFLARED_PROTOCOL", "http2", None),
+                ("GOMEMLIMIT", "12MiB", &["8MiB"][..]),
+                ("GOGC", "50", &[][..]),
+                ("TUNNEL_MANAGEMENT_DIAGNOSTICS", "false", &[][..]),
+                ("XP_CLOUDFLARED_PROTOCOL", "http2", &[][..]),
             ][..],
         ),
     ] {
@@ -62,11 +65,11 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
         }
         let sources = systemd_environment_sources(paths, &unit, &managed)?;
         let mut content = format!("[Service]\n{MANAGED_MARKER}\n");
-        for (key, value, legacy_default) in defaults {
+        for (key, value, legacy_defaults) in defaults {
             if should_backfill_systemd_value(
                 &sources,
                 key,
-                *legacy_default,
+                legacy_defaults,
                 if service == "xray" {
                     migrate_legacy_xray_default
                 } else {
@@ -332,7 +335,8 @@ fn is_generated_systemd_drop_in(service: &str, raw: &str) -> bool {
     let is_legacy = match service {
         "xray" => matches!(
             raw,
-            "[Service]\nEnvironment=GOMEMLIMIT=32MiB\nEnvironment=GOGC=100\n"
+            "[Service]\nEnvironment=GOMEMLIMIT=48MiB\nEnvironment=GOGC=100\n"
+                | "[Service]\nEnvironment=GOMEMLIMIT=32MiB\nEnvironment=GOGC=100\n"
                 | "[Service]\nEnvironment=GOMEMLIMIT=16MiB\nEnvironment=GOGC=50\n"
         ),
         "cloudflared" => matches!(
@@ -350,6 +354,7 @@ fn is_generated_systemd_drop_in(service: &str, raw: &str) -> bool {
         "xray" => &[
             ("GOMEMLIMIT", crate::ops::MANAGED_XRAY_GOMEMLIMIT),
             ("GOGC", crate::ops::MANAGED_XRAY_GOGC),
+            ("GOMEMLIMIT", crate::ops::PREVIOUS_MANAGED_XRAY_GOMEMLIMIT),
             ("GOMEMLIMIT", crate::ops::LEGACY_XRAY_GOMEMLIMIT),
             ("GOGC", crate::ops::LEGACY_XRAY_GOGC),
         ][..],
@@ -506,7 +511,7 @@ fn operator_controlled_systemd_environment() -> String {
 fn should_backfill_systemd_value(
     sources: &[String],
     key: &str,
-    legacy_default: Option<&str>,
+    legacy_defaults: &[&str],
     migrate_legacy_default: bool,
 ) -> bool {
     let unit_assignments = sources
@@ -531,8 +536,9 @@ fn should_backfill_systemd_value(
     }
     unit_assignments.is_empty()
         || (migrate_legacy_default
-            && legacy_default
-                .is_some_and(|legacy| unit_assignments.iter().all(|value| value == legacy)))
+            && legacy_defaults
+                .iter()
+                .any(|legacy| unit_assignments.iter().all(|value| value == legacy)))
 }
 
 fn parse_systemd_environment_line(line: &str) -> Vec<(String, String)> {
