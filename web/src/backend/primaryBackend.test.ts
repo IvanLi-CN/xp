@@ -12,6 +12,7 @@ import {
 	normalizeReleaseVersion,
 	recognizedReleaseVersion,
 	resetPrimaryBackendTransportForTests,
+	subscribePrimaryBackend,
 	switchPrimaryBackend,
 	verifyBackendCandidate,
 	withPrimaryBackendMutation,
@@ -331,6 +332,67 @@ describe("primary backend transport", () => {
 		resolveTransaction?.();
 		await transaction;
 		await switchPromise;
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			fixtureCatalog.url.secondaryApi(),
+		);
+	});
+
+	it("rechecks the barrier when a subscriber starts a mutation during drain", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		let resolveFirst: (() => void) | undefined;
+		let resolveSecond: (() => void) | undefined;
+		const first = withPrimaryBackendMutation(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveFirst = resolve;
+				}),
+		);
+		await Promise.resolve();
+		let second: Promise<void> | undefined;
+		const unsubscribe = subscribePrimaryBackend((snapshot) => {
+			if (snapshot.state !== "switching" || snapshot.pendingMutations !== 0) {
+				return;
+			}
+			second = withPrimaryBackendMutation(
+				() =>
+					new Promise<void>((resolve) => {
+						resolveSecond = resolve;
+					}),
+			);
+		});
+
+		const switchPromise = switchPrimaryBackend({
+			origin: fixtureCatalog.url.secondaryApi(),
+			nodeId: fixtureCatalog.identifier.nodeSecondary(),
+			nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+			verifiedAt: Date.now(),
+			lastError: null,
+		});
+		await Promise.resolve();
+		resolveFirst?.();
+		await first;
+		await Promise.resolve();
+		expect(second).toBeDefined();
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
+		resolveSecond?.();
+		await second;
+		await switchPromise;
+		unsubscribe();
 		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
 			fixtureCatalog.url.secondaryApi(),
 		);

@@ -127,11 +127,18 @@ test("switches API and SSE traffic to a verified recovery origin", async ({
 				headers,
 				contentType: "application/json",
 				body: JSON.stringify({
-					items: nodes.map((node) => ({
-						node_id: node.node_id,
-						xp_version: "v3.22.5",
-						error: null,
-					})),
+					items: [
+						{
+							node_id: fixtureCatalog.identifier.nodePrimary(),
+							xp_version: "v3.22.5",
+							error: null,
+						},
+						{
+							node_id: fixtureCatalog.identifier.nodeSecondary(),
+							xp_version: "v3.22.5",
+							error: null,
+						},
+					],
 				}),
 			});
 			return;

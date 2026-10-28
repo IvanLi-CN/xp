@@ -163,6 +163,7 @@ export function AppShell({
 		apiCompatibility.data?.kind === "compatible" &&
 		apiCompatibility.data.isFeatureAvailable("admin.upgrade");
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+	const [backendSelectorOpen, setBackendSelectorOpen] = useState(false);
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
 	const [versionCheck, dispatchVersionCheck] = useReducer(
 		reduceVersionCheckUiState,
@@ -223,6 +224,12 @@ export function AppShell({
 		primaryOrigin: primaryBackend.primaryOrigin,
 		runtimeOnline: runtime.isOnline,
 		staticConsole,
+		runtimePolicyReady:
+			!staticConsole ||
+			(runtimePolicy.data !== undefined &&
+				runtimePolicy.data.cluster_id === clusterInfo.data?.cluster_id &&
+				Date.parse(runtimePolicy.data.expires_at) > Date.now()),
+		selectorOpen: backendSelectorOpen,
 		refreshRuntimePolicy: runtimePolicy.refetch,
 	});
 
@@ -913,6 +920,7 @@ export function AppShell({
 										clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
 									}
 									onOpened={refreshBackendCandidates}
+									onOpenChange={setBackendSelectorOpen}
 								/>
 							</div>
 						</div>

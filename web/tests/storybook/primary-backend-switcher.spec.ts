@@ -136,7 +136,7 @@ test("shows version differences and separate frontend links", async ({
 	await expect(page.getByText("Verified backend")).toHaveCount(0);
 
 	const nodeLink = page.locator(
-		'a[aria-label="Open Legacy node frontend in a new tab"]',
+		`a[aria-label="Open ${fixtureCatalog.nodeName.fixture18()} frontend in a new tab"]`,
 	);
 	await expect(nodeLink).toHaveAttribute("target", "_blank");
 	await expect(nodeLink).toHaveAttribute("rel", "noopener noreferrer");
@@ -150,6 +150,21 @@ test("shows version differences and separate frontend links", async ({
 			name: /Open on node unavailable: API base URL must use HTTPS/,
 		}),
 	).toBeDisabled();
+});
+
+test("hides service-version comparisons for an unrecognized frontend release", async ({
+	page,
+}) => {
+	await page.goto(
+		storyUrl(
+			"components-primarybackendswitcher--unrecognized-frontend-version",
+		),
+		{ waitUntil: "networkidle" },
+	);
+	await page.getByRole("button", { name: "Open primary backend" }).click();
+
+	await expect(page.getByText("v3.21.11")).toHaveCount(0);
+	await expect(page.getByText("Version unknown")).toHaveCount(0);
 });
 
 test("keeps the switcher menu inside a narrow viewport", async ({ page }) => {

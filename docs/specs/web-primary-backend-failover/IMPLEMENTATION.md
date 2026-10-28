@@ -30,11 +30,17 @@
   switching gate and anonymous pages never receive topology. A ten-minute policy grant is held in
   memory by the Service Worker per controlled client and rewrites only the next navigation's
   `connect-src`.
+- Static Web directory queries wait for a matching, unexpired Runtime Policy. Service-version
+  reads are enabled only while the selector is open, refresh once on open, and do not refetch on
+  mount, reconnect, or window focus.
 - The selector keeps switching and full-page node opening as separate actions. Node opening uses
   the existing path/query/hash and login handoff, targets a new tab with `noopener noreferrer`, and
   disables only invalid HTTPS targets. A bounded authenticated version fan-out reads each node's
   local release through the fixed `/api/cluster/info` route, verifies the cluster ID,
-  and reports only service versions that differ from the recognized frontend release.
+  and reports only service versions that differ from the recognized frontend release. Unknown
+  service versions and unrecognized frontend releases omit the comparison label entirely.
+- The mutation barrier rechecks for a mutation opened during drain notification before committing
+  a primary switch.
 - External subscription URLs are built from the current verified Primary Backend origin, so copied
   URLs remain directly consumable by clients that do not execute the Web app runtime.
 - Vite emits the build declaration and document-fallback handler as a content-hashed external asset.

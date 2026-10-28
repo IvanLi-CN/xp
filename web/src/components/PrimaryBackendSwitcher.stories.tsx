@@ -78,8 +78,8 @@ const versionedCandidates = [
 	},
 	{
 		origin: "https://legacy.xp.example",
-		nodeId: "node-legacy",
-		nodeName: "Legacy node",
+		nodeId: fixtureCatalog.nodeId.fixture17(),
+		nodeName: fixtureCatalog.nodeName.fixture18(),
 		verifiedAt: null,
 		lastError: "unreachable",
 		switchable: false,
@@ -89,8 +89,8 @@ const versionedCandidates = [
 	},
 	{
 		origin: "http://insecure.xp.example",
-		nodeId: "node-invalid",
-		nodeName: "Invalid address",
+		nodeId: fixtureCatalog.nodeId.fixture32(),
+		nodeName: fixtureCatalog.nodeName.fixture33(),
 		verifiedAt: null,
 		lastError: "invalid_origin",
 		switchable: false,
@@ -161,6 +161,17 @@ export const MutationBlocked: Story = {
 
 export const VersionMismatchAndLinks: Story = {
 	args: { frontendVersion: "3.22.5" },
+	render: withSnapshot({
+		...getPrimaryBackendSnapshot(),
+		clusterId: "cluster-demo",
+		primaryOrigin: fixtureCatalog.url.primaryApi(),
+		candidates: versionedCandidates,
+		state: "ready",
+	}),
+};
+
+export const UnrecognizedFrontendVersion: Story = {
+	args: { frontendVersion: "3.22.5-buildhash" },
 	render: withSnapshot({
 		...getPrimaryBackendSnapshot(),
 		clusterId: "cluster-demo",

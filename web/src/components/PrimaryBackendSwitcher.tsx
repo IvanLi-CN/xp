@@ -35,6 +35,7 @@ export function PrimaryBackendSwitcher(props: {
 	adminToken: string;
 	clusterId: string | null;
 	onOpened?: () => void;
+	onOpenChange?: (open: boolean) => void;
 	onSwitched?: () => void;
 	frontendVersion?: string | null;
 }) {
@@ -116,6 +117,7 @@ export function PrimaryBackendSwitcher(props: {
 			open={open}
 			onOpenChange={(nextOpen) => {
 				setOpen(nextOpen);
+				props.onOpenChange?.(nextOpen);
 				if (nextOpen) props.onOpened?.();
 			}}
 		>

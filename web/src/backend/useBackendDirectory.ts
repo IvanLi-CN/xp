@@ -15,13 +15,16 @@ export function useBackendDirectory(args: {
 	primaryOrigin: string;
 	runtimeOnline: boolean;
 	staticConsole: boolean;
+	runtimePolicyReady: boolean;
+	selectorOpen: boolean;
 	refreshRuntimePolicy: () => unknown;
 }) {
 	const enabled =
 		args.adminToken.length > 0 &&
 		Boolean(args.clusterId) &&
 		args.clusterId === args.primaryClusterId &&
-		args.runtimeOnline;
+		args.runtimeOnline &&
+		(!args.staticConsole || args.runtimePolicyReady);
 	const queryKeySuffix = [args.adminToken, args.primaryOrigin] as const;
 	const backendNodes = useQuery({
 		queryKey: ["adminNodes", ...queryKeySuffix],
@@ -30,10 +33,13 @@ export function useBackendDirectory(args: {
 	});
 	const nodeVersions = useQuery({
 		queryKey: ["adminNodeVersions", ...queryKeySuffix],
-		enabled,
+		enabled: enabled && args.selectorOpen,
 		queryFn: ({ signal }) => fetchAdminNodeVersions(args.adminToken, signal),
-		staleTime: 0,
+		staleTime: Number.POSITIVE_INFINITY,
 		retry: false,
+		refetchOnMount: false,
+		refetchOnReconnect: false,
+		refetchOnWindowFocus: false,
 	});
 	const backendNodeInventoryKey = backendNodes.data?.items
 		.map((node) => node.node_id)

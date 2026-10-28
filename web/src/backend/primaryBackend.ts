@@ -691,7 +691,11 @@ export async function switchPrimaryBackend(
 	if (origin === state.primaryOrigin) return { timedOut: false };
 	updateState({ state: "switching", lastSwitchTimedOut: false });
 	const timedOut = await waitForMutations();
-	if (timedOut) {
+	// A drain notification can synchronously start another mutation through a
+	// subscriber. Re-check after the first await before committing the switch.
+	const redrained = !timedOut && (await waitForMutations());
+	const barrierTimedOut = timedOut || redrained;
+	if (barrierTimedOut) {
 		state = {
 			...state,
 			unknownMutationCount: state.unknownMutationCount + 1,
@@ -719,5 +723,5 @@ export async function switchPrimaryBackend(
 	};
 	persistCurrentProfile();
 	notify();
-	return { timedOut };
+	return { timedOut: barrierTimedOut };
 }

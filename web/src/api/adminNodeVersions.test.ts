@@ -59,7 +59,12 @@ describe("admin node versions", () => {
 	it("rejects malformed results instead of treating them as compatible", () => {
 		expect(() =>
 			AdminNodeVersionsResponseSchema.parse({
-				items: [{ node_id: "node-1", xp_version: "3.22.5" }],
+				items: [
+					{
+						node_id: fixtureCatalog.identifier.nodePrimary(),
+						xp_version: "3.22.5",
+					},
+				],
 			}),
 		).toThrow();
 	});

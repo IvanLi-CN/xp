@@ -548,8 +548,13 @@ export async function setupApiMocks(
 
 		if (path === "/api/admin/nodes/versions" && method === "GET") {
 			jsonResponse(route, {
-				items: state.nodes.map((node) => ({
-					node_id: node.node_id,
+				items: state.nodes.map((_, index) => ({
+					node_id:
+						state.nodes.length === 1
+							? fixtureCatalog.nodeId.fixture32()
+							: index === 0
+								? fixtureCatalog.identifier.nodePrimary()
+								: fixtureCatalog.identifier.nodeSecondary(),
 					xp_version: state.clusterInfo.xp_version,
 					error: null,
 				})),

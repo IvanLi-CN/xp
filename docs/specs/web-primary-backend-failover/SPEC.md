@@ -73,9 +73,10 @@ ADR 0012 and does not alter this embedded-PWA contract.
   degrade an old or unavailable node to an unknown version. The Web client MUST
   compare only a recognized formal frontend release version (not a package
   version, backend version, or build hash), normalize the optional `v` prefix,
-  and display the service version only when it differs. An unrecognized
-  frontend version MUST display that comparison is unavailable; unknown or
-  timed-out node reads MUST NOT block inventory, switching, or node opening.
+  and display the service version only when it differs. If the frontend release
+  version is unrecognized, the selector MUST omit the service-version
+  comparison entirely. Unknown or timed-out node reads MUST NOT block
+  inventory, switching, or node opening.
 - **REQ-TRANSPORT**: The browser MUST use one selected primary origin for all
   relative `/api/*` requests and SSE requests through centralized transport
   rewriting. Static resources, navigation, Service Worker traffic, and the
