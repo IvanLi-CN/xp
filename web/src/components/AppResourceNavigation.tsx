@@ -7,6 +7,7 @@ import { fetchAdminUsers } from "../api/adminUsers";
 import type { ApiCompatibilityResult } from "../api/apiCompatibility";
 import { isBackendApiError } from "../api/backendError";
 import { getApiCapabilityState } from "../api/useApiCompatibility";
+import { isNodeDetailsTab } from "../views/nodeDetailsTabs";
 import {
 	ResourceNavigation,
 	type ResourceNavigationGroup,
@@ -27,6 +28,7 @@ type AppResourceNavigationProps = {
 	groups: AppNavigationGroup[];
 	localNodeId: string | null;
 	pathname: string;
+	search: string;
 	onNavigate: (href: string) => void;
 	onResourceNavigate: (href: string) => void;
 	onRetryCompatibility: () => void;
@@ -56,6 +58,7 @@ export function AppResourceNavigation({
 	groups,
 	localNodeId,
 	pathname,
+	search,
 	onNavigate,
 	onResourceNavigate,
 	onRetryCompatibility,
@@ -75,6 +78,13 @@ export function AppResourceNavigation({
 	const nodesRequested = requestedResources.nodes || nodesActive;
 	const endpointsRequested = requestedResources.endpoints || endpointsActive;
 	const usersRequested = requestedResources.users || usersActive;
+	const currentNodeDetailsTab = pathname.startsWith("/nodes/")
+		? new URLSearchParams(search).get("tab")
+		: null;
+	const currentNodeDetailsTabQuery =
+		currentNodeDetailsTab && isNodeDetailsTab(currentNodeDetailsTab)
+			? `?tab=${encodeURIComponent(currentNodeDetailsTab)}`
+			: "";
 	const adminNodes = useQuery({
 		queryKey: ["adminNodes", adminToken],
 		enabled:
@@ -106,7 +116,7 @@ export function AppResourceNavigation({
 					return {
 						id: node.node_id,
 						label: nodeName,
-						href: `/nodes/${encodeURIComponent(node.node_id)}`,
+						href: `/nodes/${encodeURIComponent(node.node_id)}${currentNodeDetailsTabQuery}`,
 						ariaLabel: `${identityLabel} ${nodeName} (${node.node_id})`,
 						leadingIcon: {
 							name: isLocalNode ? "tabler:server-bolt" : "tabler:server-2",
@@ -219,6 +229,7 @@ export function AppResourceNavigation({
 		nodesCapability,
 		nodesRequested,
 		onRetryCompatibility,
+		currentNodeDetailsTabQuery,
 		usersCapability,
 		usersRequested,
 	]);

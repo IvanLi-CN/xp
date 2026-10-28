@@ -141,8 +141,8 @@ export function AppShell({
 	children,
 }: AppShellProps) {
 	const navigate = useNavigate();
-	const pathname = useRouterState({
-		select: (state) => state.location.pathname,
+	const { pathname, searchStr: search } = useRouterState({
+		select: (state) => state.location,
 	});
 	const queryClient = useQueryClient();
 	const runtime = useAppRuntime();
@@ -186,7 +186,6 @@ export function AppShell({
 	const lastUpgradeStateRef = useRef<string | null>(null);
 	const lastMeshRevisionRef = useRef<number | null>(null);
 	const upgradeObservation = useUpgradeObservation();
-
 	const health = useQuery({
 		queryKey: ["health"],
 		queryFn: ({ signal }) => fetchHealth(signal),
@@ -736,6 +735,7 @@ export function AppShell({
 			groups={effectiveNavGroups}
 			localNodeId={clusterInfo.data?.node_id ?? null}
 			pathname={pathname}
+			search={search}
 			onNavigate={navigateResource}
 			onResourceNavigate={navigateResource}
 			onRetryCompatibility={() => void apiCompatibility.refetch()}
