@@ -747,6 +747,20 @@ export async function switchPrimaryBackend(
 		notify();
 		throw new Error("Backend directory is no longer available for switching.");
 	}
+	if (options.revalidate && state.pendingMutations > 0) {
+		const revalidationBarrierTimedOut = await waitForMutations();
+		if (revalidationBarrierTimedOut || state.pendingMutations > 0) {
+			state = {
+				...state,
+				state: "ready",
+				unknownMutationCount:
+					state.unknownMutationCount + (revalidationBarrierTimedOut ? 1 : 0),
+				lastSwitchTimedOut: revalidationBarrierTimedOut,
+			};
+			notify();
+			throw new Error("Backend switch is blocked by an unresolved mutation.");
+		}
+	}
 	const currentCandidate = state.candidates.find(
 		(candidate) => candidate.origin === origin,
 	);

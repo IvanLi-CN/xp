@@ -26,6 +26,8 @@
   失败恢复 ready 状态且不改变主后端，并拒绝并行切换。
 - 重验证只接受 refetch 成功结果，保留的旧缓存不能掩盖目录或策略读取失败；静态策略 hydration
   在切换进行时保持 switching 锁。
+- 重验证期间新启动的 mutation 会再次 drain；若再次超时则拒绝本次切换，避免未决写入随切换
+  提交。
 
 ## Compatibility
 

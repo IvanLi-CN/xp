@@ -577,6 +577,56 @@ describe("primary backend transport", () => {
 		);
 	});
 
+	it("drains mutations that start during candidate revalidation", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		let resolveTransaction: (() => void) | undefined;
+		let resolveRevalidation: ((value: boolean) => void) | undefined;
+		const switchPromise = switchPrimaryBackend(
+			{
+				origin: fixtureCatalog.url.secondaryApi(),
+				nodeId: fixtureCatalog.identifier.nodeSecondary(),
+				nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+				verifiedAt: Date.now(),
+				lastError: null,
+			},
+			{
+				revalidate: async () => {
+					void withPrimaryBackendMutation(
+						() =>
+							new Promise<void>((resolve) => {
+								resolveTransaction = resolve;
+							}),
+					);
+					return new Promise<boolean>((resolve) => {
+						resolveRevalidation = resolve;
+					});
+				},
+			},
+		);
+		await Promise.resolve();
+		resolveRevalidation?.(true);
+		await Promise.resolve();
+		expect(getPrimaryBackendSnapshot().pendingMutations).toBe(1);
+		resolveTransaction?.();
+		await switchPromise;
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			fixtureCatalog.url.secondaryApi(),
+		);
+	});
+
 	it("rewrites SSE requests to the selected backend while keeping page assets local", async () => {
 		const fetchMock = vi.fn(
 			(_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
