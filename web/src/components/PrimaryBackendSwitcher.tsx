@@ -33,8 +33,9 @@ function hostLabel(origin: string) {
 export function getCurrentReloadCandidate(
 	pending: BackendCandidate | null,
 	candidates: readonly BackendCandidate[],
+	expired = false,
 ): BackendCandidate | null {
-	if (!pending) return null;
+	if (!pending || expired) return null;
 	return (
 		candidates.find(
 			(candidate) =>
@@ -69,6 +70,7 @@ export function PrimaryBackendSwitcher(props: {
 	const currentReloadCandidate = getCurrentReloadCandidate(
 		reloadCandidate,
 		backend.candidates,
+		isStaticRuntimePolicyExpired(),
 	);
 
 	const handleSelect = async (candidate: BackendCandidate) => {
@@ -233,6 +235,10 @@ export function PrimaryBackendSwitcher(props: {
 							<Button
 								size="sm"
 								onClick={() => {
+									if (isStaticRuntimePolicyExpired()) {
+										setReloadCandidate(null);
+										return;
+									}
 									if (currentReloadCandidate.runtimePolicyGrant) {
 										setServiceWorkerRuntimePolicy(
 											currentReloadCandidate.runtimePolicyGrant,

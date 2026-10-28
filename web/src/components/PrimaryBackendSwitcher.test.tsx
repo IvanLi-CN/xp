@@ -53,6 +53,9 @@ describe("getCurrentReloadCandidate", () => {
 				{ ...stagedCandidate, runtimePolicyId: "rcp-next" },
 			]),
 		).toBeNull();
+		expect(
+			getCurrentReloadCandidate(stagedCandidate, [stagedCandidate], true),
+		).toBeNull();
 	});
 
 	it("keeps the confirmation when the staged candidate is unchanged", () => {
