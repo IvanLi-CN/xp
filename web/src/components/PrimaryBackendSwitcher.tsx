@@ -30,27 +30,11 @@ function hostLabel(origin: string) {
 	}
 }
 
-function switchStatusLabel(candidate: BackendCandidate, isCurrent: boolean) {
-	if (isCurrent) return "Current";
-	if (candidate.switchable !== false) return null;
-	if (candidate.switchBlockedReason === "HTTPS is required for this node.") {
-		return "HTTPS required";
-	}
-	if (
-		candidate.switchBlockedReason ===
-		"This node is not available to the static console."
-	) {
-		return "Not in console policy";
-	}
-	return candidate.switchBlockedReason ?? "Unavailable";
-}
-
 export function PrimaryBackendSwitcher(props: {
 	adminToken: string;
 	clusterId: string | null;
 	onOpened?: () => void;
 	onSwitched?: () => void;
-	versionsLoading?: boolean;
 	frontendVersion?: string | null;
 }) {
 	const backend = usePrimaryBackend();
@@ -110,13 +94,15 @@ export function PrimaryBackendSwitcher(props: {
 			? currentWebReleaseVersion()
 			: recognizedReleaseVersion(props.frontendVersion);
 	const versionLabel = (candidate: BackendCandidate) => {
-		if (!frontendVersion) return "Frontend version unavailable";
-		if (candidate.versionState === "unavailable") return "Version unknown";
-		if (candidate.versionState !== "ready" || !candidate.serviceVersion) {
-			return props.versionsLoading ? "Checking version…" : "Version unknown";
+		if (
+			!frontendVersion ||
+			candidate.versionState !== "ready" ||
+			!candidate.serviceVersion
+		) {
+			return null;
 		}
 		if (candidate.serviceVersion === frontendVersion) return null;
-		return `Service v${candidate.serviceVersion}`;
+		return `v${candidate.serviceVersion}`;
 	};
 
 	const label =
@@ -154,9 +140,6 @@ export function PrimaryBackendSwitcher(props: {
 				<DropdownMenuLabel className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
 					Primary backend
 				</DropdownMenuLabel>
-				<p className="px-1 text-xs text-muted-foreground">
-					Select a backend or open its console.
-				</p>
 				<div className="mt-2 space-y-1">
 					{candidates.length === 0 ? (
 						<p className="px-2 py-2 text-sm text-muted-foreground">
@@ -165,10 +148,8 @@ export function PrimaryBackendSwitcher(props: {
 					) : (
 						candidates.map((candidate) => {
 							const isCurrent = candidate.origin === backend.primaryOrigin;
-							const isChecking = checkingOrigin === candidate.origin;
 							const resolved = buildNodePageHref(candidate.origin);
 							const version = versionLabel(candidate);
-							const switchStatus = switchStatusLabel(candidate, isCurrent);
 							return (
 								<div
 									key={candidate.origin}
@@ -188,8 +169,9 @@ export function PrimaryBackendSwitcher(props: {
 										aria-label={
 											isCurrent
 												? `${candidate.nodeName}, current backend`
-												: switchStatus
-													? `${candidate.nodeName}, ${switchStatus}`
+												: candidate.switchable === false &&
+														candidate.switchBlockedReason
+													? `${candidate.nodeName}, ${candidate.switchBlockedReason}`
 													: candidate.nodeName
 										}
 									>
@@ -204,25 +186,13 @@ export function PrimaryBackendSwitcher(props: {
 											</span>
 											<span className="block truncate text-xs text-muted-foreground">
 												{hostLabel(candidate.origin)}
-												{switchStatus ? ` · ${switchStatus}` : null}
 												{version ? (
-													<span
-														className={
-															version.startsWith("Service v")
-																? "font-medium text-warning"
-																: undefined
-														}
-													>
+													<span className="font-medium text-warning">
 														{` · ${version}`}
 													</span>
 												) : null}
 											</span>
 										</span>
-										{isChecking ? (
-											<span className="text-xs text-muted-foreground">
-												Checking
-											</span>
-										) : null}
 									</DropdownMenuItem>
 									{resolved.disabled ? (
 										<DropdownMenuItem

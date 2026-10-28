@@ -112,7 +112,7 @@ test("shows the registered node list from the AppShell switcher", async ({
 	).toBeDisabled();
 });
 
-test("shows service version differences and separate frontend links", async ({
+test("shows version differences and separate frontend links", async ({
 	page,
 }) => {
 	await page.goto(
@@ -121,8 +121,9 @@ test("shows service version differences and separate frontend links", async ({
 	);
 	await page.getByRole("button", { name: "Open primary backend" }).click();
 
-	await expect(page.getByText("Service v3.21.11")).toBeVisible();
-	await expect(page.getByText("Version unknown").first()).toBeVisible();
+	await expect(page.getByText("v3.21.11")).toBeVisible();
+	await expect(page.getByText("Service v3.21.11")).toHaveCount(0);
+	await expect(page.getByText("Version unknown")).toHaveCount(0);
 	await expect(page.getByText("Verified backend")).toHaveCount(0);
 
 	const nodeLink = page.locator(

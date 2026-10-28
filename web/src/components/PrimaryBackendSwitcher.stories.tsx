@@ -160,7 +160,7 @@ export const MutationBlocked: Story = {
 };
 
 export const VersionMismatchAndLinks: Story = {
-	args: { frontendVersion: "3.22.5", versionsLoading: false },
+	args: { frontendVersion: "3.22.5" },
 	render: withSnapshot({
 		...getPrimaryBackendSnapshot(),
 		clusterId: "cluster-demo",

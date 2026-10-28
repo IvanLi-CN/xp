@@ -216,7 +216,7 @@ export function AppShell({
 					? "API compatibility is unavailable while offline."
 					: null;
 
-	const { nodeVersions, refreshBackendCandidates } = useBackendDirectory({
+	const { refreshBackendCandidates } = useBackendDirectory({
 		adminToken,
 		clusterId: clusterInfo.data?.cluster_id,
 		primaryClusterId: primaryBackend.clusterId,
@@ -913,7 +913,6 @@ export function AppShell({
 										clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
 									}
 									onOpened={refreshBackendCandidates}
-									versionsLoading={nodeVersions.isFetching}
 								/>
 							</div>
 						</div>
