@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
+import {
+	type MihomoSaveFeedback,
+	isMihomoWriteOutcomeUnknown,
+	mihomoProfilesEqual,
+	mihomoSaveDiagnostics,
+	submittedMihomoProfile,
+} from "../utils/mihomoSaveOutcome";
 
 export type MihomoProfileDocumentId = keyof AdminUserMihomoProfile;
 
@@ -25,6 +32,9 @@ type UseMihomoProfileDraftProps = {
 		profile: AdminUserMihomoProfile,
 		baseline: AdminUserMihomoProfile,
 	) => Promise<AdminUserMihomoProfile>;
+	verifyProfile?: (
+		profile: AdminUserMihomoProfile,
+	) => Promise<AdminUserMihomoProfile>;
 	formatError?: (error: unknown) => string;
 };
 
@@ -42,6 +52,7 @@ export function useMihomoProfileDraft({
 	profile,
 	readOnly = false,
 	saveProfile,
+	verifyProfile,
 	formatError = (error) =>
 		error instanceof Error ? error.message : String(error),
 }: UseMihomoProfileDraftProps) {
@@ -55,7 +66,11 @@ export function useMihomoProfileDraft({
 		profile ? userId : null,
 	);
 	const [isSaving, setIsSaving] = useState(false);
+	const [isVerifying, setIsVerifying] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [saveFeedback, setSaveFeedback] = useState<MihomoSaveFeedback | null>(
+		null,
+	);
 	const currentUserIdRef = useRef(userId);
 	const sessionIdentity = `${userId}\u0000${sessionKey ?? userId}`;
 	const currentSessionIdentityRef = useRef(sessionIdentity);
@@ -80,6 +95,7 @@ export function useMihomoProfileDraft({
 		currentSessionIdentityRef.current = sessionIdentity;
 		userSessionRef.current += 1;
 		setIsSaving(false);
+		setIsVerifying(false);
 		savePromiseRef.current = null;
 		setLoadedUserId(null);
 		setDraftState(cloneProfile(profile ?? EMPTY_MIHOMO_PROFILE));
@@ -87,6 +103,7 @@ export function useMihomoProfileDraft({
 		acceptedProfileKeyRef.current = profileKey(profile);
 		lastSavedProfileKeyRef.current = null;
 		setError(null);
+		setSaveFeedback(null);
 	}, [profile, sessionIdentity, userId]);
 
 	const incomingProfileKey = profileKey(profile);
@@ -104,6 +121,7 @@ export function useMihomoProfileDraft({
 			setBaseline(cloneProfile(profile));
 			acceptedProfileKeyRef.current = incomingProfileKey;
 			setError(null);
+			setSaveFeedback(null);
 			return;
 		}
 		if (incomingProfileKey === acceptedProfileKeyRef.current) {
@@ -126,6 +144,7 @@ export function useMihomoProfileDraft({
 		setBaseline(cloneProfile(profile));
 		acceptedProfileKeyRef.current = incomingProfileKey;
 		setError(null);
+		setSaveFeedback(null);
 	}, [
 		dirty,
 		incomingProfileKey,
@@ -154,7 +173,20 @@ export function useMihomoProfileDraft({
 		lastSavedProfileKeyRef.current = null;
 		setLoadedUserId(profile ? userId : loadedUserId);
 		setError(null);
+		setSaveFeedback(null);
 	}, [baseline, isSaving, loadedUserId, profile, userId]);
+
+	const acceptProfile = useCallback(
+		(saved: AdminUserMihomoProfile, targetUserId: string) => {
+			const next = cloneProfile(saved);
+			setBaseline(next);
+			setDraftState(next);
+			setLoadedUserId(targetUserId);
+			acceptedProfileKeyRef.current = profileKey(next);
+			lastSavedProfileKeyRef.current = profileKey(next);
+		},
+		[],
+	);
 
 	const save = useCallback(async (): Promise<boolean> => {
 		if (
@@ -181,20 +213,52 @@ export function useMihomoProfileDraft({
 					currentSessionIdentityRef.current !== sessionIdentity
 				)
 					return false;
-				const next = cloneProfile(saved);
-				setBaseline(next);
-				setDraftState(next);
-				setLoadedUserId(targetUserId);
-				acceptedProfileKeyRef.current = profileKey(next);
-				lastSavedProfileKeyRef.current = profileKey(next);
+				acceptProfile(saved, targetUserId);
+				setSaveFeedback(null);
 				return true;
 			})
-			.catch((saveError: unknown) => {
+			.catch(async (saveError: unknown) => {
 				if (
 					currentUserIdRef.current === targetUserId &&
 					userSessionRef.current === targetSession &&
 					currentSessionIdentityRef.current === sessionIdentity
 				) {
+					if (isMihomoWriteOutcomeUnknown(saveError) && verifyProfile) {
+						const submitted = submittedMihomoProfile(saveError) ?? payload;
+						setIsVerifying(true);
+						try {
+							const latest = await verifyProfile(submitted);
+							if (
+								currentUserIdRef.current !== targetUserId ||
+								userSessionRef.current !== targetSession ||
+								currentSessionIdentityRef.current !== sessionIdentity
+							)
+								return false;
+							if (mihomoProfilesEqual(latest, submitted)) {
+								acceptProfile(latest, targetUserId);
+								setError(null);
+								setSaveFeedback({
+									kind: "outcome_unknown",
+									verification: "matches",
+									diagnostics: mihomoSaveDiagnostics(saveError),
+								});
+								return true;
+							}
+							setSaveFeedback({
+								kind: "outcome_unknown",
+								verification: "different",
+								diagnostics: mihomoSaveDiagnostics(saveError),
+							});
+						} catch {
+							setSaveFeedback({
+								kind: "outcome_unknown",
+								verification: "unavailable",
+								diagnostics: mihomoSaveDiagnostics(saveError),
+							});
+						} finally {
+							setIsVerifying(false);
+						}
+					}
 					setError(formatError(saveError));
 				}
 				return false;
@@ -211,15 +275,82 @@ export function useMihomoProfileDraft({
 		savePromiseRef.current = request;
 		return request;
 	}, [
+		acceptProfile,
 		dirty,
 		draft,
 		formatError,
 		isLoaded,
 		readOnly,
 		saveProfile,
+		verifyProfile,
 		sessionIdentity,
 		baseline,
 		userId,
+	]);
+
+	const verify = useCallback(async (): Promise<boolean> => {
+		if (
+			!verifyProfile ||
+			readOnly ||
+			!isLoaded ||
+			isSaving ||
+			currentUserIdRef.current !== userId ||
+			currentSessionIdentityRef.current !== sessionIdentity
+		)
+			return false;
+		const targetUserId = userId;
+		const targetSession = userSessionRef.current;
+		const submitted = cloneProfile(draft);
+		setIsVerifying(true);
+		setError(null);
+		try {
+			const latest = await verifyProfile(submitted);
+			if (
+				currentUserIdRef.current !== targetUserId ||
+				userSessionRef.current !== targetSession ||
+				currentSessionIdentityRef.current !== sessionIdentity
+			)
+				return false;
+			if (mihomoProfilesEqual(latest, submitted)) {
+				acceptProfile(latest, targetUserId);
+				setSaveFeedback({
+					kind: "outcome_unknown",
+					verification: "matches",
+					diagnostics: saveFeedback?.diagnostics ?? {},
+				});
+				return true;
+			}
+			setSaveFeedback({
+				kind: "outcome_unknown",
+				verification: "different",
+				diagnostics: saveFeedback?.diagnostics ?? {},
+			});
+			setError(
+				"Save result is still unknown. Read-back differs from your draft; review before retrying.",
+			);
+			return false;
+		} catch (verificationError) {
+			setSaveFeedback({
+				kind: "outcome_unknown",
+				verification: "unavailable",
+				diagnostics: saveFeedback?.diagnostics ?? {},
+			});
+			setError(formatError(verificationError));
+			return false;
+		} finally {
+			setIsVerifying(false);
+		}
+	}, [
+		acceptProfile,
+		draft,
+		formatError,
+		isLoaded,
+		isSaving,
+		readOnly,
+		saveFeedback,
+		sessionIdentity,
+		userId,
+		verifyProfile,
 	]);
 
 	return {
@@ -229,8 +360,11 @@ export function useMihomoProfileDraft({
 		error,
 		isLoaded,
 		isSaving,
+		isVerifying,
+		saveFeedback,
 		save,
 		setField,
+		verify,
 		dirty,
 	};
 }

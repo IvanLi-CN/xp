@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
+import { BackendApiError } from "../api/backendError";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	mockFetchAdminUserMihomoProfile,
@@ -225,5 +226,39 @@ describe("<UserDetailsPage /> Mihomo cache", () => {
 			).toBeInTheDocument(),
 		);
 		expect(editor).toHaveTextContent("local draft");
+	});
+
+	it("keeps the draft and offers read-back after an unknown 5xx", async () => {
+		const initialProfile: AdminUserMihomoProfile = {
+			mixin_yaml: "initial\n",
+			extra_proxies_yaml: "",
+			extra_proxy_providers_yaml: "",
+		};
+		setupMocks({ mihomoProfile: initialProfile });
+		mockPutAdminUserMihomoProfile.mockRejectedValueOnce(
+			new BackendApiError({ status: 500, message: "request failed: 500" }),
+		);
+		const page = renderPage();
+
+		const editor = await within(page.container).findByLabelText("mixin_yaml");
+		fireEvent.change(editor, { target: { value: "draft after timeout\n" } });
+		fireEvent.click(
+			within(page.container).getByRole("button", {
+				name: "Save configuration",
+			}),
+		);
+
+		await waitFor(() =>
+			expect(mockPutAdminUserMihomoProfile).toHaveBeenCalledTimes(1),
+		);
+		await waitFor(() =>
+			expect(
+				within(page.container).getByText("Save result is still unknown"),
+			).toBeTruthy(),
+		);
+		expect(editor).toHaveTextContent("draft after timeout");
+		expect(
+			within(page.container).getByRole("button", { name: "Check again" }),
+		).toBeTruthy();
 	});
 });

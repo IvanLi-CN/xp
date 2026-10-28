@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
+import { MihomoSaveOutcomeUnknownError } from "../utils/mihomoSaveOutcome";
 import { useMihomoProfileDraft } from "./useMihomoProfileDraft";
 
 const PROFILE_A: AdminUserMihomoProfile = {
@@ -86,6 +87,85 @@ describe("useMihomoProfileDraft", () => {
 		expect(saveProfile).toHaveBeenCalledTimes(2);
 		expect(result.current.dirty).toBe(false);
 		expect(result.current.error).toBeNull();
+	});
+
+	it("checks an unknown write once and accepts a matching read-back", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "unknown write\n" };
+		const saveProfile = vi
+			.fn<
+				(
+					profile: AdminUserMihomoProfile,
+					baseline: AdminUserMihomoProfile,
+				) => Promise<AdminUserMihomoProfile>
+			>()
+			.mockRejectedValueOnce(
+				new MihomoSaveOutcomeUnknownError(
+					new TypeError("Failed to fetch"),
+					submitted,
+				),
+			);
+		const verifyProfile = vi.fn(async () => submitted);
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+				verifyProfile,
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", submitted.mixin_yaml));
+		await act(async () => expect(await result.current.save()).toBe(true));
+
+		expect(saveProfile).toHaveBeenCalledTimes(1);
+		expect(verifyProfile).toHaveBeenCalledTimes(1);
+		expect(result.current.dirty).toBe(false);
+		expect(result.current.saveFeedback?.verification).toBe("matches");
+		expect(result.current.error).toBeNull();
+
+		act(() =>
+			result.current.setField("mixin_yaml", "edited after read-back\n"),
+		);
+		expect(result.current.dirty).toBe(true);
+		expect(result.current.saveFeedback?.verification).toBe("matches");
+	});
+
+	it("keeps the draft and permits a manual check after a different read-back", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "unknown write\n" };
+		const saveProfile = vi.fn(async () => {
+			throw new MihomoSaveOutcomeUnknownError(
+				new TypeError("Failed to fetch"),
+				submitted,
+			);
+		});
+		const verifyProfile = vi
+			.fn<
+				(profile: AdminUserMihomoProfile) => Promise<AdminUserMihomoProfile>
+			>()
+			.mockResolvedValueOnce(PROFILE_A)
+			.mockResolvedValueOnce(submitted);
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+				verifyProfile,
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", submitted.mixin_yaml));
+		await act(async () => expect(await result.current.save()).toBe(false));
+		expect(result.current.draft).toEqual(submitted);
+		expect(result.current.dirty).toBe(true);
+		expect(result.current.saveFeedback?.verification).toBe("different");
+		expect(verifyProfile).toHaveBeenCalledTimes(1);
+
+		await act(async () => expect(await result.current.verify()).toBe(true));
+		expect(verifyProfile).toHaveBeenCalledTimes(2);
+		expect(result.current.dirty).toBe(false);
+		expect(result.current.saveFeedback?.verification).toBe("matches");
 	});
 
 	it("keeps dirty drafts across refreshes and accepts a complete save response", async () => {

@@ -5,6 +5,7 @@ use tokio::sync::{Mutex, watch};
 
 use super::*;
 use crate::{
+    control_plane_mesh::MeshRequestError,
     domain::{Endpoint, EndpointKind},
     state::{JsonSnapshotStore, StoreInit, membership_key},
 };
@@ -141,4 +142,33 @@ fn conditional_endpoint_update_requires_the_new_capability() {
     assert!(!capabilities_support_conditional_endpoint_update(&[
         "admin.endpoints".to_string(),
     ]));
+}
+
+#[test]
+fn raft_forwarding_error_classification_is_conservative() {
+    assert_eq!(
+        crate::raft::write_error::dispatch_state(&MeshRequestError::InvalidTarget(
+            "bad".to_string(),
+        )),
+        RaftWriteDispatchState::NotDispatched
+    );
+    assert_eq!(
+        crate::raft::write_error::dispatch_state(&MeshRequestError::PreDispatchTimeout),
+        RaftWriteDispatchState::NotDispatched
+    );
+    assert_eq!(
+        crate::raft::write_error::dispatch_state(&MeshRequestError::TransportTimeout),
+        RaftWriteDispatchState::DispatchedNoVerifiedResponse
+    );
+    assert_eq!(
+        crate::raft::write_error::dispatch_state(&MeshRequestError::OutcomeUnknown),
+        RaftWriteDispatchState::Unknown
+    );
+    assert_eq!(
+        crate::raft::write_error::dispatch_state(&MeshRequestError::CircuitOpen {
+            path: "Public",
+            dispatched: true,
+        }),
+        RaftWriteDispatchState::Unknown
+    );
 }

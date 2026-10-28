@@ -6,6 +6,7 @@ import type {
 	AdminMihomoImportPreview,
 	AdminUserMihomoProfile,
 } from "../api/adminUsers";
+import type { MihomoSaveFeedback } from "../utils/mihomoSaveOutcome";
 import { MihomoProfileEditor } from "./MihomoProfileEditor";
 import type { MihomoImportPreviewRequestFn } from "./MihomoSubscriptionImportDialog";
 
@@ -23,6 +24,7 @@ type EditorStoryProps = {
 	startWithError?: boolean;
 	startSaving?: boolean;
 	holdSave?: boolean;
+	startWithUnknown?: boolean;
 	importAvailable?: boolean;
 };
 
@@ -53,10 +55,11 @@ function EditorStory({
 	startWithError = false,
 	startSaving = false,
 	holdSave = false,
+	startWithUnknown = false,
 	importAvailable = false,
 }: EditorStoryProps) {
 	const initialDraft =
-		startWithError || holdSave
+		startWithError || holdSave || startWithUnknown
 			? {
 					...initialProfile,
 					mixin_yaml: `${initialProfile.mixin_yaml}# retry me\n`,
@@ -67,8 +70,23 @@ function EditorStory({
 	const [draft, setDraft] = useState(initialDraft);
 	const [savedProfile, setSavedProfile] = useState(initialProfile);
 	const [isSaving, setIsSaving] = useState(startSaving);
+	const [isVerifying, setIsVerifying] = useState(false);
 	const [saveAttempts, setSaveAttempts] = useState(0);
 	const [error, setError] = useState<string | null>(null);
+	const [saveFeedback, setSaveFeedback] = useState<MihomoSaveFeedback | null>(
+		startWithUnknown
+			? {
+					kind: "outcome_unknown",
+					verification: "different",
+					diagnostics: {
+						code: "raft_write_outcome_unknown",
+						dispatchState: "dispatched_no_verified_response",
+						supportId: "01JDEMO-SUPPORT",
+						targetNodeId: "node-demo",
+					},
+				}
+			: null,
+	);
 	const [visualEvidenceTarget, setVisualEvidenceTarget] =
 		useState<HTMLDivElement | null>(null);
 	const pendingSaveResolve = useRef<(() => void) | null>(null);
@@ -90,6 +108,22 @@ function EditorStory({
 		if (!holdSave) {
 			setSavedProfile(draft);
 		}
+		setSaveFeedback(null);
+		return true;
+	};
+	const verify = async () => {
+		setIsVerifying(true);
+		await Promise.resolve();
+		setSavedProfile(draft);
+		setSaveFeedback({
+			kind: "outcome_unknown",
+			verification: "matches",
+			diagnostics: {
+				code: "raft_write_outcome_unknown",
+				dispatchState: "dispatched_no_verified_response",
+			},
+		});
+		setIsVerifying(false);
 		return true;
 	};
 
@@ -113,8 +147,10 @@ function EditorStory({
 							savedProfile[key as keyof AdminUserMihomoProfile],
 					)}
 					isSaving={isSaving}
+					isVerifying={isVerifying}
 					readOnly={readOnly}
 					error={error}
+					saveFeedback={saveFeedback}
 					isLoaded
 					importAvailable={importAvailable}
 					previewImport={
@@ -138,6 +174,7 @@ function EditorStory({
 						setError(null);
 					}}
 					onSave={save}
+					onVerify={verify}
 				/>
 				{holdSave ? (
 					<button
@@ -347,6 +384,23 @@ export const SaveError: Story = {
 		await expect(dialog).toHaveTextContent("keep me too");
 		await userEvent.click(saveButton);
 		await expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+	},
+};
+
+export const OutcomeUnknown: Story = {
+	args: { startWithUnknown: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByText("Save result is still unknown"),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: "Check again" }),
+		).toBeEnabled();
+		await userEvent.click(canvas.getByRole("button", { name: "Retry save" }));
+		await expect(canvasElement).toHaveTextContent(
+			"Click Retry save again to confirm",
+		);
 	},
 };
 

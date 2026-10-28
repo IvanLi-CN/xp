@@ -32,6 +32,7 @@ mod mesh;
 mod mihomo_import_api;
 mod mihomo_resource_route;
 mod node_delete;
+mod raft_write_error;
 mod resource_alerts;
 mod resource_history_capacity;
 mod resource_mesh_error;
@@ -125,6 +126,7 @@ use mesh::{
 };
 use mihomo_import_api::admin_preview_user_mihomo_import;
 use node_delete::AdminNodeDeletePreviewEndpoint;
+use raft_write_error::map_raft_write_error;
 use resource_alerts::admin_get_alerts_response;
 use resource_monitoring::{
     admin_get_node_resources, admin_get_node_resources_history, admin_get_node_resources_recent,
@@ -1773,7 +1775,7 @@ async fn raft_write(
         .raft
         .client_write(cmd)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(map_raft_write_error)?;
 
     match resp {
         RaftClientResponse::Ok { result } => Ok(result),

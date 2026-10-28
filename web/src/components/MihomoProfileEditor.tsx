@@ -15,6 +15,10 @@ import {
 	type MihomoProfileDocumentId,
 } from "../hooks/useMihomoProfileDraft";
 import { cn } from "../lib/utils";
+import type {
+	MihomoSaveFeedback,
+	MihomoSaveVerification,
+} from "../utils/mihomoSaveOutcome";
 import { Button, IconButton } from "./Button";
 import { Icon } from "./Icon";
 import {
@@ -55,11 +59,14 @@ type MihomoProfileEditorProps = {
 	draft: AdminUserMihomoProfile;
 	dirty: boolean;
 	isSaving: boolean;
+	isVerifying?: boolean;
 	readOnly?: boolean;
 	error: string | null;
+	saveFeedback?: MihomoSaveFeedback | null;
 	isLoaded: boolean;
 	onChange: (documentId: MihomoProfileDocumentId, value: string) => void;
 	onSave: () => Promise<boolean>;
+	onVerify?: () => Promise<boolean>;
 	onExpandAvailabilityChange?: (available: boolean) => void;
 	adminToken?: string;
 	importAvailable?: boolean;
@@ -115,6 +122,100 @@ function statusLabel(
 	return dirty ? "Unsaved changes" : "Saved";
 }
 
+function feedbackCopy(verification: MihomoSaveVerification): {
+	title: string;
+	description: string;
+} {
+	switch (verification) {
+		case "matches":
+			return {
+				title: "Read-back matches your draft",
+				description:
+					"The saved profile currently has the same three files. " +
+					"The original write response was not confirmed, so keep the " +
+					"diagnostic details for follow-up.",
+			};
+		case "different":
+			return {
+				title: "Save result is still unknown",
+				description:
+					"The saved profile differs from your draft. Your draft is preserved; " +
+					"check again or review it before retrying.",
+			};
+		case "unavailable":
+			return {
+				title: "Save result is still unknown",
+				description:
+					"The read-back could not be completed. Your draft is preserved; " +
+					"check again when the backend is reachable.",
+			};
+	}
+}
+
+function MihomoSaveFeedbackPanel({
+	feedback,
+	isVerifying,
+	onVerify,
+}: {
+	feedback: MihomoSaveFeedback | null | undefined;
+	isVerifying: boolean;
+	onVerify?: () => Promise<boolean>;
+}) {
+	if (!feedback) return null;
+	const copy = feedbackCopy(feedback.verification);
+	const details = [
+		["Error code", feedback.diagnostics.code],
+		["Dispatch state", feedback.diagnostics.dispatchState],
+		["Cause", feedback.diagnostics.cause],
+		["Target node", feedback.diagnostics.targetNodeId],
+		["Support ID", feedback.diagnostics.supportId],
+	].filter(([, value]) => value);
+	return (
+		<output className="xp-alert xp-alert-warning space-y-2 px-4 py-3">
+			<div className="flex items-start gap-2">
+				<Icon
+					name="tabler:alert-triangle"
+					className="mt-0.5 size-4 shrink-0"
+					ariaLabel="Save result unknown"
+				/>
+				<div className="min-w-0 space-y-1">
+					<div className="font-medium">{copy.title}</div>
+					<div className="text-sm">{copy.description}</div>
+				</div>
+			</div>
+			<div className="text-xs text-warning-foreground">
+				A manual retry may overwrite changes made elsewhere in the meantime.
+			</div>
+			{details.length > 0 ? (
+				<details className="text-xs">
+					<summary className="cursor-pointer select-none font-medium">
+						Technical details
+					</summary>
+					<dl className="mt-2 grid gap-1 sm:grid-cols-[auto_1fr] sm:gap-x-3">
+						{details.map(([label, value]) => (
+							<div key={label} className="contents">
+								<dt className="text-muted-foreground">{label}</dt>
+								<dd className="font-mono break-all">{value}</dd>
+							</div>
+						))}
+					</dl>
+				</details>
+			) : null}
+			{onVerify ? (
+				<Button
+					variant="outline"
+					size="sm"
+					loading={isVerifying}
+					disabled={isVerifying}
+					onClick={() => void onVerify()}
+				>
+					Check again
+				</Button>
+			) : null}
+		</output>
+	);
+}
+
 export function MihomoProfileEditor({
 	userName,
 	userId,
@@ -122,11 +223,14 @@ export function MihomoProfileEditor({
 	draft,
 	dirty,
 	isSaving,
+	isVerifying = false,
 	readOnly = false,
 	error,
+	saveFeedback,
 	isLoaded,
 	onChange,
 	onSave,
+	onVerify,
 	onExpandAvailabilityChange,
 	adminToken = "",
 	importAvailable = false,
@@ -150,6 +254,23 @@ export function MihomoProfileEditor({
 	const viewportMetrics = useVisualViewportMetrics(expanded);
 	const currentStatus = statusLabel(readOnly, dirty);
 	const canImport = importAvailable && !readOnly && isLoaded;
+	const [retryAcknowledged, setRetryAcknowledged] = useState(false);
+	const needsRetryWarning = saveFeedback?.kind === "outcome_unknown" && dirty;
+
+	useEffect(() => {
+		if (dirty || saveFeedback) setRetryAcknowledged(false);
+	}, [dirty, saveFeedback]);
+
+	const handleSave = useCallback(() => {
+		if (needsRetryWarning && !retryAcknowledged) {
+			setRetryAcknowledged(true);
+			return;
+		}
+		setRetryAcknowledged(false);
+		void onSave();
+	}, [needsRetryWarning, onSave, retryAcknowledged]);
+
+	const saveLabel = needsRetryWarning ? "Retry save" : "Save configuration";
 
 	useEffect(() => {
 		if (typeof document === "undefined") return;
@@ -266,7 +387,7 @@ export function MihomoProfileEditor({
 				onChange={(value) => onChange(documentId, value)}
 				placeholder={DOCUMENT_PLACEHOLDERS[documentId]}
 				minRows={DOCUMENT_ROWS[documentId]}
-				readOnly={readOnly || isSaving || !isLoaded}
+				readOnly={readOnly || isSaving || isVerifying || !isLoaded}
 				fillHeight={expanded}
 				preserveEditorStateOnValueChange
 				hideLabel={expanded || documentId === "extra_proxies_yaml"}
@@ -362,8 +483,19 @@ export function MihomoProfileEditor({
 				</div>
 			</div>
 			<div ref={inlineMount} className="min-w-0" />
-			{error ? (
+			<MihomoSaveFeedbackPanel
+				feedback={saveFeedback}
+				isVerifying={isVerifying}
+				onVerify={onVerify}
+			/>
+			{error && !saveFeedback ? (
 				<div className="xp-alert xp-alert-error px-4 py-2">{error}</div>
+			) : null}
+			{needsRetryWarning && retryAcknowledged ? (
+				<div className="text-xs text-warning-foreground" role="alert">
+					Click Retry save again to confirm. This may overwrite changes made
+					elsewhere.
+				</div>
 			) : null}
 			<div className="flex items-center justify-between gap-3">
 				<span className="text-xs text-muted-foreground">
@@ -371,12 +503,12 @@ export function MihomoProfileEditor({
 				</span>
 				<div className="flex items-center gap-2">
 					<Button
-						loading={isSaving}
-						disabled={readOnly || !dirty || !isLoaded}
+						loading={isSaving || isVerifying}
+						disabled={readOnly || !dirty || !isLoaded || isVerifying}
 						iconLeft={<Icon name="tabler:device-floppy" />}
-						onClick={() => void onSave()}
+						onClick={handleSave}
 					>
-						Save configuration
+						{saveLabel}
 					</Button>
 				</div>
 			</div>
@@ -493,25 +625,22 @@ export function MihomoProfileEditor({
 								<Button
 									className="hidden sm:inline-flex"
 									size="sm"
-									loading={isSaving}
-									disabled={readOnly || !dirty || !isLoaded}
+									loading={isSaving || isVerifying}
+									disabled={readOnly || !dirty || !isLoaded || isVerifying}
 									iconLeft={<Icon name="tabler:device-floppy" />}
-									onClick={() => void onSave()}
+									onClick={handleSave}
 								>
-									Save configuration
+									{saveLabel}
 								</Button>
 								<IconButton
 									className="sm:hidden"
-									label="Save configuration"
-									tooltip="Save configuration"
-									loading={isSaving}
-									disabled={readOnly || !dirty || !isLoaded}
-									onClick={() => void onSave()}
+									label={saveLabel}
+									tooltip={saveLabel}
+									loading={isSaving || isVerifying}
+									disabled={readOnly || !dirty || !isLoaded || isVerifying}
+									onClick={handleSave}
 								>
-									<Icon
-										name="tabler:device-floppy"
-										ariaLabel="Save configuration"
-									/>
+									<Icon name="tabler:device-floppy" ariaLabel={saveLabel} />
 								</IconButton>
 								<IconButton
 									label="Exit expanded editor"
@@ -571,7 +700,12 @@ export function MihomoProfileEditor({
 										{readOnly ? <span>Read-only</span> : null}
 									</div>
 								</div>
-								{error ? (
+								<MihomoSaveFeedbackPanel
+									feedback={saveFeedback}
+									isVerifying={isVerifying}
+									onVerify={onVerify}
+								/>
+								{error && !saveFeedback ? (
 									<div
 										className="xp-alert xp-alert-error mx-3 mt-3 shrink-0 px-3 py-2 text-xs sm:mx-4"
 										role="alert"
