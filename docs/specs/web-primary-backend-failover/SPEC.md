@@ -104,7 +104,10 @@ ADR 0012 and does not alter this embedded-PWA contract.
   before the first authenticated API request, provided the origin is a
   canonical HTTPS origin recorded in that profile. If it cannot be reached,
   the Login page MUST still offer the current page origin as an explicit
-  recovery choice.
+  recovery choice. If that public probe proves a different cluster identity,
+  the client MUST discard the stale in-memory candidates, bind the current
+  tab to the probed cluster, and defer persistence until authenticated node
+  inventory hydration.
 - **REQ-PREAUTH-PERSIST**: A pre-auth choice MUST remain session-local until
   token verification succeeds. The selected origin MAY become the durable
   primary backend only after successful authentication and normal cluster
@@ -222,9 +225,9 @@ ADR 0012 and does not alter this embedded-PWA contract.
   submission_gate: approved
   story_id_or_title: Views/LoginPage/PreAuthBackendRecovery
   state: Login page with a known same-cluster backend candidate selected
-  evidence_note: verifies that a stale current-node token does not hide the
-  service-node recovery control and that the selected target is visible at
-  1280x900 without overflow or overlap after the submission-readiness repair.
+  evidence_note: verifies that the service-node recovery control and selected
+  target are visible at 1280x900 without overflow or overlap after the
+  submission-readiness repair.
   image:
   ![Login pre-auth desktop](./assets/login-preauth-desktop.png)
 

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 	navigate: vi.fn(),
 	verifyAdminToken: vi.fn(),
 	isStaticWebConsole: vi.fn(),
+	probeBackendOrigin: vi.fn(),
 	probeBackendCandidate: vi.fn(),
 	selectPreAuthBackend: vi.fn(),
 	backend: {
@@ -47,7 +48,9 @@ vi.mock("../backend/primaryBackend", async () => {
 	const actual = await vi.importActual<object>("../backend/primaryBackend");
 	return {
 		...actual,
+		hydratePrimaryBackendProfile: vi.fn(),
 		isStaticWebConsole: mocks.isStaticWebConsole,
+		probeBackendOrigin: mocks.probeBackendOrigin,
 		probeBackendCandidate: mocks.probeBackendCandidate,
 		selectPreAuthBackend: mocks.selectPreAuthBackend,
 	};
@@ -81,9 +84,11 @@ describe("<LoginPage />", () => {
 		mocks.navigate.mockReset();
 		mocks.verifyAdminToken.mockReset();
 		mocks.isStaticWebConsole.mockReset();
+		mocks.probeBackendOrigin.mockReset();
 		mocks.probeBackendCandidate.mockReset();
 		mocks.selectPreAuthBackend.mockReset();
 		mocks.isStaticWebConsole.mockReturnValue(false);
+		mocks.probeBackendOrigin.mockResolvedValue({ clusterId: "cluster-84" });
 		mocks.probeBackendCandidate.mockResolvedValue(undefined);
 		mocks.selectPreAuthBackend.mockResolvedValue({ timedOut: false });
 		mocks.backend.clusterId = null;
@@ -107,6 +112,9 @@ describe("<LoginPage />", () => {
 
 		await waitFor(() => {
 			expect(mocks.verifyAdminToken).toHaveBeenCalledWith("test.jwt.token");
+		});
+		expect(mocks.probeBackendOrigin).toHaveBeenCalledWith({
+			origin: window.location.origin,
 		});
 
 		await waitFor(() => {
@@ -207,9 +215,41 @@ describe("<LoginPage />", () => {
 		await user.click(screen.getByRole("menuitem", { name: /Secondary node/ }));
 
 		await waitFor(() => {
-			expect(mocks.probeBackendCandidate).toHaveBeenCalledTimes(3);
+			expect(mocks.probeBackendCandidate).toHaveBeenCalledTimes(2);
 		});
 		expect(mocks.backend.candidates).toHaveLength(1);
+	});
+
+	it("allows retrying a failed current-page probe", async () => {
+		window.history.pushState({}, "", "/login");
+		let failed = true;
+		mocks.probeBackendOrigin.mockImplementation(async () => {
+			if (failed) throw new Error("current page probe failed");
+			return { clusterId: "cluster-84" };
+		});
+
+		render(
+			<UiPrefsProvider>
+				<LoginPage />
+			</UiPrefsProvider>,
+		);
+
+		const user = userEvent.setup();
+		await user.click(
+			screen.getByRole("button", { name: "Select service node" }),
+		);
+		await waitFor(() => {
+			expect(screen.getByRole("alert")).toHaveTextContent(
+				"current page probe failed",
+			);
+		});
+		failed = false;
+		await user.click(screen.getByRole("menuitem", { name: /localhost:3000/ }));
+
+		await waitFor(() => {
+			expect(mocks.probeBackendOrigin).toHaveBeenCalledTimes(2);
+			expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+		});
 	});
 
 	it("keeps a selected candidate and unsaved token after a 401", async () => {

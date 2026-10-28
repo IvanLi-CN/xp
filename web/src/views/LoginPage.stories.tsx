@@ -167,9 +167,20 @@ export const PreAuthBackendRecovery: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const trigger = await canvas.findByRole("button", {
+			name: "Select service node",
+		});
+		await expect(trigger).toBeVisible();
+		await userEvent.click(trigger);
+		const body = within(canvasElement.ownerDocument.body);
 		await expect(
-			await canvas.findByRole("button", { name: "Select service node" }),
+			await body.findByRole("menuitem", { name: /fixture-node-a/ }),
 		).toBeVisible();
+		await expect(
+			await body.findByRole("menuitem", { name: /fixture-node-b/ }),
+		).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await expect(trigger).toHaveFocus();
 	},
 };
 
@@ -199,6 +210,10 @@ export const ZeroCandidates: Story = {
 		const trigger = canvas.getByRole("button", { name: "Select service node" });
 		await expect(trigger).toBeVisible();
 		await userEvent.click(trigger);
-		await expect(trigger).toBeVisible();
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(body.getByRole("menu")).toBeVisible();
+		await expect(body.getByRole("menuitem", { name: /Current/ })).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await expect(trigger).toHaveFocus();
 	},
 };

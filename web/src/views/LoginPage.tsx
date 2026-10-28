@@ -8,8 +8,9 @@ import { verifyAdminToken } from "../api/adminAuth";
 import { isBackendApiError } from "../api/backendError";
 import { usePrimaryBackend } from "../backend/PrimaryBackendProvider";
 import {
+	hydratePrimaryBackendProfile,
 	isStaticWebConsole,
-	probeBackendCandidate,
+	probeBackendOrigin,
 	selectPreAuthBackend,
 } from "../backend/primaryBackend";
 import { Button } from "../components/Button";
@@ -69,13 +70,7 @@ export function LoginPage({
 }: LoginPageProps) {
 	const navigate = useNavigate();
 	const backend = usePrimaryBackend();
-	const [preAuthTargetReady, setPreAuthTargetReady] = useState(() => {
-		if (staticConsole) return true;
-		return (
-			backend.clusterId === null &&
-			backend.primaryOrigin === window.location.origin
-		);
-	});
+	const [preAuthTargetReady, setPreAuthTargetReady] = useState(staticConsole);
 	const storedToken = useMemo(() => readAdminToken(), []);
 	const [tokenLength, setTokenLength] = useState(storedToken.length);
 	const [isVerifying, setIsVerifying] = useState(false);
@@ -141,11 +136,11 @@ export function LoginPage({
 		void (async () => {
 			try {
 				if (!staticConsole) {
-					if (backend.clusterId) {
-						await probeBackendCandidate({
-							origin: window.location.origin,
-							clusterId: backend.clusterId,
-						});
+					const result = await probeBackendOrigin({
+						origin: window.location.origin,
+					});
+					if (result.clusterId !== backend.clusterId) {
+						hydratePrimaryBackendProfile(result.clusterId);
 					}
 					await selectPreAuthBackend(window.location.origin);
 				}

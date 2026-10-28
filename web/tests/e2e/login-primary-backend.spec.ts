@@ -232,6 +232,15 @@ test("uses selected recovery origin and persists after inventory hydration", asy
 			(request) => request.url === `${recoveryOrigin}/api/admin/alerts`,
 		),
 	).toBe(true);
+	const sseRequests = apiRequests.filter(
+		(request) => new URL(request.url).pathname === "/api/admin/status/events",
+	);
+	expect(sseRequests.length).toBeGreaterThan(0);
+	expect(
+		sseRequests.every(
+			(request) => new URL(request.url).origin === recoveryOrigin,
+		),
+	).toBe(true);
 });
 
 test("keeps the login page and selected origin after a recovery 401", async ({
