@@ -4,7 +4,7 @@
 
 ## Current Status
 
-- Implementation: existing contract complete; pre-auth recovery gap not started
+- Implementation: complete for pre-auth primary-backend recovery
 - Lifecycle: active
 - Delivery: fast-track
 
@@ -32,16 +32,19 @@
   the static EdgeOne deployment gate. The image and GitHub Release jobs depend on the public static
   smoke gate; the protected static rollback workflow reuses only verified release archives.
 
-## Remaining Gap
+- The Login page now exposes a same-cluster service-node selector backed by public health,
+  cluster, and compatibility probes that never send the admin token.
+- Pre-auth selection is session-local, respects the existing mutation barrier, and routes token
+  verification plus subsequent relative API/SSE requests through the selected origin.
+- Cold-start transport restores a canonical persisted primary origin when it is still present in
+  the active profile, while the current page origin remains an explicit recovery candidate.
+- Successful authenticated node-inventory hydration is the persistence gate for a new primary;
+  authentication rejection keeps the login page and unverified token out of local storage.
+- Vitest, Storybook interaction, Playwright browser, and the cluster join token-hash regression
+  coverage are recorded in the specification verification matrix.
 
-- The Login page does not yet expose pre-auth backend recovery.
-- Cold-start transport initialization does not yet restore the persisted
-  `primaryOrigin` before the first authenticated request.
-- Login-page Storybook and browser coverage for selected-target authentication,
-  401 recovery, stale candidates, and zero-candidate fallback is not yet added.
-
-The requirements and acceptance contract for this work are recorded in
-`SPEC.md` and ADR 0028. No implementation is claimed by this document.
+The remaining work for this topic is governed by the repository delivery flow and the live PR
+checks; no server-side authentication protocol or deployment behavior changed.
 
 ## References
 

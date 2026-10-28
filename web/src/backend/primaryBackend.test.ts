@@ -7,7 +7,9 @@ import {
 	getPrimaryBackendSnapshot,
 	hydratePrimaryBackendProfile,
 	installPrimaryBackendTransport,
+	probeBackendCandidate,
 	resetPrimaryBackendTransportForTests,
+	selectPreAuthBackend,
 	switchPrimaryBackend,
 	verifyBackendCandidate,
 	withPrimaryBackendMutation,
@@ -152,6 +154,134 @@ describe("primary backend transport", () => {
 		});
 		expect(candidate.nodeId).toBe(fixtureCatalog.identifier.nodeSecondary());
 		expect(requests.at(-1)?.authorization).toBe("Bearer secret-token");
+	});
+
+	it("probes a candidate publicly before any credentialed request", async () => {
+		const requests: Array<{ path: string; authorization: string | null }> = [];
+		window.fetch = vi.fn((input, init) => {
+			const request = new Request(input, init);
+			const url = new URL(request.url);
+			requests.push({
+				path: url.pathname,
+				authorization: request.headers.get("Authorization"),
+			});
+			if (url.pathname === "/api/health") {
+				return Promise.resolve(
+					new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
+				);
+			}
+			if (url.pathname === "/api/cluster/info") {
+				return Promise.resolve(
+					new Response(
+						JSON.stringify({
+							cluster_id: fixtureCatalog.cluster.fixture84(),
+						}),
+						{ status: 200 },
+					),
+				);
+			}
+			return Promise.resolve(
+				new Response(JSON.stringify({ release_tag: "v3.22.0" }), {
+					status: 200,
+				}),
+			);
+		}) as typeof window.fetch;
+		installPrimaryBackendTransport();
+
+		await probeBackendCandidate({
+			origin: fixtureCatalog.url.secondaryApi(),
+			clusterId: fixtureCatalog.cluster.fixture84(),
+		});
+
+		expect(requests.map((request) => request.path)).toEqual([
+			"/api/health",
+			"/api/cluster/info",
+			"/api/capabilities",
+		]);
+		expect(requests.every((request) => request.authorization === null)).toBe(
+			true,
+		);
+	});
+
+	it("keeps pre-auth selection out of the durable profile", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		const before = JSON.parse(
+			window.localStorage.getItem("xp-primary-backend-profiles") ?? "{}",
+		);
+
+		await selectPreAuthBackend(fixtureCatalog.url.secondaryApi());
+
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			fixtureCatalog.url.secondaryApi(),
+		);
+		expect(
+			JSON.parse(
+				window.localStorage.getItem("xp-primary-backend-profiles") ?? "{}",
+			).profiles[fixtureCatalog.cluster.fixture84()].primaryOrigin,
+		).toBe(before.profiles[fixtureCatalog.cluster.fixture84()].primaryOrigin);
+	});
+
+	it("restores primary and gates pre-auth persistence on inventory hydration", async () => {
+		const clusterId = fixtureCatalog.cluster.fixture84();
+		const secondary = fixtureCatalog.url.secondaryApi();
+		window.localStorage.setItem(
+			"xp-primary-backend-profiles",
+			JSON.stringify({
+				activeClusterId: clusterId,
+				profiles: {
+					[clusterId]: {
+						clusterId,
+						primaryOrigin: secondary,
+						candidates: [
+							{
+								origin: secondary,
+								nodeId: fixtureCatalog.identifier.nodeSecondary(),
+								nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+								verifiedAt: Date.now(),
+								lastError: null,
+							},
+						],
+						updatedAt: Date.now(),
+					},
+				},
+			}),
+		);
+		resetPrimaryBackendTransportForTests();
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(secondary);
+
+		hydratePrimaryBackendProfile(clusterId);
+		await selectPreAuthBackend(window.location.origin);
+		const beforeHydration = JSON.parse(
+			window.localStorage.getItem("xp-primary-backend-profiles") ?? "{}",
+		);
+		expect(beforeHydration.profiles[clusterId].primaryOrigin).toBe(secondary);
+
+		hydratePrimaryBackendProfile(clusterId, [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: window.location.origin,
+			},
+		]);
+		const afterHydration = JSON.parse(
+			window.localStorage.getItem("xp-primary-backend-profiles") ?? "{}",
+		);
+		expect(afterHydration.profiles[clusterId].primaryOrigin).toBe(
+			window.location.origin,
+		);
 	});
 
 	it("removes stale nodes and falls back when the primary is removed", async () => {
