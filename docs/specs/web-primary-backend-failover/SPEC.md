@@ -199,6 +199,6 @@ ADR 0012 and does not alter this embedded-PWA contract.
   state: authenticated node directory with current, unavailable, invalid-address, and
   mismatched-version entries
   evidence_note: verifies real node names and hosts, separate new-tab actions, invalid HTTPS
-  handling, unknown versions, and a visible Service v3.21.11 mismatch label.
+  handling, hidden unknown versions, and a visible v3.21.11 mismatch label.
   image:
   ![Primary backend node directory](./assets/primary-backend-selector-version-links.png)
