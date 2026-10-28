@@ -37,7 +37,6 @@ import type {
 import type {
 	AdminNodeTrafficResponse,
 	AdminUserTrafficResponse,
-	TrafficReport,
 	TrafficWindow,
 } from "../../src/api/adminTraffic";
 import type { AdminUpgradeStatusResponse } from "../../src/api/adminUpgrade";
@@ -102,6 +101,10 @@ import {
 	buildFixtureUserQuotaSummaryItem,
 	buildUserNodeQuotaStatusItem,
 } from "./staticFixtureMappings";
+import {
+	buildDefaultNodeTraffic,
+	buildDefaultUserTraffic,
+} from "./trafficFixtureBuilders";
 
 export type StorybookApiMockConfig = {
 	identityNamespace?: "demo";
@@ -112,6 +115,7 @@ export type StorybookApiMockConfig = {
 	failVersionCheck?: boolean;
 	nodeDeleteAccepted?: StorybookNodeDeleteAccepted;
 	probe?: import("./endpointProbeMock").StorybookEndpointProbeMock;
+	trafficNowMs?: number;
 };
 
 export type MockEndpointSeed = AdminEndpoint & {
@@ -151,6 +155,7 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 	failAdminConfig: boolean;
 	failNodeRuntimeNodeIds: string[];
 	failVersionCheck: boolean;
+	trafficNowMs?: number;
 	nextEndpointId: () => string;
 	nextEndpointTag: () => string;
 	identityNamespace?: "demo";
@@ -475,164 +480,6 @@ function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 	};
 }
 
-function buildTrafficPoint(
-	window: TrafficWindow,
-	index: number,
-	isCurrentDay: boolean,
-	isGap = false,
-): NonNullable<TrafficReport["current"]>[number] {
-	const step = window === "24h" ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
-	if (isGap) {
-		return {
-			start_at: catalogTimestampOffset(index * step),
-			end_at: catalogTimestampOffset((index + 1) * step),
-			uplink_bytes: null,
-			downlink_bytes: null,
-			total_bytes: null,
-			complete: false,
-			is_current_day: isCurrentDay,
-		};
-	}
-
-	return {
-		start_at: catalogTimestampOffset(index * step),
-		end_at: catalogTimestampOffset((index + 1) * step),
-		uplink_bytes:
-			index % 2 === 0
-				? fixtureCatalog.number.value3()
-				: fixtureCatalog.number.value4(),
-		downlink_bytes:
-			index % 2 === 0
-				? fixtureCatalog.number.value5()
-				: fixtureCatalog.number.value6(),
-		total_bytes:
-			index % 2 === 0
-				? fixtureCatalog.number.value8()
-				: fixtureCatalog.number.value10(),
-		complete: true,
-		is_current_day: isCurrentDay,
-	};
-}
-
-function buildReferenceTrafficPoint(
-	window: TrafficWindow,
-	index: number,
-): NonNullable<TrafficReport["reference"]>[number] {
-	const step = window === "24h" ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
-	const count = window === "24h" ? 288 : 31;
-	return {
-		start_at: catalogTimestampOffset((index - count) * step),
-		end_at: catalogTimestampOffset((index + 1 - count) * step),
-		uplink_bytes:
-			index % 2 === 0
-				? fixtureCatalog.number.value2()
-				: fixtureCatalog.number.value3(),
-		downlink_bytes:
-			index % 2 === 0
-				? fixtureCatalog.number.value3()
-				: fixtureCatalog.number.value4(),
-		total_bytes:
-			index % 2 === 0
-				? fixtureCatalog.number.value5()
-				: fixtureCatalog.number.value7(),
-		complete: true,
-		is_current_day: false,
-	};
-}
-
-function buildTrafficReport(window: TrafficWindow, gap = false): TrafficReport {
-	const count = window === "24h" ? 288 : 31;
-	const current = Array.from({ length: count }, (_, index) =>
-		buildTrafficPoint(
-			window,
-			index,
-			window === "31d" && index === count - 1,
-			gap && index > 112 && index < 124,
-		),
-	);
-	const reference = current.map((_, index) =>
-		buildReferenceTrafficPoint(window, index),
-	);
-	const summary =
-		window === "24h"
-			? {
-					uplink_bytes: fixtureCatalog.number.value864(),
-					downlink_bytes: fixtureCatalog.number.value1152(),
-					total_bytes: fixtureCatalog.number.value2016(),
-				}
-			: {
-					uplink_bytes: fixtureCatalog.number.value93(),
-					downlink_bytes: fixtureCatalog.number.value124(),
-					total_bytes: fixtureCatalog.number.value217(),
-				};
-	const step = window === "24h" ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
-	return {
-		window,
-		window_start_at: catalogTimestampOffset(0),
-		window_end_at: catalogTimestampOffset(count * step),
-		timezone: "UTC",
-		summary: {
-			mode: "cycle",
-			cycle_start_at: fixtureCatalog.timestamp.baseline(),
-			cycle_end_at: catalogTimestampOffset(count * step),
-			...summary,
-			complete: !gap,
-			tracking_since: catalogTimestampOffset(0),
-		},
-		current,
-		reference,
-		partial: false,
-		last_sample_at: catalogTimestampOffset(count * step),
-		warnings: [],
-	};
-}
-
-function buildDefaultNodeTraffic(node: AdminNode): MockWindowedNodeTraffic {
-	return {
-		"24h": { node, traffic: buildTrafficReport("24h") },
-		"31d": { node, traffic: buildTrafficReport("31d") },
-	};
-}
-
-function buildDefaultUserTraffic(
-	user: AdminUser,
-	nodes: AdminNode[],
-): MockWindowedUserTraffic {
-	const nodeOptions = nodes.map((node, index) => {
-		const option = {
-			node_id: fixtureCatalog.nodeId.fixture36(),
-			node_name: fixtureCatalog.nodeName.fixture37(),
-		};
-		if (node.node_id === fixtureCatalog.identifier.nodePrimary()) {
-			option.node_id = fixtureCatalog.identifier.nodePrimary();
-			option.node_name = fixtureCatalog.identifier.nodeNameSecondary();
-		} else if (node.node_id === fixtureCatalog.identifier.nodeSecondary()) {
-			option.node_id = fixtureCatalog.identifier.nodeSecondary();
-			option.node_name = fixtureCatalog.identifier.nodeNamePrimary();
-		} else if (index === 0) {
-			option.node_id = fixtureCatalog.nodeId.fixture32();
-			option.node_name = fixtureCatalog.nodeName.fixture33();
-		}
-		return option;
-	});
-	return {
-		"24h": {
-			user: { user_id: user.user_id, display_name: user.display_name },
-			traffic: buildTrafficReport("24h"),
-			nodes: nodeOptions,
-			partial: false,
-			unreachable_nodes: [],
-		},
-		"31d": {
-			user: { user_id: user.user_id, display_name: user.display_name },
-			traffic: buildTrafficReport("31d"),
-			nodes: nodeOptions,
-			partial: false,
-			unreachable_nodes: [],
-		},
-	};
-}
-
 function refreshGlobalEndpointReality(state: MockState): void {
 	for (const endpoint of state.endpoints) {
 		if (endpoint.kind !== "vless_reality_vision_tcp") continue;
@@ -753,7 +600,7 @@ function buildDefaultUserIpUsage(
 	};
 }
 
-function createDefaultSeed(): MockStateSeed {
+function createDefaultSeed(trafficNowMs?: number): MockStateSeed {
 	const nodes: AdminNode[] = [
 		{
 			node_id: fixtureCatalog.nodeId.fixture32(),
@@ -998,10 +845,16 @@ function createDefaultSeed(): MockStateSeed {
 		users.map((user) => [user.user_id, buildDefaultUserIpUsage(user, nodes)]),
 	) satisfies Record<string, AdminUserIpUsageResponse>;
 	const nodeTrafficByNodeId = Object.fromEntries(
-		nodes.map((node) => [node.node_id, buildDefaultNodeTraffic(node)]),
+		nodes.map((node) => [
+			node.node_id,
+			buildDefaultNodeTraffic(node, trafficNowMs),
+		]),
 	) satisfies Record<string, MockWindowedNodeTraffic>;
 	const userTrafficByUserId = Object.fromEntries(
-		users.map((user) => [user.user_id, buildDefaultUserTraffic(user, nodes)]),
+		users.map((user) => [
+			user.user_id,
+			buildDefaultUserTraffic(user, nodes, trafficNowMs),
+		]),
 	) satisfies Record<string, MockWindowedUserTraffic>;
 
 	return {
@@ -1055,7 +908,7 @@ function createDefaultSeed(): MockStateSeed {
 }
 
 function buildState(config?: StorybookApiMockConfig): MockState {
-	const base = createDefaultSeed();
+	const base = createDefaultSeed(config?.trafficNowMs);
 	const overrides = config?.data;
 	const merged: MockStateSeed = {
 		...base,
@@ -1121,6 +974,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		failAdminConfig: config?.failAdminConfig ?? false,
 		failNodeRuntimeNodeIds: config?.failNodeRuntimeNodeIds ?? [],
 		failVersionCheck: config?.failVersionCheck ?? false,
+		trafficNowMs: config?.trafficNowMs,
 		nextEndpointId,
 		nextEndpointTag,
 		identityNamespace: config?.identityNamespace,
@@ -1528,7 +1382,7 @@ async function handleRequest(
 		const node = state.nodes.find((item) => item.node_id === nodeId);
 		const entry =
 			state.nodeTrafficByNodeId[nodeId] ??
-			(node ? buildDefaultNodeTraffic(node) : null);
+			(node ? buildDefaultNodeTraffic(node, state.trafficNowMs) : null);
 		if (!entry) return errorResponse(404, "not_found", "node not found");
 		const window = url.searchParams.get("window") === "31d" ? "31d" : "24h";
 		return jsonResponse(selectWindowedNodeTraffic(entry, window));
@@ -1601,7 +1455,9 @@ async function handleRequest(
 		const user = state.users.find((item) => item.user_id === userId);
 		const entry =
 			state.userTrafficByUserId[userId] ??
-			(user ? buildDefaultUserTraffic(user, state.nodes) : null);
+			(user
+				? buildDefaultUserTraffic(user, state.nodes, state.trafficNowMs)
+				: null);
 		if (!entry) return errorResponse(404, "not_found", "user not found");
 		const window = url.searchParams.get("window") === "31d" ? "31d" : "24h";
 		const selectedNodeId = url.searchParams.get("node_id");
