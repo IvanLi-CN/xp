@@ -215,6 +215,42 @@ describe("ServiceConfigPage", () => {
 		expect(updateAdminMeshConfig).toHaveBeenCalledTimes(1);
 	});
 
+	it("keeps an unknown mutation locked when observation reaches the target", async () => {
+		const user = userEvent.setup();
+		vi.mocked(updateAdminMeshConfig).mockRejectedValueOnce(
+			new Error("connection interrupted"),
+		);
+		const observedValues = [false, false, false, true];
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus).mockImplementation(async () => ({
+			...demoMeshStatus,
+			cluster_mesh_enabled: observedValues.shift() ?? true,
+		}));
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		await user.click(
+			screen.getByRole("button", { name: "Refresh observation" }),
+		);
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		expect(
+			screen.getByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		).toBeDisabled();
+	});
+
 	it("does not submit after canceling the confirmation refresh", async () => {
 		const user = userEvent.setup();
 		let resolveRefresh!: (value: typeof demoMeshStatus) => void;

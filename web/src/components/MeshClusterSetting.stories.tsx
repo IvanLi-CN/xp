@@ -92,6 +92,25 @@ export const UnknownOffline: Story = {
 	},
 };
 
+export const UnknownNoObservation: Story = {
+	args: {
+		status: undefined,
+		statusUpdatedAt: null,
+		statusFresh: false,
+		isOnline: false,
+		isReadOnly: true,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByText("Observation unavailable"),
+		).toBeInTheDocument();
+		await expect(
+			canvas.getByText("No current observation is available."),
+		).toBeInTheDocument();
+	},
+};
+
 export const PreflightFailure: Story = {
 	args: {
 		status: { ...demoMeshStatus, cluster_mesh_enabled: false },

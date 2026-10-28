@@ -345,6 +345,23 @@ export function ServiceConfigPage() {
 			};
 			try {
 				const lockResult = await withMeshMutationLock(lock, async () => {
+					const currentBackend = getPrimaryBackendSnapshot();
+					if (
+						currentBackend.primaryOrigin !== expectedOrigin ||
+						currentBackend.generation !== expectedGeneration
+					) {
+						const cleared = clearMeshMutationLock(expectedClusterId);
+						setMeshLockRevision((revision) => revision + 1);
+						setMeshMutationIssue({
+							kind: cleared ? "rejected" : "persistence",
+							message: cleared
+								? "The selected backend changed before the mutation started. " +
+									"No cluster mutation was sent."
+								: "The selected backend changed before the mutation started, " +
+									"but the local safety lock could not be cleared.",
+						});
+						return;
+					}
 					setMeshLockRevision((revision) => revision + 1);
 					setMeshMutationPhase("submitting");
 					try {

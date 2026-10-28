@@ -12,6 +12,9 @@ export type MeshMutationLockRunResult<T> =
 	  };
 
 const STORAGE_KEY = "xp-mesh-config-mutation-locks";
+// The persisted value is one shared cluster-id map. A single Web Lock protects
+// its read-modify-write lifecycle across different cluster ids as well.
+const WEB_LOCK_NAME = "xp-mesh-config-mutation-storage";
 
 function storage(): Storage | null {
 	if (typeof window === "undefined") return null;
@@ -88,7 +91,7 @@ export async function withMeshMutationLock<T>(
 		return { acquired: false, reason: "unavailable" };
 	}
 	return navigator.locks.request(
-		`xp-mesh-config:${lock.clusterId}`,
+		WEB_LOCK_NAME,
 		{ mode: "exclusive", ifAvailable: true },
 		async (heldLock) => {
 			if (!heldLock || readMeshMutationLock(lock.clusterId)) {

@@ -177,7 +177,7 @@ export function MeshClusterSetting({
 }: MeshClusterSettingProps) {
 	const [unlockConfirmOpen, setUnlockConfirmOpen] = useState(false);
 	const value = status?.cluster_mesh_enabled;
-	const counts = pathSummary(status);
+	const counts = status ? pathSummary(status) : null;
 	const observerDataIncomplete =
 		!statusFresh ||
 		status?.peers.some(
@@ -382,18 +382,29 @@ export function MeshClusterSetting({
 					</Button>
 				</div>
 				<div className="mt-3 grid grid-cols-3 gap-2 text-center text-sm">
-					<div className="rounded-xl border border-border/70 bg-card px-2 py-2">
-						<div className="font-semibold">{counts.mesh}</div>
-						<div className="text-xs text-muted-foreground">Mesh</div>
-					</div>
-					<div className="rounded-xl border border-border/70 bg-card px-2 py-2">
-						<div className="font-semibold">{counts.public}</div>
-						<div className="text-xs text-muted-foreground">Public</div>
-					</div>
-					<div className="rounded-xl border border-border/70 bg-card px-2 py-2">
-						<div className="font-semibold">{counts.unknown}</div>
-						<div className="text-xs text-muted-foreground">Unknown</div>
-					</div>
+					{counts ? (
+						<>
+							<div className="rounded-xl border border-border/70 bg-card px-2 py-2">
+								<div className="font-semibold">{counts.mesh}</div>
+								<div className="text-xs text-muted-foreground">Mesh</div>
+							</div>
+							<div className="rounded-xl border border-border/70 bg-card px-2 py-2">
+								<div className="font-semibold">{counts.public}</div>
+								<div className="text-xs text-muted-foreground">Public</div>
+							</div>
+							<div className="rounded-xl border border-border/70 bg-card px-2 py-2">
+								<div className="font-semibold">{counts.unknown}</div>
+								<div className="text-xs text-muted-foreground">Unknown</div>
+							</div>
+						</>
+					) : (
+						<div className="col-span-3 rounded-xl border border-border/70 bg-card px-3 py-2">
+							<div className="font-semibold">Unknown</div>
+							<div className="text-xs text-muted-foreground">
+								Observation unavailable
+							</div>
+						</div>
+					)}
 				</div>
 				<div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
 					<Badge variant={observerDataIncomplete ? "outline" : "secondary"}>
@@ -406,9 +417,11 @@ export function MeshClusterSetting({
 					) : null}
 				</div>
 				<p className="mt-2 text-xs text-muted-foreground">
-					{status?.peers.length === 0
-						? "No remote peer samples are available."
-						: `Observed at ${formatTimestamp(status?.generated_at)}.`}
+					{!status
+						? "No current observation is available."
+						: status.peers.length === 0
+							? "No remote peer samples are available."
+							: `Observed at ${formatTimestamp(status?.generated_at)}.`}
 				</p>
 			</div>
 

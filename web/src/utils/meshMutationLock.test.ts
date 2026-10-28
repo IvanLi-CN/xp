@@ -86,4 +86,80 @@ describe("mesh mutation lock", () => {
 		releaseFirst?.();
 		expect(await first).toEqual({ acquired: true, value: "completed" });
 	});
+
+	it("serializes shared lock storage across different clusters", async () => {
+		let active = false;
+		let releaseFirst: (() => void) | undefined;
+		vi.stubGlobal("navigator", {
+			locks: {
+				request: async (
+					name: string,
+					_options: LockOptions,
+					callback: (lock: Lock | null) => Promise<unknown>,
+				) => {
+					expect(name).toBe("xp-mesh-config-mutation-storage");
+					if (active) return callback(null);
+					active = true;
+					try {
+						return await callback({ name } as Lock);
+					} finally {
+						active = false;
+					}
+				},
+			},
+		});
+		const firstLock = {
+			clusterId: fixtureCatalog.cluster.fixture53(),
+			targetEnabled: true,
+			createdAt: fixtureCatalog.number.value123(),
+		};
+		const secondLock = {
+			clusterId: fixtureCatalog.cluster.fixture84(),
+			targetEnabled: false,
+			createdAt: fixtureCatalog.number.value124(),
+		};
+
+		const first = withMeshMutationLock(
+			firstLock,
+			() =>
+				new Promise<string>((resolve) => {
+					releaseFirst = () => resolve("completed");
+				}),
+		);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		const second = await withMeshMutationLock(
+			secondLock,
+			async () => "unexpected",
+		);
+
+		expect(second).toEqual({ acquired: false, reason: "held" });
+		releaseFirst?.();
+		expect(await first).toEqual({ acquired: true, value: "completed" });
+	});
+
+	it("retains an unknown-result lock after the operation rejects", async () => {
+		vi.stubGlobal("navigator", {
+			locks: {
+				request: async (
+					_name: string,
+					_options: LockOptions,
+					callback: (lock: Lock | null) => Promise<unknown>,
+				) => callback({ name: "xp-mesh-config-mutation-storage" } as Lock),
+			},
+		});
+		const lock = {
+			clusterId: fixtureCatalog.cluster.fixture53(),
+			targetEnabled: true,
+			createdAt: fixtureCatalog.number.value123(),
+		};
+
+		await expect(
+			withMeshMutationLock(lock, async () => {
+				throw new Error("request outcome unknown");
+			}),
+		).rejects.toThrow("request outcome unknown");
+		expect(readMeshMutationLock(fixtureCatalog.cluster.fixture53())).toEqual(
+			lock,
+		);
+	});
 });

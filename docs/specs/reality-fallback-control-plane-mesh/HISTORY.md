@@ -5,9 +5,10 @@
 ## Decisions
 
 - The Web control now treats the Mesh write route as an independent compatibility contract,
-  serializes same-cluster browser mutations with Web Locks before persisting the local unknown
-  result lock, and cancels stale confirmation refresh callbacks. Unknown settings render as an
-  indeterminate control, while stale or unsampled observer peers remain visibly marked.
+  serializes the shared local lock map with Web Locks before persisting the local unknown result
+  lock, rechecks the selected backend after lock acquisition, and cancels stale confirmation
+  refresh callbacks. Unknown settings render as an indeterminate control, stale or unsampled
+  observer peers remain visibly marked, and missing observations never render as zero counts.
 
 - Cluster Mesh configuration belongs in Service config, while System Status keeps node-local
   path diagnosis. A single control reflects the Raft setting; Public fallback and dormant

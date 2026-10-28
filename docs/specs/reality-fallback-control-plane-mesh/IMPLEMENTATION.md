@@ -14,8 +14,11 @@
   failure presentation, and a durable browser-local unknown-result lock held with the Web Locks
   API to prevent concurrent same-cluster mutations across tabs. Configuration writes are gated
   independently by the compatibility inventory's server route set; unknown values use an
-  indeterminate switch and stale or unsampled peer observations are labeled explicitly. System
-  Status remains diagnostic and links to Service config.
+  indeterminate switch and stale or unsampled peer observations are labeled explicitly. The
+  shared localStorage lock map is serialized across cluster ids, and the selected backend is
+  rechecked after lock acquisition before any write begins. Missing observer data renders as
+  unknown rather than zero-valued path counts. System Status remains diagnostic and links to
+  Service config.
 
 ## Confirmed Recovery Gap
 
