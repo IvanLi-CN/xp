@@ -219,8 +219,29 @@ ADR 0012 and does not alter this embedded-PWA contract.
   surface_selector: '[data-visual-evidence-surface]'
   target_selector: '[data-visual-evidence-target]'
   sensitive_exclusion: N/A
-  submission_gate: planned
+  submission_gate: approved
   story_id_or_title: Views/LoginPage/PreAuthBackendRecovery
   state: Login page with a known same-cluster backend candidate selected
   evidence_note: verifies that a stale current-node token does not hide the
-  service-node recovery control and that the selected target is visible.
+  service-node recovery control and that the selected target is visible at
+  1280x900 without overflow or overlap.
+  image:
+  ![Login pre-auth desktop](./assets/login-preauth-desktop.png)
+
+- source_type: storybook_canvas
+  target_program: mock-only
+  capture_scope: element
+  requested_viewport: 393x852
+  viewport_strategy: storybook-viewport
+  margin_policy: require_margin
+  evidence_surface: component
+  surface_selector: '[data-visual-evidence-surface]'
+  target_selector: '[data-visual-evidence-target]'
+  sensitive_exclusion: N/A
+  submission_gate: approved
+  story_id_or_title: Views/LoginPage/ZeroCandidates
+  state: Login page with current-page fallback and the service-node menu open
+  evidence_note: verifies the mobile selector, zero-candidate recovery state,
+  token form, error surface, and actions fit within the viewport.
+  image:
+  ![Login pre-auth mobile](./assets/login-preauth-mobile.png)

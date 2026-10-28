@@ -6,8 +6,12 @@ import { z } from "zod";
 
 import { verifyAdminToken } from "../api/adminAuth";
 import { isBackendApiError } from "../api/backendError";
-import { isStaticWebConsole } from "../backend/primaryBackend";
+import {
+	isStaticWebConsole,
+	selectPreAuthBackend,
+} from "../backend/primaryBackend";
 import { Button } from "../components/Button";
+import { LoginBackendSelector } from "../components/LoginBackendSelector";
 import { XpBrandLogo } from "../components/XpBrandLogo";
 import {
 	ADMIN_TOKEN_STORAGE_KEY,
@@ -124,15 +128,29 @@ export function LoginPage({
 		window.history.replaceState(null, "", nextUrl);
 
 		form.reset({ token: loginToken });
-		void submitToken(loginToken);
+		void (async () => {
+			try {
+				await selectPreAuthBackend(window.location.origin);
+				await submitToken(loginToken);
+			} catch (error) {
+				setServerError(
+					error instanceof Error
+						? error.message
+						: "Unable to select the current service node.",
+				);
+			}
+		})();
 	}, [form, submitToken]);
 
 	return (
 		<div className="flex min-h-screen items-center justify-center bg-muted/35 px-6 py-10">
 			<div className="xp-card w-full max-w-lg">
 				<div className="xp-card-body space-y-5">
-					<div className="flex items-start gap-4">
-						<XpBrandLogo kind="lockup" className="h-12 w-[10rem] shrink-0" />
+					<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+						<XpBrandLogo
+							kind="lockup"
+							className="h-10 w-[8.5rem] shrink-0 sm:h-12 sm:w-[10rem]"
+						/>
 						<div className="space-y-1">
 							<h1 className="text-2xl font-semibold tracking-tight">
 								Admin login
@@ -142,6 +160,8 @@ export function LoginPage({
 							</p>
 						</div>
 					</div>
+
+					<LoginBackendSelector />
 
 					<div className="space-y-2">
 						<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">

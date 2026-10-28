@@ -62,7 +62,7 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 | shadcn/ui migration   | active     | complete       | [Spec][43] | -          |         |
 | Service monitoring    | active     | complete       | [Spec][44] | -          |         |
 | Web local upgrade     | active     | complete       | [Spec][45] | -          |         |
-| Web primary backend   | active     | in progress    | [Spec][46] | -          | preauth |
+| Web primary backend   | active     | complete       | [Spec][46] | -          | preauth |
 | Web PWA               | active     | complete       | [Spec][47] | -          |         |
 | Web resilience        | active     | in progress    | [Spec][48] | -          |         |
 | Web tools             | active     | complete       | [Spec][49] | -          |         |

@@ -77,11 +77,20 @@ function readInitialState(): PrimaryBackendSnapshot {
 	const active = stored.activeClusterId
 		? stored.profiles?.[stored.activeClusterId]
 		: undefined;
+	const pageOrigin = getPageOrigin();
+	const storedPrimary = canonicalBackendOrigin(active?.primaryOrigin ?? "");
+	const storedCandidateOrigins = new Set(
+		(active?.candidates ?? [])
+			.map((candidate) => canonicalBackendOrigin(candidate.origin))
+			.filter((origin): origin is string => Boolean(origin)),
+	);
 	return {
 		clusterId: stored.activeClusterId ?? null,
 		primaryOrigin: isStaticWebConsole()
 			? STATIC_BOOTSTRAP_ORIGIN
-			: getPageOrigin(),
+			: storedPrimary && storedCandidateOrigins.has(storedPrimary)
+				? storedPrimary
+				: pageOrigin,
 		candidates: active?.candidates ?? [],
 		generation: 0,
 		state: "ready",
@@ -297,6 +306,10 @@ export function hydratePrimaryBackendProfile(
 	}
 	const stored = readStoredProfiles();
 	const storedProfile = stored.profiles?.[clusterId];
+	const currentPrimary =
+		state.clusterId === clusterId
+			? canonicalBackendOrigin(state.primaryOrigin)
+			: null;
 	const candidatesByOrigin = new Map<string, BackendCandidate>();
 	if (nodes === undefined) {
 		for (const candidate of storedProfile?.candidates ?? []) {
@@ -331,10 +344,11 @@ export function hydratePrimaryBackendProfile(
 		storedProfile?.primaryOrigin ?? "",
 	);
 	const nextPrimary =
-		persistedPrimary &&
-		(nodes === undefined || candidatesByOrigin.has(persistedPrimary))
-			? persistedPrimary
-			: pageOrigin;
+		currentPrimary && candidatesByOrigin.has(currentPrimary)
+			? currentPrimary
+			: persistedPrimary && candidatesByOrigin.has(persistedPrimary)
+				? persistedPrimary
+				: pageOrigin;
 	const changed =
 		state.clusterId !== clusterId || state.primaryOrigin !== nextPrimary;
 	state = {
@@ -345,7 +359,7 @@ export function hydratePrimaryBackendProfile(
 		generation: changed ? state.generation + 1 : state.generation,
 		state: "ready",
 	};
-	persistCurrentProfile();
+	if (nodes !== undefined) persistCurrentProfile();
 	notify();
 }
 
@@ -428,12 +442,60 @@ async function directJson(
 	return (await response.json()) as unknown;
 }
 
-export async function verifyBackendCandidate(args: {
+async function probeCompatibility(
+	origin: string,
+	signal?: AbortSignal,
+): Promise<void> {
+	let compatibilityPayload: Record<string, unknown>;
+	try {
+		compatibilityPayload = (await directJson(
+			origin,
+			"/api/capabilities",
+			undefined,
+			signal,
+		)) as Record<string, unknown>;
+	} catch (error) {
+		if ((error as { status?: number }).status !== 404) throw error;
+		compatibilityPayload = (await directJson(
+			origin,
+			"/api/version/check",
+			undefined,
+			signal,
+		)) as Record<string, unknown>;
+	}
+	const compatibility = resolveApiCompatibility({
+		releaseTag:
+			typeof compatibilityPayload.release_tag === "string"
+				? compatibilityPayload.release_tag
+				: typeof (
+							compatibilityPayload.current as
+								| { release_tag?: unknown }
+								| undefined
+						)?.release_tag === "string"
+					? (compatibilityPayload.current as { release_tag: string })
+							.release_tag
+					: undefined,
+		capabilities: Array.isArray(compatibilityPayload.capabilities)
+			? compatibilityPayload.capabilities.filter(
+					(value): value is string => typeof value === "string",
+				)
+			: undefined,
+		fingerprint:
+			typeof compatibilityPayload.fingerprint === "object" &&
+			compatibilityPayload.fingerprint !== null
+				? (compatibilityPayload.fingerprint as Record<string, string[]>)
+				: undefined,
+	});
+	if (compatibility.kind === "incompatible") {
+		throw new Error(compatibility.reason);
+	}
+}
+
+export async function probeBackendCandidate(args: {
 	origin: string;
 	clusterId: string;
-	adminToken: string;
 	signal?: AbortSignal;
-}): Promise<BackendCandidate> {
+}): Promise<void> {
 	const origin = canonicalBackendOrigin(args.origin);
 	if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
 	if (isStaticWebConsole() && !staticAllowedOrigins.has(origin)) {
@@ -465,50 +527,18 @@ export async function verifyBackendCandidate(args: {
 	) {
 		throw new Error("Backend belongs to a different cluster.");
 	}
+	await probeCompatibility(origin, args.signal);
+}
 
-	let compatibilityPayload: Record<string, unknown>;
-	try {
-		compatibilityPayload = (await directJson(
-			origin,
-			"/api/capabilities",
-			undefined,
-			args.signal,
-		)) as Record<string, unknown>;
-	} catch (error) {
-		if ((error as { status?: number }).status !== 404) throw error;
-		compatibilityPayload = (await directJson(
-			origin,
-			"/api/version/check",
-			undefined,
-			args.signal,
-		)) as Record<string, unknown>;
-	}
-	const compatibility = resolveApiCompatibility({
-		releaseTag:
-			typeof compatibilityPayload.release_tag === "string"
-				? compatibilityPayload.release_tag
-				: typeof (
-							compatibilityPayload.current as
-								| { release_tag?: unknown }
-								| undefined
-						)?.release_tag === "string"
-					? (compatibilityPayload.current as { release_tag: string })
-							.release_tag
-					: undefined,
-		capabilities: Array.isArray(compatibilityPayload.capabilities)
-			? compatibilityPayload.capabilities.filter(
-					(value): value is string => typeof value === "string",
-				)
-			: undefined,
-		fingerprint:
-			typeof compatibilityPayload.fingerprint === "object" &&
-			compatibilityPayload.fingerprint !== null
-				? (compatibilityPayload.fingerprint as Record<string, string[]>)
-				: undefined,
-	});
-	if (compatibility.kind === "incompatible") {
-		throw new Error(compatibility.reason);
-	}
+export async function verifyBackendCandidate(args: {
+	origin: string;
+	clusterId: string;
+	adminToken: string;
+	signal?: AbortSignal;
+}): Promise<BackendCandidate> {
+	const origin = canonicalBackendOrigin(args.origin);
+	if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
+	await probeBackendCandidate(args);
 	const nodes = await directJson(
 		origin,
 		"/api/admin/nodes",
@@ -545,6 +575,58 @@ export async function verifyBackendCandidate(args: {
 		verifiedAt: Date.now(),
 		lastError: null,
 	};
+}
+
+export async function selectPreAuthBackend(
+	originValue: string,
+): Promise<SwitchResult> {
+	const origin = canonicalBackendOrigin(originValue);
+	if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
+	const pageOrigin = getPageOrigin();
+	const knownCandidate = state.candidates.some(
+		(candidate) => canonicalBackendOrigin(candidate.origin) === origin,
+	);
+	if (origin !== pageOrigin && !knownCandidate) {
+		throw new Error("Backend is not present in the active cluster profile.");
+	}
+	if (origin === state.primaryOrigin) return { timedOut: false };
+	updateState({ state: "switching", lastSwitchTimedOut: false });
+	const timedOut = await waitForMutations();
+	if (timedOut) {
+		state = {
+			...state,
+			unknownMutationCount: state.unknownMutationCount + 1,
+			lastSwitchTimedOut: true,
+		};
+	}
+	const currentCandidate = state.candidates.find(
+		(candidate) => canonicalBackendOrigin(candidate.origin) === origin,
+	);
+	const candidate =
+		currentCandidate ??
+		({
+			origin,
+			nodeId: "current-page",
+			nodeName: "Current page",
+			verifiedAt: Date.now(),
+			lastError: null,
+		} satisfies BackendCandidate);
+	const candidates = currentCandidate
+		? state.candidates.map((item) =>
+				canonicalBackendOrigin(item.origin) === origin
+					? { ...item, verifiedAt: Date.now(), lastError: null }
+					: item,
+			)
+		: [...state.candidates, candidate];
+	state = {
+		...state,
+		primaryOrigin: origin,
+		candidates,
+		generation: state.generation + 1,
+		state: "ready",
+	};
+	notify();
+	return { timedOut };
 }
 
 async function waitForMutations(): Promise<boolean> {
