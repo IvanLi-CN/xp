@@ -40,6 +40,7 @@
   local release through the fixed `/api/cluster/info` route, verifies the cluster ID,
   and reports only service versions that differ from the recognized frontend release. Unknown
   service versions and unrecognized frontend releases omit the comparison label entirely.
+  The bounded fan-out shares one aggregate deadline across all registered nodes.
 - The mutation barrier rechecks for a mutation opened during drain notification before committing
   a primary switch.
 - Registered HTTPS origins reject URL userinfo at both metadata validation and outbound URL joining,

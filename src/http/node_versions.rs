@@ -1,6 +1,7 @@
 use axum::{Json, extract::Extension};
 use futures_util::{StreamExt as _, stream};
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 use super::{ApiError, AppState, CLUSTER_RUNTIME_FANOUT_TIMEOUT, bounded_json};
 
@@ -33,6 +34,7 @@ pub(super) async fn admin_list_node_versions(
     let local_node_id = state.cluster.node_id.clone();
     let cluster_id = state.cluster.cluster_id.clone();
     let client = state.mesh_client.clone();
+    let fanout_deadline = Instant::now() + CLUSTER_RUNTIME_FANOUT_TIMEOUT;
 
     let items = stream::iter(nodes.into_iter().map(|node| {
         let client = client.clone();
@@ -47,12 +49,17 @@ pub(super) async fn admin_list_node_versions(
                 };
             }
 
+            let remaining = fanout_deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return AdminNodeVersionItem {
+                    node_id: node.node_id,
+                    xp_version: None,
+                    error: Some("timeout".to_string()),
+                };
+            }
+
             let (response, deadline) = match client
-                .send_registered_public_read(
-                    &node.api_base_url,
-                    "/api/cluster/info",
-                    CLUSTER_RUNTIME_FANOUT_TIMEOUT,
-                )
+                .send_registered_public_read(&node.api_base_url, "/api/cluster/info", remaining)
                 .await
             {
                 Ok(response) => response,
