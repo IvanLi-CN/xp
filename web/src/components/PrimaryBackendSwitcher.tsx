@@ -154,15 +154,20 @@ export function PrimaryBackendSwitcher(props: {
 								>
 									<DropdownMenuItem
 										disabled={
-											Boolean(checkingOrigin) ||
-											isCurrent ||
-											candidate.switchable === false
+											!isCurrent &&
+											(Boolean(checkingOrigin) ||
+												candidate.switchable === false)
 										}
+										aria-current={isCurrent ? "true" : undefined}
 										onSelect={(event) => {
 											event.preventDefault();
 											void handleSelect(candidate);
 										}}
-										className="items-start py-2"
+										className={
+											isCurrent
+												? "items-start bg-primary/10 py-2 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
+												: "items-start py-2"
+										}
 										aria-label={
 											isCurrent
 												? `${candidate.nodeName}, current backend`
@@ -175,7 +180,7 @@ export function PrimaryBackendSwitcher(props: {
 										<Icon
 											name={isCurrent ? "tabler:circle-check" : "tabler:server"}
 											ariaLabel={isCurrent ? "Current" : "Backend"}
-											className="mt-0.5 shrink-0"
+											className={`mt-0.5 shrink-0${isCurrent ? " text-primary" : ""}`}
 										/>
 										<span className="min-w-0 flex-1">
 											<span className="block truncate font-medium">

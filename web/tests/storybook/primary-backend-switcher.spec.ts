@@ -107,9 +107,10 @@ test("shows the registered node list from the AppShell switcher", async ({
 			exact: true,
 		}),
 	).toBeVisible();
-	await expect(
-		page.getByRole("menuitem", { name: /Current page/ }),
-	).toBeDisabled();
+	const currentItem = page.getByRole("menuitem", { name: /Current page/ });
+	await expect(currentItem).not.toBeDisabled();
+	await expect(currentItem).toHaveAttribute("aria-current", "true");
+	await expect(currentItem).toHaveClass(/bg-primary\/10/);
 });
 
 test("shows version differences and separate frontend links", async ({
