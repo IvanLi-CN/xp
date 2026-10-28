@@ -224,7 +224,7 @@ ADR 0012 and does not alter this embedded-PWA contract.
   state: Login page with a known same-cluster backend candidate selected
   evidence_note: verifies that a stale current-node token does not hide the
   service-node recovery control and that the selected target is visible at
-  1280x900 without overflow or overlap.
+  1280x900 without overflow or overlap after the submission-readiness repair.
   image:
   ![Login pre-auth desktop](./assets/login-preauth-desktop.png)
 
@@ -242,6 +242,7 @@ ADR 0012 and does not alter this embedded-PWA contract.
   story_id_or_title: Views/LoginPage/ZeroCandidates
   state: Login page with current-page fallback and the service-node menu open
   evidence_note: verifies the mobile selector, zero-candidate recovery state,
-  token form, error surface, and actions fit within the viewport.
+  token form, error surface, and actions fit within the viewport with the
+  required source-managed margin.
   image:
   ![Login pre-auth mobile](./assets/login-preauth-mobile.png)

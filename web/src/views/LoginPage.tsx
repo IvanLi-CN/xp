@@ -6,8 +6,10 @@ import { z } from "zod";
 
 import { verifyAdminToken } from "../api/adminAuth";
 import { isBackendApiError } from "../api/backendError";
+import { usePrimaryBackend } from "../backend/PrimaryBackendProvider";
 import {
 	isStaticWebConsole,
+	probeBackendCandidate,
 	selectPreAuthBackend,
 } from "../backend/primaryBackend";
 import { Button } from "../components/Button";
@@ -66,6 +68,14 @@ export function LoginPage({
 	staticConsole = isStaticWebConsole(),
 }: LoginPageProps) {
 	const navigate = useNavigate();
+	const backend = usePrimaryBackend();
+	const [preAuthTargetReady, setPreAuthTargetReady] = useState(() => {
+		if (staticConsole) return true;
+		return (
+			backend.clusterId === null &&
+			backend.primaryOrigin === window.location.origin
+		);
+	});
 	const storedToken = useMemo(() => readAdminToken(), []);
 	const [tokenLength, setTokenLength] = useState(storedToken.length);
 	const [isVerifying, setIsVerifying] = useState(false);
@@ -130,7 +140,15 @@ export function LoginPage({
 		form.reset({ token: loginToken });
 		void (async () => {
 			try {
-				await selectPreAuthBackend(window.location.origin);
+				if (!staticConsole) {
+					if (backend.clusterId) {
+						await probeBackendCandidate({
+							origin: window.location.origin,
+							clusterId: backend.clusterId,
+						});
+					}
+					await selectPreAuthBackend(window.location.origin);
+				}
 				await submitToken(loginToken);
 			} catch (error) {
 				setServerError(
@@ -140,7 +158,19 @@ export function LoginPage({
 				);
 			}
 		})();
-	}, [form, submitToken]);
+	}, [backend.clusterId, form, staticConsole, submitToken]);
+
+	const handleFormSubmit = form.handleSubmit((values) => {
+		if (!staticConsole && backend.state === "switching") {
+			setServerError("Service node switching is still in progress.");
+			return;
+		}
+		if (!staticConsole && !preAuthTargetReady) {
+			setServerError("Verify the selected service node before continuing.");
+			return;
+		}
+		void submitToken(values.token);
+	});
 
 	return (
 		<div className="flex min-h-screen items-center justify-center bg-muted/35 px-6 py-10">
@@ -161,7 +191,10 @@ export function LoginPage({
 						</div>
 					</div>
 
-					<LoginBackendSelector />
+					<LoginBackendSelector
+						staticConsole={staticConsole}
+						onProbeStateChange={setPreAuthTargetReady}
+					/>
 
 					<div className="space-y-2">
 						<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
@@ -173,12 +206,7 @@ export function LoginPage({
 					</div>
 
 					<Form {...form}>
-						<form
-							className="space-y-4"
-							onSubmit={form.handleSubmit((values) =>
-								submitToken(values.token),
-							)}
-						>
+						<form className="space-y-4" onSubmit={handleFormSubmit}>
 							<FormField
 								control={form.control}
 								name="token"
@@ -245,7 +273,11 @@ export function LoginPage({
 									type="submit"
 									variant="secondary"
 									loading={isVerifying}
-									disabled={isVerifying}
+									disabled={
+										isVerifying ||
+										(!staticConsole &&
+											(!preAuthTargetReady || backend.state === "switching"))
+									}
 								>
 									Save &amp; Continue
 								</Button>

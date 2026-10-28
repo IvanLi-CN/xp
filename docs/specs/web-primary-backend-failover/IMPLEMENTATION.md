@@ -40,6 +40,9 @@
   the active profile, while the current page origin remains an explicit recovery candidate.
 - Successful authenticated node-inventory hydration is the persistence gate for a new primary;
   authentication rejection keeps the login page and unverified token out of local storage.
+- Login submission is gated on the selected target's public probe and the existing mutation
+  barrier; static-console login links keep the bootstrap transport and failed probes remain
+  retryable without dropping candidates.
 - Vitest, Storybook interaction, Playwright browser, and the cluster join token-hash regression
   coverage are recorded in the specification verification matrix.
 
