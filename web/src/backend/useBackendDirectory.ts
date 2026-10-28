@@ -77,12 +77,14 @@ export function useBackendDirectory(args: {
 		}
 		if (args.staticConsole) void args.refreshRuntimePolicy();
 		hydrateBackendVersions([]);
-		void backendNodes.refetch();
-		void nodeVersions.refetch();
+		if (backendNodes.isFetched) void backendNodes.refetch();
+		if (nodeVersions.isFetched) void nodeVersions.refetch();
 	}, [
 		args.adminToken,
 		args.primaryClusterId,
 		args.refreshRuntimePolicy,
+		backendNodes.isFetched,
+		nodeVersions.isFetched,
 		args.runtimePolicyReady,
 		args.staticConsole,
 		backendNodes.refetch,
