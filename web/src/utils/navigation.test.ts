@@ -46,6 +46,21 @@ describe("navigation helpers", () => {
 		).toBe("/dashboard?foo=1#frag");
 	});
 
+	it("resolves fragment handoff redirects without carrying the token", () => {
+		vi.stubGlobal("window", {
+			location: {
+				origin: "https://node-a.example.com",
+			},
+		});
+		const handoff = buildLoginHandoffHash("fresh-token", "#history");
+
+		expect(
+			resolveLoginRedirectFromHref(
+				`https://node-b.example.com/nodes?view=table${handoff}`,
+			),
+		).toBe("/nodes?view=table#history");
+	});
+
 	it("replaces login_token when building cross-node hrefs", () => {
 		const resolved = buildNodePageHref(
 			"https://node-b.example.com",

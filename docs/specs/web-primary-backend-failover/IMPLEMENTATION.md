@@ -48,8 +48,9 @@
   directory and, for Static Web, Runtime Policy before commit. Failed revalidation restores the
   ready state; cached data from an unsuccessful refetch never satisfies the check, and concurrent
   switch attempts are rejected while one barrier is active. A mutation that starts during
-  revalidation is drained before commit or rejects the switch. Policy hydration preserves the
-  active switching state until the commit path finishes.
+  revalidation is drained before commit or rejects the switch when the initial barrier has not
+  timed out; after the initial unknown timeout, manual switching remains available. Policy
+  hydration preserves the active switching state until the commit path finishes.
 - Registered HTTPS origins reject URL userinfo at both metadata validation and outbound URL joining,
   so credentials cannot be supplied through a node address.
 - External subscription URLs are built from the current verified Primary Backend origin, so copied

@@ -620,6 +620,9 @@ describe("primary backend transport", () => {
 		resolveRevalidation?.(true);
 		await Promise.resolve();
 		expect(getPrimaryBackendSnapshot().pendingMutations).toBe(1);
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
 		resolveTransaction?.();
 		await switchPromise;
 		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(

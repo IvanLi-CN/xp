@@ -106,8 +106,10 @@ ADR 0012 and does not alter this embedded-PWA contract.
   policy-disallowed candidate MUST be rejected, and any revalidation failure
   (including a failed refetch that retains cached data) MUST restore the
   selector to a ready state without changing the primary origin. If a mutation
-  starts during revalidation, the switch MUST drain it before commit or reject
-  the switch without changing the primary origin.
+  starts during revalidation before the initial barrier timeout, the switch MUST
+  drain it before commit or reject the switch without changing the primary
+  origin. After the initial unknown timeout, an administrator MAY complete the
+  manual switch without waiting for that unresolved mutation.
 - **REQ-NAV**: The AppShell MUST expose the primary-backend selector as the
   rightmost header control, after Settings, on desktop and narrow viewports.
   It MUST provide accessible labels and keep the selector and adjacent

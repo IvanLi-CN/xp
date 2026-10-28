@@ -747,7 +747,7 @@ export async function switchPrimaryBackend(
 		notify();
 		throw new Error("Backend directory is no longer available for switching.");
 	}
-	if (options.revalidate && state.pendingMutations > 0) {
+	if (options.revalidate && !barrierTimedOut && state.pendingMutations > 0) {
 		const revalidationBarrierTimedOut = await waitForMutations();
 		if (revalidationBarrierTimedOut || state.pendingMutations > 0) {
 			state = {

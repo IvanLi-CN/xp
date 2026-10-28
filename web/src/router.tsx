@@ -20,6 +20,7 @@ import { isDemoRuntime } from "./demo/runtimeMode";
 import { DEMO_SHARE_KEYS } from "./demo/shareState";
 
 import {
+	buildLoginHandoffHash,
 	buildRedirectTarget,
 	parseLoginHandoffHash,
 	resolveLoginRedirectFromHref,
@@ -107,11 +108,14 @@ const appRoute = createRoute({
 		}
 		if (!hasAdminToken()) {
 			const loginSearch = new URLSearchParams(targetUrl.search);
-			const loginToken = loginSearch.get("login_token") ?? handoff?.token;
+			const loginToken = loginSearch.get("login_token");
 			const redirectTarget = resolveLoginRedirectFromHref(location.href);
 			throw redirect({
 				replace: true,
 				to: "/login",
+				hash: handoff
+					? buildLoginHandoffHash(handoff.token, "").slice(1)
+					: undefined,
 				search: {
 					redirect: redirectTarget,
 					...(loginToken ? { login_token: loginToken } : {}),
