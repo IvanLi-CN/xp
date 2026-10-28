@@ -76,12 +76,21 @@ vi.mock("../components/auth", async (importOriginal) => {
 });
 
 function node(nodeId: string): AdminNode {
+	const secondary = nodeId === fixtureCatalog.nodeId.fixture36();
 	return {
-		node_id: nodeId,
-		node_name: `Node ${nodeId}`,
-		api_base_url: `https://${nodeId}.example.test`,
-		access_host: `${nodeId}.example.test`,
-		quota_limit_bytes: 1024,
+		node_id: secondary
+			? fixtureCatalog.nodeId.fixture36()
+			: fixtureCatalog.nodeId.fixture32(),
+		node_name: secondary
+			? fixtureCatalog.nodeName.fixture37()
+			: fixtureCatalog.nodeName.fixture33(),
+		api_base_url: secondary
+			? fixtureCatalog.service.fixture38()
+			: fixtureCatalog.service.fixture34(),
+		access_host: secondary
+			? fixtureCatalog.host.fixture39()
+			: fixtureCatalog.host.fixture35(),
+		quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 		quota_reset: fixtureCatalog.quota.resetNode(),
 	};
 }

@@ -8,9 +8,11 @@ import type {
 } from "../../src/api/adminTraffic";
 import type { AdminUser } from "../../src/api/adminUsers";
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
+import { catalogTimestampOffset } from "./apiMockFixtureBuilders";
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const BASELINE_MS = Date.parse(fixtureCatalog.timestamp.baseline());
 
 type WindowedNodeTraffic = Partial<
 	Record<TrafficWindow, AdminNodeTrafficResponse>
@@ -28,24 +30,27 @@ function buildTrafficPoint(
 ): TrafficSeriesPoint {
 	const step = window === "24h" ? FIVE_MINUTES_MS : DAY_MS;
 	const startMs = windowStartMs + index * step;
+	const bytes = isGap
+		? {
+				uplink_bytes: fixtureCatalog.optional.none(),
+				downlink_bytes: fixtureCatalog.optional.none(),
+				total_bytes: fixtureCatalog.optional.none(),
+			}
+		: index % 2 === 0
+			? {
+					uplink_bytes: fixtureCatalog.number.value3(),
+					downlink_bytes: fixtureCatalog.number.value5(),
+					total_bytes: fixtureCatalog.number.value8(),
+				}
+			: {
+					uplink_bytes: fixtureCatalog.number.value4(),
+					downlink_bytes: fixtureCatalog.number.value6(),
+					total_bytes: fixtureCatalog.number.value10(),
+				};
 	return {
-		start_at: new Date(startMs).toISOString(),
-		end_at: new Date(startMs + step).toISOString(),
-		uplink_bytes: isGap
-			? null
-			: index % 2 === 0
-				? fixtureCatalog.number.value3()
-				: fixtureCatalog.number.value4(),
-		downlink_bytes: isGap
-			? null
-			: index % 2 === 0
-				? fixtureCatalog.number.value5()
-				: fixtureCatalog.number.value6(),
-		total_bytes: isGap
-			? null
-			: index % 2 === 0
-				? fixtureCatalog.number.value8()
-				: fixtureCatalog.number.value10(),
+		start_at: catalogTimestampOffset(startMs - BASELINE_MS),
+		end_at: catalogTimestampOffset(startMs + step - BASELINE_MS),
+		...bytes,
 		complete: !isGap,
 		is_current_day: isCurrentDay,
 	};
@@ -60,8 +65,8 @@ function buildReferenceTrafficPoint(
 	const count = window === "24h" ? 288 : 31;
 	const startMs = windowStartMs + (index - count) * step;
 	return {
-		start_at: new Date(startMs).toISOString(),
-		end_at: new Date(startMs + step).toISOString(),
+		start_at: catalogTimestampOffset(startMs - BASELINE_MS),
+		end_at: catalogTimestampOffset(startMs + step - BASELINE_MS),
 		uplink_bytes:
 			index % 2 === 0
 				? fixtureCatalog.number.value2()
@@ -134,21 +139,21 @@ function buildTrafficReport(
 				};
 	return {
 		window,
-		window_start_at: new Date(windowStartMs).toISOString(),
-		window_end_at: new Date(windowEndMs).toISOString(),
+		window_start_at: catalogTimestampOffset(windowStartMs - BASELINE_MS),
+		window_end_at: catalogTimestampOffset(windowEndMs - BASELINE_MS),
 		timezone: "UTC",
 		summary: {
 			mode: "cycle",
 			cycle_start_at: fixtureCatalog.timestamp.baseline(),
-			cycle_end_at: new Date(windowEndMs).toISOString(),
+			cycle_end_at: catalogTimestampOffset(windowEndMs - BASELINE_MS),
 			...summary,
 			complete: !gap,
-			tracking_since: new Date(windowStartMs).toISOString(),
+			tracking_since: catalogTimestampOffset(windowStartMs - BASELINE_MS),
 		},
 		current,
 		reference,
 		partial: false,
-		last_sample_at: new Date(windowEndMs).toISOString(),
+		last_sample_at: catalogTimestampOffset(windowEndMs - BASELINE_MS),
 		warnings: [],
 	};
 }
