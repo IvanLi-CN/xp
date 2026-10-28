@@ -42,7 +42,8 @@
   service versions and unrecognized frontend releases omit the comparison label entirely.
   The bounded fan-out shares one aggregate deadline across all registered nodes.
 - The mutation barrier rechecks for a mutation opened during drain notification before committing
-  a primary switch.
+  a primary switch, and the selected candidate is revalidated against the refreshed directory
+  and policy before commit.
 - Registered HTTPS origins reject URL userinfo at both metadata validation and outbound URL joining,
   so credentials cannot be supplied through a node address.
 - External subscription URLs are built from the current verified Primary Backend origin, so copied

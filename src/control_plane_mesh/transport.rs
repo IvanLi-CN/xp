@@ -22,6 +22,7 @@ pub(super) fn join_url(
         || base.path() != "/"
         || !base.username().is_empty()
         || base.password().is_some()
+        || base.as_str().contains('@')
         || base.query().is_some()
         || base.fragment().is_some()
     {

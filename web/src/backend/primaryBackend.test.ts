@@ -212,6 +212,11 @@ describe("primary backend transport", () => {
 				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
 				api_base_url: fixtureCatalog.url.secondaryApi(),
 			},
+			{
+				node_id: fixtureCatalog.identifier.nodeTertiary(),
+				node_name: fixtureCatalog.identifier.nodeNameTertiary(),
+				api_base_url: window.location.origin,
+			},
 		]);
 
 		hydrateBackendVersions([
@@ -224,6 +229,11 @@ describe("primary backend transport", () => {
 				node_id: fixtureCatalog.identifier.nodeSecondary(),
 				xp_version: null,
 				error: "unreachable",
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeTertiary(),
+				xp_version: "v3.21.4",
+				error: null,
 			},
 		]);
 
@@ -240,6 +250,11 @@ describe("primary backend transport", () => {
 					serviceVersion: null,
 					versionState: "unavailable",
 					lastError: "unreachable",
+				}),
+				expect.objectContaining({
+					nodeId: fixtureCatalog.identifier.nodeTertiary(),
+					serviceVersion: "3.21.4",
+					versionState: "ready",
 				}),
 			]),
 		);

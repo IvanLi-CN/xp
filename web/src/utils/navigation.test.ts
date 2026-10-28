@@ -64,6 +64,9 @@ describe("navigation helpers", () => {
 		expect(
 			buildNodePageHref("https://user:password@node-b.example.com").disabled,
 		).toBe(true);
+		expect(buildNodePageHref("https://@node-b.example.com").disabled).toBe(
+			true,
+		);
 		expect(buildNodePageHref("")).toEqual({
 			disabled: true,
 			reason: "Open on node unavailable: API base URL is empty.",

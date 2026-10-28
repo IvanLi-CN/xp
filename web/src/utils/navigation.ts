@@ -82,7 +82,8 @@ export function buildNodePageHref(
 		baseUrl.search ||
 		baseUrl.hash ||
 		baseUrl.username ||
-		baseUrl.password
+		baseUrl.password ||
+		baseUrl.href.includes("@")
 	) {
 		return {
 			disabled: true,

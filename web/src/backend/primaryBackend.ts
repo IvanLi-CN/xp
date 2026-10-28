@@ -160,7 +160,8 @@ export function canonicalBackendOrigin(value: string): string | null {
 			url.search ||
 			url.hash ||
 			url.username ||
-			url.password
+			url.password ||
+			url.href.includes("@")
 		) {
 			return null;
 		}
@@ -406,14 +407,16 @@ export function hydratePrimaryBackendProfile(
 	}
 	const pageOrigin = getPageOrigin();
 	if (pageOrigin) {
-		candidatesByOrigin.set(pageOrigin, {
-			origin: pageOrigin,
-			nodeId: "current-page",
-			nodeName: "Current page",
-			verifiedAt: Date.now(),
-			lastError: null,
-			switchable: true,
-		});
+		if (!candidatesByOrigin.has(pageOrigin)) {
+			candidatesByOrigin.set(pageOrigin, {
+				origin: pageOrigin,
+				nodeId: "current-page",
+				nodeName: "Current page",
+				verifiedAt: Date.now(),
+				lastError: null,
+				switchable: true,
+			});
+		}
 	}
 	const persistedPrimary = canonicalBackendOrigin(
 		storedProfile?.primaryOrigin ?? "",

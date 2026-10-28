@@ -1877,6 +1877,7 @@ fn validate_https_origin(origin: &str) -> Result<(), ApiError> {
     if url.path() != "/"
         || !url.username().is_empty()
         || url.password().is_some()
+        || url.as_str().contains('@')
         || url.query().is_some()
         || url.fragment().is_some()
     {
