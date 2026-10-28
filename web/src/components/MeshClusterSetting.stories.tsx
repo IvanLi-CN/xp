@@ -102,9 +102,11 @@ export const UnknownNoObservation: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(
-			canvas.getByText("Observation unavailable"),
-		).toBeInTheDocument();
+		const unavailable = canvas.getByText("Observation unavailable");
+		await expect(unavailable).toBeInTheDocument();
+		await expect(unavailable.previousElementSibling).toHaveTextContent(
+			"Unknown",
+		);
 		await expect(
 			canvas.getByText("No current observation is available."),
 		).toBeInTheDocument();

@@ -39,9 +39,9 @@ describe("mesh mutation lock", () => {
 		});
 
 		expect(result).toEqual({ acquired: true, value: "completed" });
-		expect(clearMeshMutationLock(fixtureCatalog.cluster.fixture53())).toBe(
-			true,
-		);
+		expect(
+			await clearMeshMutationLock(fixtureCatalog.cluster.fixture53()),
+		).toBe(true);
 	});
 
 	it("rejects a concurrent tab before it can send a second mutation", async () => {
@@ -133,6 +133,7 @@ describe("mesh mutation lock", () => {
 		);
 
 		expect(second).toEqual({ acquired: false, reason: "held" });
+		expect(await clearMeshMutationLock(secondLock.clusterId)).toBe(false);
 		releaseFirst?.();
 		expect(await first).toEqual({ acquired: true, value: "completed" });
 	});

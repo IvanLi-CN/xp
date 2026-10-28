@@ -11,6 +11,10 @@ export type MeshMutationLockRunResult<T> =
 			reason: "held" | "persistence" | "unavailable";
 	  };
 
+export type MeshMutationLockContext = {
+	clear: () => boolean;
+};
+
 const STORAGE_KEY = "xp-mesh-config-mutation-locks";
 // The persisted value is one shared cluster-id map. A single Web Lock protects
 // its read-modify-write lifecycle across different cluster ids as well.
@@ -85,7 +89,7 @@ export function readMeshMutationLocks(): MeshMutationLock[] {
  */
 export async function withMeshMutationLock<T>(
 	lock: MeshMutationLock,
-	operation: () => Promise<T>,
+	operation: (context: MeshMutationLockContext) => Promise<T>,
 ): Promise<MeshMutationLockRunResult<T>> {
 	if (typeof navigator === "undefined" || !navigator.locks) {
 		return { acquired: false, reason: "unavailable" };
@@ -100,12 +104,17 @@ export async function withMeshMutationLock<T>(
 			if (!persistLock(lock)) {
 				return { acquired: false, reason: "persistence" };
 			}
-			return { acquired: true, value: await operation() };
+			return {
+				acquired: true,
+				value: await operation({
+					clear: () => clearMeshMutationLockValue(lock.clusterId),
+				}),
+			};
 		},
 	);
 }
 
-export function clearMeshMutationLock(clusterId: string): boolean {
+function clearMeshMutationLockValue(clusterId: string): boolean {
 	const store = storage();
 	if (!store) return false;
 	try {
@@ -116,6 +125,18 @@ export function clearMeshMutationLock(clusterId: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+export async function clearMeshMutationLock(
+	clusterId: string,
+): Promise<boolean> {
+	if (typeof navigator === "undefined" || !navigator.locks) return false;
+	return navigator.locks.request(
+		WEB_LOCK_NAME,
+		{ mode: "exclusive", ifAvailable: true },
+		async (heldLock) =>
+			heldLock ? clearMeshMutationLockValue(clusterId) : false,
+	);
 }
 
 export function clearAllMeshMutationLocksForTests(): void {

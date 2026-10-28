@@ -344,82 +344,85 @@ export function ServiceConfigPage() {
 				createdAt: Date.now(),
 			};
 			try {
-				const lockResult = await withMeshMutationLock(lock, async () => {
-					const currentBackend = getPrimaryBackendSnapshot();
-					if (
-						currentBackend.primaryOrigin !== expectedOrigin ||
-						currentBackend.generation !== expectedGeneration
-					) {
-						const cleared = clearMeshMutationLock(expectedClusterId);
-						setMeshLockRevision((revision) => revision + 1);
-						setMeshMutationIssue({
-							kind: cleared ? "rejected" : "persistence",
-							message: cleared
-								? "The selected backend changed before the mutation started. " +
-									"No cluster mutation was sent."
-								: "The selected backend changed before the mutation started, " +
-									"but the local safety lock could not be cleared.",
-						});
-						return;
-					}
-					setMeshLockRevision((revision) => revision + 1);
-					setMeshMutationPhase("submitting");
-					try {
-						await withPrimaryBackendMutation(() =>
-							updateAdminMeshConfig(adminToken, target),
-						);
-						const cleared = clearMeshMutationLock(expectedClusterId);
-						setMeshLockRevision((revision) => revision + 1);
-						const refreshed = await meshQuery.refetch();
-						if (!refreshed.data || refreshed.isError) {
-							setMeshMutationIssue({
-								kind: "success_unconfirmed",
-								message:
-									"The server accepted the setting, but the latest cluster state could not be confirmed.",
-							});
-						} else if (refreshed.data.cluster_mesh_enabled !== target) {
-							const observedValue = refreshed.data.cluster_mesh_enabled
-								? "Enabled"
-								: "Disabled";
-							setMeshMutationIssue({
-								kind: "success_unconfirmed",
-								message: [
-									"The server accepted the request, but this observer currently reports",
-									`${observedValue}.`,
-									"Another administrator or replication delay may be involved.",
-								].join(" "),
-							});
-						} else if (!cleared) {
-							setMeshMutationIssue({
-								kind: "persistence",
-								message:
-									"The setting was accepted, but the local safety lock could not be " +
-									"cleared. Verify the cluster before unlocking it.",
-							});
-						} else {
-							setMeshMutationIssue(null);
-						}
-					} catch (error) {
-						if (isAmbiguousMeshMutationError(error)) {
-							setMeshMutationIssue({
-								kind: "unknown",
-								message:
-									"The mutation result is unknown. Refreshing or switching backend " +
-									"cannot prove whether it was applied.",
-							});
-						} else {
-							clearMeshMutationLock(expectedClusterId);
+				const lockResult = await withMeshMutationLock(
+					lock,
+					async ({ clear }) => {
+						const currentBackend = getPrimaryBackendSnapshot();
+						if (
+							currentBackend.primaryOrigin !== expectedOrigin ||
+							currentBackend.generation !== expectedGeneration
+						) {
+							const cleared = clear();
 							setMeshLockRevision((revision) => revision + 1);
-							const failures = parseMeshPreflightFailures(error);
-							setMeshPreflightFailures(failures);
 							setMeshMutationIssue({
-								kind: failures.length > 0 ? "preflight" : "rejected",
-								message: knownMeshMutationErrorMessage(error),
+								kind: cleared ? "rejected" : "persistence",
+								message: cleared
+									? "The selected backend changed before the mutation started. " +
+										"No cluster mutation was sent."
+									: "The selected backend changed before the mutation started, " +
+										"but the local safety lock could not be cleared.",
 							});
-							await meshQuery.refetch();
+							return;
 						}
-					}
-				});
+						setMeshLockRevision((revision) => revision + 1);
+						setMeshMutationPhase("submitting");
+						try {
+							await withPrimaryBackendMutation(() =>
+								updateAdminMeshConfig(adminToken, target),
+							);
+							const cleared = clear();
+							setMeshLockRevision((revision) => revision + 1);
+							const refreshed = await meshQuery.refetch();
+							if (!refreshed.data || refreshed.isError) {
+								setMeshMutationIssue({
+									kind: "success_unconfirmed",
+									message:
+										"The server accepted the setting, but the latest cluster state could not be confirmed.",
+								});
+							} else if (refreshed.data.cluster_mesh_enabled !== target) {
+								const observedValue = refreshed.data.cluster_mesh_enabled
+									? "Enabled"
+									: "Disabled";
+								setMeshMutationIssue({
+									kind: "success_unconfirmed",
+									message: [
+										"The server accepted the request, but this observer currently reports",
+										`${observedValue}.`,
+										"Another administrator or replication delay may be involved.",
+									].join(" "),
+								});
+							} else if (!cleared) {
+								setMeshMutationIssue({
+									kind: "persistence",
+									message:
+										"The setting was accepted, but the local safety lock could not be " +
+										"cleared. Verify the cluster before unlocking it.",
+								});
+							} else {
+								setMeshMutationIssue(null);
+							}
+						} catch (error) {
+							if (isAmbiguousMeshMutationError(error)) {
+								setMeshMutationIssue({
+									kind: "unknown",
+									message:
+										"The mutation result is unknown. Refreshing or switching backend " +
+										"cannot prove whether it was applied.",
+								});
+							} else {
+								clear();
+								setMeshLockRevision((revision) => revision + 1);
+								const failures = parseMeshPreflightFailures(error);
+								setMeshPreflightFailures(failures);
+								setMeshMutationIssue({
+									kind: failures.length > 0 ? "preflight" : "rejected",
+									message: knownMeshMutationErrorMessage(error),
+								});
+								await meshQuery.refetch();
+							}
+						}
+					},
+				);
 				if (!lockResult.acquired) {
 					setMeshMutationIssue({
 						kind: "persistence",
@@ -445,15 +448,17 @@ export function ServiceConfigPage() {
 		const clusterId =
 			meshLock?.clusterId ?? meshStatusUnavailableLock?.clusterId;
 		if (!clusterId) return;
-		if (clearMeshMutationLock(clusterId)) {
-			setMeshLockRevision((revision) => revision + 1);
-			setMeshMutationIssue(null);
-			return;
-		}
-		setMeshMutationIssue({
-			kind: "persistence",
-			message:
-				"The local safety lock could not be cleared. Keep it locked until storage is available.",
+		void clearMeshMutationLock(clusterId).then((cleared) => {
+			if (cleared) {
+				setMeshLockRevision((revision) => revision + 1);
+				setMeshMutationIssue(null);
+				return;
+			}
+			setMeshMutationIssue({
+				kind: "persistence",
+				message:
+					"The local safety lock could not be cleared. Keep it locked until storage is available.",
+			});
 		});
 	};
 
