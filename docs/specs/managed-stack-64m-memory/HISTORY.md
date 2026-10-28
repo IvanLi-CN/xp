@@ -1,5 +1,9 @@
 # History
 
+- 2026-10-28: managed Xray defaults moved to `GOMEMLIMIT=48MiB` and `GOGC=100`.
+  Generated `32MiB/100` and `16MiB/50` values migrate while explicit operator
+  overrides remain unchanged.
+
 - 2026-10-23: managed Xray defaults moved to `GOMEMLIMIT=32MiB` and `GOGC=100`
   across host-generated services, container launches, and upgrade backfill;
   generated legacy `16MiB/50` values migrate while explicit operator overrides remain unchanged.

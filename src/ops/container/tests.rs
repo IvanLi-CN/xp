@@ -560,7 +560,7 @@ fn build_runtime_env_forwards_vless_canary_and_default_endpoint_settings() {
     );
     assert_eq!(
         runtime_env.get("XP_XRAY_GOMEMLIMIT").map(String::as_str),
-        Some("32MiB")
+        Some("48MiB")
     );
     assert_eq!(
         runtime_env.get("XP_XRAY_GOGC").map(String::as_str),

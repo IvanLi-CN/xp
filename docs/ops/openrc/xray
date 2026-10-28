@@ -6,7 +6,7 @@ description="xray (local proxy runtime)"
 command="/usr/local/bin/xray"
 command_args="run -c /etc/xray/config.json"
 command_user="xray:xray"
-export GOMEMLIMIT="${GOMEMLIMIT:-32MiB}"
+export GOMEMLIMIT="${GOMEMLIMIT:-48MiB}"
 export GOGC="${GOGC:-100}"
 
 # Ensure automatic recovery on crashes without busy-looping.

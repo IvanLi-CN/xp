@@ -38,8 +38,9 @@ mod xp_env;
 
 pub(crate) use paths::Paths;
 
-pub(crate) const MANAGED_XRAY_GOMEMLIMIT: &str = "32MiB";
+pub(crate) const MANAGED_XRAY_GOMEMLIMIT: &str = "48MiB";
 pub(crate) const MANAGED_XRAY_GOGC: &str = "100";
+pub(crate) const PREVIOUS_MANAGED_XRAY_GOMEMLIMIT: &str = "32MiB";
 pub(crate) const LEGACY_XRAY_GOMEMLIMIT: &str = "16MiB";
 pub(crate) const LEGACY_XRAY_GOGC: &str = "50";
 
