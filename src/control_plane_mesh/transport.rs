@@ -20,6 +20,8 @@ pub(super) fn join_url(
     if !matches!(base.scheme(), "https" | "http")
         || (require_https && base.scheme() != "https")
         || base.path() != "/"
+        || !base.username().is_empty()
+        || base.password().is_some()
         || base.query().is_some()
     {
         return Err(MeshRequestError::InvalidTarget(

@@ -1874,7 +1874,12 @@ fn validate_https_origin(origin: &str) -> Result<(), ApiError> {
     if url.scheme() != "https" {
         return Err(ApiError::invalid_request("api_base_url must use https"));
     }
-    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+    if url.path() != "/"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return Err(ApiError::invalid_request(
             "api_base_url must be an origin (no path/query)",
         ));

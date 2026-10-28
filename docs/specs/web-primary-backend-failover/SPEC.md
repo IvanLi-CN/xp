@@ -48,7 +48,9 @@ ADR 0012 and does not alter this embedded-PWA contract.
   `sw.js` MUST retain their existing response headers and MUST NOT receive this
   dynamic document policy.
 - **REQ-CANDIDATE**: A candidate MUST come only from the current page origin
-  or an authenticated current-cluster node inventory. Before a credentialed
+  or an authenticated current-cluster node inventory. Registered node origins
+  MUST be canonical HTTPS origins without userinfo, paths, queries, or hashes.
+  Before a credentialed
   probe, the browser MUST verify public health, matching `cluster_id`, an
   immutable compatible API release profile, and the candidate inventory. A
   failed check MUST neither persist nor select the candidate.

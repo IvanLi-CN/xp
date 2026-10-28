@@ -326,6 +326,7 @@ export function hydratePrimaryBackendProfile(
 ) {
 	if (isStaticWebConsole()) {
 		const candidatesByOrigin = new Map<string, BackendCandidate>();
+		const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
 		if (nodes === undefined) {
 			for (const candidate of state.candidates) {
 				candidatesByOrigin.set(candidate.origin, candidate);
@@ -349,12 +350,21 @@ export function hydratePrimaryBackendProfile(
 					: "This node is not available to the static console.",
 			});
 		}
+		const currentOrigin = canonicalBackendOrigin(state.primaryOrigin);
+		const nextPrimary =
+			(currentOrigin && candidatesByOrigin.has(currentOrigin)
+				? currentOrigin
+				: bootstrapOrigin) ?? getPageOrigin();
 		const changed = state.clusterId !== clusterId;
 		state = {
 			...state,
 			clusterId,
+			primaryOrigin: nextPrimary,
 			candidates: [...candidatesByOrigin.values()],
-			generation: changed ? state.generation + 1 : state.generation,
+			generation:
+				changed || state.primaryOrigin !== nextPrimary
+					? state.generation + 1
+					: state.generation,
 		};
 		notify();
 		return;
@@ -423,23 +433,7 @@ export function hydrateStaticRuntimePolicy(
 	clusterId: string,
 	origins: readonly string[],
 ) {
-	const candidatesByOrigin = new Map(
-		state.candidates.map((candidate) => [candidate.origin, candidate]),
-	);
 	const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
-	if (bootstrapOrigin) {
-		const existing = candidatesByOrigin.get(bootstrapOrigin);
-		candidatesByOrigin.set(bootstrapOrigin, {
-			...existing,
-			origin: bootstrapOrigin,
-			nodeId: existing?.nodeId ?? "bootstrap",
-			nodeName: existing?.nodeName ?? "Bootstrap backend",
-			verifiedAt: existing?.verifiedAt ?? null,
-			lastError: existing?.lastError ?? null,
-			switchable: true,
-			switchBlockedReason: undefined,
-		});
-	}
 	staticAllowedOrigins = bootstrapOrigin
 		? new Set<string>([bootstrapOrigin])
 		: new Set<string>();
@@ -447,12 +441,19 @@ export function hydrateStaticRuntimePolicy(
 		const origin = canonicalBackendOrigin(rawOrigin);
 		if (!origin) continue;
 		staticAllowedOrigins.add(origin);
-		const existing = candidatesByOrigin.get(origin);
-		candidatesByOrigin.set(origin, {
+	}
+	const candidatesByOrigin = new Map(
+		state.candidates
+			.filter((candidate) => staticAllowedOrigins.has(candidate.origin))
+			.map((candidate) => [candidate.origin, candidate]),
+	);
+	if (bootstrapOrigin) {
+		const existing = candidatesByOrigin.get(bootstrapOrigin);
+		candidatesByOrigin.set(bootstrapOrigin, {
 			...existing,
-			origin,
-			nodeId: existing?.nodeId ?? origin,
-			nodeName: displayNodeName(existing?.nodeName ?? "", origin),
+			origin: bootstrapOrigin,
+			nodeId: existing?.nodeId ?? "bootstrap",
+			nodeName: existing?.nodeName ?? "Bootstrap backend",
 			verifiedAt: existing?.verifiedAt ?? null,
 			lastError: existing?.lastError ?? null,
 			switchable: true,

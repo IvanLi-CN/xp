@@ -44,6 +44,7 @@ export function useBackendDirectory(args: {
 	const backendNodeInventoryKey = backendNodes.data?.items
 		.map((node) => node.node_id)
 		.join(",");
+	const nodeVersionsUpdatedAt = nodeVersions.dataUpdatedAt;
 	useEffect(() => {
 		const clusterId = args.clusterId;
 		if (!clusterId) return;
@@ -56,7 +57,8 @@ export function useBackendDirectory(args: {
 		if (
 			!nodeVersions.isSuccess ||
 			!backendNodes.isSuccess ||
-			!backendNodeInventoryKey
+			!backendNodeInventoryKey ||
+			!nodeVersionsUpdatedAt
 		)
 			return;
 		hydrateBackendVersions(nodeVersions.data.items);
@@ -64,6 +66,7 @@ export function useBackendDirectory(args: {
 		backendNodeInventoryKey,
 		backendNodes.isSuccess,
 		nodeVersions.data?.items,
+		nodeVersionsUpdatedAt,
 		nodeVersions.isSuccess,
 	]);
 	const refreshBackendCandidates = useCallback(() => {

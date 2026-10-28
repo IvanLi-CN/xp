@@ -42,6 +42,8 @@
   service versions and unrecognized frontend releases omit the comparison label entirely.
 - The mutation barrier rechecks for a mutation opened during drain notification before committing
   a primary switch.
+- Registered HTTPS origins reject URL userinfo at both metadata validation and outbound URL joining,
+  so credentials cannot be supplied through a node address.
 - External subscription URLs are built from the current verified Primary Backend origin, so copied
   URLs remain directly consumable by clients that do not execute the Web app runtime.
 - Vite emits the build declaration and document-fallback handler as a content-hashed external asset.
