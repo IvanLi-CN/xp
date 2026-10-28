@@ -162,4 +162,38 @@ mod tests {
             policy_id("other-cluster", &states)
         );
     }
+
+    #[test]
+    fn policy_id_changes_when_node_state_changes() {
+        let allowed = vec![RuntimePolicyNodeState {
+            origin: "https://node.example".to_string(),
+            state: "allowed",
+        }];
+        let unavailable = vec![RuntimePolicyNodeState {
+            origin: "https://node.example".to_string(),
+            state: "temporarily_unavailable",
+        }];
+
+        assert_ne!(
+            policy_id("cluster", &allowed),
+            policy_id("cluster", &unavailable)
+        );
+    }
+
+    #[test]
+    fn node_state_serializes_the_runtime_state() {
+        let allowed = serde_json::to_value(RuntimePolicyNodeState {
+            origin: "https://allowed.example".to_string(),
+            state: "allowed",
+        })
+        .unwrap();
+        let unavailable = serde_json::to_value(RuntimePolicyNodeState {
+            origin: "https://unavailable.example".to_string(),
+            state: "temporarily_unavailable",
+        })
+        .unwrap();
+
+        assert_eq!(allowed["state"], "allowed");
+        assert_eq!(unavailable["state"], "temporarily_unavailable");
+    }
 }

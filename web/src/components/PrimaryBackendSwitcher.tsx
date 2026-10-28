@@ -30,6 +30,21 @@ function hostLabel(origin: string) {
 	}
 }
 
+export function getCurrentReloadCandidate(
+	pending: BackendCandidate | null,
+	candidates: readonly BackendCandidate[],
+): BackendCandidate | null {
+	if (!pending) return null;
+	return (
+		candidates.find(
+			(candidate) =>
+				candidate.origin === pending.origin &&
+				candidate.runtimeState === "staged" &&
+				candidate.runtimePolicyId === pending.runtimePolicyId,
+		) ?? null
+	);
+}
+
 export function PrimaryBackendSwitcher(props: {
 	adminToken: string;
 	clusterId: string | null;
@@ -50,6 +65,10 @@ export function PrimaryBackendSwitcher(props: {
 				return hostLabel(left.origin).localeCompare(hostLabel(right.origin));
 			}),
 		[backend.candidates, backend.primaryOrigin],
+	);
+	const currentReloadCandidate = getCurrentReloadCandidate(
+		reloadCandidate,
+		backend.candidates,
 	);
 
 	const handleSelect = async (candidate: BackendCandidate) => {
@@ -196,12 +215,12 @@ export function PrimaryBackendSwitcher(props: {
 						The previous change result is unknown.
 					</p>
 				) : null}
-				{reloadCandidate ? (
+				{currentReloadCandidate ? (
 					<div className="mt-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs">
 						<p role="alert" className="text-warning-foreground">
-							{hostLabel(reloadCandidate.origin)} is not in this page's active
-							policy. Confirm one reload to activate it; your current page stays
-							intact if you cancel.
+							{hostLabel(currentReloadCandidate.origin)} is not in this page's
+							active policy. Confirm one reload to activate it; your current
+							page stays intact if you cancel.
 						</p>
 						<div className="mt-2 flex justify-end gap-2">
 							<Button
@@ -214,14 +233,14 @@ export function PrimaryBackendSwitcher(props: {
 							<Button
 								size="sm"
 								onClick={() => {
-									if (reloadCandidate.runtimePolicyGrant) {
+									if (currentReloadCandidate.runtimePolicyGrant) {
 										setServiceWorkerRuntimePolicy(
-											reloadCandidate.runtimePolicyGrant,
+											currentReloadCandidate.runtimePolicyGrant,
 										);
 									}
-									if (reloadCandidate.runtimePolicyId) {
+									if (currentReloadCandidate.runtimePolicyId) {
 										writeAppliedRuntimePolicyId(
-											reloadCandidate.runtimePolicyId,
+											currentReloadCandidate.runtimePolicyId,
 										);
 									}
 									window.location.reload();

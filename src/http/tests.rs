@@ -1943,7 +1943,7 @@ async fn runtime_policy_requires_admin_auth_and_returns_only_canonical_origins()
         body["api_origins"][0],
         xp_test_fixtures::url_loopback62416()
     );
-    assert!(body["node_states"].as_array().is_some());
+    assert_eq!(body["node_states"][0]["state"], "allowed");
     assert!(body.get("node_name").is_none());
     assert!(body.get("access_host").is_none());
 }
