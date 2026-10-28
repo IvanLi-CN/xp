@@ -4,7 +4,7 @@
 
 ## Current Status
 
-- Implementation: complete
+- Implementation: existing contract complete; pre-auth recovery gap not started
 - Lifecycle: active
 - Delivery: fast-track
 
@@ -32,8 +32,20 @@
   the static EdgeOne deployment gate. The image and GitHub Release jobs depend on the public static
   smoke gate; the protected static rollback workflow reuses only verified release archives.
 
+## Remaining Gap
+
+- The Login page does not yet expose pre-auth backend recovery.
+- Cold-start transport initialization does not yet restore the persisted
+  `primaryOrigin` before the first authenticated request.
+- Login-page Storybook and browser coverage for selected-target authentication,
+  401 recovery, stale candidates, and zero-candidate fallback is not yet added.
+
+The requirements and acceptance contract for this work are recorded in
+`SPEC.md` and ADR 0028. No implementation is claimed by this document.
+
 ## References
 
 - `./SPEC.md`
 - `./HISTORY.md`
 - `../../adr/0011-cross-origin-primary-backend-for-embedded-pwa.md`
+- `../../adr/0028-pre-auth-primary-backend-recovery.md`
