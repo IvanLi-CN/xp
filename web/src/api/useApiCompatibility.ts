@@ -182,7 +182,7 @@ export function getApiRouteState(
 	const routeUnavailable =
 		compatibility?.kind === "compatible" &&
 		!(
-			compatibility.capabilitiesAreAuthoritative
+			compatibility.usesCurrentApiRoutes
 				? compatibility.profile.apiRoutes
 				: (compatibility.profile.serverApiRoutes ??
 					compatibility.profile.apiRoutes)

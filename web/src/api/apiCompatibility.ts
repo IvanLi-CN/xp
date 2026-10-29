@@ -17,6 +17,13 @@ const ReleaseTagSchema = z.string().regex(/^v\d+\.\d+\.\d+$/);
 const CAPABILITIES_REQUIRING_EXPLICIT_PROBE = new Set([
 	"admin.mihomo-subscription-import",
 ]);
+// These capabilities are only emitted by the current additive contract. A
+// legacy v3.22 server may advertise admin.mesh, but its historical route set
+// intentionally does not include the Mesh write endpoint.
+const CURRENT_API_ROUTE_CONTRACT_CAPABILITIES = new Set([
+	"admin.mesh-transport-reuse",
+	"cluster.mesh-gate-v1",
+]);
 const CapabilitiesResponseSchema = z
 	.object({
 		release_tag: z.string().optional(),
@@ -33,6 +40,7 @@ export type ApiCompatibilityResult =
 			profile: ReleaseInventory;
 			advertisedCapabilities: ReadonlySet<string>;
 			capabilitiesAreAuthoritative: boolean;
+			usesCurrentApiRoutes: boolean;
 			isFeatureAvailable: (capability: string) => boolean;
 			degradationFor: (capability: string) => string | null;
 	  }
@@ -108,6 +116,7 @@ function compatibleResult(
 	profile: ReleaseInventory,
 	advertisedCapabilities: Iterable<string>,
 	capabilitiesAreAuthoritative: boolean,
+	usesCurrentApiRoutes = false,
 ): ApiCompatibilityResult {
 	const capabilities = new Set(advertisedCapabilities);
 	const isFeatureAvailable = (capability: string) =>
@@ -119,6 +128,7 @@ function compatibleResult(
 		profile,
 		advertisedCapabilities: capabilities,
 		capabilitiesAreAuthoritative,
+		usesCurrentApiRoutes,
 		isFeatureAvailable,
 		degradationFor: (capability) =>
 			isFeatureAvailable(capability)
@@ -163,10 +173,16 @@ export function resolveApiCompatibility(input: {
 			);
 			const profile = commonProfile(leastSpecificCandidates);
 			if (profile) {
+				const usesCurrentApiRoutes =
+					capabilitiesAreAuthoritative &&
+					[...advertised].some((capability) =>
+						CURRENT_API_ROUTE_CONTRACT_CAPABILITIES.has(capability),
+					);
 				return compatibleResult(
 					profile,
 					advertised,
 					capabilitiesAreAuthoritative,
+					usesCurrentApiRoutes,
 				);
 			}
 		}

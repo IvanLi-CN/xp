@@ -46,10 +46,26 @@ describe("API capability state", () => {
 		expect(state.reason).toMatch(/PUT \/api\/admin\/mesh\/config/);
 	});
 
-	it("accepts a write route from an authoritative current capability profile", () => {
+	it("does not infer the current write route from a legacy mesh capability", () => {
 		const compatibility = resolveApiCompatibility({
 			releaseTag: "v3.22.5",
 			capabilities: ["admin.mesh"],
+			capabilitiesAreAuthoritative: true,
+		});
+		const state = getApiRouteState(
+			compatibility,
+			"admin.mesh",
+			"PUT /api/admin/mesh/config",
+		);
+
+		expect(state.available).toBe(false);
+		expect(state.unavailable).toBe(true);
+	});
+
+	it("accepts current routes only with a current route contract capability", () => {
+		const compatibility = resolveApiCompatibility({
+			releaseTag: "v0.2.0",
+			capabilities: ["admin.mesh", "admin.mesh-transport-reuse"],
 			capabilitiesAreAuthoritative: true,
 		});
 		const state = getApiRouteState(
