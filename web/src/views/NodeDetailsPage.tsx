@@ -70,6 +70,7 @@ import {
 	FormMessage,
 } from "../components/ui/form";
 import { Input } from "../components/ui/input";
+import { ScrollArea } from "../components/ui/scroll-area";
 import {
 	Select,
 	SelectContent,
@@ -1161,7 +1162,7 @@ export function NodeDetailsPage() {
 												Refresh runtime
 											</Button>
 										</div>
-										<div className="max-h-72 overflow-auto rounded-2xl border border-border/70 bg-muted/35">
+										<ScrollArea className="max-h-72 rounded-2xl border border-border/70 bg-muted/35 [&>div]:max-h-72">
 											<table className="xp-table xp-table-compact">
 												<thead>
 													<tr>
@@ -1201,7 +1202,7 @@ export function NodeDetailsPage() {
 													)}
 												</tbody>
 											</table>
-										</div>
+										</ScrollArea>
 									</div>
 								</>
 							) : null}
