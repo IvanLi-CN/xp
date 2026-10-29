@@ -66,19 +66,9 @@ function LoginPageSurface({
 	snapshot: PrimaryBackendSnapshot;
 }) {
 	return (
-		<div
-			data-visual-evidence-surface
-			className={[
-				"box-border h-[calc(100vh-2rem)] overflow-hidden bg-background",
-				"p-[18px] text-foreground sm:p-8",
-			].join(" ")}
-		>
-			<div data-visual-evidence-target className="h-full overflow-hidden">
-				<PrimaryBackendProvider snapshot={snapshot}>
-					<LoginPage />
-				</PrimaryBackendProvider>
-			</div>
-		</div>
+		<PrimaryBackendProvider snapshot={snapshot}>
+			<LoginPage />
+		</PrimaryBackendProvider>
 	);
 }
 
@@ -88,19 +78,9 @@ function ZeroCandidatesSurface() {
 		resetPrimaryBackendTransportForTests();
 	}, []);
 	return (
-		<div
-			data-visual-evidence-surface
-			className={[
-				"box-border h-[calc(100vh-2rem)] overflow-hidden bg-background",
-				"p-[18px] text-foreground sm:p-8",
-			].join(" ")}
-		>
-			<div data-visual-evidence-target className="h-full overflow-hidden">
-				<PrimaryBackendProvider>
-					<LoginPage />
-				</PrimaryBackendProvider>
-			</div>
-		</div>
+		<PrimaryBackendProvider>
+			<LoginPage />
+		</PrimaryBackendProvider>
 	);
 }
 
@@ -108,14 +88,14 @@ const preAuthCandidates = [
 	{
 		origin: fixtureCatalog.url.primaryApi(),
 		nodeId: fixtureCatalog.identifier.nodePrimary(),
-		nodeName: fixtureCatalog.identifier.nodeNamePrimary(),
+		nodeName: fixtureCatalog.label.singaporeA(),
 		verifiedAt: Date.now(),
 		lastError: null,
 	},
 	{
 		origin: fixtureCatalog.url.secondaryApi(),
 		nodeId: fixtureCatalog.identifier.nodeSecondary(),
-		nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+		nodeName: fixtureCatalog.label.tokyo(),
 		verifiedAt: Date.now(),
 		lastError: null,
 	},
@@ -179,8 +159,10 @@ export const StaticCompatibilityPending: Story = {
 };
 
 export const PreAuthBackendRecovery: Story = {
+	tags: ["preauth-recovery"],
 	render: () => <LoginPageSurface snapshot={preAuthSnapshot()} />,
 	parameters: {
+		layout: "fullscreen",
 		mockApi: {
 			adminToken: null,
 		},
@@ -197,10 +179,10 @@ export const PreAuthBackendRecovery: Story = {
 		await userEvent.click(trigger);
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(
-			await body.findByRole("menuitem", { name: /fixture-node-a/ }),
+			await body.findByRole("menuitem", { name: /Singapore/ }),
 		).toBeVisible();
 		await expect(
-			await body.findByRole("menuitem", { name: /fixture-node-b/ }),
+			await body.findByRole("menuitem", { name: /Tokyo/ }),
 		).toBeVisible();
 		await userEvent.keyboard("{Escape}");
 		await expect(trigger).toHaveFocus();
@@ -208,8 +190,10 @@ export const PreAuthBackendRecovery: Story = {
 };
 
 export const ZeroCandidates: Story = {
+	tags: ["preauth-recovery"],
 	render: () => <ZeroCandidatesSurface />,
 	parameters: {
+		layout: "fullscreen",
 		mockApi: {
 			adminToken: null,
 		},

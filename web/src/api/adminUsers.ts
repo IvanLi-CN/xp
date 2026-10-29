@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { MihomoSaveOutcomeUnknownError } from "../utils/mihomoSaveOutcome";
 import { throwIfNotOk } from "./backendError";
 import { type UserQuotaReset, UserQuotaResetSchema } from "./quotaReset";
 import { fetchJsonWithTimeout } from "./request";
@@ -46,6 +47,40 @@ export const AdminUserMihomoProfileSchema = z.object({
 
 export type AdminUserMihomoProfile = z.infer<
 	typeof AdminUserMihomoProfileSchema
+>;
+
+export const AdminMihomoImportPreviewRequestSchema = z.object({
+	source: z.string(),
+	existing_extra_proxies_yaml: z.string(),
+});
+
+export type AdminMihomoImportPreviewRequest = z.infer<
+	typeof AdminMihomoImportPreviewRequestSchema
+>;
+
+export const AdminMihomoImportItemSchema = z.object({
+	source_index: z.number().int().positive(),
+	status: z.enum(["added", "skipped", "failed"]),
+	name: z.string().optional(),
+	scheme: z.string().optional(),
+	warnings: z.array(z.string()),
+	reason: z.string().optional(),
+});
+
+export const AdminMihomoImportPreviewSchema = z.object({
+	detected_source: z.enum(["remote_url", "raw", "base64", "mihomo_yaml"]),
+	added_proxies_yaml: z.string(),
+	counts: z.object({
+		added: z.number().int().nonnegative(),
+		skipped: z.number().int().nonnegative(),
+		failed: z.number().int().nonnegative(),
+		warnings: z.number().int().nonnegative(),
+	}),
+	items: z.array(AdminMihomoImportItemSchema),
+});
+
+export type AdminMihomoImportPreview = z.infer<
+	typeof AdminMihomoImportPreviewSchema
 >;
 
 export type AdminUserCreateRequest = {
@@ -239,6 +274,36 @@ export async function putAdminUserMihomoProfile(
 
 	await throwIfNotOk(res);
 
-	const json: unknown = await res.json();
-	return AdminUserMihomoProfileSchema.parse(json);
+	try {
+		const json: unknown = await res.json();
+		return AdminUserMihomoProfileSchema.parse(json);
+	} catch (error) {
+		throw new MihomoSaveOutcomeUnknownError(error, payload);
+	}
+}
+
+export async function previewAdminUserMihomoImport(
+	adminToken: string,
+	userId: string,
+	payload: AdminMihomoImportPreviewRequest,
+	signal?: AbortSignal,
+): Promise<AdminMihomoImportPreview> {
+	return fetchJsonWithTimeout(
+		`/api/admin/users/${userId}/subscription-mihomo-import/preview`,
+		{
+			method: "POST",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+				"Cache-Control": "no-store",
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(
+				AdminMihomoImportPreviewRequestSchema.parse(payload),
+			),
+			signal,
+		},
+		(value) => AdminMihomoImportPreviewSchema.parse(value),
+		20_000,
+	);
 }

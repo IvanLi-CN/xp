@@ -56,6 +56,8 @@ const basePersister = createAsyncStoragePersister({
 
 let persistenceEpoch = 0;
 let persistenceQueue: Promise<void> = Promise.resolve();
+let pendingClient: { epoch: number; client: PersistedQueryCache } | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function enqueuePersistence(operation: () => Promise<void>): Promise<void> {
 	const next = persistenceQueue.then(operation, operation);
@@ -101,10 +103,19 @@ export function mergePersistedQueries(
 
 const persister: PersistQueryClientProviderProps["persistOptions"]["persister"] =
 	{
-		persistClient: async (client) => {
-			const epoch = persistenceEpoch;
-			try {
-				await enqueuePersistence(async () => {
+		persistClient: (client) => {
+			pendingClient = {
+				epoch: persistenceEpoch,
+				client: client as PersistedQueryCache,
+			};
+			if (persistTimer !== null) return;
+			persistTimer = setTimeout(() => {
+				persistTimer = null;
+				const pending = pendingClient;
+				pendingClient = null;
+				if (!pending) return;
+				void enqueuePersistence(async () => {
+					const { epoch, client } = pending;
 					if (epoch !== persistenceEpoch) return;
 					const previous = (await basePersister.restoreClient()) as
 						| PersistedQueryCache
@@ -112,15 +123,10 @@ const persister: PersistQueryClientProviderProps["persistOptions"]["persister"] 
 					if (epoch !== persistenceEpoch) return;
 					await storage.setItem(
 						PERSISTED_QUERY_STORAGE_KEY,
-						JSON.stringify(
-							mergePersistedQueries(client as PersistedQueryCache, previous),
-						),
+						JSON.stringify(mergePersistedQueries(client, previous)),
 					);
-				});
-			} catch {
-				// Some test and private-browsing environments do not expose IndexedDB.
-				// Offline persistence should degrade silently instead of crashing the app.
-			}
+				}).catch(() => undefined);
+			}, 1_000);
 		},
 		restoreClient: async () => {
 			try {
@@ -155,6 +161,9 @@ export function createPersistOptions(): PersistQueryClientProviderProps["persist
 
 export async function clearPersistedQueryCache(): Promise<void> {
 	persistenceEpoch += 1;
+	if (persistTimer !== null) clearTimeout(persistTimer);
+	persistTimer = null;
+	pendingClient = null;
 	await enqueuePersistence(async () => {
 		try {
 			await basePersister.removeClient();

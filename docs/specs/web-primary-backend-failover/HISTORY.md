@@ -10,6 +10,24 @@
 - 独立静态 Web 采用 EdgeOne Makers `xp-web` 直接上传；发布先通过 `xp.ivanli.cc` 的公开静态门禁，
   再发布镜像与 GitHub Release。运行时节点 origin 通过受保护的 runtime-policy 和逐客户端
   Service Worker 导航 CSP 授权，不引入匿名拓扑发现、Edge Function 或 API 代理。
+- 选择器在认证后的运行策略门禁内改用注册节点目录，显示真实节点名和地址；每个节点保留独立的
+  新标签前端入口，并继续沿用登录交接与当前路径。版本读取通过固定的认证内部路由受限扇出，
+  只在服务版本不同于可识别的前端正式版本时展示差异；版本查询只在选择器打开时刷新，未知
+  或无法比较的版本不显示标签。
+- 静态目录查询必须先通过匹配且未过期的运行策略；切换提交前会复查 drain 期间是否有新 mutation。
+  运行策略未就绪时的显式刷新也只刷新策略本身，成功的新清单会移除已删除节点的旧行。
+- 注册 HTTPS 地址会拒绝 URL userinfo，出站固定路径拼接也执行同一拒绝，避免地址携带凭据。
+- 节点版本扇出在并发受限的同时共享一个总截止时间，慢节点不会按并发批次累加请求窗口。
+- 前端新标签入口同样要求无凭据、路径、查询或 fragment 的 canonical HTTPS origin，非法地址仅保留禁用入口。
+- 选择器新标签登录交接改用 fragment-only envelope；目标登录路由消费后替换历史记录，避免管理员
+  token 出现在导航请求 URL，而既有节点列表入口保持兼容。
+- mutation barrier 等待期间若节点被移除或策略撤销，提交前复核会拒绝旧候选，避免恢复已失效的后端。
+- mutation barrier drain 或超时后会重新读取认证节点目录，并在静态控制台重新读取运行策略；重验证
+  失败恢复 ready 状态且不改变主后端，并拒绝并行切换。
+- 重验证只接受 refetch 成功结果，保留的旧缓存不能掩盖目录或策略读取失败；静态策略 hydration
+  在切换进行时保持 switching 锁。
+- 初始 barrier 未超时时，重验证期间新启动的 mutation 会再次 drain；若再次超时则拒绝本次切换，
+  避免未决写入随切换提交。初始 unknown 超时后仍保留管理员手动切换能力。
 
 ## Compatibility
 
@@ -23,7 +41,7 @@
   和匿名节点清单发现。
 - 要求冷启动恢复持久化 `primaryOrigin`，并让选中候选成为当前 tab 的 token 验证目标；认证成功
   前不持久化新的主后端。
-- 新增 ADR 0028，记录预认证恢复边界及同集群 admin token 一致性约束。
+- 新增 ADR 0029，记录预认证恢复边界及同集群 admin token 一致性约束。
 - 完成登录页节点选择器、公共候选探测、冷启动主后端恢复、认证成功后的持久化门禁，以及
   401 保留登录状态的测试与受控视觉证据。
 - 收敛修复批次：登录提交等待公共探测与 mutation barrier，静态控制台保留 bootstrap transport，
@@ -50,3 +68,9 @@
 - 补齐 Storybook 的冷启动 identity 夹具隔离与公共探测无 Authorization 的浏览器断言。
 - 修正恢复入口：公开 identity 未 ready 或主节点不可达时仍保留已认证切换器，候选逐个公开探测
   后才允许携带 token 校验；按当前页面 origin 合并节点清单时保留已知节点名称和 ID。
+
+## Current Change
+
+- Static runtime-policy polling now stages policy and node-state changes without reloading the
+  current page. New compatible origins require one explicit reload confirmation; temporary probe
+  failures remain visible but outside active CSP and transport, while removed origins retire.

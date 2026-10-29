@@ -32,8 +32,10 @@ import type { UserQuotaReset } from "../api/quotaReset";
 import {
 	DEFAULT_SUBSCRIPTION_FORMAT,
 	type SubscriptionFormat,
+	buildSubscriptionUrl,
 } from "../api/subscription";
 import { useApiCapability } from "../api/useApiCompatibility";
+import { usePrimaryBackend } from "../backend/PrimaryBackendProvider";
 import {
 	AccessMatrix,
 	type AccessMatrixCellState,
@@ -88,6 +90,11 @@ import {
 	latestQueryDataUpdatedAt,
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
+import {
+	MihomoSaveOutcomeUnknownError,
+	formatMihomoSaveError,
+	isMihomoWriteOutcomeUnknown,
+} from "../utils/mihomoSaveOutcome";
 import * as mihomoSaveQueue from "../utils/mihomoSaveQueue";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
@@ -95,7 +102,6 @@ import { USER_TAB_OPTIONS, type UserDetailsTab } from "./UserDetailsTabs";
 import { removeAdminUser, replaceAdminUser } from "./adminUsersCache";
 import { useUserRouteTransientState } from "./useUserRouteTransientState";
 import { resolveUserTrafficNodeFilter } from "./userTrafficNodeFilter";
-
 const PROTOCOLS = [
 	{ protocolId: "vless_reality_vision_tcp", label: "VLESS" },
 	{ protocolId: "ss2022_2022_blake3_aes_128_gcm", label: "SS2022" },
@@ -121,6 +127,7 @@ function formatInlineList(items: string[]): string {
 export function UserDetailsPage() {
 	const adminToken = readAdminToken();
 	const runtime = useAppRuntime();
+	const primaryBackend = usePrimaryBackend();
 	const navigate = useNavigate();
 	const demoSearch = useRouterState({
 		select: (state) => state.location.searchStr,
@@ -135,6 +142,9 @@ export function UserDetailsPage() {
 	const endpointsCapability = useApiCapability("admin.endpoints");
 	const quotaCapability = useApiCapability("admin.quota-policy");
 	const trafficCapability = useApiCapability("admin.traffic-usage");
+	const mihomoImportCapability = useApiCapability(
+		"admin.mihomo-subscription-import",
+	);
 	const enabledFor = (capability: { available: boolean }) =>
 		adminToken.length > 0 && capability.available;
 	const [tab, setTab] = useState<UserDetailsTab>("user");
@@ -222,6 +232,8 @@ export function UserDetailsPage() {
 	const mihomoProfileQuery = useQuery({
 		queryKey: ["adminUserMihomoProfile", adminToken, userId],
 		enabled: enabledFor(usersCapability),
+		staleTime: 0,
+		refetchOnMount: "always",
 		queryFn: ({ signal }) =>
 			mihomoSaveQueue.fetchMihomoProfileWithSaveSnapshot(
 				`${adminToken}\u0000${userId}`,
@@ -362,22 +374,23 @@ export function UserDetailsPage() {
 			return usageGroups[0]?.node.node_id ?? null;
 		});
 	}, [usageGroups]);
-
 	const subscriptionToken = user?.subscription_token ?? "";
 	const subscriptionUrl = useMemo(() => {
-		if (!subscriptionToken) return "";
-		const basePath = `/api/sub/${encodeURIComponent(subscriptionToken)}`;
-		if (typeof window === "undefined") {
-			return `${basePath}?format=${encodeURIComponent(subFormat)}`;
-		}
-		const url = new URL(basePath, window.location.origin);
-		url.searchParams.set("format", subFormat);
-		if (subFormat === "mihomo" && useExternalResourceMirror) {
-			url.searchParams.set("external_resources", "mirror");
-		}
-		return url.toString();
-	}, [subFormat, subscriptionToken, useExternalResourceMirror]);
-
+		return buildSubscriptionUrl({
+			origin: primaryBackend.primaryOrigin,
+			subscriptionToken,
+			format: subFormat,
+			externalResources:
+				subFormat === "mihomo" && useExternalResourceMirror
+					? "mirror"
+					: undefined,
+		});
+	}, [
+		primaryBackend.primaryOrigin,
+		subFormat,
+		subscriptionToken,
+		useExternalResourceMirror,
+	]);
 	useEffect(() => {
 		if (!user) return;
 		setDisplayName(user.display_name);
@@ -392,9 +405,12 @@ export function UserDetailsPage() {
 		}
 		setUserSaveError(null);
 	}, [user]);
-
 	const saveMihomoProfileRequest = useCallback(
-		async (draft: AdminUserMihomoProfile, baseline: AdminUserMihomoProfile) => {
+		async (
+			draft: AdminUserMihomoProfile,
+			baseline: AdminUserMihomoProfile,
+			allowOverwrite = false,
+		) => {
 			if (!adminToken || !userId)
 				throw new Error("Admin session is unavailable.");
 			const saveKey = `${adminToken}\u0000${userId}`;
@@ -406,10 +422,22 @@ export function UserDetailsPage() {
 					baseline,
 					() => fetchAdminUserMihomoProfile(adminToken, userId),
 					(latestProfile) => queryClient.setQueryData(queryKey, latestProfile),
+					allowOverwrite,
 				);
+				const submit = async (payload: AdminUserMihomoProfile) => {
+					try {
+						return await putAdminUserMihomoProfile(adminToken, userId, payload);
+					} catch (error) {
+						if (isMihomoWriteOutcomeUnknown(error)) {
+							if (error instanceof MihomoSaveOutcomeUnknownError) throw error;
+							throw new MihomoSaveOutcomeUnknownError(error, payload);
+						}
+						throw error;
+					}
+				};
 				let saved: AdminUserMihomoProfile;
 				try {
-					saved = await putAdminUserMihomoProfile(adminToken, userId, draft);
+					saved = await submit(draft);
 				} catch (error) {
 					if (
 						!isBackendApiError(error) ||
@@ -420,11 +448,7 @@ export function UserDetailsPage() {
 					}
 					const migratedDraft = normalizeMihomoProfileDraftForSave(draft);
 					if (migratedDraft === draft) throw error;
-					saved = await putAdminUserMihomoProfile(
-						adminToken,
-						userId,
-						migratedDraft,
-					);
+					saved = await submit(migratedDraft);
 				}
 				if (
 					mihomoActiveIdentityRef.current !== saveKey ||
@@ -436,26 +460,45 @@ export function UserDetailsPage() {
 				}
 				mihomoSaveQueue.recordMihomoProfileSave(saveKey, saved);
 				queryClient.setQueryData<AdminUserMihomoProfile>(queryKey, saved);
-				pushToast({ variant: "success", message: "Mihomo profile updated" });
 				return saved;
 			});
 		},
-		[adminToken, pushToast, queryClient, userId],
+		[adminToken, queryClient, userId],
+	);
+	const verifyMihomoProfile = useCallback(
+		async (_submitted: AdminUserMihomoProfile) => {
+			if (!adminToken || !userId)
+				throw new Error("Admin session is unavailable.");
+			const latest = await fetchAdminUserMihomoProfile(adminToken, userId);
+			queryClient.setQueryData<AdminUserMihomoProfile>(
+				["adminUserMihomoProfile", adminToken, userId],
+				latest,
+			);
+			return latest;
+		},
+		[adminToken, queryClient, userId],
 	);
 	const mihomoDraft = useMihomoProfileDraft({
+		clusterId: primaryBackend.clusterId ?? primaryBackend.primaryOrigin,
 		userId,
 		sessionKey: adminToken,
 		profile: mihomoProfileQuery.data,
 		readOnly: runtime.isReadOnly,
 		saveProfile: saveMihomoProfileRequest,
-		formatError,
+		onSaveSuccess: () =>
+			pushToast({ variant: "success", message: "Mihomo profile updated" }),
+		verifyProfile: verifyMihomoProfile,
+		formatError: (error) => {
+			if (isMihomoWriteOutcomeUnknown(error)) {
+				return formatMihomoSaveError(error);
+			}
+			return formatError(error);
+		},
 	});
 	const mihomoSavingRef = useRef(false);
 	mihomoSavingRef.current = mihomoDraft.isSaving;
-
 	const endpoints = endpointsQuery.data?.items ?? [];
 	const access = accessQuery.data?.items ?? [];
-
 	const endpointById = useMemo(() => {
 		const map = new Map<string, (typeof endpoints)[number]>();
 		for (const endpoint of endpoints) {
@@ -463,7 +506,6 @@ export function UserDetailsPage() {
 		}
 		return map;
 	}, [endpoints]);
-
 	const optionsByCell = useMemo(() => {
 		const map = new Map<
 			string,
@@ -482,7 +524,6 @@ export function UserDetailsPage() {
 		}
 		return map;
 	}, [endpoints]);
-
 	useEffect(() => {
 		if (!userId || accessInitForUserId === userId) return;
 		if (endpointsQuery.isError || accessQuery.isError) return;
@@ -559,7 +600,6 @@ export function UserDetailsPage() {
 		}
 		return byNode;
 	}, [nodesQuery.data?.items, optionsByCell, selectedByCell]);
-
 	function toggleCell(nodeId: string, protocolId: SupportedProtocolId) {
 		const key = buildCellKey(nodeId, protocolId);
 		const allEndpointIds = (optionsByCell.get(key) ?? []).map(
@@ -1303,10 +1343,6 @@ export function UserDetailsPage() {
 										Fetch
 									</Button>
 								</div>
-								<div className="text-xs text-muted-foreground">
-									Preview opens in a modal. Mihomo uses the canonical
-									provider-backed delivery path.
-								</div>
 							</div>
 							<div className="border-t border-border/70 pt-4 space-y-3">
 								{mihomoProfileQuery.isLoading ? (
@@ -1326,11 +1362,24 @@ export function UserDetailsPage() {
 									draft={mihomoDraft.draft}
 									dirty={mihomoDraft.dirty}
 									isSaving={mihomoDraft.isSaving}
+									isVerifying={mihomoDraft.isVerifying}
 									readOnly={runtime.isReadOnly}
 									error={mihomoDraft.error}
-									isLoaded={mihomoDraft.isLoaded}
+									saveFeedback={mihomoDraft.saveFeedback}
+									storageError={mihomoDraft.storageError}
+									conflict={mihomoDraft.conflict}
+									isLoaded={
+										mihomoDraft.isLoaded &&
+										mihomoProfileQuery.isFetchedAfterMount &&
+										!mihomoProfileQuery.isFetching
+									}
+									adminToken={adminToken}
+									importAvailable={enabledFor(mihomoImportCapability)}
 									onChange={mihomoDraft.setField}
 									onSave={mihomoDraft.save}
+									onVerify={mihomoDraft.verify}
+									onContinueDraft={mihomoDraft.continueDraft}
+									onUseServer={mihomoDraft.useServer}
 								/>
 							</div>
 						</section>

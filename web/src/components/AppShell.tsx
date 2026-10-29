@@ -1,11 +1,13 @@
-import { fetchAdminNodes } from "@/api/adminNodes";
 import { startAdminStatusEvents } from "@/api/adminStatusEvents";
 import { fetchRuntimePolicy } from "@/api/runtimePolicy";
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
 import {
+	STATIC_BOOTSTRAP_ORIGIN,
+	canonicalBackendOrigin,
 	isStaticWebConsole,
 	resetPrimaryBackendSelection,
 } from "@/backend/primaryBackend";
+import { useBackendDirectory } from "@/backend/useBackendDirectory";
 import { Badge } from "@/components/ui/badge";
 import {
 	CommandDialog,
@@ -66,14 +68,8 @@ import {
 	useApiCompatibility,
 } from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
-import {
-	usePrimaryClusterInfo,
-	useRefreshBackendCandidates,
-} from "../hooks/usePrimaryBackendQueries";
-import {
-	useAuthenticatedBackendProbe,
-	useHydratePrimaryBackendProfile,
-} from "../hooks/usePublicBackendReadiness";
+import { usePrimaryClusterInfo } from "../hooks/usePrimaryBackendQueries";
+import { useAuthenticatedBackendProbe } from "../hooks/usePublicBackendReadiness";
 import { useAppRuntime } from "../offline/appRuntime";
 import { clearBackendQueryCache } from "../offline/queryPersistence";
 import { clearAppliedRuntimePolicyId } from "../offline/runtimePolicySession";
@@ -145,8 +141,8 @@ export function AppShell({
 	children,
 }: AppShellProps) {
 	const navigate = useNavigate();
-	const pathname = useRouterState({
-		select: (state) => state.location.pathname,
+	const { pathname, searchStr: search } = useRouterState({
+		select: (state) => state.location,
 	});
 	const queryClient = useQueryClient();
 	const runtime = useAppRuntime();
@@ -154,6 +150,10 @@ export function AppShell({
 	const primaryBackend = usePrimaryBackend();
 	const staticConsole = isStaticWebConsole();
 	const [adminToken, setAdminToken] = useState(() => readAdminToken());
+	const clearUnidentifiedBackendCache = useCallback(
+		() => clearBackendQueryCache(queryClient),
+		[queryClient],
+	);
 	const { requestNavigation } = useObjectNavigationGuard();
 	useObjectNavigationBrowserBlocker();
 	const publicBackend = useAuthenticatedBackendProbe({
@@ -161,6 +161,7 @@ export function AppShell({
 		isOnline: runtime.isOnline,
 		origin: primaryBackend.primaryOrigin,
 		staticConsole,
+		onUnidentifiedCluster: clearUnidentifiedBackendCache,
 	});
 	useEffect(() => {
 		if (!publicBackend.clusterMismatch) return;
@@ -173,8 +174,9 @@ export function AppShell({
 	const apiCompatibility = useApiCompatibility(
 		adminToken,
 		runtime.isOnline,
+		primaryBackend.primaryOrigin,
+		primaryBackend.generation,
 		publicBackend.probe,
-		`${primaryBackend.primaryOrigin}:${primaryBackend.generation}`,
 	);
 	const compatibility = publicBackend.ready
 		? (apiCompatibility.data ?? null)
@@ -186,6 +188,7 @@ export function AppShell({
 		compatibility?.kind === "compatible" &&
 		compatibility.isFeatureAvailable("admin.upgrade");
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+	const [backendSelectorOpen, setBackendSelectorOpen] = useState(false);
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
 	const [versionCheck, dispatchVersionCheck] = useReducer(
 		reduceVersionCheckUiState,
@@ -224,6 +227,20 @@ export function AppShell({
 		refetchIntervalInBackground: true,
 		retry: false,
 	});
+	const activeBackendOrigin = canonicalBackendOrigin(
+		primaryBackend.primaryOrigin,
+	);
+	const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
+	const runtimePolicyReady =
+		!staticConsole ||
+		(runtimePolicy.data !== undefined &&
+			runtimePolicy.data.cluster_id === clusterInfo.data?.cluster_id &&
+			Date.parse(runtimePolicy.data.expires_at) > Date.now() &&
+			activeBackendOrigin !== null &&
+			(activeBackendOrigin === bootstrapOrigin ||
+				runtimePolicy.data.api_origins.some(
+					(origin) => canonicalBackendOrigin(origin) === activeBackendOrigin,
+				)));
 	const compatibilityError =
 		staticConsole &&
 		adminToken.length > 0 &&
@@ -235,36 +252,18 @@ export function AppShell({
 				: !runtime.isOnline && compatibility === null
 					? "API compatibility is unavailable while offline."
 					: null;
-	const backendNodes = useQuery({
-		queryKey: [
-			"adminNodes",
+	const { refreshBackendCandidates, revalidateBackendCandidate } =
+		useBackendDirectory({
 			adminToken,
-			primaryBackend.clusterId,
-			primaryBackend.primaryOrigin,
-		],
-		enabled:
-			!staticConsole &&
-			adminToken.length > 0 &&
-			publicBackend.ready &&
-			Boolean(clusterInfo.data?.cluster_id) &&
-			clusterInfo.data?.cluster_id === primaryBackend.clusterId,
-		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
-	});
-	useHydratePrimaryBackendProfile({
-		clusterId: clusterInfo.data?.cluster_id,
-		primaryClusterId: primaryBackend.clusterId,
-		nodes: backendNodes.data?.items,
-		nodesReady: backendNodes.isSuccess,
-		staticConsole,
-	});
-	const refreshBackendCandidates = useRefreshBackendCandidates({
-		adminToken,
-		clusterId: primaryBackend.clusterId,
-		probe: publicBackend.probe,
-		refetchInventory: backendNodes.refetch,
-		refetchPolicy: runtimePolicy.refetch,
-		staticConsole,
-	});
+			clusterId: clusterInfo.data?.cluster_id,
+			primaryClusterId: primaryBackend.clusterId,
+			primaryOrigin: primaryBackend.primaryOrigin,
+			runtimeOnline: runtime.isOnline && publicBackend.ready,
+			staticConsole,
+			runtimePolicyReady,
+			selectorOpen: backendSelectorOpen,
+			refreshRuntimePolicy: runtimePolicy.refetch,
+		});
 	useStaticRuntimePolicy({
 		enabled: staticConsole,
 		clusterId: clusterInfo.data?.cluster_id,
@@ -721,6 +720,7 @@ export function AppShell({
 			backendClusterId={primaryBackend.clusterId}
 			localNodeId={clusterInfo.data?.node_id ?? null}
 			pathname={pathname}
+			search={search}
 			onNavigate={navigateResource}
 			onResourceNavigate={navigateResource}
 			onRetryCompatibility={() => void apiCompatibility.refetch()}
@@ -919,10 +919,10 @@ export function AppShell({
 								</DropdownMenu>
 								<PrimaryBackendSwitcher
 									adminToken={adminToken}
-									clusterId={
-										clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
-									}
+									clusterId={primaryBackend.clusterId}
 									onOpened={refreshBackendCandidates}
+									onOpenChange={setBackendSelectorOpen}
+									revalidateBeforeSwitch={revalidateBackendCandidate}
 								/>
 							</div>
 						</div>

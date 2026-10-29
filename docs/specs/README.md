@@ -15,63 +15,64 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 
 ## Topics
 
-| Topic                 | Lifecycle  | Implementation | Spec       | Successor  | Notes   |
-| --------------------- | ---------- | -------------- | ---------- | ---------- | ------- |
-| Access model          | active     | not started    | [Spec][1]  | -          |         |
-| Admin delete          | active     | complete       | [Spec][2]  | -          |         |
-| CI YAML fix           | archived   | complete       | [Spec][3]  | -          |         |
-| Cloudflare Tunnel     | active     | complete       | [Spec][4]  | -          |         |
-| History repositories  | active     | in progress    | [Spec][5]  | -          |         |
-| Node onboarding       | active     | complete       | [Spec][6]  | -          |         |
-| IP geo                | active     | complete       | [Spec][7]  | -          |         |
-| Shared node list      | active     | complete       | [Spec][8]  | -          |         |
-| Docker                | active     | complete       | [Spec][9]  | -          |         |
-| Mihomo SMux           | active     | complete       | [Spec][10] | -          |         |
-| Probe participants    | active     | complete       | [Spec][11] | -          |         |
-| Probe self-test       | active     | complete       | [Spec][12] | -          |         |
-| VLESS XHTTP           | active     | complete       | [Spec][13] | -          |         |
-| Style gates           | active     | in progress    | [Spec][14] | -          |         |
-| Fixture policy        | active     | complete       | [Spec][15] | -          |         |
-| Managed memory        | active     | not started    | [Spec][16] | -          |         |
-| Private CIDRs         | active     | complete       | [Spec][17] | -          |         |
-| Mihomo provider       | active     | complete       | [Spec][18] | -          |         |
-| Mihomo redact         | active     | complete       | [Spec][19] | -          |         |
-| Mihomo template       | active     | complete       | [Spec][20] | -          |         |
-| Node history          | active     | complete       | [Spec][21] | -          |         |
-| Node list             | active     | complete       | [Spec][22] | -          |         |
-| Node panel            | superseded | complete       | [Spec][23] | [Spec][22] |         |
-| Runtime fan-out       | active     | complete       | [Spec][24] | -          |         |
-| Service observability | active     | complete       | [Spec][25] | -          |         |
-| TCP connections       | active     | complete       | [Spec][26] | -          |         |
-| Inbound IP usage      | active     | complete       | [Spec][27] | -          |         |
-| Traffic analytics     | active     | complete       | [Spec][28] | -          |         |
-| OpenRC recovery       | active     | complete       | [Spec][29] | -          |         |
-| Prerelease E2E        | active     | unverified     | [Spec][30] | -          |         |
-| Quota ratios          | active     | complete       | [Spec][31] | -          |         |
-| Raft membership       | active     | complete       | [Spec][32] | -          |         |
-| Single-node recovery  | active     | complete       | [Spec][33] | -          |         |
-| Reality fallback      | active     | in progress    | [Spec][34] | -          |         |
-| Mesh reverse relay    | active     | in progress    | [Spec][35] | -          |         |
-| Release alerts        | active     | complete       | [Spec][36] | -          |         |
-| Release intent        | active     | in progress    | [Spec][37] | -          |         |
-| Remove Grant groups   | active     | complete       | [Spec][38] | -          |         |
-| Remove Grants         | active     | complete       | [Spec][39] | -          |         |
-| Resource monitoring   | active     | not started    | [Spec][40] | -          |         |
-| Scroll containers     | active     | complete       | [Spec][41] | -          |         |
-| Service log rotation  | active     | not started    | [Spec][42] | -          |         |
-| shadcn/ui migration   | active     | complete       | [Spec][43] | -          |         |
-| Service monitoring    | active     | complete       | [Spec][44] | -          |         |
-| Web local upgrade     | active     | complete       | [Spec][45] | -          |         |
-| Web primary backend   | active     | complete       | [Spec][46] | -          | preauth |
-| Web PWA               | active     | complete       | [Spec][47] | -          |         |
-| Web resilience        | active     | in progress    | [Spec][48] | -          |         |
-| Web tools             | active     | complete       | [Spec][49] | -          |         |
-| Web Demo runtime      | active     | in progress    | [Spec][55] | -          |         |
-| xp-ops admin token    | active     | complete       | [Spec][50] | -          |         |
-| Control-plane relay   | superseded | retired        | [Spec][51] | [Spec][34] |         |
-| Xray ingress guard    | active     | complete       | [Spec][52] | -          |         |
-| Xray stale TCP        | active     | complete       | [Spec][53] | -          |         |
-| Mihomo mirror         | active     | unverified     | [Spec][54] | -          |         |
+| Topic                 | Lifecycle  | Implementation | Spec       | Successor  | Notes        |
+| --------------------- | ---------- | -------------- | ---------- | ---------- | ------------ |
+| Access model          | active     | not started    | [Spec][1]  | -          |              |
+| Admin delete          | active     | complete       | [Spec][2]  | -          |              |
+| CI YAML fix           | archived   | complete       | [Spec][3]  | -          |              |
+| Cloudflare Tunnel     | active     | complete       | [Spec][4]  | -          |              |
+| History repositories  | active     | in progress    | [Spec][5]  | -          |              |
+| Node onboarding       | active     | complete       | [Spec][6]  | -          |              |
+| IP geo                | active     | complete       | [Spec][7]  | -          |              |
+| Shared node list      | active     | complete       | [Spec][8]  | -          |              |
+| Docker                | active     | complete       | [Spec][9]  | -          |              |
+| Mihomo SMux           | active     | complete       | [Spec][10] | -          |              |
+| Probe participants    | active     | complete       | [Spec][11] | -          |              |
+| Probe self-test       | active     | complete       | [Spec][12] | -          |              |
+| VLESS XHTTP           | active     | complete       | [Spec][13] | -          |              |
+| Style gates           | active     | in progress    | [Spec][14] | -          |              |
+| Fixture policy        | active     | complete       | [Spec][15] | -          |              |
+| Managed memory        | active     | not started    | [Spec][16] | -          |              |
+| Private CIDRs         | active     | complete       | [Spec][17] | -          |              |
+| Mihomo provider       | active     | complete       | [Spec][18] | -          |              |
+| Mihomo redact         | active     | complete       | [Spec][19] | -          |              |
+| Mihomo template       | active     | complete       | [Spec][20] | -          |              |
+| Node history          | active     | complete       | [Spec][21] | -          |              |
+| Node list             | active     | complete       | [Spec][22] | -          |              |
+| Node panel            | superseded | complete       | [Spec][23] | [Spec][22] |              |
+| Runtime fan-out       | active     | complete       | [Spec][24] | -          |              |
+| Service observability | active     | complete       | [Spec][25] | -          |              |
+| TCP connections       | active     | complete       | [Spec][26] | -          |              |
+| Inbound IP usage      | active     | complete       | [Spec][27] | -          |              |
+| Traffic analytics     | active     | complete       | [Spec][28] | -          |              |
+| OpenRC recovery       | active     | complete       | [Spec][29] | -          |              |
+| Prerelease E2E        | active     | unverified     | [Spec][30] | -          |              |
+| Quota ratios          | active     | complete       | [Spec][31] | -          |              |
+| Raft membership       | active     | complete       | [Spec][32] | -          |              |
+| Single-node recovery  | active     | complete       | [Spec][33] | -          |              |
+| Reality fallback      | active     | in progress    | [Spec][34] | -          |              |
+| Mesh reverse relay    | active     | in progress    | [Spec][35] | -          |              |
+| Release alerts        | active     | complete       | [Spec][36] | -          |              |
+| Release intent        | active     | in progress    | [Spec][37] | -          |              |
+| Remove Grant groups   | active     | complete       | [Spec][38] | -          |              |
+| Remove Grants         | active     | complete       | [Spec][39] | -          |              |
+| Resource monitoring   | active     | not started    | [Spec][40] | -          |              |
+| Scroll containers     | active     | complete       | [Spec][41] | -          |              |
+| Service log rotation  | active     | not started    | [Spec][42] | -          |              |
+| shadcn/ui migration   | active     | complete       | [Spec][43] | -          |              |
+| Service monitoring    | active     | complete       | [Spec][44] | -          |              |
+| Web local upgrade     | active     | complete       | [Spec][45] | -          |              |
+| Web primary backend   | active     | complete       | [Spec][46] | -          | preauth      |
+| Web PWA               | active     | complete       | [Spec][47] | -          |              |
+| Web resilience        | active     | in progress    | [Spec][48] | -          |              |
+| Web tools             | active     | complete       | [Spec][49] | -          |              |
+| Web Demo runtime      | active     | in progress    | [Spec][55] | -          |              |
+| xp-ops admin token    | active     | complete       | [Spec][50] | -          |              |
+| Control-plane relay   | superseded | retired        | [Spec][51] | [Spec][34] |              |
+| Xray ingress guard    | active     | complete       | [Spec][52] | -          |              |
+| Xray stale TCP        | active     | complete       | [Spec][53] | -          |              |
+| Mihomo mirror         | active     | unverified     | [Spec][54] | -          |              |
+| Mihomo import         | active     | complete       | [Spec][56] | -          | Pasted nodes |
 
 [1]: access-model-hardcut-v9/SPEC.md
 [2]: admin-delete-node/SPEC.md
@@ -128,3 +129,4 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 [53]: xray-stale-tcp-reclaim/SPEC.md
 [54]: mihomo-external-resource-mirror/SPEC.md
 [55]: web-demo-runtime/SPEC.md
+[56]: mihomo-subscription-import/SPEC.md

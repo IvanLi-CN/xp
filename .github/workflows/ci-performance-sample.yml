@@ -11,7 +11,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       target_sha: ${{ inputs.target_sha }}
-      cache_namespace: perf-${{ github.run_id }}-${{ inputs.sample }}
+      cache_namespace: perf-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.sample }}
       cache_phase: cold
       sample: ${{ inputs.sample }}
 
@@ -20,6 +20,6 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       target_sha: ${{ inputs.target_sha }}
-      cache_namespace: perf-${{ github.run_id }}-${{ inputs.sample }}
+      cache_namespace: perf-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.sample }}
       cache_phase: warm
       sample: ${{ inputs.sample }}

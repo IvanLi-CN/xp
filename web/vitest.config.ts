@@ -17,6 +17,11 @@ export default defineConfig({
 	},
 	test: {
 		environment: "jsdom",
+		environmentOptions: {
+			jsdom: {
+				url: "https://node-a.fixture.test/",
+			},
+		},
 		setupFiles: ["./src/setupTests.ts"],
 		include: ["src/**/*.test.{ts,tsx}"],
 		exclude: ["tests/e2e/**"],

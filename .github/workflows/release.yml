@@ -27,8 +27,9 @@ on:
         type: string
       resource_evidence_ref:
         description: >-
-          Evidence commit SHA whose only parent is head_sha and which contains the Agent VM log
-          and attestation
+          Resource evidence contract v2 commit SHA whose only parent is head_sha and which contains
+          resource-evidence.json and resource-workload.log; pre-v2 evidence commits must be
+          regenerated
         required: true
         type: string
 
@@ -77,7 +78,7 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
           RELEASE_REASON: ${{ inputs.reason }}
         run: bash .github/scripts/release-intent.sh
-      - name: checkout Agent VM evidence commit
+      - name: checkout resource evidence commit
         if: steps.intent.outputs.should_release == 'true'
         env:
           EVIDENCE_REF: ${{ inputs.resource_evidence_ref }}
@@ -93,15 +94,15 @@ jobs:
             git diff-tree --no-commit-id --name-only -r "${evidence_commit}"
           )
           test "${#evidence_paths[@]}" -eq 2
-          test "${evidence_paths[0]}" = "agent-vm-resource-evidence.json"
-          test "${evidence_paths[1]}" = "agent-vm-resource.log"
+          test "${evidence_paths[0]}" = "resource-evidence.json"
+          test "${evidence_paths[1]}" = "resource-workload.log"
           mkdir -p .release-evidence
           git show \
-            "${evidence_commit}:agent-vm-resource-evidence.json" \
+            "${evidence_commit}:resource-evidence.json" \
             > .release-evidence/evidence.json
-          git show "${evidence_commit}:agent-vm-resource.log" > .release-evidence/workload.log
+          git show "${evidence_commit}:resource-workload.log" > .release-evidence/workload.log
           echo "${evidence_commit}" > .release-evidence/commit
-      - name: verify signed Agent VM evidence commit
+      - name: verify signed resource evidence commit
         if: steps.intent.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -211,11 +212,11 @@ jobs:
         if: steps.intent.outputs.should_release == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with: {name: "release-automation-${{ github.run_id }}", path: Dockerfile}
-      - name: preserve Agent VM evidence
+      - name: preserve resource evidence
         if: steps.intent.outputs.should_release == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: "agent-vm-evidence-${{ github.run_id }}"
+          name: "resource-evidence-${{ github.run_id }}"
           path: .release-evidence
           include-hidden-files: true
           if-no-files-found: error
@@ -332,15 +333,15 @@ jobs:
         with: {pattern: "*-${{ github.run_id }}-*", path: release, merge-multiple: true}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: "agent-vm-evidence-${{ github.run_id }}"
+          name: "resource-evidence-${{ github.run_id }}"
           path: release/evidence
-      - name: include Agent VM evidence in release assets
+      - name: include resource evidence in release assets
         run: |
           set -euo pipefail
-          cp release/evidence/commit release/agent-vm-evidence-commit.txt
-          cp release/evidence/manifest.txt release/agent-vm-evidence-manifest.txt
-          cp release/evidence/evidence.json release/agent-vm-resource-evidence.json
-          cp release/evidence/workload.log release/agent-vm-resource.log
+          cp release/evidence/commit release/resource-evidence-commit.txt
+          cp release/evidence/manifest.txt release/resource-evidence-manifest.txt
+          cp release/evidence/evidence.json release/resource-evidence.json
+          cp release/evidence/workload.log release/resource-workload.log
           rm -rf release/evidence
       - run: cd release && sha256sum -- *-linux-* > checksums.txt && sha256sum --check checksums.txt
       - uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd

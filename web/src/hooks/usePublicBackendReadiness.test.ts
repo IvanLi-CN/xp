@@ -58,6 +58,55 @@ describe("useHydratePrimaryBackendProfile", () => {
 		});
 	});
 
+	it("bootstraps legacy sessions from the page origin after clearing cache", async () => {
+		const clearCache = vi.fn();
+		mocks.probeBackendOrigin.mockResolvedValue({
+			clusterId: "cluster-current",
+		});
+		mocks.getPrimaryBackendSnapshot.mockReturnValue({
+			primaryOrigin: window.location.origin,
+			clusterId: null,
+		});
+		const { result } = renderHook(() =>
+			useAuthenticatedBackendProbe({
+				staticConsole: false,
+				isOnline: true,
+				origin: window.location.origin,
+				clusterId: null,
+				onUnidentifiedCluster: clearCache,
+			}),
+		);
+		await waitFor(() => expect(clearCache).toHaveBeenCalledOnce());
+		expect(mocks.hydratePrimaryBackendProfile).toHaveBeenCalledWith(
+			"cluster-current",
+		);
+		expect(clearCache.mock.invocationCallOrder[0]).toBeLessThan(
+			mocks.hydratePrimaryBackendProfile.mock.invocationCallOrder[0],
+		);
+		expect(result.current.ready).toBe(false);
+		expect(result.current.clusterMismatch).toBe(false);
+	});
+
+	it("rejects a cross-origin target when no cluster identity is available", async () => {
+		mocks.probeBackendOrigin.mockResolvedValue({
+			clusterId: "cluster-current",
+		});
+		mocks.getPrimaryBackendSnapshot.mockReturnValue({
+			primaryOrigin: "https://node.example",
+			clusterId: null,
+		});
+		const { result } = renderHook(() =>
+			useAuthenticatedBackendProbe({
+				staticConsole: false,
+				isOnline: true,
+				origin: "https://node.example",
+				clusterId: null,
+			}),
+		);
+		await waitFor(() => expect(result.current.clusterMismatch).toBe(true));
+		expect(result.current.ready).toBe(false);
+	});
+
 	it("initializes static console runtime policy from public cluster identity", () => {
 		renderHook(() =>
 			useHydratePrimaryBackendProfile({

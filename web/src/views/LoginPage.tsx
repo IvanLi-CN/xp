@@ -33,7 +33,10 @@ import {
 } from "../components/ui/form";
 import { Input } from "../components/ui/input";
 import { parseAdminTokenInput } from "../utils/adminToken";
-import { sanitizeRedirectPath } from "../utils/navigation";
+import {
+	parseLoginHandoffHash,
+	sanitizeRedirectPath,
+} from "../utils/navigation";
 import { LoginBootstrapCompatibilityPending } from "./LoginBootstrapCompatibilityPending";
 
 function formatError(err: unknown): string {
@@ -135,14 +138,16 @@ export function LoginPage({
 
 	useEffect(() => {
 		const params = new URLSearchParams(window.location.search);
-		const loginToken = params.get("login_token");
+		const loginToken =
+			params.get("login_token") ??
+			parseLoginHandoffHash(window.location.hash)?.token;
 		if (!loginToken) return;
 
 		params.delete("login_token");
 		const nextQuery = params.toString();
 		const nextUrl = `${window.location.pathname}${
 			nextQuery.length ? `?${nextQuery}` : ""
-		}${window.location.hash ?? ""}`;
+		}`;
 		window.history.replaceState(null, "", nextUrl);
 
 		form.reset({ token: loginToken });
@@ -206,7 +211,12 @@ export function LoginPage({
 	});
 
 	return (
-		<div className="flex min-h-screen items-center justify-center bg-muted/35 px-6 py-10">
+		<div
+			className={[
+				"relative flex min-h-dvh items-center justify-center bg-muted/35",
+				"px-3 py-10 sm:px-6 md:pt-28",
+			].join(" ")}
+		>
 			<div className="xp-card w-full max-w-lg">
 				<div className="xp-card-body space-y-5">
 					<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
@@ -225,6 +235,10 @@ export function LoginPage({
 					</div>
 
 					<LoginBackendSelector
+						className={[
+							"md:absolute md:right-6 md:top-6 md:w-max md:min-w-28",
+							"md:max-w-[min(24rem,calc(100vw-3rem))]",
+						].join(" ")}
 						disabled={isVerifying}
 						staticConsole={staticConsole}
 						onProbeStateChange={setPreAuthTargetReady}
@@ -274,7 +288,7 @@ export function LoginPage({
 									Token is not saved until verification succeeds.
 								</p>
 							) : (
-								<div className="xp-alert xp-alert-warning px-4 py-3">
+								<div className="xp-alert xp-alert-warning flex-col items-start gap-1 px-4 py-3">
 									<p className="font-medium">No token set.</p>
 									<p className="mt-1 text-muted-foreground">
 										Ask an administrator for a token or a temporary login link.

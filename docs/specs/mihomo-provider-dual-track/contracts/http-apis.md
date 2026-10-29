@@ -133,6 +133,28 @@ Response:
 
 - `200 text/yaml; charset=utf-8`
 
+## PUT `/api/admin/users/{user_id}/subscription-mihomo-profile`
+
+- 需要管理员认证。
+- 请求体包含 `mixin_yaml`、`extra_proxies_yaml` 和 `extra_proxy_providers_yaml` 三份文档；
+  保存前仍执行现有的校验、冲突检查和最终 provider 联合预渲染。
+- 成功返回 `200`，返回当前已保存的三份文档。
+
+写入失败时，响应统一使用 `{error:{code,message,details}}`。旧的 `invalid_request`、
+`conflict` 等校验与冲突错误保持不变；共用 Raft 写入只使用以下稳定分类：
+
+- `503 raft_write_not_dispatched`：只有能证明请求在整个流程中从未派发时使用。
+  `details.dispatch_state` 为 `not_dispatched`，不包含重试覆盖警示。
+- `502 raft_write_outcome_unknown`：已派发但没有可验证响应、旧后端笼统 `5xx`、客户端连接中断，或成功状态但响应正文/Schema 无法验证。
+  `details` 只包含 `failure_layer`、`cause`、`confidence`、`attempted_path`、
+  `dispatch_state`、`retryable`、`support_id`，以及可确认的目标节点或远端状态；同时包含
+  `manual_retry_warning=may_overwrite_concurrent_changes`。
+
+错误消息和详情不得包含配置正文、凭据、内部 URL 或原始异常。客户端收到
+`raft_write_outcome_unknown` 时必须保留草稿、只读核对一次并允许手动再次核对，不得自动重试写入。
+保存前用于冲突检查的只读基线读取失败不代表 PUT 已派发；客户端必须保留草稿并报告预检失败，不能按结果未知自动核对。
+结果未知后的手动重试必须携带显式覆盖确认；未确认时仍执行原始基线冲突检查，确认后才允许在最新只读结果上覆盖写入。
+
 ## GET `/api/mihomo/resources/{resource_id}`
 
 - 外部资源镜像的长期边界见 [资源镜像 Spec][resource-mirror-spec]。

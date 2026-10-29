@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BackendApiError } from "../api/backendError";
 import { UiPrefsProvider } from "../components/UiPrefs";
 import { ADMIN_TOKEN_STORAGE_KEY } from "../components/auth";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { LoginPage } from "./LoginPage";
 
 const mocks = vi.hoisted(() => ({
@@ -149,6 +150,44 @@ describe("<LoginPage />", () => {
 		expect(localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)).toBeNull();
 	});
 
+	it("shows the selected node name and falls back to its host", () => {
+		window.history.pushState({}, "", "/login");
+		const origin = "https://secondary.example";
+		mocks.backend.clusterId = "cluster-84";
+		mocks.backend.primaryOrigin = origin;
+		mocks.backend.candidates = [
+			{
+				origin,
+				nodeId: fixtureCatalog.identifier.nodeSecondary(),
+				nodeName: fixtureCatalog.label.tokyo(),
+				verifiedAt: null,
+				lastError: null,
+			},
+		];
+		const { rerender } = render(
+			<UiPrefsProvider>
+				<LoginPage />
+			</UiPrefsProvider>,
+		);
+		expect(
+			screen.getByRole("button", { name: "Select service node" }),
+		).toHaveTextContent("Tokyo");
+		mocks.backend.candidates = [
+			{
+				...mocks.backend.candidates[0],
+				nodeName: fixtureCatalog.string.none(),
+			},
+		];
+		rerender(
+			<UiPrefsProvider>
+				<LoginPage />
+			</UiPrefsProvider>,
+		);
+		expect(
+			screen.getByRole("button", { name: "Select service node" }),
+		).toHaveTextContent("secondary.example");
+	});
+
 	it("selects a probed profile candidate before token verification", async () => {
 		window.history.pushState({}, "", "/login");
 		const secondary = "https://secondary.example";
@@ -156,8 +195,8 @@ describe("<LoginPage />", () => {
 		mocks.backend.candidates = [
 			{
 				origin: secondary,
-				nodeId: "node-secondary",
-				nodeName: "",
+				nodeId: fixtureCatalog.identifier.nodeSecondary(),
+				nodeName: fixtureCatalog.string.none(),
 				verifiedAt: Date.now(),
 				lastError: null,
 			},
@@ -202,8 +241,8 @@ describe("<LoginPage />", () => {
 		mocks.backend.candidates = [
 			{
 				origin: secondary,
-				nodeId: "node-secondary",
-				nodeName: "Secondary node",
+				nodeId: fixtureCatalog.identifier.nodeSecondary(),
+				nodeName: fixtureCatalog.label.tokyo(),
 				verifiedAt: Date.now(),
 				lastError: null,
 			},
@@ -232,13 +271,13 @@ describe("<LoginPage />", () => {
 			);
 		});
 		failed = false;
-		await user.click(screen.getByRole("menuitem", { name: /Secondary node/ }));
+		await user.click(screen.getByRole("menuitem", { name: /Tokyo/ }));
 
 		await waitFor(() => {
 			expect(mocks.probeBackendCandidate).toHaveBeenCalledTimes(2);
-			expect(
-				screen.getByRole("menuitem", { name: /Secondary node/ }),
-			).toHaveTextContent("Ready");
+			expect(screen.getByRole("menuitem", { name: /Tokyo/ })).toHaveTextContent(
+				"Ready",
+			);
 		});
 		expect(mocks.backend.candidates).toHaveLength(1);
 	});
@@ -267,7 +306,9 @@ describe("<LoginPage />", () => {
 			);
 		});
 		failed = false;
-		await user.click(screen.getByRole("menuitem", { name: /localhost:3000/ }));
+		await user.click(
+			screen.getByRole("menuitem", { name: new RegExp(window.location.host) }),
+		);
 
 		await waitFor(() => {
 			expect(mocks.probeBackendOrigin).toHaveBeenCalledTimes(2);
@@ -283,8 +324,8 @@ describe("<LoginPage />", () => {
 		mocks.backend.candidates = [
 			{
 				origin: secondary,
-				nodeId: "node-secondary",
-				nodeName: "Secondary node",
+				nodeId: fixtureCatalog.identifier.nodeSecondary(),
+				nodeName: fixtureCatalog.label.tokyo(),
 				verifiedAt: Date.now(),
 				lastError: null,
 			},
@@ -321,6 +362,23 @@ describe("<LoginPage />", () => {
 		expect(
 			screen.getByRole("button", { name: "Select service node" }),
 		).toBeInTheDocument();
+	});
+
+	it("consumes a fragment login handoff without moving the token into the query", async () => {
+		window.history.replaceState(
+			null,
+			"",
+			"/login?redirect=%2Fnodes%23history#xp_login_token=fragment-token&xp_redirect_hash=",
+		);
+		mocks.verifyAdminToken.mockResolvedValue(undefined);
+
+		render(<LoginPage />);
+
+		await waitFor(() => {
+			expect(mocks.verifyAdminToken).toHaveBeenCalledWith("fragment-token");
+		});
+		expect(window.location.search).toBe("?redirect=%2Fnodes%23history");
+		expect(window.location.hash).toBe("");
 	});
 
 	it("shows compatibility pending without storing an unverified static-console token", async () => {

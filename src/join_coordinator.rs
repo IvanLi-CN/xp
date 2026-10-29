@@ -6,6 +6,8 @@ use crate::{
 use chrono::{DateTime, Utc};
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
+
+mod legacy;
 async fn write_applied(
     raft: &Arc<dyn RaftFacade>,
     command: DesiredStateCommand,
@@ -173,17 +175,17 @@ pub async fn migrate_one_legacy_join_session(
         raft,
         DesiredStateCommand::BeginMembershipOperation {
             operation: Box::new(operation.clone()),
-            node: replayable.then_some(node).flatten(),
+            node: replayable.then_some(node.clone()).flatten(),
             join_session: replayable.then_some(session.clone()),
         },
     )
     .await?;
     if !replayable {
         crate::raft_membership_guard::block_membership_operation(raft, operation, evidence).await?;
+        legacy::tombstone_non_replayable_legacy_session(raft, session, node).await?;
     }
     Ok(())
 }
-
 async fn reconcile_once(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -198,6 +200,7 @@ async fn reconcile_once(
     {
         return Ok(());
     }
+    migrate_one_legacy_join_session(&raft, &store).await?;
     let sessions = store
         .lock()
         .await
@@ -570,13 +573,12 @@ async fn reconcile_once(
     Ok(())
 }
 #[cfg(test)]
+mod legacy_tests;
+#[cfg(test)]
 #[path = "join_coordinator_promotion_tests.rs"]
 mod promotion_tests;
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use tokio::sync::watch;
-
     use super::*;
     use crate::{
         domain::{Node, NodeQuotaReset},
@@ -587,6 +589,8 @@ mod tests {
         },
         state::StoreInit,
     };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::watch;
     #[derive(Clone)]
     struct RecoveringRaft {
         inner: LocalRaft,
@@ -800,7 +804,7 @@ mod tests {
                 JoinSession {
                     node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
                     request_fingerprint: "fingerprint".into(),
-                    signed_cert_pem: "certificate".into(),
+                    signed_cert_pem: String::new(),
                     token_expires_at: (Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
                     activation_deadline: (Utc::now() + chrono::Duration::minutes(10)).to_rfc3339(),
                     required_log_index: 1,

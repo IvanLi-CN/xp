@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run real-xray e2e tests on the shared testbox (codex-testbox).
+# Run real-Xray e2e tests on the configured shared test host.
 #
 # This follows the shared-testbox-runner rules:
 # - per-run isolation under the current shared-testbox Agent Directory
@@ -9,7 +9,9 @@ set -euo pipefail
 # - LXC cap compatibility override
 # - safe cleanup (only resources created by this run)
 
-TESTBOX="${TESTBOX:-codex-testbox}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=runner-env.sh
+source "$SCRIPT_DIR/runner-env.sh"
 RUN_MESH_RESOURCE="${XP_RUN_MESH_RESOURCE:-0}"
 ONLY_MESH_RESOURCE="${XP_E2E_ONLY_MESH_RESOURCE:-0}"
 MESH_RESOURCE_SUMMARY_ONLY="${XP_MESH_RESOURCE_SUMMARY_ONLY:-0}"
@@ -119,11 +121,12 @@ with tarfile.open(archive, "w") as output:
 PY
 }
 git -C "$REPO_ROOT" archive --format=tar "$GIT_SHA_FULL" > "$SOURCE_ARCHIVE"
-SOURCE_ARCHIVE_SHA="$(shasum -a 256 "$SOURCE_ARCHIVE" | awk '{print $1}')"
+SOURCE_ARCHIVE_SHA="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$SOURCE_ARCHIVE")"
 create_deterministic_tar "$REPO_ROOT/web/dist" "$WEB_DIST_ARCHIVE"
-WEB_DIST_ARCHIVE_SHA="$(shasum -a 256 "$WEB_DIST_ARCHIVE" | awk '{print $1}')"
+WEB_DIST_ARCHIVE_SHA="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$WEB_DIST_ARCHIVE")"
 
 REPO_NAME="$(basename "$REPO_ROOT")"
+testbox_validate_component repository "$REPO_NAME"
 case "$REPO_NAME" in
   ""|*[!A-Za-z0-9._-]*)
     echo "repository name contains unsupported path characters: $REPO_NAME" >&2
@@ -143,12 +146,6 @@ RUN_NONCE="$(python3 -c 'import secrets; print(secrets.token_hex(4))')"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA}_${RUN_NONCE}"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 
-case "${USER:-}" in
-  ""|*[!A-Za-z0-9._-]*)
-    echo "USER contains unsupported remote path characters" >&2
-    exit 2
-    ;;
-esac
 if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   case "${CODEX_THREAD_ID:-}" in
     ""|*[!A-Za-z0-9._-]*)
@@ -156,28 +153,41 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
       exit 2
       ;;
   esac
-  REMOTE_AGENT_DIR="/srv/codex/agents/$CODEX_THREAD_ID"
+  REMOTE_AGENT_DIR="$TESTBOX_REMOTE_ROOT/agents/$CODEX_THREAD_ID"
   REMOTE_WORKSPACE="$REMOTE_AGENT_DIR/workspace"
   REMOTE_RUN="$REMOTE_AGENT_DIR/runs/$RUN_ID"
 else
-  REMOTE_BASE="/srv/codex/workspaces/$USER"
+  REMOTE_BASE="$TESTBOX_REMOTE_ROOT/workspaces/$USER"
   REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
   REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 fi
-# Subnet claims are host-global so concurrent runs from different users cannot
-# select the same Docker network range.
-REMOTE_SUBNET_CLAIMS="/srv/codex/agents/.shared-testbox-subnet-claims"
+# Subnet claims are global within the operator-owned root so concurrent runs
+# under one Unix account cannot select the same Docker network range.
+REMOTE_SUBNET_CLAIMS="$TESTBOX_REMOTE_ROOT/agents/.shared-testbox-subnet-claims"
+REMOTE_RUN_CREATED=0
+cleanup_unclaimed_run() {
+  local status=$?
+  set +e
+  if [ "${REMOTE_RUN_CREATED:-0}" = "1" ]; then
+    testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1 || true
+  fi
+  return "$status"
+}
+trap cleanup_unclaimed_run EXIT
+testbox_remote_root_preflight
+REMOTE_RUN_CREATED=1
+REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
+if [ "$RUN_MESH_RESOURCE" = "1" ]; then
+  REMOTE_WORKSPACE="$REMOTE_AGENT_DIR/workspace"
+else
+  REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
+fi
 REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
-COMPOSE_PROJECT="$(python3 - "$COMPOSE_PROJECT_RAW" <<'PY'
-import re, sys
-s=sys.argv[1].lower()
-s=re.sub(r'[^a-z0-9_-]+','_',s).strip('_')
-print(s[:63] if len(s)>63 else s)
-PY
-)"
+COMPOSE_PROJECT="$(testbox_bounded_name "$COMPOSE_PROJECT_RAW")"
 REMOTE_RUN_B64="$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')"
+TESTBOX_REMOTE_ROOT_B64="$(printf '%s' "$TESTBOX_REMOTE_ROOT" | base64 | tr -d '\n')"
 COMPOSE_PROJECT_B64="$(printf '%s' "$COMPOSE_PROJECT" | base64 | tr -d '\n')"
 SUBNET_CLAIM_ROOT_B64="$(printf '%s' "$REMOTE_SUBNET_CLAIMS" | base64 | tr -d '\n')"
 REMOTE_RESOURCE_BASELINE_B64="$(printf '%s' "$REMOTE_RESOURCE_BASELINE" | base64 | tr -d '\n')"
@@ -219,25 +229,45 @@ echo "remote_run=$REMOTE_RUN"
 echo "compose_project=$COMPOSE_PROJECT"
 echo "evidence_manifest=$EVIDENCE_PATH"
 
-REMOTE_RUN_CREATED=0
 cleanup_local() {
+  local status="${1:-$?}"
   set +e
   write_evidence_manifest "${EVIDENCE_STATUS:-interrupted}"
   rm -f "$SOURCE_ARCHIVE" "$WEB_DIST_ARCHIVE"
   if [ -n "${BASELINE_ARCHIVE:-}" ]; then
     rm -f "$BASELINE_ARCHIVE"
   fi
-  if [ "${REMOTE_RUN_CREATED:-0}" = "1" ]; then
-    ssh -o BatchMode=yes "$TESTBOX" \
-      "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1 || true
+  if [ "${REMOTE_RUN_CREATED:-0}" = "1" ] && [ "$status" -eq 0 ]; then
+    if ssh -o BatchMode=yes "$TESTBOX" \
+      "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1
 set -euo pipefail
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
-case "$REMOTE_RUN" in
-  /srv/codex/agents/*/runs/*|/srv/codex/workspaces/*/runs/*) ;;
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    if [ -L "$path" ]; then
+      return 2
+    fi
+    path="$(dirname "$path")"
+  done
+}
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
+remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
+case "$remote_run_real" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
   *) exit 2 ;;
 esac
+assert_no_symlink_path "$remote_run_real"
+REMOTE_RUN="$remote_run_real"
+test -f "$REMOTE_RUN/.codex-run-id"
+test "$(cat -- "$REMOTE_RUN/.codex-run-id")" = "$RUN_ID"
 scope_unit="codex-xp-source-journal-${RUN_ID}.scope"
 systemctl --user stop "$scope_unit" >/dev/null 2>&1 || true
 systemctl --user reset-failed "$scope_unit" >/dev/null 2>&1 || true
@@ -246,6 +276,7 @@ for resource_label in candidate-smoke baseline candidate source-journal summary;
   systemctl --user stop "$resource_unit" >/dev/null 2>&1 || true
   systemctl --user reset-failed "$resource_unit" >/dev/null 2>&1 || true
 done
+cleanup_ok=1
 if [ -d "$REMOTE_RUN/scripts/e2e" ]; then
   cd "$REMOTE_RUN/scripts/e2e"
   cleanup_files=()
@@ -255,19 +286,55 @@ if [ -d "$REMOTE_RUN/scripts/e2e" ]; then
     fi
   done
   if [ "${#cleanup_files[@]}" -gt 0 ]; then
-    docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+    if docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1; then
+      :
+    else
+      cleanup_ok=0
+    fi
   fi
 fi
-rm -rf "$REMOTE_RUN"
+if [ "$cleanup_ok" != "1" ]; then
+  exit 1
+fi
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
+final_run="$(readlink -m -- "$REMOTE_RUN")"
+case "$final_run" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
 REMOTE_CLEANUP
+    then
+      if testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1; then
+        REMOTE_RUN_CREATED=0
+      else
+        status=1
+      fi
+    else
+      status=1
+    fi
   fi
+  return "$status"
 }
 on_local_signal() {
   trap - EXIT INT TERM
-  cleanup_local
+  cleanup_local "$1"
   exit "$1"
 }
-trap cleanup_local EXIT
+on_local_exit() {
+  local status=$?
+  trap - EXIT
+  cleanup_local "$status"
+  local cleanup_status=$?
+  if [ "$status" -eq 0 ] && [ "$cleanup_status" -ne 0 ]; then
+    status="$cleanup_status"
+  fi
+  exit "$status"
+}
+trap - EXIT
+trap on_local_exit EXIT
 trap 'on_local_signal 130' INT
 trap 'on_local_signal 143' TERM
 
@@ -281,14 +348,41 @@ source_archive_sha256=$SOURCE_ARCHIVE_SHA
 web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA
 "
 WORKSPACE_METADATA_B64="$(printf '%s' "$WORKSPACE_METADATA" | base64 | tr -d '\n')"
-REMOTE_RUN_CREATED=1
 ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' WORKSPACE_METADATA_B64='$WORKSPACE_METADATA_B64' bash -s" <<'REMOTE_BOOTSTRAP'
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' WORKSPACE_METADATA_B64='$WORKSPACE_METADATA_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE_BOOTSTRAP'
 set -euo pipefail
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 REMOTE_WORKSPACE="$(printf '%s' "${REMOTE_WORKSPACE_B64:?}" | base64 -d)"
-if [[ "$REMOTE_RUN" == /srv/codex/agents/*/runs/* ]]; then
-  agent_base=/srv/codex/agents
+RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
+test -f "$REMOTE_RUN/.codex-run-id"
+test "$(cat -- "$REMOTE_RUN/.codex-run-id")" = "$RUN_ID"
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    test ! -L "$path"
+    path="$(dirname "$path")"
+  done
+}
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+assert_no_symlink_path "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
+remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
+case "$remote_run_real" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
+assert_no_symlink_path "$remote_run_real"
+REMOTE_RUN="$remote_run_real"
+if [[ "$REMOTE_RUN" == "$TESTBOX_REMOTE_ROOT"/agents/*/runs/* ]]; then
+  REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")/workspace"
+else
+  REMOTE_WORKSPACE="$(dirname "$(dirname "$REMOTE_RUN")")"
+fi
+if [[ "$REMOTE_RUN" == "$TESTBOX_REMOTE_ROOT"/agents/*/runs/* ]]; then
+  agent_base="$TESTBOX_REMOTE_ROOT/agents"
   agent_dir="$(dirname "$REMOTE_WORKSPACE")"
   [[ -d "$agent_base" && ! -L "$agent_base" ]]
   [[ "$(readlink -f -- "$agent_base")" == "$agent_base" ]]
@@ -299,7 +393,7 @@ if [[ "$REMOTE_RUN" == /srv/codex/agents/*/runs/* ]]; then
   fi
   [[ "$(readlink -f -- "$agent_dir")" == "$agent_dir" ]]
 fi
-mkdir -p "$REMOTE_WORKSPACE" "$REMOTE_RUN"
+mkdir -p "$REMOTE_WORKSPACE"
 printf '%s' "${WORKSPACE_METADATA_B64:?}" | base64 -d > "$REMOTE_WORKSPACE/workspace.txt"
 REMOTE_BOOTSTRAP
 
@@ -315,7 +409,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ] && [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; t
   git -C "$REPO_ROOT" cat-file -e "$MESH_RESOURCE_BASELINE_SHA^{commit}"
   BASELINE_ARCHIVE="$(mktemp -t xp-testbox-baseline.XXXXXX.tar)"
   git -C "$REPO_ROOT" archive --format=tar "$MESH_RESOURCE_BASELINE_SHA" > "$BASELINE_ARCHIVE"
-  BASELINE_ARCHIVE_SHA="$(shasum -a 256 "$BASELINE_ARCHIVE" | awk '{print $1}')"
+  BASELINE_ARCHIVE_SHA="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$BASELINE_ARCHIVE")"
   rsync -a "$BASELINE_ARCHIVE" "$TESTBOX:$REMOTE_RUN/resource-baseline.tar"
   ssh -o BatchMode=yes "$TESTBOX" \
     "test \"\$(sha256sum '$REMOTE_RUN/resource-baseline.tar' | awk '{print \$1}')\" = '$BASELINE_ARCHIVE_SHA' && mkdir -p '$REMOTE_RESOURCE_BASELINE' && tar -xf '$REMOTE_RUN/resource-baseline.tar' -C '$REMOTE_RESOURCE_BASELINE' && rm -f '$REMOTE_RUN/resource-baseline.tar'"
@@ -325,10 +419,11 @@ BASELINE_ARCHIVE_SHA_B64="$(printf '%s' "${BASELINE_ARCHIVE_SHA:-none}" | base64
 
 # 5) Run on testbox.
 if ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_CACHE_SMOKE_B64='$MESH_RESOURCE_CACHE_SMOKE_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' GIT_SHA_FULL_B64='$GIT_SHA_FULL_B64' RUN_ID_B64='$RUN_ID_B64' TESTBOX_CARGO_CACHE_ROOT_B64='$TESTBOX_CARGO_CACHE_ROOT_B64' TESTBOX_CARGO_HOME_B64='$TESTBOX_CARGO_HOME_B64' SOURCE_ARCHIVE_SHA_B64='$SOURCE_ARCHIVE_SHA_B64' WEB_DIST_ARCHIVE_SHA_B64='$WEB_DIST_ARCHIVE_SHA_B64' BASELINE_ARCHIVE_SHA_B64='$BASELINE_ARCHIVE_SHA_B64' bash -s" 2>&1 <<'REMOTE' | tee "$EVIDENCE_OUTPUT_PATH"
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' TESTBOX_REMOTE_ROOT_B64='$TESTBOX_REMOTE_ROOT_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_CACHE_SMOKE_B64='$MESH_RESOURCE_CACHE_SMOKE_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' GIT_SHA_FULL_B64='$GIT_SHA_FULL_B64' RUN_ID_B64='$RUN_ID_B64' TESTBOX_CARGO_CACHE_ROOT_B64='$TESTBOX_CARGO_CACHE_ROOT_B64' TESTBOX_CARGO_HOME_B64='$TESTBOX_CARGO_HOME_B64' SOURCE_ARCHIVE_SHA_B64='$SOURCE_ARCHIVE_SHA_B64' WEB_DIST_ARCHIVE_SHA_B64='$WEB_DIST_ARCHIVE_SHA_B64' BASELINE_ARCHIVE_SHA_B64='$BASELINE_ARCHIVE_SHA_B64' bash -s" 2>&1 <<'REMOTE' | tee "$EVIDENCE_OUTPUT_PATH"
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+TESTBOX_REMOTE_ROOT="$(printf '%s' "${TESTBOX_REMOTE_ROOT_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 SUBNET_CLAIM_ROOT="$(printf '%s' "${SUBNET_CLAIM_ROOT_B64:?}" | base64 -d)"
 REMOTE_RESOURCE_BASELINE="$(printf '%s' "${REMOTE_RESOURCE_BASELINE_B64:?}" | base64 -d)"
@@ -345,39 +440,99 @@ TESTBOX_CARGO_HOME="$(printf '%s' "${TESTBOX_CARGO_HOME_B64:?}" | base64 -d)"
 SOURCE_ARCHIVE_SHA="$(printf '%s' "${SOURCE_ARCHIVE_SHA_B64:?}" | base64 -d)"
 WEB_DIST_ARCHIVE_SHA="$(printf '%s' "${WEB_DIST_ARCHIVE_SHA_B64:?}" | base64 -d)"
 BASELINE_ARCHIVE_SHA="$(printf '%s' "${BASELINE_ARCHIVE_SHA_B64:?}" | base64 -d)"
+REMOTE_RUN_ID="$RUN_ID"
+
+assert_no_symlink_path() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "." ]; do
+    test ! -L "$path"
+    path="$(dirname "$path")"
+  done
+}
+test ! -L "$TESTBOX_REMOTE_ROOT"
+test "$(readlink -f -- "$TESTBOX_REMOTE_ROOT")" = "$TESTBOX_REMOTE_ROOT"
+test ! -L "$REMOTE_RUN"
+assert_no_symlink_path "$REMOTE_RUN"
+remote_run_real="$(readlink -m -- "$REMOTE_RUN")"
+case "$remote_run_real" in
+  "$TESTBOX_REMOTE_ROOT"/agents/*/runs/*|"$TESTBOX_REMOTE_ROOT"/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
+REMOTE_RUN="$remote_run_real"
+source "$REMOTE_RUN/scripts/testbox/remote-run-guard.sh"
 
 export TMPDIR="$REMOTE_RUN/tmp"
 mkdir -p "$TMPDIR"
 
 cleanup() {
+  local status="${1:-$?}"
   if [ "${CLEANUP_DONE:-0}" = "1" ]; then
-    return
+    return "$status"
   fi
   CLEANUP_DONE=1
   set +e
-  if [ -n "${REMOTE_RUN:-}" ] && [ -d "$REMOTE_RUN/scripts/e2e" ]; then
-    cd "$REMOTE_RUN/scripts/e2e" || return 0
-    if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
-      cleanup_files=(-f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml")
-      if [ -f ".codex.user-compat.yaml" ]; then
-        cleanup_files+=(-f ".codex.user-compat.yaml")
+  cleanup_ok=1
+  if [ -n "${REMOTE_RUN:-}" ]; then
+    if [ -n "${SUBNET_CLAIM_DIR:-}" ] && [ ! -d "$REMOTE_RUN/scripts/e2e" ]; then
+      cleanup_ok=0
+    elif [ -d "$REMOTE_RUN/scripts/e2e" ]; then
+      if (
+        cd "$REMOTE_RUN/scripts/e2e" || exit 1
+        if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
+          cleanup_files=(-f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml")
+          if [ -f ".codex.user-compat.yaml" ]; then
+            cleanup_files+=(-f ".codex.user-compat.yaml")
+          fi
+          docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1
+        else
+          exit 1
+        fi
+      ); then
+        :
+      else
+        cleanup_ok=0
       fi
-      docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
     fi
   fi
-  if [ -n "${SUBNET_CLAIM_DIR:-}" ] && [ -d "$SUBNET_CLAIM_DIR" ]; then
-    rm -rf "$SUBNET_CLAIM_DIR" >/dev/null 2>&1 || true
+  if [ "$cleanup_ok" = "1" ] && [ -n "${REMOTE_RUN:-}" ]; then
+    if assert_remote_run; then
+      if [ -n "${SUBNET_CLAIM_DIR:-}" ]; then
+        if RUN_ID="${REMOTE_RUN_ID:-}" python3 "$REMOTE_RUN/scripts/testbox/remote-run-guard.py" \
+          cleanup-with-claim "$TESTBOX_REMOTE_ROOT" "$REMOTE_RUN" "$SUBNET_CLAIM_DIR" >/dev/null 2>&1; then
+          :
+        else
+          cleanup_ok=0
+        fi
+      elif remove_remote_run >/dev/null 2>&1; then
+        :
+      else
+        cleanup_ok=0
+      fi
+    else
+      cleanup_ok=0
+    fi
   fi
-  if [ -n "${REMOTE_RUN:-}" ]; then
-    rm -rf "$REMOTE_RUN" >/dev/null 2>&1 || true
+  if [ "$cleanup_ok" != "1" ] && [ "$status" -eq 0 ]; then
+    status=1
   fi
+  return "$status"
 }
 on_signal() {
   cleanup
   trap - EXIT INT TERM
   exit "$1"
 }
-trap cleanup EXIT
+on_exit() {
+  local status=$?
+  trap - EXIT
+  cleanup "$status"
+  local cleanup_status=$?
+  if [ "$status" -eq 0 ] && [ "$cleanup_status" -ne 0 ]; then
+    status="$cleanup_status"
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
@@ -411,11 +566,13 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
       exit 2
     fi
   done
+  remote_root_real="$(readlink -f -- "$TESTBOX_REMOTE_ROOT")"
+  [ -n "$remote_root_real" ] || exit 2
   agent_root="$(dirname "$REMOTE_WORKSPACE")"
   agent_root_real="$(readlink -f -- "$agent_root")"
   [ -n "$agent_root_real" ] || exit 2
   case "$agent_root_real" in
-    /srv/codex/agents/*) ;;
+    "$remote_root_real"/agents/*) ;;
     *)
       echo "remote workspace is not inside the shared-testbox Agent Directory" >&2
       exit 2
@@ -443,21 +600,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
       exit 2
       ;;
   esac
-  cargo_home_parent_real="$(readlink -f -- "$(dirname "$TESTBOX_CARGO_HOME")")"
-  case "$TESTBOX_CARGO_HOME" in
-    /srv/codex/caches/linux-amd64/cargo) ;;
-    *)
-      echo "Cargo Home must be /srv/codex/caches/linux-amd64/cargo" >&2
-      exit 2
-      ;;
-  esac
-  case "$cargo_home_parent_real" in
-    /srv/codex/caches/linux-amd64) ;;
-    *)
-      echo "Cargo Home must be inside the shared Cargo cache root" >&2
-      exit 2
-      ;;
-  esac
+  mkdir -p "$TESTBOX_CARGO_HOME"
   command -v flock >/dev/null 2>&1 || {
     echo "flock is required on the shared testbox" >&2
     exit 2
@@ -522,7 +665,7 @@ fi
 cd "$REMOTE_RUN/scripts/e2e"
 
 if ! command -v make >/dev/null 2>&1; then
-  echo "missing 'make' on codex-testbox; vendored OpenSSL builds require it" >&2
+  echo "missing 'make' on the configured test host; vendored OpenSSL builds require it" >&2
   echo "repair with shared-testbox-bootstrap before running real-Xray suites" >&2
   exit 2
 fi
@@ -593,37 +736,258 @@ YAML
   done
 } > "$caps_override"
 
+claim_pid="$$"
+claim_start_ticks="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
+case "$claim_start_ticks" in
+  ''|*[!0-9]*)
+    echo "cannot determine shared-testbox lease start time" >&2
+    exit 1
+    ;;
+esac
+
 mapfile -t subnet_claim_info < <(
-  python3 - "$SUBNET_CLAIM_ROOT" "$REMOTE_RUN" "$COMPOSE_PROJECT" <<'PY'
+  python3 - "$SUBNET_CLAIM_ROOT" "$REMOTE_RUN" "$COMPOSE_PROJECT" "$TESTBOX_REMOTE_ROOT" "$claim_pid" "$claim_start_ticks" <<'PY'
+import fcntl
 import ipaddress
 import json
 import os
 import pathlib
-import shutil
+import re
+import stat
 import subprocess
 import sys
-import time
 
 claim_root = pathlib.Path(sys.argv[1])
 remote_run = pathlib.Path(sys.argv[2])
-compose_project = sys.argv[3]
-lock_dir = claim_root / ".allocator.lock"
-lock_timeout_seconds = 30
-lock_poll_seconds = 0.2
-pending_claim_grace_seconds = 120
+requested_compose_project = sys.argv[3]
+remote_root = pathlib.Path(os.path.normpath(sys.argv[4]))
+claim_pid = int(sys.argv[5])
+claim_start_ticks = int(sys.argv[6])
+if claim_pid <= 0 or claim_start_ticks <= 0:
+    print("invalid shared-testbox lease identity", file=sys.stderr)
+    sys.exit(1)
 
-claim_root.mkdir(parents=True, exist_ok=True)
+if remote_root.is_symlink() or remote_root.resolve() != remote_root:
+    print("shared-testbox remote root is not canonical", file=sys.stderr)
+    sys.exit(1)
 
-deadline = time.time() + lock_timeout_seconds
-while True:
+
+def open_directory(path, create):
     try:
-        os.mkdir(lock_dir)
-        break
-    except FileExistsError:
-        if time.time() >= deadline:
-            print("timed out waiting for shared-testbox subnet allocator lock", file=sys.stderr)
-            sys.exit(1)
-        time.sleep(lock_poll_seconds)
+        suffix = path.relative_to(remote_root).parts
+    except ValueError:
+        print(f"shared-testbox path escaped remote root: {path}", file=sys.stderr)
+        sys.exit(1)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    root_parts = remote_root.relative_to(remote_root.anchor).parts
+    parts = root_parts + suffix
+    current_fd = os.open(remote_root.anchor, flags)
+    try:
+        for index, part in enumerate(parts):
+            relative_index = index - len(root_parts)
+            try:
+                next_fd = os.open(part, flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                if not create:
+                    print(f"shared-testbox directory is missing: {path}", file=sys.stderr)
+                    sys.exit(1)
+                try:
+                    os.mkdir(part, 0o700, dir_fd=current_fd)
+                except FileExistsError:
+                    pass
+                next_fd = os.open(part, flags, dir_fd=current_fd)
+            if relative_index < 0:
+                os.close(current_fd)
+                current_fd = next_fd
+                continue
+            directory_stat = os.fstat(next_fd)
+            if (
+                directory_stat.st_uid != os.geteuid()
+                or (directory_stat.st_mode & 0o777) != 0o700
+            ):
+                print(
+                    f"shared-testbox directory has unsafe ownership or mode: {path}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
+    except BaseException:
+        os.close(current_fd)
+        raise
+
+
+def ensure_directory(path, create):
+    directory_fd = open_directory(path, create)
+    os.close(directory_fd)
+
+
+def path_has_symlink(path):
+    try:
+        parts = path.relative_to(remote_root).parts
+    except ValueError:
+        return True
+    current = remote_root
+    for part in parts:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def is_allowed_run(path):
+    if path_has_symlink(path):
+        return False
+    try:
+        parts = path.relative_to(remote_root).parts
+    except ValueError:
+        return False
+    return (
+        len(parts) == 4
+        and parts[0] == "agents"
+        and parts[2] == "runs"
+        and all(parts)
+    ) or (
+        len(parts) == 5
+        and parts[0] == "workspaces"
+        and parts[3] == "runs"
+        and all(parts)
+    )
+
+
+guard_script = remote_run / "scripts/testbox/remote-run-guard.py"
+
+
+def cleanup_claim_dir(path):
+    if path_has_symlink(path) or not guard_script.is_file():
+        return False
+    result = subprocess.run(
+        [
+            "python3",
+            str(guard_script),
+            "claim-cleanup-locked",
+            str(remote_root),
+            str(path),
+        ],
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def write_claim_lease(path):
+    temporary = path / ".lease.tmp"
+    try:
+        fd = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        with os.fdopen(fd, "w") as lease_file:
+            lease_file.write(f"pid={claim_pid}\nstart_ticks={claim_start_ticks}\n")
+            lease_file.flush()
+            os.fsync(lease_file.fileno())
+        os.replace(temporary, path / "lease")
+    except BaseException:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def read_claim_file(path, label):
+    if path.is_symlink() or not path.is_file():
+        print(f"shared-testbox claim metadata is missing or unsafe: {label}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        value = path.read_text().strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"cannot read shared-testbox claim metadata {label}: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if not value:
+        print(f"shared-testbox claim metadata is empty: {label}", file=sys.stderr)
+        sys.exit(1)
+    return value
+
+
+def cleanup_stale_run(path, claim_dir):
+    if not path.exists() or path.is_symlink():
+        return False
+    if path_has_symlink(path) or not path.is_dir() or not is_allowed_run(path):
+        return False
+    compose_project = read_claim_file(claim_dir / "compose_project", "compose_project")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", compose_project):
+        return False
+    compose_dir = path / "scripts/e2e"
+    required_files = [
+        "docker-compose.xray.yml",
+        ".codex.caps-compat.yaml",
+        ".codex.net-compat.yaml",
+    ]
+    if path_has_symlink(compose_dir) or not compose_dir.is_dir():
+        return False
+    if any(
+        (compose_dir / filename).is_symlink() or not (compose_dir / filename).is_file()
+        for filename in required_files
+    ):
+        return False
+    compose_files = []
+    for filename in [*required_files, ".codex.user-compat.yaml"]:
+        if (compose_dir / filename).is_file() and not (compose_dir / filename).is_symlink():
+            compose_files.extend(["-f", filename])
+    try:
+        compose_result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-p",
+                compose_project,
+                *compose_files,
+                "down",
+                "-v",
+                "--remove-orphans",
+            ],
+            cwd=compose_dir,
+            check=False,
+        )
+    except OSError:
+        return False
+    if compose_result.returncode != 0:
+        return False
+    environment = os.environ.copy()
+    environment.pop("RUN_ID_B64", None)
+    environment["RUN_ID"] = path.name
+    result = subprocess.run(
+        [
+            "python3",
+            str(guard_script),
+            "cleanup-with-claim-locked",
+            str(remote_root),
+            str(path),
+            str(claim_dir),
+        ],
+        check=False,
+        env=environment,
+    )
+    return result.returncode == 0
+
+
+ensure_directory(remote_root / "agents", create=True)
+ensure_directory(claim_root, create=True)
+
+claim_root_fd = open_directory(claim_root, create=False)
+lock_fd = os.open(
+    ".codex-run-lock",
+    os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
+    0o600,
+    dir_fd=claim_root_fd,
+)
+lock_stat = os.fstat(lock_fd)
+if lock_stat.st_uid != os.geteuid() or lock_stat.st_mode & 0o022:
+    print("shared-testbox claim lock has unsafe ownership or mode", file=sys.stderr)
+    sys.exit(1)
+fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
 used = []
 claimed = []
@@ -663,65 +1027,89 @@ try:
                 pass
 
     for claim_dir in claim_root.iterdir():
-        if not claim_dir.is_dir() or claim_dir.name.startswith("."):
+        if claim_dir.name.startswith("."):
             continue
+        if claim_dir.is_symlink():
+            print(f"shared-testbox claim directory is a symlink: {claim_dir}", file=sys.stderr)
+            sys.exit(1)
+        if not claim_dir.is_dir() or path_has_symlink(claim_dir):
+            if not cleanup_claim_dir(claim_dir):
+                print(f"cannot clean unsafe shared-testbox claim: {claim_dir}", file=sys.stderr)
+                sys.exit(1)
+            continue
+
+        claim_stat = claim_dir.stat()
+        if claim_stat.st_uid != os.geteuid() or stat.S_IMODE(claim_stat.st_mode) != 0o700:
+            print(f"shared-testbox claim directory is not private: {claim_dir}", file=sys.stderr)
+            sys.exit(1)
 
         run_path_file = claim_dir / "run_path"
         subnet_file = claim_dir / "subnet"
-        if not run_path_file.exists() or not subnet_file.exists():
-            shutil.rmtree(claim_dir, ignore_errors=True)
-            continue
-
-        run_path = pathlib.Path(run_path_file.read_text().strip())
+        run_path = pathlib.Path(read_claim_file(run_path_file, str(run_path_file)))
+        subnet_text = read_claim_file(subnet_file, str(subnet_file))
+        try:
+            subnet = ipaddress.ip_network(subnet_text, strict=False)
+        except ValueError as exc:
+            print(f"invalid shared-testbox claim subnet {subnet_file}: {exc}", file=sys.stderr)
+            sys.exit(1)
+        if not run_path.is_absolute() or not is_allowed_run(run_path):
+            print(f"invalid shared-testbox claim run path: {run_path}", file=sys.stderr)
+            sys.exit(1)
+        compose_project = read_claim_file(claim_dir / "compose_project", "compose_project")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", compose_project):
+            print(f"invalid shared-testbox Compose project: {claim_dir}", file=sys.stderr)
+            sys.exit(1)
 
         def remove_stale_run():
-            if run_path.is_symlink() or not run_path.is_dir():
-                return
-            run_real = run_path.resolve(strict=False)
-            allowed_roots = (
-                pathlib.Path("/srv/codex/agents").resolve(),
-                pathlib.Path("/srv/codex/workspaces").resolve(),
-            )
-            if not any(
-                run_real == root or root in run_real.parents for root in allowed_roots
-            ):
-                return
-            shutil.rmtree(run_path, ignore_errors=True)
+            return cleanup_stale_run(run_path, claim_dir)
 
         active = False
         lease_file = claim_dir / "lease"
-        if run_path.is_dir() and not run_path.is_symlink() and lease_file.is_file():
-            lease = {}
-            try:
-                for line in lease_file.read_text().splitlines():
-                    key, value = line.split("=", 1)
-                    lease[key] = value
-                pid = int(lease["pid"])
-                start_ticks = int(lease["start_ticks"])
-                proc_stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
-                proc_start_ticks = int(proc_stat.rsplit(")", 1)[1].split()[19])
-                proc_cwd = pathlib.Path(os.path.realpath(f"/proc/{pid}/cwd"))
-                run_real = pathlib.Path(os.path.realpath(run_path))
-                active = proc_start_ticks == start_ticks and (
-                    proc_cwd == run_real or run_real in proc_cwd.parents
-                )
-            except (KeyError, ValueError, FileNotFoundError, OSError):
-                active = False
-        elif run_path.is_dir() and not run_path.is_symlink():
-            try:
-                active = time.time() - claim_dir.stat().st_mtime < pending_claim_grace_seconds
-            except OSError:
-                active = False
+        if not run_path.exists() or run_path.is_symlink() or not run_path.is_dir():
+            print(f"shared-testbox claim points to a missing or unsafe run: {run_path}", file=sys.stderr)
+            sys.exit(1)
+        if lease_file.is_symlink() or (lease_file.exists() and not lease_file.is_file()):
+            print(f"shared-testbox lease is missing or unsafe: {lease_file}", file=sys.stderr)
+            sys.exit(1)
+        if not lease_file.is_file():
+            print(f"shared-testbox lease metadata is missing: {lease_file}", file=sys.stderr)
+            sys.exit(1)
+        lease = {}
+        try:
+            for line in lease_file.read_text().splitlines():
+                key, value = line.split("=", 1)
+                if key not in {"pid", "start_ticks"} or key in lease:
+                    raise ValueError("duplicate or unknown lease field")
+                lease[key] = value
+            pid = int(lease["pid"])
+            start_ticks = int(lease["start_ticks"])
+            if pid <= 0 or start_ticks <= 0 or set(lease) != {"pid", "start_ticks"}:
+                raise ValueError("lease values must be positive and complete")
+        except (KeyError, ValueError, OSError, UnicodeDecodeError) as exc:
+            print(f"invalid active shared-testbox lease {lease_file}: {exc}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            proc_stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+            proc_start_ticks = int(proc_stat.rsplit(")", 1)[1].split()[19])
+            proc_cwd = pathlib.Path(os.path.realpath(f"/proc/{pid}/cwd"))
+            run_real = pathlib.Path(os.path.realpath(run_path))
+            active = proc_start_ticks == start_ticks and (
+                proc_cwd == run_real or run_real in proc_cwd.parents
+            )
+        except FileNotFoundError:
+            active = False
+        except (ValueError, OSError) as exc:
+            print(f"cannot validate shared-testbox lease {lease_file}: {exc}", file=sys.stderr)
+            sys.exit(1)
 
         if not active:
-            remove_stale_run()
-            shutil.rmtree(claim_dir, ignore_errors=True)
+            stale_cleanup_ok = remove_stale_run()
+            if not stale_cleanup_ok:
+                print(f"cannot safely reclaim shared-testbox run: {run_path}", file=sys.stderr)
+                sys.exit(1)
             continue
 
-        try:
-            claimed.append(ipaddress.ip_network(subnet_file.read_text().strip(), strict=False))
-        except ValueError:
-            shutil.rmtree(claim_dir, ignore_errors=True)
+        claimed.append(subnet)
 
     for octet in range(0, 256):
         candidate = ipaddress.ip_network(f"10.203.{octet}.0/24")
@@ -735,10 +1123,18 @@ try:
         if claim_dir.exists():
             continue
 
-        claim_dir.mkdir()
-        (claim_dir / "run_path").write_text(f"{remote_run}\n")
-        (claim_dir / "compose_project").write_text(f"{compose_project}\n")
-        (claim_dir / "subnet").write_text(f"{candidate}\n")
+        ensure_directory(claim_root, create=False)
+        if claim_dir.exists() or claim_dir.is_symlink():
+            continue
+        try:
+            claim_dir.mkdir(mode=0o700)
+            (claim_dir / "run_path").write_text(f"{remote_run}\n")
+            (claim_dir / "compose_project").write_text(f"{requested_compose_project}\n")
+            (claim_dir / "subnet").write_text(f"{candidate}\n")
+            write_claim_lease(claim_dir)
+        except BaseException:
+            cleanup_claim_dir(claim_dir)
+            raise
         print(candidate)
         print(claim_dir)
         sys.exit(0)
@@ -746,10 +1142,9 @@ try:
     print("failed to find free subnet for shared testbox compose run", file=sys.stderr)
     sys.exit(1)
 finally:
-    try:
-        os.rmdir(lock_dir)
-    except FileNotFoundError:
-        pass
+    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    os.close(lock_fd)
+    os.close(claim_root_fd)
 PY
 )
 
@@ -758,11 +1153,6 @@ SUBNET_CLAIM_DIR="${subnet_claim_info[1]:-}"
 if [ -z "$TESTBOX_SUBNET" ] || [ -z "$SUBNET_CLAIM_DIR" ]; then
   echo "failed to allocate isolated shared-testbox subnet claim" >&2
   exit 1
-fi
-
-claim_start_ticks="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
-if [ -n "$claim_start_ticks" ]; then
-  printf 'pid=%s\nstart_ticks=%s\n' "$$" "$claim_start_ticks" > "$SUBNET_CLAIM_DIR/lease"
 fi
 
 cat > "$net_override" <<YAML
@@ -956,7 +1346,6 @@ fi
 REMOTE
 then
   EVIDENCE_STATUS=passed
-  REMOTE_RUN_CREATED=0
 else
   status=${PIPESTATUS[0]}
   EVIDENCE_STATUS=failed

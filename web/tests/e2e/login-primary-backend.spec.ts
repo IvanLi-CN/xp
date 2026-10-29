@@ -15,12 +15,12 @@ function corsHeaders(origin: string) {
 	};
 }
 
-function nodes(pageOrigin: string) {
+function nodes() {
 	return [
 		{
 			node_id: fixtureCatalog.identifier.nodePrimary(),
 			node_name: fixtureCatalog.identifier.nodeNamePrimary(),
-			api_base_url: pageOrigin,
+			api_base_url: fixtureCatalog.url.primaryApi(),
 			access_host: fixtureCatalog.host.fixture88(),
 			quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 			quota_reset: fixtureCatalog.quota.resetUnlimited(),
@@ -28,7 +28,7 @@ function nodes(pageOrigin: string) {
 		{
 			node_id: fixtureCatalog.identifier.nodeSecondary(),
 			node_name: fixtureCatalog.identifier.nodeNameSecondary(),
-			api_base_url: recoveryOrigin,
+			api_base_url: fixtureCatalog.url.secondaryApi(),
 			access_host: fixtureCatalog.host.secondary(),
 			quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 			quota_reset: fixtureCatalog.quota.resetUnlimited(),
@@ -43,41 +43,42 @@ async function installLoginMocks(
 	const pageOrigin = new URL(
 		process.env.E2E_BASE_URL ?? "http://127.0.0.1:60080",
 	).origin;
-	const nodeList = nodes(pageOrigin);
+	const nodeList = nodes();
+	const initialProfile = {
+		clusterId,
+		primaryOrigin: pageOrigin,
+		candidates: [
+			{
+				origin: pageOrigin,
+				nodeId: fixtureCatalog.identifier.nodePrimary(),
+				nodeName: fixtureCatalog.identifier.nodeNamePrimary(),
+				verifiedAt: Date.now(),
+				lastError: null,
+			},
+			{
+				origin: recoveryOrigin,
+				nodeId: fixtureCatalog.identifier.nodeSecondary(),
+				nodeName: fixtureCatalog.label.tokyo(),
+				verifiedAt: Date.now(),
+				lastError: null,
+			},
+		],
+		updatedAt: fixtureCatalog.number.value100(),
+	};
 	await page.addInitScript(
-		({ activeClusterId, activeRecoveryOrigin }) => {
+		({ activeClusterId, profile }) => {
 			localStorage.removeItem("xp_admin_token");
+			profile.primaryOrigin = location.origin;
+			profile.candidates[0].origin = location.origin;
 			localStorage.setItem(
 				"xp-primary-backend-profiles",
 				JSON.stringify({
 					activeClusterId,
-					profiles: {
-						[activeClusterId]: {
-							clusterId: activeClusterId,
-							primaryOrigin: location.origin,
-							candidates: [
-								{
-									origin: location.origin,
-									nodeId: "current-page",
-									nodeName: "Current page",
-									verifiedAt: Date.now(),
-									lastError: null,
-								},
-								{
-									origin: activeRecoveryOrigin,
-									nodeId: "node-secondary",
-									nodeName: "Secondary node",
-									verifiedAt: Date.now(),
-									lastError: null,
-								},
-							],
-							updatedAt: Date.now(),
-						},
-					},
+					profiles: Object.fromEntries([[activeClusterId, profile]]),
 				}),
 			);
 		},
-		{ activeClusterId: clusterId, activeRecoveryOrigin: recoveryOrigin },
+		{ activeClusterId: clusterId, profile: initialProfile },
 	);
 
 	await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
@@ -104,13 +105,13 @@ async function installLoginMocks(
 				headers,
 				contentType: "application/json",
 				body: JSON.stringify({
-					cluster_id: clusterId,
+					cluster_id: fixtureCatalog.cluster.fixture84(),
 					node_id:
 						origin === recoveryOrigin
 							? fixtureCatalog.identifier.nodeSecondary()
 							: fixtureCatalog.identifier.nodePrimary(),
 					role: "leader",
-					leader_api_base_url: recoveryOrigin,
+					leader_api_base_url: fixtureCatalog.url.secondaryApi(),
 					term: 1,
 					xp_version: "v3.22.5",
 				}),
@@ -195,6 +196,16 @@ test("uses selected recovery origin and persists after inventory hydration", asy
 	});
 	await installLoginMocks(page, 200);
 	await page.goto("/login", { waitUntil: "networkidle" });
+	await expect
+		.poll(
+			() =>
+				apiRequests.filter((request) =>
+					["/api/health", "/api/cluster/info", "/api/capabilities"].includes(
+						new URL(request.url).pathname,
+					),
+				).length,
+		)
+		.toBeGreaterThan(0);
 	const preAuthProbeRequests = apiRequests.filter((request) =>
 		["/api/health", "/api/cluster/info", "/api/capabilities"].includes(
 			new URL(request.url).pathname,
@@ -206,10 +217,31 @@ test("uses selected recovery origin and persists after inventory hydration", asy
 	).toBe(true);
 	apiRequests.length = 0;
 
-	await page.getByRole("button", { name: "Select service node" }).click();
+	const desktopSelector = page.getByRole("button", {
+		name: "Select service node",
+	});
+	const desktopBounds = await desktopSelector.boundingBox();
+	expect(desktopBounds).not.toBeNull();
+	if (!desktopBounds) throw new Error("Service node selector is not visible");
+	expect(desktopBounds.y).toBeLessThan(150);
+	expect(desktopBounds.x + desktopBounds.width).toBeGreaterThan(1240);
+	await desktopSelector.click();
+	const menuBounds = await page.getByRole("menu").boundingBox();
+	expect(menuBounds).not.toBeNull();
+	if (!menuBounds) throw new Error("Service node menu is not visible");
+	expect(Math.abs(menuBounds.width - desktopBounds.width)).toBeLessThan(1);
+	expect(
+		await page
+			.getByRole("menu")
+			.evaluate((menu) =>
+				[...menu.querySelectorAll("[role=menuitem] .truncate")].every(
+					(item) => item.scrollWidth <= item.clientWidth,
+				),
+			),
+	).toBe(true);
 	await page
 		.getByRole("menuitem", {
-			name: /Secondary node/,
+			name: /Tokyo/,
 		})
 		.click();
 	await page.getByLabel("Token").fill("valid-admin-token");
@@ -266,7 +298,7 @@ test("keeps the login page and selected origin after a recovery 401", async ({
 	await page.getByRole("button", { name: "Select service node" }).click();
 	await page
 		.getByRole("menuitem", {
-			name: /Secondary node/,
+			name: /Tokyo/,
 		})
 		.click();
 	await page.getByLabel("Token").fill("invalid-admin-token");
@@ -277,7 +309,7 @@ test("keeps the login page and selected origin after a recovery 401", async ({
 	).toBeVisible();
 	await expect(page).toHaveURL(/\/login$/);
 	const selector = page.getByRole("button", { name: "Select service node" });
-	await expect(selector).toContainText(new URL(recoveryOrigin).host);
+	await expect(selector).toContainText("Tokyo");
 	await selector.press("Enter");
 	await expect(page.getByRole("menu")).toBeVisible();
 	await page.keyboard.press("Escape");

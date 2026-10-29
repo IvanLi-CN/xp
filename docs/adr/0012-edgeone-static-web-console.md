@@ -40,6 +40,13 @@ Function invocation. A Policy Grant is scoped to one controlled client and is
 removed on logout or client loss; static or shared caches never disclose a prior
 administrator's topology to an anonymous page.
 
+Policy polling stages changes instead of reloading the current document. Newly
+allowed origins remain visible as staged candidates until the administrator
+explicitly confirms one reload; the confirmation installs the next-navigation
+Policy Grant and activates that policy. Temporarily unavailable nodes remain
+visible for diagnosis but are excluded from the active CSP and transport
+allowlist, while origins absent from the authenticated inventory are retired.
+
 ## Considered Options
 
 - Static CSP released again for every topology change: rejected because Node
@@ -64,10 +71,10 @@ administrator's topology to an anonymous page.
   and the Runtime Policy derive from the same Raft-backed inputs and reject
   wildcards or operator-entered arbitrary origins.
 - The app-shell build ID and Runtime Policy ID are independent. A policy-only
-  change refreshes the document only when the current client needs an API origin
-  absent from its active CSP, its selected origin is removed, or the client must
-  recover from an expired policy. Existing clients continue on an already allowed,
-  healthy Primary Backend without interruption.
+  change never refreshes the current document by itself. Existing clients continue
+  on an already allowed, healthy Primary Backend without interruption; an origin
+  that is newly allowed becomes active only after explicit reload confirmation,
+  while expiry locks switching until a fresh authenticated policy is received.
 - A Bootstrap Outage fails closed for fresh or logged-out clients. A client with a
   valid Policy Grant can continue against an allowed healthy Primary Backend and
   refresh the policy there. Recovery is an ingress or DNS switch for

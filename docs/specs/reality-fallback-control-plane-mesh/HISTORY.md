@@ -4,6 +4,24 @@
 
 ## Decisions
 
+- The Web control now treats the Mesh write route as an independent compatibility contract,
+  serializes the shared local lock map with Web Locks before persisting the local unknown result
+  lock, rechecks the selected backend after lock acquisition, and cancels stale confirmation
+  refresh callbacks. It retains the lock until an accepted target is confirmed, fails closed for
+  unreadable lock storage, and refuses to send after cancellation while waiting for the lock.
+  The accepted follow-up observation remains inside the backend mutation barrier and must match
+  the confirmed backend generation and cluster id before the lock can be cleared. Missing setting
+  values are rendered as `Unknown`, never as `Disabled`. Authoritative capability probes use the
+  current additive route contract for the Mesh write gate; release-tag-only legacy profiles keep
+  their historical server route set. Corrupt lock maps with mismatched cluster keys fail closed.
+  Unknown settings render as an indeterminate control, stale or unsampled observer peers remain
+  visibly marked, and missing observations never render as zero counts.
+
+- Cluster Mesh configuration belongs in Service config, while System Status keeps node-local
+  path diagnosis. A single control reflects the Raft setting; Public fallback and dormant
+  Native Reverse are not independently selectable capabilities. An ambiguous write remains
+  locked until an administrator independently verifies termination and convergence, because
+  a local status read cannot identify the write's outcome.
 - Reality fallback 是普通 HTTPS ingress，不是 VLESS peer tunnel。
 - 应用层重复执行与 TLS 密文重放是不同问题。
 - body hash、稳定 request ID 和 durable idempotency 处理跨路径重复执行。

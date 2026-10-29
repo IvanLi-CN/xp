@@ -29,8 +29,10 @@ mod api_error;
 mod embedded_ui;
 mod endpoint_requests;
 mod mesh;
+mod mihomo_import_api;
 mod mihomo_resource_route;
 mod node_delete;
+mod raft_write_error;
 mod resource_alerts;
 mod resource_history_capacity;
 mod resource_mesh_error;
@@ -122,7 +124,9 @@ use mesh::{
     send_mesh_internal_stream_read, spawn_mesh_probe_worker, spawn_reverse_assignment_worker,
     spawn_reverse_link_probe_worker,
 };
+use mihomo_import_api::admin_preview_user_mihomo_import;
 use node_delete::AdminNodeDeletePreviewEndpoint;
+use raft_write_error::map_raft_write_error;
 use resource_alerts::admin_get_alerts_response;
 use resource_monitoring::{
     admin_get_node_resources, admin_get_node_resources_history, admin_get_node_resources_recent,
@@ -141,6 +145,7 @@ mod join_capability;
 mod join_protocol;
 mod membership_restore;
 mod node_metadata;
+mod node_versions;
 mod service_monitors;
 mod version_check;
 mod web_assets;
@@ -200,6 +205,9 @@ impl ApiError {
     }
     pub fn invalid_request(message: impl Into<String>) -> Self {
         Self::new("invalid_request", StatusCode::BAD_REQUEST, message)
+    }
+    pub fn too_large(message: impl Into<String>) -> Self {
+        Self::new("request_too_large", StatusCode::PAYLOAD_TOO_LARGE, message)
     }
     pub fn unprocessable_entity(message: impl Into<String>) -> Self {
         Self::new("invalid_request", StatusCode::UNPROCESSABLE_ENTITY, message)
@@ -1196,6 +1204,10 @@ pub fn build_router_with_mesh_telemetry(
         .route("/status/events", get(admin_stream_status_events))
         .route("/nodes", get(admin_list_nodes))
         .route(
+            "/nodes/versions",
+            get(node_versions::admin_list_node_versions),
+        )
+        .route(
             "/membership-operations/{operation_id}",
             get(admin_get_membership_operation),
         )
@@ -1350,6 +1362,10 @@ pub fn build_router_with_mesh_telemetry(
             get(admin_get_user_mihomo_profile).put(admin_put_user_mihomo_profile),
         )
         .route(
+            "/users/{user_id}/subscription-mihomo-import/preview",
+            post(admin_preview_user_mihomo_import),
+        )
+        .route(
             "/users/{user_id}/reset-credentials",
             post(admin_reset_user_credentials),
         )
@@ -1451,7 +1467,10 @@ pub fn build_router_with_mesh_telemetry(
             get(history_repository::admin_query_history_repository),
         )
         .merge(service_monitors::router())
-        .layer(middleware::from_fn_with_state(auth_state, admin_auth));
+        .layer(middleware::from_fn_with_state(auth_state, admin_auth))
+        .layer(middleware::from_fn(
+            mihomo_resource_route::no_store_mihomo_import_response,
+        ));
 
     let api = Router::new()
         .route("/health", get(health))
@@ -1761,7 +1780,7 @@ async fn raft_write(
         .raft
         .client_write(cmd)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(map_raft_write_error)?;
 
     match resp {
         RaftClientResponse::Ok { result } => Ok(result),
@@ -1857,7 +1876,13 @@ fn validate_https_origin(origin: &str) -> Result<(), ApiError> {
     if url.scheme() != "https" {
         return Err(ApiError::invalid_request("api_base_url must use https"));
     }
-    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+    if url.path() != "/"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.as_str().contains('@')
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return Err(ApiError::invalid_request(
             "api_base_url must be an origin (no path/query)",
         ));
@@ -4841,6 +4866,7 @@ async fn admin_delete_node_mihomo_resource_policy(
 fn map_mihomo_redact_error(err: mihomo_redact::RedactError) -> ApiError {
     match err.kind {
         mihomo_redact::RedactErrorKind::InvalidInput => ApiError::invalid_request(err.message),
+        mihomo_redact::RedactErrorKind::TooLarge => ApiError::too_large(err.message),
         mihomo_redact::RedactErrorKind::Network => {
             ApiError::new("upstream_error", StatusCode::BAD_GATEWAY, err.message)
         }

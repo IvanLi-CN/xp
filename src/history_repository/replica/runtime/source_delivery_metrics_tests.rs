@@ -345,7 +345,7 @@ fn runtime_status_exposes_completed_five_minute_window() {
         .find(|scope| scope.target_repository_id == "repository-b")
         .and_then(|scope| scope.last_completed_window)
         .expect("status should expose scoped completed window");
-    assert_eq!(scoped_window.generated_segments, 0);
+    assert_eq!(scoped_window.generated_segments, 1);
     assert_eq!(scoped_window.acknowledged_segments, 1);
     assert!(!scoped_window.meets_ten_x);
 }
@@ -429,6 +429,8 @@ fn source_delivery_journal_state_tracks_upserts_and_ack_path() {
     assert_eq!(summary.last_acknowledged_at, Some(200));
     assert_eq!(summary.last_delivery_path.as_deref(), Some("direct"));
 }
+
+include!("source_delivery_scope_tests.rs");
 
 #[test]
 fn source_delivery_batch_ack_removes_page_in_one_checkpoint() {

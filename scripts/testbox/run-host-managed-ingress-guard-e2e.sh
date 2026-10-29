@@ -1,27 +1,73 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Validate the host-managed nft admission transaction in an isolated privileged testbox.
+# Validate the host-managed nft admission transaction in an isolated privileged test host.
 # This is test infrastructure only; Docker/Compose remains outside the deployment contract.
 
-TESTBOX="${TESTBOX:-codex-testbox}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=runner-env.sh
+source "$SCRIPT_DIR/runner-env.sh"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_NAME="$(basename "$REPO_ROOT")"
-PATH_HASH8="$(printf '%s' "$(realpath "$REPO_ROOT")" | shasum -a 256 | cut -c1-8)"
-RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$$_$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
-REMOTE_RUN="/srv/codex/workspaces/$USER/${REPO_NAME}__${PATH_HASH8}/runs/$RUN_ID"
-CONTAINER="codex_${REPO_NAME}_${PATH_HASH8}_ingress_${RUN_ID}"
+testbox_validate_component repository "$REPO_NAME"
+PATH_HASH8="$(printf '%s' "$(realpath "$REPO_ROOT")" | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:8])')"
+RUN_NONCE="$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
+RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$$_${RUN_NONCE}_$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+REMOTE_RUN="$TESTBOX_REMOTE_ROOT/workspaces/$USER/${REPO_NAME}__${PATH_HASH8}/runs/$RUN_ID"
+CONTAINER="$(testbox_bounded_name "codex_${REPO_NAME}_${PATH_HASH8}_ingress_${RUN_ID}")"
+REMOTE_RUN_CREATED=0
+cleanup() {
+  local status="${1:-$?}"
+  set +e
+  local cleanup_ok=1
+  if [ "$REMOTE_RUN_CREATED" != "1" ]; then
+    return "$status"
+  fi
+  if ssh -o BatchMode=yes "$TESTBOX" \
+    "if docker inspect '$CONTAINER' >/dev/null 2>&1; then docker rm -f '$CONTAINER' >/dev/null 2>&1; else docker info >/dev/null 2>&1; fi" \
+    >/dev/null 2>&1; then
+    :
+  else
+    cleanup_ok=0
+  fi
+  if [ "$cleanup_ok" = "1" ]; then
+    if testbox_remote_cleanup "$REMOTE_RUN" "$RUN_ID" >/dev/null 2>&1; then
+      :
+    else
+      cleanup_ok=0
+    fi
+  fi
+  if [ "$cleanup_ok" != "1" ] && [ "$status" -eq 0 ]; then
+    status=1
+  fi
+  return "$status"
+}
+on_signal() {
+  local status="$1"
+  trap - EXIT INT TERM
+  cleanup "$status"
+  exit "$status"
+}
+on_exit() {
+  local status=$?
+  trap - EXIT
+  cleanup "$status"
+  local cleanup_status=$?
+  if [ "$status" -eq 0 ] && [ "$cleanup_status" -ne 0 ]; then
+    status="$cleanup_status"
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+testbox_remote_root_preflight
+REMOTE_RUN_CREATED=1
+REMOTE_RUN="$(testbox_remote_run_create "$REMOTE_RUN")"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
 echo "container=$CONTAINER"
-
-ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RUN'"
-cleanup() {
-  set +e
-  ssh -o BatchMode=yes "$TESTBOX" "docker rm -f '$CONTAINER' >/dev/null 2>&1 || true; rm -rf '$REMOTE_RUN'"
-}
-trap cleanup EXIT INT TERM
 
 ssh -o BatchMode=yes "$TESTBOX" "cat > '$REMOTE_RUN/run.sh'" <<'REMOTE'
 #!/usr/bin/env bash

@@ -46,7 +46,7 @@ The throughput target is a hard delivery gate:
 5. A release cannot pass the throughput gate until the counters, five-minute
    window calculation, and failure categories are observable through a read-only
    status surface and a deterministic red-capable test.
-6. Artifact publication additionally requires a JSON Agent VM attestation bound to the exact
+6. Artifact publication additionally requires a JSON resource attestation bound to the exact
    release target SHA and workload-log digest. The owner-dispatched release receives an evidence
    commit whose only parent is the target and whose only paths are the attestation and workload
    log; readiness recomputes the digest and rejects missing, malformed, or mismatched evidence
@@ -122,8 +122,8 @@ outbox rows, run full `VACUUM`, or use Mesh/Reverse Mesh for history traffic.
 ## Consequences
 
 The existing status API now has additive durable counters used to build a bounded
-rate view. Production evidence still requires a red-capable loop, Agent VM
-resource validation, and a fresh acceptance window before any convergence claim.
-The Agent VM resource runner compiles the candidate XP binary and resource workload
+rate view. Production evidence still requires a red-capable loop, resource validation, and a fresh
+acceptance window before any convergence claim.
+The resource runner compiles the candidate XP binary and resource workload
 with the `resource-fixture` feature; the workload's environment variable cannot
 enable that Cargo feature at runtime.

@@ -25,8 +25,10 @@ export function useAuthenticatedBackendProbe(args: {
 	isOnline: boolean;
 	origin: string;
 	clusterId: string | null;
+	onUnidentifiedCluster?: () => void;
 }) {
-	const { clusterId, isOnline, origin, staticConsole } = args;
+	const { clusterId, isOnline, origin, staticConsole, onUnidentifiedCluster } =
+		args;
 	const [probeState, setProbeState] = useState({
 		clusterId,
 		origin,
@@ -92,6 +94,14 @@ export function useAuthenticatedBackendProbe(args: {
 			if (current.primaryOrigin !== origin || current.clusterId !== clusterId) {
 				return false;
 			}
+			if (clusterId === null && origin === window.location.origin) {
+				// A legacy session may have a token but no saved cluster identity.
+				// Only the page origin may establish that identity, after dropping
+				// unbound cached data and before any authenticated request.
+				onUnidentifiedCluster?.();
+				hydratePrimaryBackendProfile(result.clusterId);
+				return false;
+			}
 			if (clusterId === null || result.clusterId !== clusterId) {
 				hydratePrimaryBackendProfile(result.clusterId);
 				setProbeState({
@@ -113,7 +123,7 @@ export function useAuthenticatedBackendProbe(args: {
 			});
 			return true;
 		},
-		[clusterId, isOnline, origin, staticConsole],
+		[clusterId, isOnline, origin, staticConsole, onUnidentifiedCluster],
 	);
 	const ready = requestReady;
 	useEffect(() => {

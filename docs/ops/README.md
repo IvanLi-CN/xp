@@ -1028,23 +1028,23 @@ Notes:
   - Predecessor rollback cannot read v3-prefixed metadata; its deep checks must fail closed.
   - Redeploy the newer binary for in-place metadata rebuilding.
 
-  The operator-run source/release-candidate validation path
-  `XP_MESH_RESOURCE_SUMMARY_ONLY=1 XP_RUN_MESH_RESOURCE=1` runs the signed summary endpoint against
-  257 near-limit segments and the 20,000-row source journal benchmark in 128 MiB/no-swap cgroups;
+  The release source/release-candidate validation path is the owner-dispatched
+  `resource-evidence` GitHub Actions workflow. It runs the signed summary endpoint against 257
+  near-limit segments and the 20,000-row source journal benchmark in 128 MiB/no-swap cgroups;
   it records the candidate XP `smaps_rollup` PSS peak during request execution before any rollout
-  decision. The runner requires a clean commit, verifies tracked source and generated Web-shell
-  archive SHA256 values, and embeds the commit in the candidate build. GitHub CI and release
-  publication do not access the shared testbox; the runner writes a SHA-bound manifest and full
-  workload log to `${XP_TESTBOX_EVIDENCE_DIR:-$TMPDIR/xp-testbox-evidence}` before cleanup, so
-  attach those files separately before production rollout.
+  decision. The workflow checks out the exact target SHA, builds the generated Web shell from that
+  SHA, and uploads the raw workload log plus a v2 attestation. The owner must then create a signed
+  evidence commit containing exactly those two files before dispatching the release workflow.
   Retained partition mismatches after segment repair drains trigger the same single-authority
   tiered import followed by a fresh deep summary pass; the member cannot enter `ready` while that
   verification remains unresolved.
 
-  Mesh resource runner Cargo caching is documented in `docs/ops/cargo-cache.md`. The shared
-  Cargo Home contains dependency downloads only; candidate and baseline build targets remain
-  inside the owning shared-testbox Agent Directory. The disposable run directory is cleaned after
-  evidence capture and is never a cache. The formal comparison remains 900 seconds per side.
+  Mesh resource runner inputs are caller-owned: every remote run must provide an explicit `TESTBOX`
+  SSH target and `XP_TESTBOX_REMOTE_ROOT`; no host alias or remote root is defaulted by the project.
+  Cargo caching is documented in `docs/ops/cargo-cache.md`. The shared Cargo Home contains
+  dependency downloads only; candidate and baseline build targets remain inside the owning
+  shared-testbox Agent Directory. The disposable run directory is cleaned after evidence capture
+  and is never a cache. The formal comparison remains 900 seconds per side.
   Tombstones accepted during `syncing` are persisted locally but their acknowledgement fanout is
   deferred until the member is Raft-`ready`, after which the existing durable acknowledgement page
   retries delivery to all cluster nodes.
@@ -1114,7 +1114,7 @@ sudo rc-service xray start
 sudo rc-service xp start
 ```
 
-Managed Xray services default to `GOMEMLIMIT=32MiB` and `GOGC=100` on systemd, OpenRC, and Docker/Compose. Use a separate systemd drop-in, an OpenRC `/etc/conf.d/xray` value, or the container `XP_XRAY_GOMEMLIMIT` / `XP_XRAY_GOGC` variables for an explicit operator override; host upgrades and generated service assets preserve those overrides. XP-generated legacy Xray `16MiB/50` defaults are migrated during managed-runtime backfill.
+Managed Xray services default to `GOMEMLIMIT=48MiB` and `GOGC=100` on systemd, OpenRC, and Docker/Compose. Use a separate systemd drop-in, an OpenRC `/etc/conf.d/xray` value, or the container `XP_XRAY_GOMEMLIMIT` / `XP_XRAY_GOGC` variables for an explicit operator override; host upgrades and generated service assets preserve those overrides. XP-generated legacy Xray `32MiB/100` and `16MiB/50` defaults are migrated during managed-runtime backfill.
 
 ### Cloudflare Tunnel transport
 
@@ -1311,17 +1311,21 @@ not authoritative, and historical PR labels must not be edited to trigger a rele
 published only after the target SHA has successful `ci`, `fixture-policy`, and `xray-e2e` push runs
 on `main`.
 
-For a corrective release, an owner dispatches the `release` workflow with the exact merged `head_sha`,
-`release_type`, `channel`, `expected_version`, `reason`, and the SHA of an Agent VM evidence commit.
-That evidence commit must have the target as its only parent and contain only the attestation JSON
-and workload log. The commit must also have a GitHub-verified valid signature by the repository
+For a corrective release, an owner first dispatches the `resource-evidence` workflow from the exact
+merged SHA, signs its downloaded two-file artifact as an evidence commit whose only parent is that
+SHA, and then dispatches the `release` workflow with the exact merged `head_sha`,
+`release_type`, `channel`, `expected_version`, `reason`, and the SHA of an owner-supplied resource
+evidence commit.
+The current evidence contract is v2: the evidence commit must have the target as its only parent and
+contain only `resource-evidence.json` and `resource-workload.log`; pre-v2 evidence commits must be
+regenerated. The commit must also have a GitHub-verified valid signature by the repository
 owner. The workflow itself also requires the dispatch actor and re-run actor to be the repository
 owner, and verifies the pinned owner signing key with `git verify-commit`. It recomputes the log
 digest, publishes the evidence files and commit identity as release assets, then fails before tag
 creation if the target is not on `main`, the expected version does not match, evidence is malformed
 or mismatched, or any required workflow is missing or unsuccessful. This is an owner-dispatched
 Manual Backfill;
-there is no automatic release trigger without an auditable Agent VM evidence reference. Stable
+there is no automatic release trigger without an auditable resource evidence reference. Stable
 releases publish `latest`; prereleases do not. If the target commit changes a workflow file, the
 Actions `GITHUB_TOKEN` cannot create its tag; an owner must first push the exact annotated tag with a
 credential that has workflow scope, after which the workflow's idempotent tag step reuses it.
@@ -1331,8 +1335,10 @@ credential that has workflow scope, after which the workflow's idempotent tag st
 Performance acceptance is explicit and SHA-bound; ordinary main runs are not accumulated into an
 informal moving average. Dispatch `ci-performance` from the exact commit under test and pass the
 same full 40-character SHA as `target_sha`. It runs three isolated cold/warm pairs. Each pair has a
-unique cache namespace, requires cold misses and warm hits, and fails when the maximum parallel-job
-duration exceeds 420 seconds cold or 300 seconds warm.
+unique cache namespace containing the workflow run and attempt, so a rerun cannot reuse the previous
+attempt's cold cache. It requires cold misses and warm hits, and fails when the maximum parallel-job
+duration exceeds 540 seconds cold or 300 seconds warm. The cold budget covers a real Cargo rebuild
+on a hosted runner; warm remains the tighter regression signal after cache population.
 
 Dispatch `release-performance` the same way to exercise the reusable release build graph without
 creating a tag, package version, GitHub Release, or deployment. It uses a synthetic
@@ -1579,7 +1585,11 @@ After recovery:
   the leader removes the incomplete membership/node and expires the reservation when that session is
   owned by a recorded Join operation. A legacy `Reserved` session that is already expired while its
   non-voter learner remains is only marked `Expired`; its learner and DesiredState Node stay in
-  place for explicit stale-learner recovery.
+  place for explicit stale-learner recovery. If the leader crashes after that cleanup has already
+  removed the learner, DesiredState node, and endpoints but before the Join operation transition is
+  committed, the membership guard terminalizes the exact recorded operation after restart. A
+  remaining learner is blocked for explicit stale-learner recovery and is never removed by this
+  recovery path.
 - Run `xp-ops xp sync-node-meta` on each node after updating `/etc/xp/xp.env` to ensure membership
   `NodeMeta` (leader discovery/forwarding) matches config. This command preserves existing
   managed-default endpoint ports from Raft even when the local bootstrap env differs.

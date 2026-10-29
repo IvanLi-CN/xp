@@ -331,14 +331,13 @@
   and live heads rotate from the replay stream cursor, which is persisted in the same transaction
   that deletes an acknowledged window; an unacknowledged in-memory window is retained across
   failed delivery cycles and its cursor cannot advance before ACK.
-  The summary memory regression uses the shared testbox's summary-only mode to start the release
-  `xp run` binary with 257 near-limit SQLite segments, call the signed summary endpoint repeatedly,
-  and sample `smaps_rollup` under the 128 MiB/no-swap cgroup without a concurrent peer workload.
-  The source-journal resource workload resolves the release binary from the candidate build,
-  verifies the same clean commit, and uses a cryptographically random run nonce in the remote
-  workspace, Compose project, and run-scoped systemd unit so concurrent testbox runs cannot share
-  a cgroup or mask a resource result. The resource harness forwards its successful child metrics
-  to the outer test output for auditability.
+  The `resource-evidence` GitHub Actions workflow uses the summary-only resource path to start the
+  release `xp run` binary with 257 near-limit SQLite segments, call the signed summary endpoint
+  repeatedly, and sample `smaps_rollup` under the 128 MiB/no-swap cgroup without a concurrent peer
+  workload. The source-journal workload resolves the release binary from the candidate build,
+  verifies the same clean commit, and uses a run-scoped systemd unit so the workload cannot share a
+  cgroup with another run or mask a resource result. The resource harness forwards its successful
+  child metrics to the uploaded workload log for auditability.
   Existing databases initialize these fields idempotently without deleting or rewriting signed
   pending segments.
   Live receivers require the complete pinned identity: repository senders must match their current
@@ -373,10 +372,10 @@
 - Production delivery still requires a continuous 300-second counter window, bounded by two
   read-only status samples, proving both source-to-ACK and repository-to-apply capacity at 10x the
   peak generated segment and byte rates. Queue depth alone is not acceptance evidence.
-- The Agent VM runner must compile both the candidate binary and the resource workload with the
+- The resource runner must compile both the candidate binary and the resource workload with the
   `resource-fixture` feature so the bounded live enqueue fixture is exercised; a runtime
   environment variable alone is not sufficient to enable a Cargo feature.
-- Release readiness requires a JSON Agent VM attestation bound to the exact target SHA and log
+- Release readiness requires a JSON resource attestation bound to the exact target SHA and log
   digest. It must identify the 300-second window, 128 MiB/no-swap limits, and all four segment/
   byte 10x gates; missing or mismatched evidence fails closed before artifact publication. The
   owner-dispatched release accepts an evidence commit with exactly the target as its only parent

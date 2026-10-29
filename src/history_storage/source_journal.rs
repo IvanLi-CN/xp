@@ -267,6 +267,7 @@ impl HistoryStorage {
         &self,
         rows: &[SourceDeliveryJournalRow],
         control_payload: &[u8],
+        target_repository_ids: &[String],
     ) -> Result<()> {
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
@@ -275,7 +276,12 @@ impl HistoryStorage {
             ));
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        if let Err(error) = source_journal_write::insert_journal_rows(&transaction, rows, true) {
+        if let Err(error) = source_journal_write::insert_journal_rows(
+            &transaction,
+            rows,
+            true,
+            target_repository_ids,
+        ) {
             if error.0 == "source delivery journal capacity guard" {
                 drop(transaction);
                 mark_capacity_suspended(connection)?;
@@ -305,7 +311,8 @@ impl HistoryStorage {
             ));
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        if let Err(error) = source_journal_write::insert_journal_rows(&transaction, rows, true) {
+        if let Err(error) = source_journal_write::insert_journal_rows(&transaction, rows, true, &[])
+        {
             if error.0 == "source delivery journal capacity guard" {
                 drop(transaction);
                 mark_capacity_suspended(connection)?;
@@ -331,7 +338,9 @@ impl HistoryStorage {
             ));
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        if let Err(error) = source_journal_write::insert_journal_rows(&transaction, rows, false) {
+        if let Err(error) =
+            source_journal_write::insert_journal_rows(&transaction, rows, false, &[])
+        {
             if error.0 == "source delivery journal capacity guard" {
                 drop(transaction);
                 mark_capacity_suspended(connection)?;

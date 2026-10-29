@@ -72,8 +72,8 @@ own completed or current 300-second window, so a busy stream or target cannot hi
 The status view is diagnostic; release acceptance still requires two signed samples and the
 real-node five-minute observation.
 
-The owner-dispatched release workflow also requires an Agent VM resource attestation bound to the
-exact target SHA and workload-log SHA. The attestation commit must have the target as its only
+The owner-dispatched release workflow also requires an owner-supplied resource attestation bound to
+the exact target SHA and workload-log SHA. The attestation commit must have the target as its only
 parent and contain only the attestation and workload log; readiness recomputes the log SHA before
 publication and requires a GitHub-verified valid pinned repository-owner signature from the
 owner-triggered workflow. The release retains the evidence files and commit identity as assets. The
@@ -81,7 +81,7 @@ attestation must record a 300-second window,
 `MemoryMax=128M`, `MemorySwapMax=0`, and successful segment and canonical-byte 10x gates for both
 delivery stages. Missing, malformed, or SHA-mismatched evidence fails closed before release
 artifacts are published.
-The attestation fields are `schema=xp-history-throughput-v1`, `target_sha`, `log_sha`,
+The attestation fields are `schema=xp-history-throughput-v2`, `target_sha`, `log_sha`,
 `window_seconds=300`, `memory_limit_mib=128`, `swap_limit_mib=0`, the observed
 `sample_window_seconds`, `generated_segments`, `generated_bytes`, `peak_generated_segments`,
 `peak_generated_bytes`, `acknowledged_segments`, `acknowledged_bytes`, `applied_segments`, and

@@ -70,6 +70,7 @@ import {
 	FormMessage,
 } from "../components/ui/form";
 import { Input } from "../components/ui/input";
+import { ScrollArea } from "../components/ui/scroll-area";
 import {
 	Select,
 	SelectContent,
@@ -104,6 +105,10 @@ import {
 	summaryBadgeVariant,
 } from "./nodeDetailsStatus";
 import {
+	NODE_DETAILS_TAB_VALUES,
+	type NodeDetailsTab,
+} from "./nodeDetailsTabs";
+import {
 	isNodeQuotaDraftDirty,
 	nodeQuotaDraftFromNode,
 	toNodeQuotaReset,
@@ -135,22 +140,12 @@ const quotaResetSchema = z
 	});
 type QuotaResetFormValues = z.infer<typeof quotaResetSchema>;
 type QuotaResetFormInput = z.input<typeof quotaResetSchema>;
-export const NODE_DETAILS_TAB_VALUES = [
-	"resources",
-	"runtime",
-	"metadata",
-	"traffic",
-	"ipUsage",
-	"tcpConnections",
-	"settings",
-] as const;
-type NodeDetailsTab = (typeof NODE_DETAILS_TAB_VALUES)[number];
 const NODE_DETAILS_TAB_OPTIONS: Array<{
 	value: NodeDetailsTab;
 	label: string;
 }> = [
-	{ value: "resources", label: "Resources" },
 	{ value: "runtime", label: "Service runtime" },
+	{ value: "resources", label: "Resources" },
 	{ value: "metadata", label: "Node metadata" },
 	{ value: "traffic", label: "Traffic" },
 	{ value: "ipUsage", label: "IP usage" },
@@ -1167,7 +1162,7 @@ export function NodeDetailsPage() {
 												Refresh runtime
 											</Button>
 										</div>
-										<div className="max-h-72 overflow-auto rounded-2xl border border-border/70 bg-muted/35">
+										<ScrollArea className="max-h-72 rounded-2xl border border-border/70 bg-muted/35 [&>div]:max-h-72">
 											<table className="xp-table xp-table-compact">
 												<thead>
 													<tr>
@@ -1207,7 +1202,7 @@ export function NodeDetailsPage() {
 													)}
 												</tbody>
 											</table>
-										</div>
+										</ScrollArea>
 									</div>
 								</>
 							) : null}

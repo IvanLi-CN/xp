@@ -24,6 +24,28 @@ _Avoid_: Landing group, external relay
 The node a chain proxy ultimately reaches; its own Access Point is excluded from that Relay Group.
 _Avoid_: Current node, serving node
 
+### Subscription Import
+
+**Import Source**:
+A user-provided subscription URL or copied subscription text that is submitted for node conversion.
+_Avoid_: Upstream proxy, source node
+
+**Imported Node**:
+A proxy node from an Import Source added to the current user's Mihomo profile.
+_Avoid_: Subscription Node, external resource
+
+**Static Node Snapshot**:
+Imported Nodes stored in a user's Mihomo profile instead of refreshed from the source.
+_Avoid_: Provider, live subscription
+
+**Import Draft**:
+A proposed change to a user's Mihomo profile that has not yet been saved.
+_Avoid_: Saved profile, provider configuration
+
+**Import Report**:
+The outcome of an import attempt: converted nodes plus items that failed or were skipped.
+_Avoid_: Import log, provider status
+
 ### External Resources
 
 **External Resource**:

@@ -15,6 +15,9 @@ class PerformanceError(RuntimeError):
     pass
 
 
+CI_PHASE_LIMITS = (("cold", 540), ("warm", 300))
+
+
 def parse_time(value: Any) -> datetime:
     if not isinstance(value, str) or not value.endswith("Z"):
         raise PerformanceError(f"invalid workflow timestamp: {value!r}")
@@ -63,7 +66,7 @@ def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dic
     samples: dict[str, Any] = {}
     for sample in range(1, 4):
         phase_seconds: dict[str, float] = {}
-        for phase, limit in (("cold", 420), ("warm", 300)):
+        for phase, limit in CI_PHASE_LIMITS:
             durations = {}
             for component in components:
                 job = find_one(

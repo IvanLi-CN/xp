@@ -11,12 +11,22 @@ import type { EditorView } from "@uiw/react-codemirror";
 
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
 import {
+	MIHOMO_DRAFT_PERSISTENCE_WARNING,
 	MIHOMO_PROFILE_DOCUMENTS,
+	type MihomoProfileConflict,
 	type MihomoProfileDocumentId,
 } from "../hooks/useMihomoProfileDraft";
 import { cn } from "../lib/utils";
+import type {
+	MihomoSaveFeedback,
+	MihomoSaveVerification,
+} from "../utils/mihomoSaveOutcome";
 import { Button, IconButton } from "./Button";
 import { Icon } from "./Icon";
+import {
+	type MihomoImportPreviewRequestFn,
+	MihomoSubscriptionImportDialog,
+} from "./MihomoSubscriptionImportDialog";
 import { YamlCodeEditor } from "./YamlCodeEditor";
 import {
 	Dialog,
@@ -51,12 +61,23 @@ type MihomoProfileEditorProps = {
 	draft: AdminUserMihomoProfile;
 	dirty: boolean;
 	isSaving: boolean;
+	isVerifying?: boolean;
 	readOnly?: boolean;
 	error: string | null;
+	saveFeedback?: MihomoSaveFeedback | null;
+	storageError?: string | null;
+	conflict?: MihomoProfileConflict | null;
 	isLoaded: boolean;
 	onChange: (documentId: MihomoProfileDocumentId, value: string) => void;
-	onSave: () => Promise<boolean>;
+	onSave: (allowOverwrite?: boolean) => Promise<boolean>;
+	onVerify?: () => Promise<boolean>;
+	onContinueDraft?: () => void;
+	onUseServer?: () => void;
 	onExpandAvailabilityChange?: (available: boolean) => void;
+	adminToken?: string;
+	importAvailable?: boolean;
+	previewImport?: MihomoImportPreviewRequestFn;
+	portalContainer?: HTMLElement | null;
 };
 
 type VisualViewportMetrics = {
@@ -107,6 +128,155 @@ function statusLabel(
 	return dirty ? "Unsaved changes" : "Saved";
 }
 
+function feedbackCopy(verification: MihomoSaveVerification): {
+	title: string;
+	description: string;
+} {
+	switch (verification) {
+		case "matches":
+			return {
+				title: "Read-back matches your draft",
+				description:
+					"The saved profile currently has the same three files. " +
+					"The original write response was not confirmed, so keep the " +
+					"diagnostic details for follow-up.",
+			};
+		case "different":
+			return {
+				title: "Save result is still unknown",
+				description:
+					"The saved profile differs from your draft. Your draft is preserved; " +
+					"check again or review it before retrying.",
+			};
+		case "unavailable":
+			return {
+				title: "Save result is still unknown",
+				description:
+					"The read-back could not be completed. Your draft is preserved; " +
+					"check again when the backend is reachable.",
+			};
+	}
+}
+
+function MihomoSaveFeedbackPanel({
+	feedback,
+	error,
+	retryAcknowledged,
+	isVerifying,
+	onVerify,
+}: {
+	feedback: MihomoSaveFeedback | null | undefined;
+	error: string | null;
+	retryAcknowledged: boolean;
+	isVerifying: boolean;
+	onVerify?: () => Promise<boolean>;
+}) {
+	const copy = feedback ? feedbackCopy(feedback.verification) : null;
+	const details = feedback
+		? [
+				["Error code", feedback.diagnostics.code],
+				["Dispatch state", feedback.diagnostics.dispatchState],
+				["Cause", feedback.diagnostics.cause],
+				["Target node", feedback.diagnostics.targetNodeId],
+				["Support ID", feedback.diagnostics.supportId],
+			].filter(([, value]) => value)
+		: [];
+	const showError =
+		error !== null && (!feedback || error === MIHOMO_DRAFT_PERSISTENCE_WARNING);
+	const showRetryWarning =
+		retryAcknowledged && feedback?.kind === "outcome_unknown";
+	if (!feedback && !showError && !showRetryWarning) return null;
+
+	return (
+		<div
+			className={
+				"pointer-events-none fixed inset-x-4 bottom-4 z-[70] flex justify-end " +
+				"sm:inset-x-auto sm:right-4 sm:w-[min(32rem,calc(100vw-2rem))]"
+			}
+			data-mihomo-feedback-overlay
+		>
+			<div
+				className={cn(
+					"pointer-events-auto max-h-[min(60vh,32rem)] w-full overflow-y-auto",
+					"rounded-xl border border-border bg-popover/95 p-4 text-popover-foreground",
+					"shadow-sm",
+				)}
+			>
+				{feedback && copy ? (
+					<output
+						className="block space-y-2"
+						aria-live="polite"
+						aria-atomic="true"
+					>
+						<div className="flex items-start gap-2">
+							<Icon
+								name="tabler:alert-triangle"
+								className="mt-1 size-4 shrink-0 text-foreground"
+								ariaLabel="Save result unknown"
+							/>
+							<div className="min-w-0 space-y-1">
+								<div className="font-medium">{copy.title}</div>
+								<div className="text-sm text-muted-foreground">
+									{copy.description}
+								</div>
+							</div>
+						</div>
+						<div className="text-xs text-foreground">
+							A manual retry may overwrite changes made elsewhere in the
+							meantime.
+						</div>
+						{details.length > 0 ? (
+							<details className="text-xs">
+								<summary className="cursor-pointer select-none font-medium">
+									Technical details
+								</summary>
+								<dl className="mt-2 grid gap-1 sm:grid-cols-[auto_1fr] sm:gap-x-3">
+									{details.map(([label, value]) => (
+										<div key={label} className="contents">
+											<dt className="text-muted-foreground">{label}</dt>
+											<dd className="break-all font-mono">{value}</dd>
+										</div>
+									))}
+								</dl>
+							</details>
+						) : null}
+						{onVerify ? (
+							<Button
+								variant="outline"
+								size="sm"
+								loading={isVerifying}
+								disabled={isVerifying}
+								onClick={() => void onVerify()}
+							>
+								Check again
+							</Button>
+						) : null}
+					</output>
+				) : null}
+				{showError ? (
+					<div
+						className="xp-alert xp-alert-error mt-3 flex items-start gap-2 px-3 py-2 text-xs"
+						role="alert"
+					>
+						<Icon
+							name="tabler:alert-circle"
+							className="mt-1 size-4 shrink-0"
+							ariaLabel="Save error"
+						/>
+						<span className="min-w-0 break-words">{error}</span>
+					</div>
+				) : null}
+				{showRetryWarning ? (
+					<div className="mt-3 text-xs text-foreground" role="alert">
+						Click Retry save again to confirm. This may overwrite changes made
+						elsewhere.
+					</div>
+				) : null}
+			</div>
+		</div>
+	);
+}
+
 export function MihomoProfileEditor({
 	userName,
 	userId,
@@ -114,18 +284,34 @@ export function MihomoProfileEditor({
 	draft,
 	dirty,
 	isSaving,
+	isVerifying = false,
 	readOnly = false,
 	error,
+	saveFeedback,
+	storageError = null,
+	conflict = null,
 	isLoaded,
 	onChange,
 	onSave,
+	onVerify,
+	onContinueDraft,
+	onUseServer,
 	onExpandAvailabilityChange,
+	adminToken = "",
+	importAvailable = false,
+	previewImport,
+	portalContainer,
 }: MihomoProfileEditorProps) {
 	const [expanded, setExpanded] = useState(false);
+	const [importOpen, setImportOpen] = useState(false);
 	const [filesOpen, setFilesOpen] = useState(false);
 	const [selectedDocument, setSelectedDocument] =
 		useState<MihomoProfileDocumentId>("mixin_yaml");
 	const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
+	const [expandedFeedbackMount, setExpandedFeedbackMount] =
+		useState<HTMLElement | null>(null);
+	const [filesFeedbackMount, setFilesFeedbackMount] =
+		useState<HTMLElement | null>(null);
 	const inlineMount = useRef<HTMLDivElement>(null);
 	const expandedMount = useRef<HTMLDivElement>(null);
 	const entryButton = useRef<HTMLDivElement>(null);
@@ -136,6 +322,85 @@ export function MihomoProfileEditor({
 	);
 	const viewportMetrics = useVisualViewportMetrics(expanded);
 	const currentStatus = statusLabel(readOnly, dirty);
+	const canImport = importAvailable && !readOnly && isLoaded && !isVerifying;
+	const [retryAcknowledged, setRetryAcknowledged] = useState(false);
+	const needsRetryWarning = saveFeedback?.kind === "outcome_unknown" && dirty;
+
+	useEffect(() => {
+		if (dirty || saveFeedback) setRetryAcknowledged(false);
+	}, [dirty, saveFeedback]);
+
+	const handleSave = useCallback(() => {
+		if (needsRetryWarning && !retryAcknowledged) {
+			setRetryAcknowledged(true);
+			return;
+		}
+		const allowOverwrite = needsRetryWarning && retryAcknowledged;
+		setRetryAcknowledged(false);
+		void onSave(allowOverwrite);
+	}, [needsRetryWarning, onSave, retryAcknowledged]);
+	const handleVerify = useCallback(async () => {
+		if (!onVerify) return false;
+		try {
+			return await onVerify();
+		} finally {
+			setRetryAcknowledged(false);
+		}
+	}, [onVerify]);
+
+	const saveLabel = needsRetryWarning ? "Retry save" : "Save configuration";
+	const conflictNotice = conflict ? (
+		<div
+			className={cn(
+				"fixed inset-x-4 bottom-20 z-[60] flex-col px-4 py-3 shadow-sm",
+				"xp-alert xp-alert-warning sm:left-auto sm:w-[min(32rem,calc(100vw-2rem))]",
+			)}
+			role="alert"
+			aria-live="polite"
+		>
+			<div className="flex items-start gap-2">
+				<Icon
+					name="tabler:alert-triangle"
+					className="mt-1 size-4 shrink-0"
+					ariaLabel="Profile conflict"
+				/>
+				<div className="min-w-0 font-medium">
+					The server profile changed. Your draft is preserved.
+				</div>
+			</div>
+			<details className="text-xs text-muted-foreground">
+				<summary className="cursor-pointer font-medium text-foreground">
+					View differences
+				</summary>
+				<ul className="mt-2 space-y-1">
+					{MIHOMO_PROFILE_DOCUMENTS.map((documentId) =>
+						conflict.draftBaseline[documentId] ===
+						profile?.[documentId] ? null : (
+							<li key={documentId}>{documentId}: server baseline changed</li>
+						),
+					)}
+				</ul>
+			</details>
+			<div className="flex flex-wrap gap-2">
+				<Button
+					size="sm"
+					variant="outline"
+					disabled={isSaving || !onContinueDraft}
+					onClick={onContinueDraft}
+				>
+					Continue editing draft
+				</Button>
+				<Button
+					size="sm"
+					variant="ghost"
+					disabled={isSaving || !onUseServer}
+					onClick={onUseServer}
+				>
+					Use server version
+				</Button>
+			</div>
+		</div>
+	) : null;
 
 	useEffect(() => {
 		if (typeof document === "undefined") return;
@@ -155,6 +420,7 @@ export function MihomoProfileEditor({
 		if (userId.length === 0) return;
 		setSelectedDocument("mixin_yaml");
 		setExpanded(false);
+		setImportOpen(false);
 		setFilesOpen(false);
 	}, [userId]);
 
@@ -187,6 +453,11 @@ export function MihomoProfileEditor({
 		savedScrollY.current = window.scrollY;
 		setExpanded(true);
 	}, [isLoaded]);
+
+	const openImport = useCallback(() => {
+		if (!canImport) return;
+		setImportOpen(true);
+	}, [canImport]);
 
 	const closeExpanded = useCallback(() => {
 		setFilesOpen(false);
@@ -223,16 +494,33 @@ export function MihomoProfileEditor({
 			)}
 			data-mihomo-document={documentId}
 		>
+			{documentId === "extra_proxies_yaml" && !expanded ? (
+				<div className="mb-2 flex items-center justify-between gap-3">
+					<span className="text-sm font-medium text-foreground">
+						{DOCUMENT_LABELS[documentId]}
+					</span>
+					{canImport ? (
+						<Button
+							variant="outline"
+							size="sm"
+							iconLeft={<Icon name="tabler:download" />}
+							onClick={openImport}
+						>
+							Import nodes
+						</Button>
+					) : null}
+				</div>
+			) : null}
 			<YamlCodeEditor
 				label={DOCUMENT_LABELS[documentId]}
 				value={draft[documentId]}
 				onChange={(value) => onChange(documentId, value)}
 				placeholder={DOCUMENT_PLACEHOLDERS[documentId]}
 				minRows={DOCUMENT_ROWS[documentId]}
-				readOnly={readOnly || isSaving || !isLoaded}
+				readOnly={readOnly || isSaving || isVerifying || !isLoaded}
 				fillHeight={expanded}
 				preserveEditorStateOnValueChange
-				hideLabel={expanded}
+				hideLabel={expanded || documentId === "extra_proxies_yaml"}
 				onCreateEditor={(view) => {
 					views.current[documentId] = view;
 				}}
@@ -297,10 +585,36 @@ export function MihomoProfileEditor({
 				portalHost,
 			)
 		: null;
+	const feedbackPortalContainer =
+		(filesOpen && filesFeedbackMount) ||
+		(expanded && expandedFeedbackMount) ||
+		portalContainer?.ownerDocument.body ||
+		(typeof document !== "undefined" ? document.body : null);
+	const feedbackError = error ?? storageError;
+	const feedbackContent =
+		feedbackPortalContainer &&
+		(saveFeedback || feedbackError || (needsRetryWarning && retryAcknowledged))
+			? createPortal(
+					<MihomoSaveFeedbackPanel
+						feedback={saveFeedback}
+						error={feedbackError}
+						retryAcknowledged={retryAcknowledged}
+						isVerifying={isVerifying}
+						onVerify={onVerify ? handleVerify : undefined}
+					/>,
+					feedbackPortalContainer,
+				)
+			: null;
 
 	return (
 		<>
-			<div className="flex items-center justify-between gap-3">
+			{conflictNotice}
+			<div
+				className="flex items-center justify-between gap-3"
+				aria-busy={!isLoaded}
+				data-mihomo-editor-loaded={isLoaded ? "true" : "false"}
+				data-mihomo-profile-loaded={isLoaded ? "true" : "false"}
+			>
 				<div className="min-w-0">
 					<div className="font-medium text-sm">
 						Mihomo mixin config (per user)
@@ -325,21 +639,26 @@ export function MihomoProfileEditor({
 				</div>
 			</div>
 			<div ref={inlineMount} className="min-w-0" />
-			{error ? (
-				<div className="xp-alert xp-alert-error px-4 py-2">{error}</div>
-			) : null}
 			<div className="flex items-center justify-between gap-3">
 				<span className="text-xs text-muted-foreground">
 					{readOnly ? "Read-only profile" : "Changes apply to all three files."}
 				</span>
-				<Button
-					loading={isSaving}
-					disabled={readOnly || !dirty || !isLoaded}
-					iconLeft={<Icon name="tabler:device-floppy" />}
-					onClick={() => void onSave()}
-				>
-					Save configuration
-				</Button>
+				<div className="flex items-center gap-2">
+					<Button
+						loading={isSaving || isVerifying}
+						disabled={
+							readOnly ||
+							!dirty ||
+							!isLoaded ||
+							isVerifying ||
+							Boolean(conflict)
+						}
+						iconLeft={<Icon name="tabler:device-floppy" />}
+						onClick={handleSave}
+					>
+						{saveLabel}
+					</Button>
+				</div>
 			</div>
 
 			<Dialog
@@ -368,7 +687,7 @@ export function MihomoProfileEditor({
 				>
 					<div
 						data-testid="mihomo-workspace-surface"
-						className="flex min-h-0 flex-1 flex-col bg-background text-foreground"
+						className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground"
 						style={{
 							height: viewportMetrics
 								? `${viewportMetrics.height}px`
@@ -420,38 +739,67 @@ export function MihomoProfileEditor({
 								</div>
 							</div>
 							<div className="flex shrink-0 items-center gap-2">
+								{canImport ? (
+									<>
+										<Button
+											className="hidden sm:inline-flex"
+											variant="outline"
+											size="sm"
+											iconLeft={<Icon name="tabler:download" />}
+											onClick={openImport}
+										>
+											Import nodes
+										</Button>
+										<IconButton
+											className="sm:hidden"
+											label="Import nodes"
+											tooltip="Import nodes"
+											onClick={openImport}
+										>
+											<Icon name="tabler:download" ariaLabel="Import nodes" />
+										</IconButton>
+									</>
+								) : null}
 								<div ref={filesTrigger} className="md:hidden">
-									<Button
-										variant="outline"
-										size="sm"
-										iconLeft={<Icon name="tabler:files" />}
+									<IconButton
+										label="Open files"
+										tooltip="Open files"
 										onClick={() => setFilesOpen(true)}
 									>
-										Files
-									</Button>
+										<Icon name="tabler:files" ariaLabel="Open files" />
+									</IconButton>
 								</div>
 								<Button
 									className="hidden sm:inline-flex"
 									size="sm"
-									loading={isSaving}
-									disabled={readOnly || !dirty || !isLoaded}
+									loading={isSaving || isVerifying}
+									disabled={
+										readOnly ||
+										!dirty ||
+										!isLoaded ||
+										isVerifying ||
+										Boolean(conflict)
+									}
 									iconLeft={<Icon name="tabler:device-floppy" />}
-									onClick={() => void onSave()}
+									onClick={handleSave}
 								>
-									Save configuration
+									{saveLabel}
 								</Button>
 								<IconButton
 									className="sm:hidden"
-									label="Save configuration"
-									tooltip="Save configuration"
-									loading={isSaving}
-									disabled={readOnly || !dirty || !isLoaded}
-									onClick={() => void onSave()}
+									label={saveLabel}
+									tooltip={saveLabel}
+									loading={isSaving || isVerifying}
+									disabled={
+										readOnly ||
+										!dirty ||
+										!isLoaded ||
+										isVerifying ||
+										Boolean(conflict)
+									}
+									onClick={handleSave}
 								>
-									<Icon
-										name="tabler:device-floppy"
-										ariaLabel="Save configuration"
-									/>
+									<Icon name="tabler:device-floppy" ariaLabel={saveLabel} />
 								</IconButton>
 								<IconButton
 									label="Exit expanded editor"
@@ -511,19 +859,6 @@ export function MihomoProfileEditor({
 										{readOnly ? <span>Read-only</span> : null}
 									</div>
 								</div>
-								{error ? (
-									<div
-										className="xp-alert xp-alert-error mx-3 mt-3 shrink-0 px-3 py-2 text-xs sm:mx-4"
-										role="alert"
-									>
-										<Icon
-											name="tabler:alert-circle"
-											className="mt-0.5 size-4 shrink-0"
-											ariaLabel="Save error"
-										/>
-										<span className="min-w-0 break-words">{error}</span>
-									</div>
-								) : null}
 								<div
 									ref={expandedMount}
 									className="min-h-0 flex-1 overflow-hidden"
@@ -543,6 +878,10 @@ export function MihomoProfileEditor({
 							</main>
 						</div>
 					</div>
+					<div
+						ref={setExpandedFeedbackMount}
+						className="pointer-events-none fixed inset-0"
+					/>
 				</DialogContent>
 			</Dialog>
 
@@ -572,8 +911,25 @@ export function MihomoProfileEditor({
 						</div>
 					</div>
 					<div className="min-h-0 flex-1 overflow-y-auto p-2">{fileList}</div>
+					<div
+						ref={setFilesFeedbackMount}
+						className="pointer-events-none fixed inset-0"
+					/>
 				</SheetContent>
 			</Sheet>
+			<MihomoSubscriptionImportDialog
+				key={userId}
+				open={importOpen}
+				onOpenChange={setImportOpen}
+				adminToken={adminToken}
+				userId={userId}
+				existingExtraProxiesYaml={draft.extra_proxies_yaml}
+				readOnly={readOnly}
+				onAdd={(nextValue) => onChange("extra_proxies_yaml", nextValue)}
+				previewRequest={previewImport}
+				portalContainer={portalContainer}
+			/>
+			{feedbackContent}
 			{editorContent}
 		</>
 	);

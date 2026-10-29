@@ -19,7 +19,7 @@
 - Single-image Docker / Compose nodes driven by `xp-ops container run`.
 - Host-managed upgrades must not be treated as a compatibility afterthought for container-only features. If a managed-default VLESS / Mihomo relay / canary behavior is shipped, the expected host-managed upgrade path must be explicit and tested.
 - Managed runtime memory defaults are part of every deployment path: Xray uses
-  `GOMEMLIMIT=32MiB`, `GOGC=100`, and level-0 `bufferSize=0`; cloudflared uses
+  `GOMEMLIMIT=48MiB`, `GOGC=100`, and level-0 `bufferSize=0`; cloudflared uses
   `GOMEMLIMIT=12MiB`, `GOGC=50`, and `TUNNEL_MANAGEMENT_DIAGNOSTICS=false`.
   Release assets use the pinned low-memory Go build, and upgrade backfill must
   preserve operator overrides.
@@ -108,9 +108,12 @@
   bound. They validate both historical-source and Ready-tiered opaque cursor formats for length,
   forward progress, page-tail binding and stable snapshot/export state before checkpointing;
   tiered pages use the sender's canonical segment-byte budget.
-  The 128 MiB/no-swap actual-XP summary resource run is a required operator-run source/release-
-  candidate gate before rollout; the runner binds the clean commit and generated Web shell by
-  SHA. GitHub CI and release publication do not provide or replace shared-testbox capacity evidence.
+  The 128 MiB/no-swap actual-XP summary resource run is a required SHA-bound GitHub Actions
+  source/release-candidate gate before rollout. The dedicated `resource-evidence` workflow binds
+  the clean commit and generated Web shell by SHA, runs the candidate in a 128 MiB/no-swap cgroup,
+  and publishes raw evidence as an artifact; an owner-signed two-file evidence commit remains
+  required before release publication. Ordinary GitHub CI and release jobs do not synthesize or
+  replace that evidence.
   Reverse uses XP-owned loopback `127.0.0.1:10086` with authenticated TCP-only SOCKS and does
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
 - Container history recovery requires `--data-dir /var/lib/xp/data` when `xp.env` is absent.
@@ -243,7 +246,10 @@
   reservation without extending its 10-minute activation deadline. Expiry cleanup for a recorded
   Join operation removes its owned learner and DesiredState node; an expired legacy `Reserved`
   session whose learner remains is only terminalized as `Expired`, retaining that learner and node
-  for explicit recovery.
+  for explicit recovery. If a crash leaves that recorded Join active after its learner, DesiredState
+  node, and endpoints are already absent, the current leader may terminalize it as `Expired` only
+  after a linearizable exact-shape check; if the learner remains, the operation is `Blocked` and
+  requires explicit stale-learner recovery.
 - Fresh join, restore and delete require every current voter to expose
   `cluster.membership-lifecycle-v1`. Orphan-voter repair first proves one exact non-leader orphan,
   then requires that capability only from every retained DesiredState-mapped voter; the proven
@@ -300,10 +306,12 @@
 - UI regression: `cd web && bun run storybook`, `cd web && bun run test-storybook`
 - E2E: `cd web && bun run test:e2e` (Playwright)
 
-For Mesh resource runs on shared testbox, use the project cache contract in
-`docs/ops/cargo-cache.md`: share only the compatible Cargo download cache,
-keep candidate and baseline targets in the current Agent Directory, and pass
-both `XP_TESTBOX_CARGO_CACHE_ROOT` and `XP_TESTBOX_CARGO_HOME` explicitly.
+For remote runs on a shared test host, pass `TESTBOX` and
+`XP_TESTBOX_REMOTE_ROOT` explicitly. For Mesh resource runs, also use the
+project cache contract in `docs/ops/cargo-cache.md`: share only the compatible
+Cargo download cache, keep candidate and baseline targets in the current Agent
+Directory, and pass both `XP_TESTBOX_CARGO_CACHE_ROOT` and
+`XP_TESTBOX_CARGO_HOME` explicitly.
 
 ## Coding Style & Naming Conventions
 

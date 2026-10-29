@@ -1,5 +1,5 @@
 ---
-title: Docker testbox validates host-managed fresh joins
+title: Docker test host validates host-managed fresh joins
 module: cluster onboarding
 problem_type: deployment integration validation
 component: xp-ops deploy and init managers
@@ -7,7 +7,7 @@ tags:
   - fresh-join
   - staged-join
   - docker
-  - codex-testbox
+  - shared-testbox
   - systemd
   - openrc
   - xp-ops
@@ -16,7 +16,7 @@ related_specs:
   - docs/specs/cluster-node-onboarding/SPEC.md
 ---
 
-# Docker Testbox Validates Host-Managed Fresh Joins
+# Docker Test Host Validates Host-Managed Fresh Joins
 
 ## Context
 
@@ -31,8 +31,9 @@ The shared testbox is the permitted Docker-only environment for that integration
 
 ## Resolution
 
-Use `scripts/testbox/run-host-managed-fresh-join-e2e.sh`. The local launcher maps the checkout to
-a unique `/srv/codex/workspaces/<user>/<repo>__<path-hash>/runs/<run-id>` directory and invokes a
+Use `scripts/testbox/run-host-managed-fresh-join-e2e.sh` with an explicit `TESTBOX` SSH target and
+`XP_TESTBOX_REMOTE_ROOT`. The local launcher maps the checkout to a unique
+`<remote-root>/workspaces/<user>/<repo>__<path-hash>/runs/<run-id>` directory and invokes a
 synced remote driver. Keeping the driver as a file, instead of piping it over SSH, is necessary:
 Docker Compose may read standard input and otherwise consume the rest of the control script.
 The run id includes a random nonce in addition to UTC time and the candidate SHA, so concurrent
@@ -61,9 +62,11 @@ run directory.
 
 ## Guardrails
 
-- Run this only through `$shared-testbox-runner` on `codex-testbox`; do not use a VPS, a
+- Run this only through `$shared-testbox-runner` with an owner-selected `TESTBOX`;
+  do not use a VPS, a
   production cluster, or local Docker.
-- Keep every remote write under `/srv/codex/**`, use the generated Compose project name, and never
+- Keep every remote write under `XP_TESTBOX_REMOTE_ROOT/**`, use the generated Compose project
+  name, and never
   use Docker-wide prune commands.
 - Preserve authenticated Raft traffic. This harness must not disable authentication, copy Raft
   state, expose an unauthenticated Raft endpoint, or replace host-managed deploy with the
@@ -79,6 +82,8 @@ run directory.
 Run:
 
 ```bash
+TESTBOX=<ssh-target> \
+XP_TESTBOX_REMOTE_ROOT=<remote-root> \
 scripts/testbox/run-host-managed-fresh-join-e2e.sh
 ```
 

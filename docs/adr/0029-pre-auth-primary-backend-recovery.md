@@ -10,8 +10,10 @@ active cluster profile; the client performs public health, cluster, and
 compatibility checks before using a candidate for token verification. It does
 not accept arbitrary URLs, discover node inventory anonymously, or introduce
 per-node credentials. The choice remains temporary until authentication
-succeeds, after which the existing verified-profile and mutation-barrier
-contracts continue to apply.
+succeeds and a fresh authenticated node inventory confirms the selected origin,
+after which the existing verified-profile and mutation-barrier contracts
+continue to apply. The cached profile reflects a prior inventory and can include
+a node that has since been removed; public probes do not prove current membership.
 
 ## Considered Options
 
