@@ -68,6 +68,7 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
   `h-max-request-times: "0"`、`h-max-reusable-secs: "0"`、`h-keep-alive-period: -1`。
 - 管理员可按接入点配置互斥的连接数或并发数策略、复用次数、存续秒数及保活秒数。
   除保活外支持单个非负整数或升序范围；所选策略必须为正数或正数范围，未选策略为零。
+  复用次数和存续时间可使用 `0-2` 等零起点范围；保存默认策略会清除自定义配置。
   保活 `-1` 禁用、`0` 使用客户端默认、正数为间隔秒数。并发策略初始建议 `16-32`。
 - 保存的 XMUX 参数在 Vision/TCP 不生效，切回 XHTTP 时恢复。客户端刷新订阅后生效，XMUX 变化不得重建 inbound。
   该约束同时适用于 Raft 状态机的重建请求。
