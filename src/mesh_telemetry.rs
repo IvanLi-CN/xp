@@ -276,8 +276,8 @@ impl MeshTelemetryHandle {
             generated_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
             peers: Vec::new(),
         };
-        let peers = state.persisted.peers.values().collect::<Vec<_>>();
-        if max_peers == 0 || peers.is_empty() {
+        let peer_count = state.persisted.peers.len();
+        if max_peers == 0 || peer_count == 0 {
             return snapshot;
         }
 
@@ -285,14 +285,20 @@ impl MeshTelemetryHandle {
             .history_source_cursor
             // Advance one position per collection; a byte-limited window must not skip its tail.
             .fetch_add(1, Ordering::Relaxed)
-            % peers.len();
-        for offset in 0..peers.len() {
+            % peer_count;
+        let peers = state
+            .persisted
+            .peers
+            .values()
+            .skip(start)
+            .chain(state.persisted.peers.values().take(start));
+        for peer in peers {
             if snapshot.peers.len() == max_peers {
                 break;
             }
-            let peer =
-                history_source_peer(peers[(start + offset) % peers.len()], max_buckets_per_peer);
-            snapshot.peers.push(peer);
+            snapshot
+                .peers
+                .push(history_source_peer(peer, max_buckets_per_peer));
             let fits_budget = serde_json::to_vec(&snapshot)
                 .map(|payload| payload.len() <= max_payload_bytes)
                 .unwrap_or(false);

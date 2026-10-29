@@ -269,11 +269,11 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
     state: &AppState,
     _now: u64,
 ) -> anyhow::Result<InitialBackfillProgress> {
-    let local_backfill_completed = state
-        .repository_replica
-        .lock()
-        .await
-        .local_history_backfill_completed();
+    let local_backfill_completed = {
+        let mut replica = state.repository_replica.lock().await;
+        replica.prepare_local_history_backfill(_now)?;
+        replica.local_history_backfill_completed()
+    };
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let identity = derived_repository_identity(state, node_id)
         .map_err(|_| anyhow::anyhow!("derive local history backfill identity"))?;
@@ -303,44 +303,38 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
                 InitialBackfillProgress::InProgress
             });
         } else {
-            let local_cursor = state
+            let collection_state = state
                 .repository_replica
                 .lock()
                 .await
-                .local_history_backfill_cursor()
-                .map(ToOwned::to_owned);
+                .local_history_backfill_collection_state();
             let collected = historical_source_backfill_records(
                 state,
-                local_cursor.as_deref(),
+                collection_state.0.as_deref(),
                 MAX_INITIAL_BACKFILL_PAGE_RECORDS,
             )
             .await?;
             let page_cursor = collected.next_cursor()?;
             let completed = page_cursor.is_none();
             let batches = historical_record_batches(collected.into_records())?;
+            let mut replica = state.repository_replica.lock().await;
+            replica.validate_local_history_backfill_collection_state(&collection_state)?;
             if batches.iter().any(|(_, records)| !records.is_empty()) {
-                state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .apply_local_history_backfill_page(
-                        &state.cluster.cluster_id,
-                        identity.clone(),
-                        &signing_key,
-                        page_cursor.clone(),
-                        completed,
-                        queued_history_backfill_batches(batches),
-                        _now,
-                        &ready_repository_ids,
-                        &state.cluster.node_id,
-                    )?;
+                replica.apply_local_history_backfill_page(
+                    &state.cluster.cluster_id,
+                    identity.clone(),
+                    &signing_key,
+                    page_cursor.clone(),
+                    completed,
+                    queued_history_backfill_batches(batches),
+                    _now,
+                    &ready_repository_ids,
+                    &state.cluster.node_id,
+                )?;
             } else {
-                state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .checkpoint_local_history_backfill(page_cursor.clone(), completed)?;
+                replica.checkpoint_local_history_backfill(page_cursor.clone(), completed)?;
             }
+            drop(replica);
             progress = progress.combine(if completed {
                 InitialBackfillProgress::Complete
             } else {

@@ -16,6 +16,18 @@ pub(super) struct LocalHistoryBackfillInFlight {
 }
 
 impl RepositoryReplicaRuntime {
+    pub(super) fn ensure_no_local_backfill_inflight_for_rebuild(
+        &self,
+    ) -> Result<(), RepositoryRuntimeError> {
+        if self.snapshot.local_history_backfill_inflight.is_some() {
+            return Err(RepositoryRuntimeError::Storage(
+                "stale repository rebuild blocked by an unacknowledged local history backfill page"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     fn stream_for_record(
         record: &SyncRecord,
         source_node_id: &str,
@@ -169,7 +181,6 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<(), RepositoryRuntimeError> {
-        self.rebuild_if_stale(now_unix_seconds)?;
         let created = self.queue_local_history_backfill_batches(
             cluster_id,
             identity,
@@ -188,6 +199,38 @@ impl RepositoryReplicaRuntime {
             ready_repositories,
             local_repository_id,
         )
+    }
+
+    pub(crate) fn prepare_local_history_backfill(
+        &mut self,
+        now_unix_seconds: u64,
+    ) -> Result<(), RepositoryRuntimeError> {
+        self.rebuild_if_stale(now_unix_seconds)
+    }
+
+    pub(crate) fn local_history_backfill_collection_state(
+        &self,
+    ) -> (Option<String>, bool, Option<u64>, u64) {
+        (
+            self.snapshot.local_history_backfill_cursor.clone(),
+            self.snapshot.local_history_backfill_completed,
+            self.snapshot.last_verified_unix_seconds,
+            self.snapshot.local_source.epoch(),
+        )
+    }
+
+    pub(crate) fn validate_local_history_backfill_collection_state(
+        &self,
+        expected: &(Option<String>, bool, Option<u64>, u64),
+    ) -> Result<(), RepositoryRuntimeError> {
+        if self.snapshot.local_history_backfill_inflight.is_some()
+            || self.local_history_backfill_collection_state() != *expected
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                "local history backfill state changed during page collection; retry".to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) fn local_history_backfill_inflight_is_persisted(&self) -> bool {

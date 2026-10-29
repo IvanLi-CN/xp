@@ -164,8 +164,10 @@
   local identity, apply the whole source-journal page atomically, and defer ordinary source ACK
   deletion while that page owns the rows, then continue to replay the exact rows until their real
   collector ACK commits. A durable local in-flight page is prioritized over Ready-peer catch-up,
-  and source collection keeps mesh, IP and endpoint history working sets bounded. Coverage includes
-  separate-chain,
+  stale repository rebuilds happen before reading the next local cursor and fail closed while an
+  unacknowledged local page exists. A collected page is discarded if its repository state changes
+  before apply. Source collection keeps mesh, IP and endpoint history working sets bounded.
+  Coverage includes separate-chain,
   epoch reuse, restart hash-chain continuation, exact-wire retry, commit rollback, tombstone
   protection and multi-segment page replay in `page_replay_tests.rs` and source-delivery tests.
 - Ready repository metadata is resolved independently for each member. A stale Ready member with

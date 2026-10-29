@@ -956,3 +956,6 @@ fn source_delivery_ack_defers_a_legacy_backfill_owned_wire() {
     );
     assert_eq!(restored.local_source_pending_segments().len(), 1);
 }
+
+#[path = "page_replay_stale_tests.rs"]
+mod stale_tests;

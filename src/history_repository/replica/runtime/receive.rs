@@ -901,6 +901,7 @@ impl RepositoryReplicaRuntime {
         {
             return Ok(());
         }
+        self.ensure_no_local_backfill_inflight_for_rebuild()?;
         let cluster_id = self.snapshot.cluster_id.clone();
         let mut local_source = self.snapshot.local_source.clone();
         local_source.rotate_after_repository_rebuild()?;
