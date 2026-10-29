@@ -24,12 +24,13 @@
 - AppShell exposes the primary backend switcher and refreshes active queries/status events after a
   successful manual switch; the existing full-page node handoff remains unchanged.
 - Static Web mode uses `https://101-xp.ivanli.cc` as its bootstrap origin. After the
-  Bearer-protected
-  runtime-policy route admits the current backend, the console reads the authenticated registered
-  node inventory and renders real node names and origins; the policy still remains the independent
-  switching gate and anonymous pages never receive topology. A ten-minute policy grant is held in
-  memory by the Service Worker per controlled client and rewrites only the next navigation's
-  `connect-src`.
+  Bearer-protected runtime-policy route admits the current backend, the console reads the
+  authenticated registered node inventory and renders real node names and origins; the policy
+  remains the independent switching gate and anonymous pages never receive topology. Policy
+  refreshes stage new origins without reloading the current document; only an explicit reload
+  confirmation activates the staged policy. A temporarily unavailable node remains visible but is
+  excluded from the active allowlist. A ten-minute policy grant is held in memory by the Service
+  Worker per controlled client and rewrites only the next navigation's `connect-src`.
 - Static Web directory queries wait for a matching, unexpired Runtime Policy. Service-version
   reads are enabled only while the selector is open, refresh once on open, and do not refetch on
   mount, reconnect, or window focus. Explicit refreshes are also blocked until that policy gate is
@@ -66,3 +67,4 @@
 - `./SPEC.md`
 - `./HISTORY.md`
 - `../../adr/0011-cross-origin-primary-backend-for-embedded-pwa.md`
+- `../../adr/0012-edgeone-static-web-console.md`

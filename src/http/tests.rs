@@ -1945,10 +1945,10 @@ async fn runtime_policy_requires_admin_auth_and_returns_only_canonical_origins()
         body["api_origins"][0],
         xp_test_fixtures::url_loopback62416()
     );
+    assert_eq!(body["node_states"][0]["state"], "allowed");
     assert!(body.get("node_name").is_none());
     assert!(body.get("access_host").is_none());
 }
-
 #[tokio::test]
 async fn join_token_endpoint_returns_decodable_token() {
     let tmp = tempfile::tempdir().unwrap();

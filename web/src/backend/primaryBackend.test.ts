@@ -6,6 +6,7 @@ import {
 	canonicalBackendOrigin,
 	currentWebReleaseVersion,
 	getPrimaryBackendSnapshot,
+	getStaticRuntimePolicyOrigins,
 	hydrateBackendVersions,
 	hydratePrimaryBackendProfile,
 	hydrateStaticRuntimePolicy,
@@ -199,6 +200,93 @@ describe("primary backend transport", () => {
 				(candidate) => candidate.origin === fixtureCatalog.url.secondaryApi(),
 			),
 		).toBe(false);
+	});
+
+	it("stages policy origins and preserves temporarily unavailable candidates", () => {
+		hydrateStaticRuntimePolicy(
+			fixtureCatalog.cluster.fixture84(),
+			[fixtureCatalog.url.secondaryApi(), fixtureCatalog.url.primaryApi()],
+			{
+				policyId: "rcp-staged",
+				nodeStates: [
+					{
+						origin: fixtureCatalog.url.secondaryApi(),
+						state: "allowed",
+					},
+					{
+						origin: fixtureCatalog.url.primaryApi(),
+						state: "temporarily_unavailable",
+					},
+				],
+			},
+		);
+		const snapshot = getPrimaryBackendSnapshot();
+		expect(
+			snapshot.candidates.find(
+				(candidate) => candidate.origin === fixtureCatalog.url.secondaryApi(),
+			)?.runtimeState,
+		).toBe("staged");
+		expect(
+			snapshot.candidates.find(
+				(candidate) => candidate.origin === fixtureCatalog.url.primaryApi(),
+			)?.runtimeState,
+		).toBe("temporarily_unavailable");
+		expect(getStaticRuntimePolicyOrigins()).toEqual([
+			"https://101-xp.ivanli.cc",
+		]);
+	});
+
+	it("falls back from a selected backend when it becomes temporarily unavailable", async () => {
+		hydrateStaticRuntimePolicy(
+			fixtureCatalog.cluster.fixture84(),
+			[fixtureCatalog.url.primaryApi()],
+			{
+				policyId: "rcp-active",
+				nodeStates: [
+					{
+						origin: fixtureCatalog.url.primaryApi(),
+						state: "allowed",
+					},
+				],
+				activate: true,
+			},
+		);
+		const primary = getPrimaryBackendSnapshot().candidates.find(
+			(candidate) => candidate.origin === fixtureCatalog.url.primaryApi(),
+		);
+		if (!primary) throw new Error("active candidate missing");
+		await switchPrimaryBackend({ ...primary, verifiedAt: Date.now() });
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			fixtureCatalog.url.primaryApi(),
+		);
+
+		hydrateStaticRuntimePolicy(
+			fixtureCatalog.cluster.fixture84(),
+			[fixtureCatalog.url.primaryApi()],
+			{
+				policyId: "rcp-unavailable",
+				nodeStates: [
+					{
+						origin: fixtureCatalog.url.primaryApi(),
+						state: "temporarily_unavailable",
+					},
+				],
+				candidateOrigins: [
+					"https://101-xp.ivanli.cc",
+					fixtureCatalog.url.primaryApi(),
+				],
+			},
+		);
+		const snapshot = getPrimaryBackendSnapshot();
+		expect(snapshot.primaryOrigin).toBe("https://101-xp.ivanli.cc");
+		expect(getStaticRuntimePolicyOrigins()).toEqual([
+			"https://101-xp.ivanli.cc",
+		]);
+		expect(
+			snapshot.candidates.find(
+				(candidate) => candidate.origin === fixtureCatalog.url.primaryApi(),
+			)?.runtimeState,
+		).toBe("temporarily_unavailable");
 	});
 
 	it("attaches service versions by registered node id and preserves unknowns", () => {
@@ -575,6 +663,42 @@ describe("primary backend transport", () => {
 		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
 			window.location.origin,
 		);
+	});
+
+	it("passes the selected candidate to revalidation", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		let revalidatedOrigin: string | undefined;
+
+		await switchPrimaryBackend(
+			{
+				origin: fixtureCatalog.url.secondaryApi(),
+				nodeId: fixtureCatalog.identifier.nodeSecondary(),
+				nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+				verifiedAt: Date.now(),
+				lastError: null,
+			},
+			{
+				revalidate: async (candidate) => {
+					revalidatedOrigin = candidate.origin;
+					return true;
+				},
+			},
+		);
+
+		expect(revalidatedOrigin).toBe(fixtureCatalog.url.secondaryApi());
 	});
 
 	it("drains mutations that start during candidate revalidation", async () => {

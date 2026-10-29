@@ -33,3 +33,9 @@
 
 - API 兼容窗口与 PWA build ID 继续独立。
 - 已有相对 API 调用、SSE、离线读缓存和 mutation 写保护继续有效。
+
+## Current Change
+
+- Static runtime-policy polling now stages policy and node-state changes without reloading the
+  current page. New compatible origins require one explicit reload confirmation; temporary probe
+  failures remain visible but outside active CSP and transport, while removed origins retire.

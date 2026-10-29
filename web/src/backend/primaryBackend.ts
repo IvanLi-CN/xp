@@ -4,6 +4,18 @@ import { isDemoRuntime } from "../demo/runtimeMode";
 
 export const PRIMARY_BACKEND_SWITCH_TIMEOUT_MS = 60_000;
 
+export type StaticBackendRuntimeState =
+	| "active"
+	| "staged"
+	| "temporarily_unavailable";
+
+export type StaticRuntimePolicyGrant = {
+	policy_id: string;
+	cluster_id: string;
+	expires_at: string;
+	api_origins: string[];
+};
+
 export type BackendCandidate = {
 	origin: string;
 	nodeId: string;
@@ -14,6 +26,9 @@ export type BackendCandidate = {
 	switchBlockedReason?: string;
 	serviceVersion?: string | null;
 	versionState?: "ready" | "unknown" | "unavailable";
+	runtimeState?: StaticBackendRuntimeState;
+	runtimePolicyId?: string;
+	runtimePolicyGrant?: StaticRuntimePolicyGrant;
 };
 
 export type BackendProfile = {
@@ -39,7 +54,7 @@ export type SwitchResult = {
 };
 
 export type SwitchOptions = {
-	revalidate?: () => Promise<boolean>;
+	revalidate?: (candidate: BackendCandidate) => Promise<boolean>;
 };
 
 type StoredProfiles = {
@@ -107,6 +122,7 @@ function readInitialState(): PrimaryBackendSnapshot {
 
 let state: PrimaryBackendSnapshot = readInitialState();
 let staticAllowedOrigins = new Set<string>();
+let staticRuntimePolicyExpired = false;
 
 function displayNodeName(nodeName: string, origin: string): string {
 	if (nodeName.trim() && nodeName !== "Verified backend") return nodeName;
@@ -302,6 +318,7 @@ export function resetPrimaryBackendTransportForTests() {
 	staticAllowedOrigins = isStaticWebConsole()
 		? new Set<string>([STATIC_BOOTSTRAP_ORIGIN])
 		: new Set<string>();
+	staticRuntimePolicyExpired = false;
 }
 
 export function getPrimaryBackendSnapshot(): PrimaryBackendSnapshot {
@@ -332,6 +349,23 @@ export function hydratePrimaryBackendProfile(
 	if (isStaticWebConsole()) {
 		const candidatesByOrigin = new Map<string, BackendCandidate>();
 		const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
+		const previousCandidates = new Map(
+			state.candidates.map((candidate) => [candidate.origin, candidate]),
+		);
+		if (bootstrapOrigin) {
+			const existing = previousCandidates.get(bootstrapOrigin);
+			candidatesByOrigin.set(bootstrapOrigin, {
+				...existing,
+				origin: bootstrapOrigin,
+				nodeId: existing?.nodeId ?? "bootstrap",
+				nodeName: existing?.nodeName ?? "Bootstrap backend",
+				verifiedAt: existing?.verifiedAt ?? null,
+				lastError: existing?.lastError ?? null,
+				runtimeState: "active",
+				switchable: true,
+				switchBlockedReason: undefined,
+			});
+		}
 		if (nodes === undefined) {
 			for (const candidate of state.candidates) {
 				candidatesByOrigin.set(candidate.origin, candidate);
@@ -341,8 +375,13 @@ export function hydratePrimaryBackendProfile(
 			const rawOrigin = node.api_base_url.trim();
 			const origin = canonicalBackendOrigin(rawOrigin);
 			const candidateKey = origin ?? `invalid:${node.node_id}`;
-			const existing = candidatesByOrigin.get(candidateKey);
-			const switchable = origin !== null && staticAllowedOrigins.has(origin);
+			const existing = previousCandidates.get(candidateKey);
+			const runtimeState = existing?.runtimeState;
+			const switchable =
+				origin !== null &&
+				staticAllowedOrigins.has(origin) &&
+				runtimeState !== "staged" &&
+				runtimeState !== "temporarily_unavailable";
 			candidatesByOrigin.set(candidateKey, {
 				...existing,
 				origin: origin ?? rawOrigin,
@@ -354,9 +393,13 @@ export function hydratePrimaryBackendProfile(
 				switchBlockedReason:
 					origin === null
 						? "HTTPS is required for this node."
-						: switchable
-							? undefined
-							: "This node is not available to the static console.",
+						: runtimeState === "staged"
+							? "This node requires a confirmed reload."
+							: runtimeState === "temporarily_unavailable"
+								? "This node is temporarily unavailable."
+								: switchable
+									? undefined
+									: "This node is not available to the static console.",
 			});
 		}
 		const currentOrigin = canonicalBackendOrigin(state.primaryOrigin);
@@ -447,21 +490,36 @@ export function hydratePrimaryBackendProfile(
 export function hydrateStaticRuntimePolicy(
 	clusterId: string,
 	origins: readonly string[],
+	options: {
+		nodeStates?: readonly {
+			origin: string;
+			state: "allowed" | "temporarily_unavailable";
+		}[];
+		candidateOrigins?: readonly string[];
+		policyId?: string;
+		policyGrant?: StaticRuntimePolicyGrant;
+		activate?: boolean;
+	} = {},
 ) {
 	const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
-	staticAllowedOrigins = bootstrapOrigin
-		? new Set<string>([bootstrapOrigin])
-		: new Set<string>();
-	for (const rawOrigin of origins) {
-		const origin = canonicalBackendOrigin(rawOrigin);
-		if (!origin) continue;
-		staticAllowedOrigins.add(origin);
+	if (options.activate) {
+		staticRuntimePolicyExpired = false;
+		staticAllowedOrigins = bootstrapOrigin
+			? new Set<string>([bootstrapOrigin])
+			: new Set<string>();
+		for (const rawOrigin of origins) {
+			const origin = canonicalBackendOrigin(rawOrigin);
+			if (origin) staticAllowedOrigins.add(origin);
+		}
+	} else if (bootstrapOrigin) {
+		staticAllowedOrigins.add(bootstrapOrigin);
 	}
-	const candidatesByOrigin = new Map(
+	const candidatesByOrigin = new Map<string, BackendCandidate>();
+	const previousCandidates = new Map(
 		state.candidates.map((candidate) => [candidate.origin, candidate]),
 	);
 	if (bootstrapOrigin) {
-		const existing = candidatesByOrigin.get(bootstrapOrigin);
+		const existing = previousCandidates.get(bootstrapOrigin);
 		candidatesByOrigin.set(bootstrapOrigin, {
 			...existing,
 			origin: bootstrapOrigin,
@@ -471,24 +529,65 @@ export function hydrateStaticRuntimePolicy(
 			lastError: existing?.lastError ?? null,
 			switchable: true,
 			switchBlockedReason: undefined,
+			runtimeState: "active",
 		});
 	}
-	for (const [origin, candidate] of candidatesByOrigin) {
-		if (origin === bootstrapOrigin) continue;
-		const switchable = staticAllowedOrigins.has(origin);
+	const nodeStates = new Map<string, "allowed" | "temporarily_unavailable">();
+	for (const node of options.nodeStates ?? []) {
+		const origin = canonicalBackendOrigin(node.origin);
+		if (origin) nodeStates.set(origin, node.state);
+	}
+	for (const rawOrigin of options.candidateOrigins ?? origins) {
+		const origin = canonicalBackendOrigin(rawOrigin);
+		if (!origin) continue;
+		if (!nodeStates.has(origin)) nodeStates.set(origin, "allowed");
+		const existing = previousCandidates.get(origin);
+		const policyManaged = Boolean(
+			options.policyId ||
+				options.policyGrant ||
+				options.activate ||
+				options.nodeStates?.length,
+		);
+		const runtimeState: StaticBackendRuntimeState = !policyManaged
+			? "active"
+			: nodeStates.get(origin) === "temporarily_unavailable"
+				? "temporarily_unavailable"
+				: staticAllowedOrigins.has(origin)
+					? "active"
+					: "staged";
+		const switchable = !policyManaged || runtimeState === "active";
 		candidatesByOrigin.set(origin, {
-			...candidate,
+			...existing,
+			origin,
+			nodeId: existing?.nodeId ?? origin,
+			nodeName: existing?.nodeName ?? "Verified backend",
+			verifiedAt: existing?.verifiedAt ?? Date.now(),
+			lastError:
+				runtimeState === "temporarily_unavailable"
+					? "Backend is temporarily unavailable."
+					: null,
+			runtimeState,
+			runtimePolicyId: options.policyId,
+			runtimePolicyGrant: options.policyGrant,
 			switchable,
 			switchBlockedReason: switchable
 				? undefined
 				: "This node is not available to the static console.",
 		});
 	}
+	for (const origin of [...staticAllowedOrigins]) {
+		if (origin !== bootstrapOrigin && nodeStates.get(origin) !== "allowed") {
+			staticAllowedOrigins.delete(origin);
+		}
+	}
 	const currentOrigin = canonicalBackendOrigin(state.primaryOrigin);
+	const currentCandidate = currentOrigin
+		? candidatesByOrigin.get(currentOrigin)
+		: undefined;
 	const nextPrimary =
 		(currentOrigin &&
-		staticAllowedOrigins.has(currentOrigin) &&
-		candidatesByOrigin.has(currentOrigin)
+		currentCandidate?.runtimeState === "active" &&
+		staticAllowedOrigins.has(currentOrigin)
 			? currentOrigin
 			: bootstrapOrigin) ?? getPageOrigin();
 	const changed =
@@ -501,7 +600,25 @@ export function hydrateStaticRuntimePolicy(
 		generation: changed ? state.generation + 1 : state.generation,
 		state: state.state === "switching" ? "switching" : "ready",
 	};
+	staticRuntimePolicyExpired = false;
 	notify();
+}
+
+export function expireStaticRuntimePolicy(clusterId?: string) {
+	if (!isStaticWebConsole()) return;
+	staticRuntimePolicyExpired = true;
+	if (clusterId && state.clusterId !== clusterId) {
+		state = { ...state, clusterId };
+	}
+	notify();
+}
+
+export function isStaticRuntimePolicyExpired(): boolean {
+	return staticRuntimePolicyExpired;
+}
+
+export function getStaticRuntimePolicyOrigins(): string[] {
+	return [...staticAllowedOrigins].sort();
 }
 
 export function hydrateBackendVersions(
@@ -576,8 +693,24 @@ export async function verifyBackendCandidate(args: {
 }): Promise<BackendCandidate> {
 	const origin = canonicalBackendOrigin(args.origin);
 	if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
-	if (isStaticWebConsole() && !staticAllowedOrigins.has(origin)) {
-		throw new Error("Backend is not present in the active runtime policy.");
+	if (isStaticWebConsole()) {
+		if (staticRuntimePolicyExpired) {
+			throw new Error(
+				"Runtime policy has expired; backend switching is locked.",
+			);
+		}
+		const candidate = state.candidates.find((item) => item.origin === origin);
+		if (candidate?.runtimeState === "temporarily_unavailable") {
+			throw new Error("Backend is temporarily unavailable.");
+		}
+		if (candidate?.runtimeState === "staged") {
+			throw new Error(
+				"Backend requires a confirmed reload before it can be checked.",
+			);
+		}
+		if (!staticAllowedOrigins.has(origin)) {
+			throw new Error("Backend is not present in the active runtime policy.");
+		}
 	}
 	const health = await directJson(
 		origin,
@@ -718,6 +851,19 @@ export async function switchPrimaryBackend(
 	if (!candidate.verifiedAt) {
 		throw new Error("Backend must be verified before switching.");
 	}
+	if (isStaticWebConsole()) {
+		if (staticRuntimePolicyExpired) {
+			throw new Error(
+				"Runtime policy has expired; backend switching is locked.",
+			);
+		}
+		if (candidate.runtimeState === "staged") {
+			throw new Error("Backend requires a confirmed reload before switching.");
+		}
+		if (candidate.runtimeState === "temporarily_unavailable") {
+			throw new Error("Backend is temporarily unavailable.");
+		}
+	}
 	if (state.state === "switching") {
 		throw new Error("Backend switch is already in progress.");
 	}
@@ -734,7 +880,7 @@ export async function switchPrimaryBackend(
 	let revalidated = true;
 	if (options.revalidate) {
 		try {
-			revalidated = await options.revalidate();
+			revalidated = await options.revalidate(candidate);
 		} catch {
 			revalidated = false;
 		}
@@ -764,7 +910,15 @@ export async function switchPrimaryBackend(
 	const currentCandidate = state.candidates.find(
 		(candidate) => candidate.origin === origin,
 	);
-	if (!currentCandidate || currentCandidate.switchable === false) {
+	const policyManaged =
+		isStaticWebConsole() || currentCandidate?.runtimePolicyId !== undefined;
+	if (
+		!currentCandidate ||
+		currentCandidate.switchable === false ||
+		(policyManaged &&
+			(currentCandidate.runtimeState === "temporarily_unavailable" ||
+				currentCandidate.runtimeState === "staged"))
+	) {
 		state = {
 			...state,
 			state: "ready",

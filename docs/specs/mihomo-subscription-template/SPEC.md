@@ -3,6 +3,7 @@
 ## Related ADRs
 
 - [ADR 0001](../../adr/0001-mihomo-landing-and-relay-group-contract.md)
+- [ADR 0012](../../adr/0012-edgeone-static-web-console.md)
 
 ## Context and Scope
 
@@ -59,7 +60,7 @@
 - 不追求 YAML 行级一致；验收以行为等价为准。
 - 不把示例中的具体动态节点名继续暴露为 mixin 的稳定接口。
 - ToolsPage 脱敏输入/输出编辑器、其他 YAML 编辑器与通用文件管理器。
-- 浏览器 Fullscreen API、新路由、单文件保存 API、自动保存与跨刷新草稿恢复。
+- 浏览器 Fullscreen API、新路由、单文件保存 API、自动保存与跨标签页草稿同步。
 - 跨来源控制台之间的 Profile 并发写入协调；Web Locks 只在同源标签之间提供保存串行，跨来源版本校验需后续服务端 CAS 能力。
 - 额外链式区域与可配置 filter。
 
@@ -122,7 +123,14 @@
 - `Esc` 优先交给当前打开的搜索、补全或文件抽屉；这些内部交互关闭且事件未被消费时，`Esc` 才缩回工作区。
 - 真正导航离开当前用户时，继续使用现有 Mihomo Profile 未保存变更保护；不能用缩回行为绕过它。
 - 所有离开当前用户的入口（详情返回链接、用户列表行和应用导航）都 MUST 经过同一未保存变更保护。
-- 视图切换和后台刷新不得覆盖脏草稿；页面刷新仍沿用既有草稿生命周期，不引入跨刷新恢复。
+- 视图切换和后台刷新不得覆盖脏草稿；当前标签页刷新后 MUST 从
+  `sessionStorage` 恢复三个固定文件的脏草稿，且 key MUST 同时包含 schema 版本、cluster ID、user ID
+  与 Profile 对象名，不得包含 admin token。
+- 恢复草稿时若服务端基线已经变化，MUST 保留草稿并显示差异；只有用户明确选择“继续编辑草稿”
+  才能以新的服务端基线继续保存，选择“使用服务端版本”或成功保存后 MUST 清除该标签页草稿。
+- 冲突提示 MUST 以脱离表单文档流的持久视口通知呈现；在用户明确选择前不得自动消失，
+  且通知必须同时提供差异查看、“继续编辑草稿”和“使用服务端版本”操作。
+- `sessionStorage` 读写失败 MUST 显示可读提示，不得伪装成已恢复；草稿不得自动覆盖服务端配置。
 
 ### REQ-MIHOMO-WORKSPACE-004 — 手动保存整个 Profile
 
@@ -275,6 +283,7 @@
 - covers: `REQ-MIHOMO-WORKSPACE-003`
 - Pass condition: 原页修改后放大可见同一草稿，工作区修改后缩回可见同一草稿；退出不发保存请求、不弹确认且恢复原页滚动位置和入口焦点。
   搜索、补全或抽屉打开时首次 `Esc` 只关闭内部交互，后续未消费的 `Esc` 缩回；后台刷新不覆盖脏草稿。
+  当前标签页重载后恢复脏草稿，服务端基线变化时展示差异并要求用户明确选择。
   真正离开当前用户时仍进入现有保存/放弃/继续编辑保护流程。
 
 ### VER-MIHOMO-WORKSPACE-004 — 保存成功、失败与只读
@@ -312,6 +321,8 @@ Mihomo workspace visual proof: desktop tree/editor and narrow toolbar/drawer sta
 ![Mihomo workspace mobile editor](./assets/mihomo-workspace-dark-mobile.png)
 ![Mihomo workspace mobile Files drawer](./assets/mihomo-workspace-dark-files.png)
 ![Mihomo recursive folding preview](./assets/mihomo-recursive-folding-preview.png)
+![Mihomo same-tab draft recovery](./assets/mihomo-draft-recovery-fixed.png)
+![Mihomo floating conflict notice](./assets/mihomo-draft-conflict-fixed.png)
 Owner confirmation: 2026-10-07; approved for current-candidate reuse.
 
 ## 主题资产

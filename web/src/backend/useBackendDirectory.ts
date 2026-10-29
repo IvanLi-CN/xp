@@ -2,8 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
 
 import { fetchAdminNodeVersions } from "@/api/adminNodeVersions";
-import { fetchAdminNodes } from "@/api/adminNodes";
+import { type AdminNodesResponse, fetchAdminNodes } from "@/api/adminNodes";
 import type { RuntimePolicy } from "@/api/runtimePolicy";
+import { fetchRuntimePolicy } from "@/api/runtimePolicy";
+import { readAppliedRuntimePolicyId } from "@/offline/runtimePolicySession";
 import {
 	STATIC_BOOTSTRAP_ORIGIN,
 	hydrateBackendVersions,
@@ -79,38 +81,65 @@ export function useBackendDirectory(args: {
 		nodeVersionsUpdatedAt,
 		nodeVersions.isSuccess,
 	]);
-	const revalidateBackendCandidate = useCallback(async () => {
-		if (!args.adminToken || !args.primaryClusterId || !args.clusterId) {
-			return false;
-		}
-		if (args.staticConsole) {
-			const policyResult = await args.refreshRuntimePolicy();
-			const policy = policyResult.data;
-			if (
-				!policyResult.isSuccess ||
-				!policy ||
-				policy.cluster_id !== args.clusterId ||
-				Date.parse(policy.expires_at) <= Date.now()
-			) {
+	const revalidateBackendCandidate = useCallback(
+		async (candidate: { origin: string }) => {
+			if (!args.adminToken || !args.primaryClusterId || !args.clusterId) {
 				return false;
 			}
-			hydrateStaticRuntimePolicy(args.clusterId, [
-				STATIC_BOOTSTRAP_ORIGIN,
-				...policy.api_origins,
-			]);
-		}
-		const inventory = await backendNodes.refetch();
-		if (!inventory.isSuccess || !inventory.data) return false;
-		hydratePrimaryBackendProfile(args.clusterId, inventory.data.items);
-		return true;
-	}, [
-		args.adminToken,
-		args.clusterId,
-		args.primaryClusterId,
-		args.refreshRuntimePolicy,
-		args.staticConsole,
-		backendNodes.refetch,
-	]);
+			if (args.staticConsole) {
+				let policy: RuntimePolicy;
+				try {
+					policy = await fetchRuntimePolicy(
+						args.adminToken,
+						undefined,
+						candidate.origin,
+					);
+				} catch {
+					return false;
+				}
+				if (
+					policy.cluster_id !== args.clusterId ||
+					Date.parse(policy.expires_at) <= Date.now()
+				) {
+					return false;
+				}
+				const apiOrigins = [STATIC_BOOTSTRAP_ORIGIN, ...policy.api_origins];
+				hydrateStaticRuntimePolicy(args.clusterId, apiOrigins, {
+					candidateOrigins: [
+						...apiOrigins,
+						...policy.node_states.map((node) => node.origin),
+					],
+					nodeStates: policy.node_states,
+					policyId: policy.policy_id,
+					policyGrant: {
+						policy_id: policy.policy_id,
+						cluster_id: policy.cluster_id,
+						expires_at: policy.expires_at,
+						api_origins: [...new Set(apiOrigins)],
+					},
+					activate: readAppliedRuntimePolicyId() === policy.policy_id,
+				});
+			}
+			let inventory: AdminNodesResponse;
+			try {
+				inventory = await fetchAdminNodes(
+					args.adminToken,
+					undefined,
+					candidate.origin,
+				);
+			} catch {
+				return false;
+			}
+			hydratePrimaryBackendProfile(args.clusterId, inventory.items);
+			return true;
+		},
+		[
+			args.adminToken,
+			args.clusterId,
+			args.primaryClusterId,
+			args.staticConsole,
+		],
+	);
 	const refreshBackendCandidates = useCallback(() => {
 		if (!args.adminToken || !args.primaryClusterId) return;
 		if (args.staticConsole && !args.runtimePolicyReady) {

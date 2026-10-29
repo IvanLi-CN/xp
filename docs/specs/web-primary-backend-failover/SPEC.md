@@ -21,7 +21,7 @@ and SSE refresh behavior, the mutation switch barrier, controlled UI tests,
 and operator-facing deployment documentation.
 
 The scope excludes cross-origin cookies, automatic failover, arbitrary URL entry,
-background polling, request replay, multi-cluster profiles, changes to server-side
+request replay, multi-cluster profiles, changes to server-side
 node forwarding/Raft coordination, and changes to PWA app-shell caching or
 installation scope. Independent static Web deployment is defined separately by
 ADR 0012 and does not alter this embedded-PWA contract.
@@ -47,6 +47,19 @@ ADR 0012 and does not alter this embedded-PWA contract.
   browser CORS, excluding invalid or removed-node metadata. Assets and
   `sw.js` MUST retain their existing response headers and MUST NOT receive this
   dynamic document policy.
+- **REQ-STATIC-POLICY-STAGING**: The authenticated Static Web runtime policy MUST
+  distinguish the active policy from a newer staged policy. A background policy
+  refresh MUST update candidate metadata and the next-navigation Service Worker
+  grant without reloading the current document or changing its active
+  `connect-src`. A newly allowed backend MUST remain staged until the administrator
+  explicitly confirms one reload; cancelling that confirmation MUST leave the page
+  and selected backend unchanged.
+- **REQ-STATIC-POLICY-NODE-STATES**: Runtime policy node states MUST distinguish
+  `allowed` from `temporarily_unavailable`. A temporarily unavailable node MUST
+  remain visible as unavailable but MUST NOT enter the active CSP or transport
+  allowlist. An origin absent from the authenticated current inventory is a
+  formally removed node and MUST be retired. Policy expiry MUST lock backend
+  switching until a fresh authenticated policy is received.
 - **REQ-CANDIDATE**: A candidate MUST come only from the current page origin
   or an authenticated current-cluster node inventory. Registered node origins
   MUST be canonical HTTPS origins without userinfo, paths, queries, or hashes.
@@ -132,6 +145,19 @@ ADR 0012 and does not alter this embedded-PWA contract.
   `cd web && bun run test -- src/backend/primaryBackend.test.ts` verifies
   health/cluster/compatibility ordering, the credential gate, inventory
   membership, and stale-node removal.
+- **VER-STATIC-POLICY** covers: REQ-STATIC-POLICY-STAGING and
+  REQ-STATIC-POLICY-NODE-STATES. The browser smoke evidence plus this test
+  command prove that a policy-id change is staged without activating a new
+  origin, temporary unavailability is excluded from the
+  active allowlist, a selected unavailable backend falls back to the bootstrap
+  origin, removed nodes retire, and expiry blocks switching. The browser smoke
+  flow remains the owner-facing check for the single explicit reload.
+
+  ```sh
+  cd web && bunx vitest run \
+    src/offline/useStaticRuntimePolicy.test.tsx \
+    src/backend/primaryBackend.test.ts
+  ```
 - **VER-NODE-DIRECTORY** covers: REQ-NODE-DIRECTORY. The authenticated node
   inventory and selector Storybook state verify real names, current-node
   marking, the static-policy gate, and the absence of the old generic
