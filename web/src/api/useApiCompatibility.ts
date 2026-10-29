@@ -100,10 +100,20 @@ export function ApiCompatibilityProvider(props: {
 	);
 }
 
-export function useApiCompatibility(adminToken: string, isOnline: boolean) {
+export function useApiCompatibility(
+	adminToken: string,
+	isOnline: boolean,
+	beforeAuthenticatedRequest?: (signal: AbortSignal) => Promise<void>,
+	cacheIdentity?: string | null,
+) {
 	return useQuery({
-		queryKey: ["apiCompatibility", adminToken ? "admin" : "anonymous"],
+		queryKey: [
+			"apiCompatibility",
+			adminToken ? "admin" : "anonymous",
+			cacheIdentity ?? "unknown",
+		],
 		queryFn: async ({ signal }) => {
+			await beforeAuthenticatedRequest?.(signal);
 			const compatibility = await fetchApiCompatibility({
 				adminToken: adminToken || undefined,
 				signal,
