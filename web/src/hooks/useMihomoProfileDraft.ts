@@ -9,7 +9,6 @@ import {
 	mihomoSaveDiagnostics,
 	submittedMihomoProfile,
 } from "../utils/mihomoSaveOutcome";
-
 export type MihomoProfileDocumentId = keyof AdminUserMihomoProfile;
 
 export const MIHOMO_PROFILE_DOCUMENTS: readonly MihomoProfileDocumentId[] = [
@@ -17,17 +16,14 @@ export const MIHOMO_PROFILE_DOCUMENTS: readonly MihomoProfileDocumentId[] = [
 	"extra_proxies_yaml",
 	"extra_proxy_providers_yaml",
 ];
-
 export const EMPTY_MIHOMO_PROFILE: AdminUserMihomoProfile = {
 	mixin_yaml: "",
 	extra_proxies_yaml: "",
 	extra_proxy_providers_yaml: "",
 };
-
 export const MIHOMO_DRAFT_PERSISTENCE_WARNING =
 	"Your Mihomo draft is kept in this tab, but browser storage is unavailable. " +
 	"Keep this tab open or copy the draft before reloading.";
-
 type UseMihomoProfileDraftProps = {
 	clusterId?: string;
 	userId: string;
@@ -44,12 +40,10 @@ type UseMihomoProfileDraftProps = {
 	) => Promise<AdminUserMihomoProfile>;
 	formatError?: (error: unknown) => string;
 };
-
 export type MihomoProfileConflict = {
 	server: AdminUserMihomoProfile;
 	draftBaseline: AdminUserMihomoProfile;
 };
-
 type StoredMihomoDraft = {
 	version: 1;
 	clusterId: string;
@@ -58,7 +52,6 @@ type StoredMihomoDraft = {
 	draft: AdminUserMihomoProfile;
 	baseline: AdminUserMihomoProfile;
 };
-
 const MIHOMO_DRAFT_SCHEMA_VERSION = 1;
 
 function sessionDraftKey(clusterId: string, userId: string): string {
@@ -99,7 +92,6 @@ function readStoredDraft(
 		};
 	}
 }
-
 function writeStoredDraft(
 	clusterId: string | undefined,
 	userId: string,
@@ -124,7 +116,6 @@ function writeStoredDraft(
 		return "Mihomo draft could not be kept in this tab; keep the page open until you save.";
 	}
 }
-
 function clearStoredDraft(
 	clusterId: string | undefined,
 	userId: string,
@@ -137,15 +128,12 @@ function clearStoredDraft(
 		return "Mihomo draft could not be cleared from this tab.";
 	}
 }
-
 function cloneProfile(profile: AdminUserMihomoProfile): AdminUserMihomoProfile {
 	return { ...profile };
 }
-
 function profileKey(profile: AdminUserMihomoProfile | undefined): string {
 	return profile ? JSON.stringify(profile) : "";
 }
-
 export const MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX =
 	"xp.mihomo-profile-draft.v1:";
 const MIHOMO_PROFILE_TAB_ID_STORAGE_KEY = "xp.mihomo-profile.tab-id.v1";
@@ -206,12 +194,20 @@ function tabClaimInstanceId(value: string | null): string | null {
 	}
 }
 
-function mihomoDraftStoragePrefix(userId: string): string {
-	return `${MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX}${encodeURIComponent(userId)}:`;
+function mihomoDraftStoragePrefix(
+	clusterId: string | undefined,
+	userId: string,
+): string {
+	const scope = clusterId ? `${encodeURIComponent(clusterId)}:` : "";
+	return `${MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX}${scope}${encodeURIComponent(userId)}:`;
 }
 
-function mihomoDraftStorageKey(userId: string, tabId: string): string {
-	return `${mihomoDraftStoragePrefix(userId)}${encodeURIComponent(tabId)}`;
+function mihomoDraftStorageKey(
+	clusterId: string | undefined,
+	userId: string,
+	tabId: string,
+): string {
+	return `${mihomoDraftStoragePrefix(clusterId, userId)}${encodeURIComponent(tabId)}`;
 }
 
 function validProfile(value: unknown): value is AdminUserMihomoProfile {
@@ -300,16 +296,18 @@ function readPersistedMihomoDraft(
 }
 
 function readLatestOtherMihomoDraft(
+	clusterId: string | undefined,
 	userId: string,
 	tabId: string,
 ): PersistedMihomoDraft | null {
 	if (typeof window === "undefined") return null;
-	const prefix = mihomoDraftStoragePrefix(userId);
+	const prefix = mihomoDraftStoragePrefix(clusterId, userId);
 	let latest: PersistedMihomoDraft | null = null;
 	try {
 		for (let index = 0; index < window.localStorage.length; index += 1) {
 			const key = window.localStorage.key(index);
-			if (!key || key === mihomoDraftStorageKey(userId, tabId)) continue;
+			if (!key || key === mihomoDraftStorageKey(clusterId, userId, tabId))
+				continue;
 			if (!key.startsWith(prefix)) continue;
 			const candidate = parsePersistedMihomoDraft(
 				window.localStorage.getItem(key),
@@ -369,11 +367,11 @@ export function useMihomoProfileDraft({
 		tabInstanceIdRef.current = browserTabInstanceId();
 	}
 	const tabInstanceId = tabInstanceIdRef.current;
-	const storageKey = mihomoDraftStorageKey(userId, tabId);
-	const storagePrefix = mihomoDraftStoragePrefix(userId);
+	const storageKey = mihomoDraftStorageKey(clusterId, userId, tabId);
+	const storagePrefix = mihomoDraftStoragePrefix(clusterId, userId);
 	const initialPersistedDraft =
 		readPersistedMihomoDraft(storageKey) ??
-		readLatestOtherMihomoDraft(userId, tabId);
+		readLatestOtherMihomoDraft(clusterId, userId, tabId);
 	const initialBaseline =
 		initialPersistedDraft?.baseline ?? profile ?? EMPTY_MIHOMO_PROFILE;
 	const [draft, setDraftState] = useState<AdminUserMihomoProfile>(() =>
@@ -450,7 +448,7 @@ export function useMihomoProfileDraft({
 				const nextTabId = randomBrowserIdentifier();
 				if (isLoadedRef.current && (dirty || saveFeedbackRef.current)) {
 					persistMihomoDraft(
-						mihomoDraftStorageKey(userId, nextTabId),
+						mihomoDraftStorageKey(clusterId, userId, nextTabId),
 						draftRef.current,
 						baselineKnownRef.current ? baselineRef.current : null,
 						saveFeedbackRef.current,
@@ -480,7 +478,7 @@ export function useMihomoProfileDraft({
 		};
 		window.addEventListener("storage", handleStorage);
 		return () => window.removeEventListener("storage", handleStorage);
-	}, [dirty, tabId, tabInstanceId, userId]);
+	}, [clusterId, dirty, tabId, tabInstanceId, userId]);
 
 	useEffect(() => {
 		if (resetSessionIdentityRef.current === sessionIdentity) return;
@@ -515,7 +513,7 @@ export function useMihomoProfileDraft({
 		if (loadedUserId !== userId) {
 			const persisted =
 				readPersistedMihomoDraft(storageKey) ??
-				readLatestOtherMihomoDraft(userId, tabId);
+				readLatestOtherMihomoDraft(clusterId, userId, tabId);
 			const recovery = readStoredDraft(clusterId, userId);
 			const stored = recovery.value;
 			setLoadedUserId(userId);
@@ -626,7 +624,7 @@ export function useMihomoProfileDraft({
 				return;
 			const persisted =
 				parsePersistedMihomoDraft(event.newValue) ??
-				readLatestOtherMihomoDraft(userId, tabId);
+				readLatestOtherMihomoDraft(clusterId, userId, tabId);
 			const next =
 				persisted?.draft ?? cloneProfile(profile ?? EMPTY_MIHOMO_PROFILE);
 			setDraftState(next);
@@ -642,6 +640,7 @@ export function useMihomoProfileDraft({
 		window.addEventListener("storage", handleStorage);
 		return () => window.removeEventListener("storage", handleStorage);
 	}, [
+		clusterId,
 		dirty,
 		isLoaded,
 		isSaving,

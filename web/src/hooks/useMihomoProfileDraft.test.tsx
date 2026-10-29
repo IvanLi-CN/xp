@@ -465,6 +465,33 @@ describe("useMihomoProfileDraft", () => {
 		);
 	});
 
+	it("does not restore a same-user draft from another cluster", async () => {
+		const first = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-a",
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile: vi.fn(async (profile) => profile),
+			}),
+		);
+		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
+		act(() => first.result.current.setField("mixin_yaml", "cluster-a draft\n"));
+		await waitFor(() => expect(first.result.current.dirty).toBe(true));
+		first.unmount();
+
+		const second = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-b",
+				userId: "user-a",
+				profile: PROFILE_B,
+				saveProfile: vi.fn(async (profile) => profile),
+			}),
+		);
+		await waitFor(() => expect(second.result.current.isLoaded).toBe(true));
+		expect(second.result.current.draft).toEqual(PROFILE_B);
+		expect(second.result.current.dirty).toBe(false);
+	});
+
 	it("blocks legacy drafts that have no persisted baseline", async () => {
 		const tabStorageKey = "xp.mihomo-profile.tab-id.v1";
 		const tabId =
