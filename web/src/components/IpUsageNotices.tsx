@@ -1,8 +1,8 @@
+import { Alert } from "@/components/ui/alert";
 import type {
 	AdminIpGeoSource,
 	AdminIpUsageWarning,
 } from "../api/adminIpUsage";
-import { alertClass } from "./ui-helpers";
 
 export function IpUsageWarningList({
 	warnings,
@@ -13,14 +13,14 @@ export function IpUsageWarningList({
 	return (
 		<div className="space-y-2">
 			{warnings.map((warning) => (
-				<div
+				<Alert
 					key={warning.code}
-					className={alertClass(
-						warning.code === "online_stats_unavailable" ? "warning" : "info",
-					)}
+					tone={
+						warning.code === "online_stats_unavailable" ? "warning" : "info"
+					}
 				>
 					<span>{warning.message}</span>
-				</div>
+				</Alert>
 			))}
 		</div>
 	);
@@ -45,8 +45,8 @@ export function IpGeoSourceNotice({
 		}
 	})();
 	return (
-		<div className={alertClass("info", "py-2 text-sm")}>
+		<Alert tone="info" className={"py-2 text-sm"}>
 			<span>{message}</span>
-		</div>
+		</Alert>
 	);
 }

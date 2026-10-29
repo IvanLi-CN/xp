@@ -223,6 +223,12 @@ xp 使用细边框、色调分层和极轻阴影的混合策略。深度用于�
 - **Style:** 状态 chip 使用 full rounded、紧凑尺寸和低透明语义背景，例如 `info/14`、`success/14`、`warning/18`、`destructive/14`。
 - **State:** chip 用于状态和紧凑元数据，不用于装饰。Health、leader、term、alerts、quota 和 endpoint status 应该能快速扫读，并在页面间对齐。
 
+### Alerts
+
+- 页面和局部提示统一使用 `Alert`，通过 `info`、`warning`、`success`、`error` 表达语义，正文使用主题前景色以保证明暗主题可读。
+- 默认不设置 live region；动态状态按需使用 `status`，需要立即关注的错误使用 `alert`。字段校验、Toast、AlertDialog 和启动兜底保留各自语义。
+- Alert 可以包含说明、列表和操作按钮；不要在业务页面手写独立的提示配色或容器。
+
 ### Cards / Containers
 
 - **Corner Style:** 当前 card 和 panel 使用 `rounded-2xl`，由 root radius scale 支撑。

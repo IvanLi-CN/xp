@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useRouterState } from "@tanstack/react-router";
@@ -1279,9 +1280,9 @@ export function UserDetailsPage() {
 								</span>
 							</div>
 							{userSaveError ? (
-								<div className="xp-alert xp-alert-error px-4 py-2">
+								<Alert tone="error" className="px-4 py-2">
 									{userSaveError}
-								</div>
+								</Alert>
 							) : null}
 							<div>
 								<Button
@@ -1351,9 +1352,9 @@ export function UserDetailsPage() {
 									</div>
 								) : null}
 								{mihomoProfileQuery.isError ? (
-									<div className="xp-alert xp-alert-error px-4 py-2">
+									<Alert tone="error" className="px-4 py-2">
 										{formatError(mihomoProfileQuery.error)}
-									</div>
+									</Alert>
 								) : null}
 								<MihomoProfileEditor
 									userName={user.display_name}
@@ -1448,11 +1449,10 @@ export function UserDetailsPage() {
 								Apply access
 							</Button>
 						</div>
-
 						{accessError ? (
-							<div className="xp-alert xp-alert-error px-4 py-2">
+							<Alert tone="error" className="px-4 py-2">
 								{accessError}
-							</div>
+							</Alert>
 						) : null}
 						{accessSelectionHints.length > 0 ? (
 							<output
@@ -1641,7 +1641,7 @@ export function UserDetailsPage() {
 							/>
 						) : null}
 						{ipUsageDisplay.data?.partial ? (
-							<div className="xp-alert xp-alert-warning px-4 py-2">
+							<Alert tone="warning" className="px-4 py-2">
 								<div className="space-y-1">
 									<div>Usage details are partial.</div>
 									<div className="font-mono text-xs">
@@ -1649,7 +1649,7 @@ export function UserDetailsPage() {
 										{ipUsageDisplay.data.unreachable_nodes.join(", ")}
 									</div>
 								</div>
-							</div>
+							</Alert>
 						) : null}
 						{ipUsageDisplay.data ? (
 							usageGroups.length > 0 ? (
@@ -1744,7 +1744,7 @@ export function UserDetailsPage() {
 							/>
 						) : null}
 						{nodeQuotaStatusQuery.data?.partial ? (
-							<div className="xp-alert xp-alert-warning px-4 py-2">
+							<Alert tone="warning" className="px-4 py-2">
 								<div className="space-y-1">
 									<div>Quota status is partial.</div>
 									<div className="font-mono text-xs">
@@ -1752,7 +1752,7 @@ export function UserDetailsPage() {
 										{nodeQuotaStatusQuery.data.unreachable_nodes.join(", ")}
 									</div>
 								</div>
-							</div>
+							</Alert>
 						) : null}
 						{(nodeQuotaStatusQuery.data?.items ?? []).map((item) => {
 							const isUnlimited = item.quota_limit_bytes === 0;
