@@ -711,6 +711,10 @@ DDNS runtime notes:
 - `cloudflared` is only used as a heuristic fast-mode trigger (`down -> up` / `became available`), never as the source of truth for public IPs.
 - Probe timeouts or transient upstream errors do not delete records; only repeated hard evidence of a missing address family can remove `A` / `AAAA`.
 - Nodes with only IPv4 connectivity are healthy DDNS targets: IPv6 `network unreachable`, `no route`, unsupported address family, or local address assignment failures are treated as missing IPv6 candidates rather than runtime degradation.
+- DDNS is `up` when a family is detected and its DNS record is synchronized in the current round.
+  Errors for the other family remain visible; this status does not guarantee reachability for every client.
+  Probe-target family mismatches and uncertain observations reset the affected missing count.
+  They never authorize record deletion.
 
 Optional quota knobs:
 

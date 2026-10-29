@@ -193,8 +193,13 @@ impl DdnsState {
             ipv4: parsed.ipv4,
             ipv6: parsed.ipv6,
         };
+        state.ipv4.missing_count = 0;
+        state.ipv6.missing_count = 0;
         if !enabled {
             state.snapshot = DdnsStatusSnapshot::disabled();
+        } else {
+            // A restored snapshot is historical until this process completes a round.
+            state.snapshot.status = DdnsStatus::Unknown;
         }
         state
     }
@@ -396,45 +401,8 @@ async fn reconcile_once(config: &Config, handle: &DdnsHealthHandle) {
         }
     };
 
-    let ipv4_record = match client
-        .list_dns_records_by_type(&zone_id, &hostname, "A")
-        .await
-    {
-        Ok(records) => records,
-        Err(err) => {
-            apply_fatal_error(handle, now, format!("ddns list A records: {err}")).await;
-            return;
-        }
-    };
-    if ipv4_record.len() > 1 {
-        apply_fatal_error(
-            handle,
-            now,
-            format!("ddns found multiple A records for {hostname}; refusing automatic changes"),
-        )
-        .await;
-        return;
-    }
-
-    let ipv6_record = match client
-        .list_dns_records_by_type(&zone_id, &hostname, "AAAA")
-        .await
-    {
-        Ok(records) => records,
-        Err(err) => {
-            apply_fatal_error(handle, now, format!("ddns list AAAA records: {err}")).await;
-            return;
-        }
-    };
-    if ipv6_record.len() > 1 {
-        apply_fatal_error(
-            handle,
-            now,
-            format!("ddns found multiple AAAA records for {hostname}; refusing automatic changes"),
-        )
-        .await;
-        return;
-    }
+    let ipv4_record = list_family_record(&client, &zone_id, &hostname, AddressFamily::Ipv4).await;
+    let ipv6_record = list_family_record(&client, &zone_id, &hostname, AddressFamily::Ipv6).await;
 
     let ipv4_probe = probe_public_ip(
         &config.cloudflare_ddns_ipv4_url,
@@ -447,81 +415,93 @@ async fn reconcile_once(config: &Config, handle: &DdnsHealthHandle) {
     )
     .await;
 
+    let mut state = handle.inner.write().await;
+    state.hostname = hostname.clone();
+    state.zone_id = Some(zone_id.clone());
+    state.clear_expired_fast_mode(now);
+    reconcile_families(
+        &mut state,
+        now,
+        &client,
+        &zone_id,
+        &hostname,
+        [
+            (AddressFamily::Ipv4, ipv4_probe, ipv4_record),
+            (AddressFamily::Ipv6, ipv6_probe, ipv6_record),
+        ],
+        config.cloudflare_ddns_family_missing_grace,
+    )
+    .await;
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn reconcile_families(
+    state: &mut DdnsState,
+    now: DateTime<Utc>,
+    client: &CloudflareClient,
+    zone_id: &str,
+    hostname: &str,
+    families: [(
+        AddressFamily,
+        PublicIpProbeOutcome,
+        Result<Option<DnsRecordInfo>, String>,
+    ); 2],
+    missing_grace: u64,
+) {
     let mut unknown_messages = Vec::new();
     let mut updates_succeeded = false;
-    let no_public_ip;
-
-    {
-        let mut state = handle.inner.write().await;
-        state.hostname = hostname.clone();
-        state.zone_id = Some(zone_id.clone());
-        state.clear_expired_fast_mode(now);
-
-        let ipv4_synced = match apply_family_reconcile(
-            &mut state,
-            now,
-            &client,
-            &zone_id,
-            &hostname,
-            AddressFamily::Ipv4,
-            ipv4_probe,
-            ipv4_record.first().cloned(),
-            config.cloudflare_ddns_family_missing_grace,
-        )
-        .await
-        {
-            Ok(FamilyReconcileOutcome::Synced) => {
-                updates_succeeded = true;
-                true
+    let mut synced = false;
+    for (family, probe, record) in families {
+        let outcome = match record {
+            Ok(record) => {
+                apply_family_reconcile(
+                    state,
+                    now,
+                    client,
+                    zone_id,
+                    hostname,
+                    family,
+                    probe,
+                    record,
+                    missing_grace,
+                )
+                .await
             }
-            Ok(FamilyReconcileOutcome::MissingConfirmed) => {
-                updates_succeeded = true;
-                false
-            }
-            Ok(FamilyReconcileOutcome::PendingMissingGrace) => false,
             Err(message) => {
-                unknown_messages.push(message);
-                state.snapshot.current_ipv4.is_some()
+                state.family_mut(family).missing_count = 0;
+                Err(message)
             }
         };
-
-        let ipv6_synced = match apply_family_reconcile(
-            &mut state,
-            now,
-            &client,
-            &zone_id,
-            &hostname,
-            AddressFamily::Ipv6,
-            ipv6_probe,
-            ipv6_record.first().cloned(),
-            config.cloudflare_ddns_family_missing_grace,
-        )
-        .await
-        {
+        match outcome {
             Ok(FamilyReconcileOutcome::Synced) => {
+                synced = true;
                 updates_succeeded = true;
-                true
             }
-            Ok(FamilyReconcileOutcome::MissingConfirmed) => {
-                updates_succeeded = true;
-                false
-            }
-            Ok(FamilyReconcileOutcome::PendingMissingGrace) => false,
-            Err(message) => {
-                unknown_messages.push(message);
-                state.snapshot.current_ipv6.is_some()
-            }
-        };
-
-        no_public_ip = !ipv4_synced && !ipv6_synced;
-        update_snapshot_after_round(
-            &mut state,
-            now,
-            unknown_messages,
-            updates_succeeded,
-            no_public_ip,
-        );
+            Ok(FamilyReconcileOutcome::MissingConfirmed) => updates_succeeded = true,
+            Ok(FamilyReconcileOutcome::PendingMissingGrace) => {}
+            Err(message) => unknown_messages.push(message),
+        }
     }
+    update_snapshot_after_round(state, now, unknown_messages, updates_succeeded, !synced);
+}
+
+async fn list_family_record(
+    client: &CloudflareClient,
+    zone_id: &str,
+    hostname: &str,
+    family: AddressFamily,
+) -> Result<Option<DnsRecordInfo>, String> {
+    let record_type = family.record_type();
+    let mut records = client
+        .list_dns_records_by_type(zone_id, hostname, record_type)
+        .await
+        .map_err(|err| format!("ddns list {record_type} records: {err}"))?;
+    if records.len() > 1 {
+        return Err(format!(
+            "ddns found multiple {record_type} records for {hostname}; refusing automatic changes"
+        ));
+    }
+    Ok(records.pop())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -593,13 +573,14 @@ async fn apply_family_reconcile(
             let family_state = state.family_mut(family);
             family_state.missing_count = family_state.missing_count.saturating_add(1);
             if family_state.missing_count >= missing_grace as u32 {
-                if let Some(record) = existing_record {
-                    client
-                        .delete_dns_record(zone_id, &record.id)
-                        .await
-                        .map_err(|err| {
-                            format!("ddns delete {} record: {err}", family.record_type())
-                        })?;
+                if let Some(record) = existing_record
+                    && let Err(err) = client.delete_dns_record(zone_id, &record.id).await
+                {
+                    family_state.missing_count = 0;
+                    return Err(format!(
+                        "ddns delete {} record: {err}",
+                        family.record_type()
+                    ));
                 }
                 family_state.record_id = None;
                 family_state.synced_ip = None;
@@ -614,6 +595,7 @@ async fn apply_family_reconcile(
             }
         }
         PublicIpProbeOutcome::Unknown(message) => {
+            state.family_mut(family).missing_count = 0;
             Err(format!("ddns {} probe: {message}", family.label()))
         }
     }
@@ -666,6 +648,8 @@ async fn apply_fatal_error(handle: &DdnsHealthHandle, now: DateTime<Utc>, messag
         let mut state = handle.inner.write().await;
         state.clear_expired_fast_mode(now);
         let previous = state.snapshot.status;
+        state.ipv4.missing_count = 0;
+        state.ipv6.missing_count = 0;
         state.snapshot.last_error = Some(message.clone());
         state.snapshot.last_fail_at = Some(now);
         state.snapshot.consecutive_failures = state.snapshot.consecutive_failures.saturating_add(1);
@@ -694,8 +678,15 @@ fn update_snapshot_after_round(
 ) {
     let previous = state.snapshot.status;
 
-    if unknown_messages.is_empty() && !no_public_ip {
-        state.snapshot.last_error = None;
+    if !no_public_ip {
+        state.snapshot.last_error = if unknown_messages.is_empty() {
+            None
+        } else {
+            Some(unknown_messages.join("; "))
+        };
+        if state.snapshot.last_error.is_some() {
+            state.snapshot.last_fail_at = Some(now);
+        }
         state.snapshot.status = DdnsStatus::Up;
         state.snapshot.last_ok_at = Some(now);
         state.snapshot.consecutive_failures = 0;
@@ -826,40 +817,4 @@ fn rfc3339(at: DateTime<Utc>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn zone_candidates_walk_suffixes() {
-        assert_eq!(
-            zone_name_candidates("edge.node.example.com"),
-            vec![
-                "edge.node.example.com".to_string(),
-                "node.example.com".to_string(),
-                "example.com".to_string(),
-                "com".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn fast_mode_only_triggers_when_cloudflared_becomes_up() {
-        assert!(should_enter_fast_mode(None, CloudflaredStatus::Up));
-        assert!(should_enter_fast_mode(
-            Some(CloudflaredStatus::Down),
-            CloudflaredStatus::Up
-        ));
-        assert!(!should_enter_fast_mode(
-            Some(CloudflaredStatus::Up),
-            CloudflaredStatus::Up
-        ));
-    }
-
-    #[test]
-    fn hostname_validation_matches_dns_rules() {
-        assert!(is_valid_hostname("node-1.example.com"));
-        assert!(!is_valid_hostname(""));
-        assert!(!is_valid_hostname("-bad.example.com"));
-        assert!(!is_valid_hostname("UPPER.example.com"));
-    }
-}
+mod tests;

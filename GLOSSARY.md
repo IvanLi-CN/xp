@@ -88,6 +88,18 @@ _Avoid_: Upstream origin, cluster primary
 An External Resource eligible for access through XP's Resource Mirror.
 _Avoid_: Any URL, proxied resource
 
+## DDNS
+
+**DDNS Family Synchronization**:
+Successful detection of a public address and synchronization of its DNS record.
+Both occur in the current reconciliation round.
+_Avoid_: Client reachability, historical address
+
+**DDNS Health**:
+The status of DDNS reconciliation.
+It is up when a family completes DDNS Family Synchronization in the current round.
+_Avoid_: Universal client availability
+
 ## Web Demo
 
 **Demo Runtime**:

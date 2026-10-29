@@ -50,7 +50,7 @@ pub async fn probe_public_ip(url: &str, family: PublicIpAddressFamily) -> Public
 
     let resolved = if let Ok(ip) = host.parse::<IpAddr>() {
         if !family.matches_ip(ip) {
-            return PublicIpProbeOutcome::MissingCandidate(format!(
+            return PublicIpProbeOutcome::Unknown(format!(
                 "configured {} probe URL is pinned to the other address family",
                 family.label()
             ));
@@ -79,7 +79,7 @@ pub async fn probe_public_ip(url: &str, family: PublicIpAddressFamily) -> Public
             .filter(|addr| family.matches_ip(addr.ip()))
             .collect();
         if filtered.is_empty() {
-            return PublicIpProbeOutcome::MissingCandidate(format!(
+            return PublicIpProbeOutcome::Unknown(format!(
                 "probe hostname resolved without any {} target",
                 family.label()
             ));
@@ -214,6 +214,14 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
+    async fn probe_target_of_wrong_family_is_unknown() {
+        assert!(matches!(
+            probe_public_ip("https://192.0.2.1/", PublicIpAddressFamily::Ipv6).await,
+            PublicIpProbeOutcome::Unknown(_)
+        ));
+    }
+
     #[test]
     fn trace_parser_accepts_plain_ip_and_trace_ip() {
         assert_eq!(
@@ -243,6 +251,9 @@ mod tests {
         ));
         assert!(is_missing_candidate_error_text(
             "connect failed: No route to host"
+        ));
+        assert!(is_missing_candidate_error_text(
+            "connect failed: Address family not supported by protocol"
         ));
         assert!(is_missing_candidate_error_text(
             "connect failed: Cannot assign requested address"

@@ -10,6 +10,7 @@
   Node metadata, Traffic, IP usage, TCP connections, Node settings.
 - Missing or invalid tab values default to Service runtime.
 - Runtime aggregation, persistent status, and Web presentation remain maintained in their sources.
+- DDNS reconciles each family independently and retains partial errors in the runtime snapshot.
 
 ## Recorded Delivery State
 
