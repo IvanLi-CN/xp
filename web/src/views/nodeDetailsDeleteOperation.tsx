@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -9,7 +10,6 @@ import {
 } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { Button } from "../components/Button";
-import { alertClass } from "../components/ui-helpers";
 import { Badge } from "../components/ui/badge";
 import { formatBackendError } from "../utils/backendErrorMessage";
 
@@ -214,11 +214,9 @@ export function NodeDeleteOperationStatus({
 	if (!visible) return null;
 	const hasError = error !== null;
 	return (
-		<div
-			className={alertClass(
-				hasError ? "error" : "warning",
-				"flex items-center justify-between gap-2 py-2",
-			)}
+		<Alert
+			tone={hasError ? "error" : "warning"}
+			className={"flex items-center justify-between gap-2 py-2"}
 			role={hasError ? "alert" : "status"}
 		>
 			<div className="min-w-0 space-y-1">
@@ -252,6 +250,6 @@ export function NodeDeleteOperationStatus({
 					Retry status
 				</Button>
 			) : null}
-		</div>
+		</Alert>
 	);
 }

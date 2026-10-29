@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { expect, screen, userEvent } from "@storybook/test";
 
 import { PrimaryBackendProvider } from "@/backend/PrimaryBackendProvider";
 import {
@@ -179,4 +180,32 @@ export const UnrecognizedFrontendVersion: Story = {
 		candidates: versionedCandidates,
 		state: "ready",
 	}),
+};
+
+export const StagedReload: Story = {
+	render: withSnapshot({
+		...getPrimaryBackendSnapshot(),
+		clusterId: "cluster-demo",
+		primaryOrigin: fixtureCatalog.url.primaryApi(),
+		candidates: [
+			candidates[0],
+			{
+				...candidates[1],
+				runtimeState: "staged",
+				runtimePolicyId: "story-policy",
+			},
+		],
+		state: "ready",
+	}),
+	play: async () => {
+		await userEvent.click(
+			screen.getByRole("button", { name: "Open primary backend" }),
+		);
+		await userEvent.click(
+			screen.getByRole("button", { name: candidates[1].nodeName }),
+		);
+		await expect(
+			screen.getByRole("button", { name: "Reload once" }),
+		).toBeVisible();
+	},
 };

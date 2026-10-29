@@ -1,6 +1,7 @@
+import { Alert } from "@/components/ui/alert";
 export function LoginBootstrapCompatibilityPending() {
 	return (
-		<div className="xp-alert xp-alert-warning px-4 py-3" aria-live="polite">
+		<Alert tone="warning" className="px-4 py-3" aria-live="polite">
 			<div className="min-w-0 space-y-1">
 				<p className="font-medium">Bootstrap compatibility pending.</p>
 				<p className="text-muted-foreground">
@@ -9,6 +10,6 @@ export function LoginBootstrapCompatibilityPending() {
 					Try again after it is ready.
 				</p>
 			</div>
-		</div>
+		</Alert>
 	);
 }

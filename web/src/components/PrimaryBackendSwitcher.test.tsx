@@ -78,7 +78,7 @@ describe("getCurrentReloadCandidate", () => {
 			screen.getByRole("button", { name: "Open primary backend" }),
 		);
 		await user.click(
-			screen.getByRole("menuitem", {
+			screen.getByRole("button", {
 				name: stagedCandidate.nodeName,
 			}),
 		);
@@ -94,6 +94,32 @@ describe("getCurrentReloadCandidate", () => {
 			/>,
 		);
 
+		expect(screen.queryByRole("button", { name: "Reload once" })).toBeNull();
+	});
+
+	it("allows keyboard users to reach and cancel a reload confirmation", async () => {
+		const user = userEvent.setup();
+		render(
+			<PrimaryBackendSwitcher
+				adminToken="admin-token"
+				clusterId={fixtureCatalog.cluster.fixture84()}
+			/>,
+		);
+		await user.tab();
+		await user.keyboard("{Enter}");
+		const candidate = screen.getByRole("button", {
+			name: stagedCandidate.nodeName,
+		});
+		expect(candidate).toHaveFocus();
+		await user.keyboard("{Enter}");
+		expect(screen.getByRole("status")).toHaveTextContent("select it again");
+		await user.tab(); // Node frontend link.
+		await user.tab();
+		expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+		await user.tab();
+		expect(screen.getByRole("button", { name: "Reload once" })).toHaveFocus();
+		await user.tab({ shift: true });
+		await user.keyboard("{Enter}");
 		expect(screen.queryByRole("button", { name: "Reload once" })).toBeNull();
 	});
 });

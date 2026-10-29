@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import type { EChartsOption } from "echarts";
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import { LineChart } from "echarts/charts";
@@ -202,10 +203,7 @@ function ResourceDiagnosticBanner(props: {
 	].includes(diagnostic.layer);
 
 	return (
-		<div
-			className="rounded-lg border border-warning/40 bg-warning/10 p-4"
-			role="alert"
-		>
+		<Alert tone="warning" role="alert" className="flex-col rounded-lg p-4">
 			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div className="min-w-0 space-y-1">
 					<div className="flex flex-wrap items-center gap-2">
@@ -259,7 +257,7 @@ function ResourceDiagnosticBanner(props: {
 					<span>Support: {diagnostic.supportId}</span>
 				) : null}
 			</div>
-		</div>
+		</Alert>
 	);
 }
 
@@ -419,7 +417,7 @@ function ResourceHistoryChart(props: {
 	if (!hasSamples) {
 		if (props.error) {
 			return (
-				<div className="space-y-2 py-7" role="alert">
+				<Alert tone="error" className="flex-col py-7" role="alert">
 					<p className="text-sm font-medium">History unavailable</p>
 					<p className="text-xs text-muted-foreground">
 						{diagnostic.description}
@@ -442,7 +440,7 @@ function ResourceHistoryChart(props: {
 								: "Retry history"}
 						</Button>
 					) : null}
-				</div>
+				</Alert>
 			);
 		}
 		return (

@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AdminUpgradeStatusResponse } from "../api/adminUpgrade";
@@ -251,13 +252,15 @@ export function VersionIndicator({
 							{upgradeObservation?.phase === "observing" ||
 							upgradeObservation?.phase === "timed_out" ||
 							upgradeObservation?.phase === "conflict" ? (
-								<p
-									className={
+								<Alert
+									as="p"
+									tone={
 										upgradeObservation.phase === "timed_out" ||
 										upgradeObservation.phase === "conflict"
-											? "xp-alert xp-alert-error rounded-lg px-2.5 py-2 text-xs"
-											: "xp-alert xp-alert-warning rounded-lg px-2.5 py-2 text-xs"
+											? "error"
+											: "warning"
 									}
+									className="rounded-lg px-2.5 py-2 text-xs"
 									aria-live="polite"
 								>
 									{upgradeObservation.phase === "timed_out"
@@ -265,24 +268,34 @@ export function VersionIndicator({
 										: upgradeObservation.phase === "conflict"
 											? UPGRADE_CONFLICT_MESSAGE
 											: "Waiting for the node to reconnect and report the upgrade status."}
-								</p>
+								</Alert>
 							) : upgradeStatusError ? (
-								<p className="xp-alert xp-alert-error rounded-lg px-2.5 py-2 text-xs">
+								<Alert
+									tone="error"
+									as="p"
+									className="rounded-lg px-2.5 py-2 text-xs"
+								>
 									{upgradeStatusError}
-								</p>
+								</Alert>
 							) : null}
 
 							{storage?.cleanup_required && !storageBlocked ? (
-								<p className="xp-alert xp-alert-warning rounded-lg px-2.5 py-2 text-xs">
+								<Alert
+									tone="warning"
+									as="p"
+									className="rounded-lg px-2.5 py-2 text-xs"
+								>
 									将自动清理历史升级文件后继续。
-								</p>
+								</Alert>
 							) : storageBlocked ? (
-								<p
-									className="xp-alert xp-alert-error rounded-lg px-2.5 py-2 text-xs"
+								<Alert
+									tone="error"
+									as="p"
+									className="rounded-lg px-2.5 py-2 text-xs"
 									role="alert"
 								>
 									{upgradeUnavailableReason}
-								</p>
+								</Alert>
 							) : null}
 
 							<div className="flex items-center justify-between gap-2">

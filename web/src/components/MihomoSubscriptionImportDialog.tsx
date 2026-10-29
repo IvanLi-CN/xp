@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -269,21 +270,18 @@ export function MihomoSubscriptionImportDialog({
 					</div>
 
 					{error ? (
-						<div
-							className="xp-alert xp-alert-error px-3 py-2 text-xs"
-							role="alert"
-						>
+						<Alert tone="error" className="px-3 py-2 text-xs" role="alert">
 							<Icon
 								name="tabler:alert-circle"
 								className="size-4 shrink-0"
 								ariaLabel=""
 							/>
 							<span className="min-w-0 break-words">{error}</span>
-						</div>
+						</Alert>
 					) : null}
 
 					{isStale ? (
-						<output className="xp-alert xp-alert-warning px-3 py-2 text-xs">
+						<Alert tone="warning" as="output" className="px-3 py-2 text-xs">
 							<Icon
 								name="tabler:refresh-alert"
 								className="size-4 shrink-0"
@@ -293,7 +291,7 @@ export function MihomoSubscriptionImportDialog({
 								The profile changed while this preview was open. Preview again
 								before adding nodes.
 							</span>
-						</output>
+						</Alert>
 					) : null}
 
 					{preview ? (
@@ -373,7 +371,7 @@ export function MihomoSubscriptionImportDialog({
 												</div>
 											) : null}
 											{item.warnings.length > 0 ? (
-												<div className="break-words text-warning-foreground">
+												<div className="break-words text-foreground">
 													{item.warnings.join(" · ")}
 												</div>
 											) : null}

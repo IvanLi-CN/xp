@@ -46,13 +46,6 @@ export function badgeClass(
 	);
 }
 
-export function alertClass(
-	tone: "info" | "warning" | "error",
-	...extra: Array<string | false | null | undefined>
-) {
-	return cn("xp-alert", `xp-alert-${tone}`, ...extra);
-}
-
 export function tableClass(
 	compact: boolean,
 	...extra: Array<string | false | null | undefined>
