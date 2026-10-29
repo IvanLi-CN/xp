@@ -13,6 +13,7 @@ import type { AdminUserMihomoProfile } from "../api/adminUsers";
 import {
 	MIHOMO_DRAFT_PERSISTENCE_WARNING,
 	MIHOMO_PROFILE_DOCUMENTS,
+	type MihomoProfileConflict,
 	type MihomoProfileDocumentId,
 } from "../hooks/useMihomoProfileDraft";
 import { cn } from "../lib/utils";
@@ -64,10 +65,14 @@ type MihomoProfileEditorProps = {
 	readOnly?: boolean;
 	error: string | null;
 	saveFeedback?: MihomoSaveFeedback | null;
+	storageError?: string | null;
+	conflict?: MihomoProfileConflict | null;
 	isLoaded: boolean;
 	onChange: (documentId: MihomoProfileDocumentId, value: string) => void;
 	onSave: (allowOverwrite?: boolean) => Promise<boolean>;
 	onVerify?: () => Promise<boolean>;
+	onContinueDraft?: () => void;
+	onUseServer?: () => void;
 	onExpandAvailabilityChange?: (available: boolean) => void;
 	adminToken?: string;
 	importAvailable?: boolean;
@@ -283,10 +288,14 @@ export function MihomoProfileEditor({
 	readOnly = false,
 	error,
 	saveFeedback,
+	storageError = null,
+	conflict = null,
 	isLoaded,
 	onChange,
 	onSave,
 	onVerify,
+	onContinueDraft,
+	onUseServer,
 	onExpandAvailabilityChange,
 	adminToken = "",
 	importAvailable = false,
@@ -340,6 +349,58 @@ export function MihomoProfileEditor({
 	}, [onVerify]);
 
 	const saveLabel = needsRetryWarning ? "Retry save" : "Save configuration";
+	const conflictNotice = conflict ? (
+		<div
+			className={cn(
+				"fixed inset-x-4 bottom-20 z-[60] flex-col px-4 py-3 shadow-sm",
+				"xp-alert xp-alert-warning sm:left-auto sm:w-[min(32rem,calc(100vw-2rem))]",
+			)}
+			role="alert"
+			aria-live="polite"
+		>
+			<div className="flex items-start gap-2">
+				<Icon
+					name="tabler:alert-triangle"
+					className="mt-1 size-4 shrink-0"
+					ariaLabel="Profile conflict"
+				/>
+				<div className="min-w-0 font-medium">
+					The server profile changed. Your draft is preserved.
+				</div>
+			</div>
+			<details className="text-xs text-muted-foreground">
+				<summary className="cursor-pointer font-medium text-foreground">
+					View differences
+				</summary>
+				<ul className="mt-2 space-y-1">
+					{MIHOMO_PROFILE_DOCUMENTS.map((documentId) =>
+						conflict.draftBaseline[documentId] ===
+						profile?.[documentId] ? null : (
+							<li key={documentId}>{documentId}: server baseline changed</li>
+						),
+					)}
+				</ul>
+			</details>
+			<div className="flex flex-wrap gap-2">
+				<Button
+					size="sm"
+					variant="outline"
+					disabled={isSaving || !onContinueDraft}
+					onClick={onContinueDraft}
+				>
+					Continue editing draft
+				</Button>
+				<Button
+					size="sm"
+					variant="ghost"
+					disabled={isSaving || !onUseServer}
+					onClick={onUseServer}
+				>
+					Use server version
+				</Button>
+			</div>
+		</div>
+	) : null;
 
 	useEffect(() => {
 		if (typeof document === "undefined") return;
@@ -529,13 +590,14 @@ export function MihomoProfileEditor({
 		(expanded && expandedFeedbackMount) ||
 		portalContainer?.ownerDocument.body ||
 		(typeof document !== "undefined" ? document.body : null);
+	const feedbackError = error ?? storageError;
 	const feedbackContent =
 		feedbackPortalContainer &&
-		(saveFeedback || error || (needsRetryWarning && retryAcknowledged))
+		(saveFeedback || feedbackError || (needsRetryWarning && retryAcknowledged))
 			? createPortal(
 					<MihomoSaveFeedbackPanel
 						feedback={saveFeedback}
-						error={error}
+						error={feedbackError}
 						retryAcknowledged={retryAcknowledged}
 						isVerifying={isVerifying}
 						onVerify={onVerify ? handleVerify : undefined}
@@ -546,6 +608,7 @@ export function MihomoProfileEditor({
 
 	return (
 		<>
+			{conflictNotice}
 			<div
 				className="flex items-center justify-between gap-3"
 				aria-busy={!isLoaded}
@@ -582,7 +645,13 @@ export function MihomoProfileEditor({
 				<div className="flex items-center gap-2">
 					<Button
 						loading={isSaving || isVerifying}
-						disabled={readOnly || !dirty || !isLoaded || isVerifying}
+						disabled={
+							readOnly ||
+							!dirty ||
+							!isLoaded ||
+							isVerifying ||
+							Boolean(conflict)
+						}
 						iconLeft={<Icon name="tabler:device-floppy" />}
 						onClick={handleSave}
 					>
@@ -703,7 +772,13 @@ export function MihomoProfileEditor({
 									className="hidden sm:inline-flex"
 									size="sm"
 									loading={isSaving || isVerifying}
-									disabled={readOnly || !dirty || !isLoaded || isVerifying}
+									disabled={
+										readOnly ||
+										!dirty ||
+										!isLoaded ||
+										isVerifying ||
+										Boolean(conflict)
+									}
 									iconLeft={<Icon name="tabler:device-floppy" />}
 									onClick={handleSave}
 								>
@@ -714,7 +789,13 @@ export function MihomoProfileEditor({
 									label={saveLabel}
 									tooltip={saveLabel}
 									loading={isSaving || isVerifying}
-									disabled={readOnly || !dirty || !isLoaded || isVerifying}
+									disabled={
+										readOnly ||
+										!dirty ||
+										!isLoaded ||
+										isVerifying ||
+										Boolean(conflict)
+									}
 									onClick={handleSave}
 								>
 									<Icon name="tabler:device-floppy" ariaLabel={saveLabel} />

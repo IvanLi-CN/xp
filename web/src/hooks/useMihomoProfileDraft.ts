@@ -29,6 +29,7 @@ export const MIHOMO_DRAFT_PERSISTENCE_WARNING =
 	"Keep this tab open or copy the draft before reloading.";
 
 type UseMihomoProfileDraftProps = {
+	clusterId?: string;
 	userId: string;
 	sessionKey?: string;
 	profile: AdminUserMihomoProfile | undefined;
@@ -43,6 +44,99 @@ type UseMihomoProfileDraftProps = {
 	) => Promise<AdminUserMihomoProfile>;
 	formatError?: (error: unknown) => string;
 };
+
+export type MihomoProfileConflict = {
+	server: AdminUserMihomoProfile;
+	draftBaseline: AdminUserMihomoProfile;
+};
+
+type StoredMihomoDraft = {
+	version: 1;
+	clusterId: string;
+	userId: string;
+	profileObject: "mihomo-profile";
+	draft: AdminUserMihomoProfile;
+	baseline: AdminUserMihomoProfile;
+};
+
+const MIHOMO_DRAFT_SCHEMA_VERSION = 1;
+
+function sessionDraftKey(clusterId: string, userId: string): string {
+	return `xp-mihomo-draft:v${MIHOMO_DRAFT_SCHEMA_VERSION}:${clusterId}:${userId}:mihomo-profile`;
+}
+
+function readStoredDraft(
+	clusterId: string | undefined,
+	userId: string,
+): { value: StoredMihomoDraft | null; error: string | null } {
+	if (typeof window === "undefined" || !clusterId) {
+		return { value: null, error: null };
+	}
+	try {
+		const raw = window.sessionStorage.getItem(
+			sessionDraftKey(clusterId, userId),
+		);
+		if (!raw) return { value: null, error: null };
+		const parsed = JSON.parse(raw) as StoredMihomoDraft;
+		if (
+			parsed?.version !== 1 ||
+			parsed.clusterId !== clusterId ||
+			parsed.userId !== userId ||
+			parsed.profileObject !== "mihomo-profile" ||
+			!parsed.draft ||
+			!parsed.baseline
+		) {
+			return {
+				value: null,
+				error: "Stored Mihomo draft was invalid and was ignored.",
+			};
+		}
+		return { value: parsed, error: null };
+	} catch {
+		return {
+			value: null,
+			error: "Mihomo draft recovery is unavailable in this tab.",
+		};
+	}
+}
+
+function writeStoredDraft(
+	clusterId: string | undefined,
+	userId: string,
+	draft: AdminUserMihomoProfile,
+	baseline: AdminUserMihomoProfile,
+): string | null {
+	if (typeof window === "undefined" || !clusterId) return null;
+	try {
+		window.sessionStorage.setItem(
+			sessionDraftKey(clusterId, userId),
+			JSON.stringify({
+				version: 1,
+				clusterId,
+				userId,
+				profileObject: "mihomo-profile",
+				draft,
+				baseline,
+			} satisfies StoredMihomoDraft),
+		);
+		return null;
+	} catch {
+		return "Mihomo draft could not be kept in this tab; keep the page open until you save.";
+	}
+}
+
+function clearStoredDraft(
+	clusterId: string | undefined,
+	userId: string,
+): string | null {
+	if (typeof window === "undefined" || !clusterId) return null;
+	try {
+		window.sessionStorage.removeItem(sessionDraftKey(clusterId, userId));
+		return null;
+	} catch {
+		return "Mihomo draft could not be cleared from this tab.";
+	}
+}
 
 function cloneProfile(profile: AdminUserMihomoProfile): AdminUserMihomoProfile {
 	return { ...profile };
@@ -259,6 +353,7 @@ function clearPersistedMihomoDraft(storageKey: string): void {
 }
 
 export function useMihomoProfileDraft({
+	clusterId,
 	userId,
 	sessionKey,
 	profile,
@@ -292,9 +387,7 @@ export function useMihomoProfileDraft({
 	const [baselineKnown, setBaselineKnown] = useState(
 		!initialPersistedDraft || initialPersistedDraft.baseline !== null,
 	);
-	const [loadedUserId, setLoadedUserId] = useState<string | null>(
-		profile ? userId : null,
-	);
+	const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
 	const incomingProfileKey = profileKey(profile);
 	const isLoaded = loadedUserId === userId && profile !== undefined;
 	const [isSaving, setIsSaving] = useState(false);
@@ -303,8 +396,10 @@ export function useMihomoProfileDraft({
 	const [saveFeedback, setSaveFeedback] = useState<MihomoSaveFeedback | null>(
 		() => initialPersistedDraft?.saveFeedback ?? null,
 	);
+	const [storageError, setStorageError] = useState<string | null>(null);
+	const [conflict, setConflict] = useState<MihomoProfileConflict | null>(null);
 	const currentUserIdRef = useRef(userId);
-	const sessionIdentity = `${userId}\u0000${sessionKey ?? userId}`;
+	const sessionIdentity = `${clusterId ?? ""}\u0000${userId}\u0000${sessionKey ?? userId}`;
 	const currentSessionIdentityRef = useRef(sessionIdentity);
 	const resetSessionIdentityRef = useRef(sessionIdentity);
 	const userSessionRef = useRef(0);
@@ -322,6 +417,7 @@ export function useMihomoProfileDraft({
 	baselineKnownRef.current = baselineKnown;
 	saveFeedbackRef.current = saveFeedback;
 	isLoadedRef.current = isLoaded;
+	const restoredSessionRef = useRef<string | null>(null);
 
 	const dirty = useMemo(
 		() =>
@@ -406,6 +502,9 @@ export function useMihomoProfileDraft({
 		lastSavedProfileKeyRef.current = null;
 		setError(null);
 		setSaveFeedback(null);
+		setStorageError(null);
+		setConflict(null);
+		restoredSessionRef.current = null;
 	}, [profile, sessionIdentity, userId]);
 
 	useEffect(() => {
@@ -419,10 +518,28 @@ export function useMihomoProfileDraft({
 			const persisted =
 				readPersistedMihomoDraft(storageKey) ??
 				readLatestOtherMihomoDraft(userId, tabId);
+			const recovery = readStoredDraft(clusterId, userId);
+			const stored = recovery.value;
 			setLoadedUserId(userId);
-			setDraftState(cloneProfile(persisted?.draft ?? profile));
-			setBaseline(cloneProfile(persisted?.baseline ?? profile));
-			setBaselineKnown(!persisted || persisted.baseline !== null);
+			if (recovery.error) setStorageError(recovery.error);
+			setDraftState(cloneProfile(persisted?.draft ?? stored?.draft ?? profile));
+			setBaseline(
+				cloneProfile(persisted?.baseline ?? stored?.baseline ?? profile),
+			);
+			setBaselineKnown(
+				persisted
+					? persisted.baseline !== null
+					: stored !== null || profile !== undefined,
+			);
+			if (stored && profileKey(stored.baseline) !== incomingProfileKey) {
+				setConflict({
+					server: cloneProfile(profile),
+					draftBaseline: cloneProfile(stored.baseline),
+				});
+			} else {
+				setConflict(null);
+			}
+			restoredSessionRef.current = sessionIdentity;
 			acceptedProfileKeyRef.current = incomingProfileKey;
 			setError(null);
 			setSaveFeedback(persisted?.saveFeedback ?? null);
@@ -436,6 +553,12 @@ export function useMihomoProfileDraft({
 			return;
 		}
 		if (dirty || isSaving) {
+			if (!isSaving) {
+				setConflict({
+					server: cloneProfile(profile),
+					draftBaseline: cloneProfile(baseline),
+				});
+			}
 			return;
 		}
 		if (lastSavedProfileKeyRef.current !== null) {
@@ -453,6 +576,8 @@ export function useMihomoProfileDraft({
 		setSaveFeedback(null);
 		clearPersistedMihomoDraft(storageKey);
 	}, [
+		baseline,
+		clusterId,
 		dirty,
 		incomingProfileKey,
 		isSaving,
@@ -552,7 +677,40 @@ export function useMihomoProfileDraft({
 		setLoadedUserId(profile ? userId : loadedUserId);
 		setError(null);
 		setSaveFeedback(null);
-	}, [baseline, isSaving, isVerifying, loadedUserId, profile, userId]);
+		setConflict(null);
+		setStorageError(clearStoredDraft(clusterId, userId));
+		clearPersistedMihomoDraft(storageKey);
+	}, [
+		baseline,
+		clusterId,
+		isSaving,
+		isVerifying,
+		loadedUserId,
+		profile,
+		storageKey,
+		userId,
+	]);
+
+	const continueDraft = useCallback(() => {
+		if (!conflict || isSaving) return;
+		const nextBaseline = cloneProfile(conflict.server);
+		setBaseline(nextBaseline);
+		acceptedProfileKeyRef.current = profileKey(nextBaseline);
+		setConflict(null);
+		setStorageError(writeStoredDraft(clusterId, userId, draft, nextBaseline));
+	}, [clusterId, conflict, draft, isSaving, userId]);
+
+	const useServer = useCallback(() => {
+		if (!conflict || isSaving) return;
+		const next = cloneProfile(conflict.server);
+		setDraftState(next);
+		setBaseline(next);
+		acceptedProfileKeyRef.current = profileKey(next);
+		lastSavedProfileKeyRef.current = null;
+		setConflict(null);
+		setError(null);
+		setStorageError(clearStoredDraft(clusterId, userId));
+	}, [clusterId, conflict, isSaving, userId]);
 
 	const acceptProfile = useCallback(
 		(saved: AdminUserMihomoProfile, targetUserId: string) => {
@@ -573,6 +731,7 @@ export function useMihomoProfileDraft({
 				readOnly ||
 				!isLoaded ||
 				isVerifying ||
+				conflict ||
 				!dirty ||
 				currentUserIdRef.current !== userId ||
 				currentSessionIdentityRef.current !== sessionIdentity
@@ -602,6 +761,8 @@ export function useMihomoProfileDraft({
 						return false;
 					acceptProfile(saved, targetUserId);
 					setSaveFeedback(null);
+					setStorageError(clearStoredDraft(clusterId, targetUserId));
+					clearPersistedMihomoDraft(storageKey);
 					return true;
 				})
 				.catch(async (saveError: unknown) => {
@@ -680,6 +841,8 @@ export function useMihomoProfileDraft({
 		},
 		[
 			acceptProfile,
+			clusterId,
+			conflict,
 			dirty,
 			draft,
 			formatError,
@@ -691,6 +854,7 @@ export function useMihomoProfileDraft({
 			verifyProfile,
 			sessionIdentity,
 			baseline,
+			storageKey,
 			userId,
 		],
 	);
@@ -700,6 +864,7 @@ export function useMihomoProfileDraft({
 			!verifyProfile ||
 			readOnly ||
 			!isLoaded ||
+			conflict ||
 			isSaving ||
 			isVerifying ||
 			currentUserIdRef.current !== userId ||
@@ -763,6 +928,7 @@ export function useMihomoProfileDraft({
 		acceptProfile,
 		draft,
 		formatError,
+		conflict,
 		isLoaded,
 		isSaving,
 		isVerifying,
@@ -771,6 +937,26 @@ export function useMihomoProfileDraft({
 		sessionIdentity,
 		userId,
 		verifyProfile,
+	]);
+
+	useEffect(() => {
+		if (
+			!isLoaded ||
+			!dirty ||
+			isSaving ||
+			restoredSessionRef.current !== sessionIdentity
+		)
+			return;
+		setStorageError(writeStoredDraft(clusterId, userId, draft, baseline));
+	}, [
+		baseline,
+		clusterId,
+		dirty,
+		draft,
+		isLoaded,
+		isSaving,
+		sessionIdentity,
+		userId,
 	]);
 
 	return {
@@ -786,5 +972,9 @@ export function useMihomoProfileDraft({
 		setField,
 		verify,
 		dirty,
+		conflict,
+		continueDraft,
+		storageError,
+		useServer,
 	};
 }

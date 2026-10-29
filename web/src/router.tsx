@@ -19,7 +19,12 @@ import { hasAdminToken } from "./components/auth";
 import { isDemoRuntime } from "./demo/runtimeMode";
 import { DEMO_SHARE_KEYS } from "./demo/shareState";
 
-import { resolveLoginRedirectFromHref } from "./utils/navigation";
+import {
+	buildLoginHandoffHash,
+	buildRedirectTarget,
+	parseLoginHandoffHash,
+	resolveLoginRedirectFromHref,
+} from "./utils/navigation";
 import { EndpointDetailsPage } from "./views/EndpointDetailsPage";
 import { EndpointNewPage } from "./views/EndpointNewPage";
 import { EndpointProbeRunPage } from "./views/EndpointProbeRunPage";
@@ -85,13 +90,32 @@ const appRoute = createRoute({
 	id: "app",
 	beforeLoad: ({ location }) => {
 		if (isDemoRuntime()) return;
+		const targetUrl = new URL(location.href, window.location.origin);
+		const handoff = parseLoginHandoffHash(targetUrl.hash);
+		if (hasAdminToken()) {
+			if (handoff) {
+				window.history.replaceState(
+					null,
+					"",
+					buildRedirectTarget(
+						targetUrl.pathname,
+						targetUrl.search,
+						handoff.redirectHash,
+					),
+				);
+			}
+			return;
+		}
 		if (!hasAdminToken()) {
-			const targetUrl = new URL(location.href, window.location.origin);
 			const loginSearch = new URLSearchParams(targetUrl.search);
 			const loginToken = loginSearch.get("login_token");
 			const redirectTarget = resolveLoginRedirectFromHref(location.href);
 			throw redirect({
+				replace: true,
 				to: "/login",
+				hash: handoff
+					? buildLoginHandoffHash(handoff.token, "").slice(1)
+					: undefined,
 				search: {
 					redirect: redirectTarget,
 					...(loginToken ? { login_token: loginToken } : {}),

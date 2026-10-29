@@ -605,6 +605,8 @@ describe("useMihomoProfileDraft", () => {
 			profile: { ...PROFILE_A, mixin_yaml: "port: 2\n" },
 		});
 		expect(result.current.draft.mixin_yaml).toBe("port: 99\n");
+		await waitFor(() => expect(result.current.conflict).not.toBeNull());
+		act(() => result.current.continueDraft());
 
 		let firstSave: Promise<boolean>;
 		let secondSave: Promise<boolean>;
@@ -766,5 +768,116 @@ describe("useMihomoProfileDraft", () => {
 		});
 		expect(result.current.draft.mixin_yaml).toBe("latest draft\n");
 		expect(result.current.dirty).toBe(false);
+	});
+
+	it("recovers a same-tab draft and requires an explicit conflict choice", async () => {
+		window.sessionStorage.clear();
+		const saveProfile = vi.fn(
+			async (profile: AdminUserMihomoProfile) => profile,
+		);
+		const first = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-recovery",
+				userId: "user-recovery",
+				profile: PROFILE_A,
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
+		act(() =>
+			first.result.current.setField("mixin_yaml", "draft after reload\n"),
+		);
+		await waitFor(() => expect(first.result.current.dirty).toBe(true));
+		first.unmount();
+
+		const second = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-recovery",
+				userId: "user-recovery",
+				profile: { ...PROFILE_A, mixin_yaml: "server changed\n" },
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(second.result.current.conflict).not.toBeNull());
+		expect(second.result.current.draft.mixin_yaml).toBe("draft after reload\n");
+		await act(async () => {
+			expect(await second.result.current.save()).toBe(false);
+		});
+		expect(saveProfile).toHaveBeenCalledTimes(0);
+		act(() => second.result.current.continueDraft());
+		expect(second.result.current.conflict).toBeNull();
+		expect(second.result.current.dirty).toBe(true);
+		await act(async () => {
+			expect(await second.result.current.save()).toBe(true);
+		});
+		expect(
+			window.sessionStorage.getItem(
+				"xp-mihomo-draft:v1:cluster-recovery:user-recovery:mihomo-profile",
+			),
+		).toBeNull();
+	});
+
+	it("keeps a live-update conflict resolved after continuing the draft", async () => {
+		const saveProfile = vi.fn(
+			async (profile: AdminUserMihomoProfile) => profile,
+		);
+		const { result, rerender } = renderHook(
+			({ profile }: { profile: AdminUserMihomoProfile }) =>
+				useMihomoProfileDraft({
+					userId: "user-live-conflict",
+					profile,
+					saveProfile,
+				}),
+			{ initialProps: { profile: PROFILE_A } },
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "local draft\n"));
+		rerender({ profile: PROFILE_B });
+		await waitFor(() => expect(result.current.conflict).not.toBeNull());
+
+		act(() => result.current.continueDraft());
+		await waitFor(() => expect(result.current.conflict).toBeNull());
+		expect(result.current.baseline).toEqual(PROFILE_B);
+		expect(result.current.draft.mixin_yaml).toBe("local draft\n");
+		expect(result.current.dirty).toBe(true);
+	});
+
+	it("uses the server version only after an explicit conflict choice", async () => {
+		window.sessionStorage.clear();
+		const saveProfile = vi.fn(
+			async (profile: AdminUserMihomoProfile) => profile,
+		);
+		const first = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-server-choice",
+				userId: "user-server-choice",
+				profile: PROFILE_A,
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
+		act(() => first.result.current.setField("mixin_yaml", "local draft\n"));
+		first.unmount();
+
+		const second = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-server-choice",
+				userId: "user-server-choice",
+				profile: PROFILE_B,
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(second.result.current.conflict).not.toBeNull());
+		act(() => second.result.current.useServer());
+		expect(second.result.current.draft).toEqual(PROFILE_B);
+		expect(second.result.current.baseline).toEqual(PROFILE_B);
+		expect(second.result.current.dirty).toBe(false);
+		expect(second.result.current.conflict).toBeNull();
+		expect(
+			window.sessionStorage.getItem(
+				"xp-mihomo-draft:v1:cluster-server-choice:user-server-choice:mihomo-profile",
+			),
+		).toBeNull();
 	});
 });

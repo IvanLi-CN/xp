@@ -25,7 +25,10 @@ import {
 } from "../components/ui/form";
 import { Input } from "../components/ui/input";
 import { parseAdminTokenInput } from "../utils/adminToken";
-import { sanitizeRedirectPath } from "../utils/navigation";
+import {
+	parseLoginHandoffHash,
+	sanitizeRedirectPath,
+} from "../utils/navigation";
 import { LoginBootstrapCompatibilityPending } from "./LoginBootstrapCompatibilityPending";
 
 function formatError(err: unknown): string {
@@ -113,14 +116,16 @@ export function LoginPage({
 
 	useEffect(() => {
 		const params = new URLSearchParams(window.location.search);
-		const loginToken = params.get("login_token");
+		const loginToken =
+			params.get("login_token") ??
+			parseLoginHandoffHash(window.location.hash)?.token;
 		if (!loginToken) return;
 
 		params.delete("login_token");
 		const nextQuery = params.toString();
 		const nextUrl = `${window.location.pathname}${
 			nextQuery.length ? `?${nextQuery}` : ""
-		}${window.location.hash ?? ""}`;
+		}`;
 		window.history.replaceState(null, "", nextUrl);
 
 		form.reset({ token: loginToken });

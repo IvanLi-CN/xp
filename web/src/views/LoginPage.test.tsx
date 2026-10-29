@@ -86,6 +86,23 @@ describe("<LoginPage />", () => {
 		});
 	});
 
+	it("consumes a fragment login handoff without moving the token into the query", async () => {
+		window.history.replaceState(
+			null,
+			"",
+			"/login?redirect=%2Fnodes%23history#xp_login_token=fragment-token&xp_redirect_hash=",
+		);
+		mocks.verifyAdminToken.mockResolvedValue(undefined);
+
+		render(<LoginPage />);
+
+		await waitFor(() => {
+			expect(mocks.verifyAdminToken).toHaveBeenCalledWith("fragment-token");
+		});
+		expect(window.location.search).toBe("?redirect=%2Fnodes%23history");
+		expect(window.location.hash).toBe("");
+	});
+
 	it("shows compatibility pending without storing an unverified static-console token", async () => {
 		window.history.pushState({}, "", "/login");
 		mocks.isStaticWebConsole.mockReturnValue(true);

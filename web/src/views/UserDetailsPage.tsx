@@ -373,7 +373,6 @@ export function UserDetailsPage() {
 			return usageGroups[0]?.node.node_id ?? null;
 		});
 	}, [usageGroups]);
-
 	const subscriptionToken = user?.subscription_token ?? "";
 	const subscriptionUrl = useMemo(() => {
 		return buildSubscriptionUrl({
@@ -481,6 +480,7 @@ export function UserDetailsPage() {
 		[adminToken, queryClient, userId],
 	);
 	const mihomoDraft = useMihomoProfileDraft({
+		clusterId: primaryBackend.clusterId ?? undefined,
 		userId,
 		sessionKey: adminToken,
 		profile: mihomoProfileQuery.data,
@@ -1347,10 +1347,6 @@ export function UserDetailsPage() {
 										Fetch
 									</Button>
 								</div>
-								<div className="text-xs text-muted-foreground">
-									Preview opens in a modal. Mihomo uses the canonical
-									provider-backed delivery path.
-								</div>
 							</div>
 							<div className="border-t border-border/70 pt-4 space-y-3">
 								{mihomoProfileQuery.isLoading ? (
@@ -1374,12 +1370,16 @@ export function UserDetailsPage() {
 									readOnly={runtime.isReadOnly}
 									error={mihomoDraft.error}
 									saveFeedback={mihomoDraft.saveFeedback}
+									storageError={mihomoDraft.storageError}
+									conflict={mihomoDraft.conflict}
 									isLoaded={mihomoDraft.isLoaded}
 									adminToken={adminToken}
 									importAvailable={enabledFor(mihomoImportCapability)}
 									onChange={mihomoDraft.setField}
 									onSave={mihomoDraft.save}
 									onVerify={mihomoDraft.verify}
+									onContinueDraft={mihomoDraft.continueDraft}
+									onUseServer={mihomoDraft.useServer}
 								/>
 							</div>
 						</section>

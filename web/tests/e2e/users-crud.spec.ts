@@ -208,6 +208,57 @@ test("persists all three Mihomo documents through the production save path", asy
 	}
 });
 
+test("recovers an unsaved Mihomo draft after a same-tab reload", async ({
+	page,
+}) => {
+	await setAdminToken(page);
+	await setupApiMocks(page);
+
+	await page.goto(`/users/${fixtureCatalog.identifier.userPrimary()}`);
+	const editor = page.locator(
+		'[data-mihomo-document="mixin_yaml"] .cm-content',
+	);
+	await editor.click();
+	await page.keyboard.press("ControlOrMeta+A");
+	await page.keyboard.insertText("port: 7999\n# same tab draft");
+	await expect(page.getByText("Unsaved configuration changes")).toBeVisible();
+
+	await page.reload();
+	await expect(editor).toContainText("same tab draft");
+	await expect(page.getByText("Unsaved configuration changes")).toBeVisible();
+});
+
+test("keeps a visible conflict notice when the server profile changes", async ({
+	page,
+}) => {
+	await setAdminToken(page);
+	const mockState = await setupApiMocks(page);
+	const userId = fixtureCatalog.identifier.userPrimary();
+
+	await page.goto(`/users/${userId}`);
+	const editor = page.locator(
+		'[data-mihomo-document="mixin_yaml"] .cm-content',
+	);
+	await editor.click();
+	await page.keyboard.press("ControlOrMeta+A");
+	await page.keyboard.insertText("port: 7999\n# draft kept");
+	mockState.userMihomoProfiles[userId].mixin_yaml =
+		"port: 8080\n# server changed";
+
+	await page.reload();
+	const notice = page
+		.getByRole("alert")
+		.filter({ hasText: "server profile changed" });
+	await expect(notice).toBeVisible();
+	await expect(notice).toHaveClass(/fixed/);
+	await expect(
+		notice.getByRole("button", { name: "Continue editing draft" }),
+	).toBeVisible();
+	await expect(
+		notice.getByRole("button", { name: "Use server version" }),
+	).toBeVisible();
+});
+
 test("repairs legacy Mihomo provider fields after API rejection", async ({
 	page,
 }) => {
