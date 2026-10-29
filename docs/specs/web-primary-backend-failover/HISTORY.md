@@ -44,4 +44,7 @@
 - 补齐身份边界：mutation barrier 结束后重新校验 cluster/generation，资源导航等待公开 identity
   readiness，登出和 backend generation 变化清理内存及持久化离线查询缓存；认证 token 校验期间
   若节点切换则不保存 token。
+- 补齐离线恢复门禁：离线转在线必须重新通过公开 identity probe，后台同身份复核不卸载编辑页；
+  已认证切换器在 identity 未 ready 时禁用，资源缓存改用稳定 cluster/origin 身份，避免
+  generation 变化破坏同目标冷启动恢复。
 - 补齐 Storybook 的冷启动 identity 夹具隔离与公共探测无 Authorization 的浏览器断言。

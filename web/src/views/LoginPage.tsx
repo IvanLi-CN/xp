@@ -147,6 +147,7 @@ export function LoginPage({
 
 		form.reset({ token: loginToken });
 		let active = true;
+		setIsVerifying(true);
 		void (async () => {
 			try {
 				const initialTarget = getPrimaryBackendSnapshot();
@@ -183,6 +184,8 @@ export function LoginPage({
 						? error.message
 						: "Unable to select the current service node.",
 				);
+			} finally {
+				if (active) setIsVerifying(false);
 			}
 		})();
 		return () => {
@@ -290,6 +293,7 @@ export function LoginPage({
 							<div className="flex flex-wrap justify-end gap-2">
 								<Button
 									variant="ghost"
+									disabled={isVerifying}
 									onClick={() => {
 										clearAdminToken();
 										setTokenLength(0);

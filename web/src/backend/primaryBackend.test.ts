@@ -514,6 +514,47 @@ describe("primary backend transport", () => {
 		);
 	});
 
+	it("waits for a mutation started in the switch continuation turn", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		const switchPromise = switchPrimaryBackend({
+			origin: fixtureCatalog.url.secondaryApi(),
+			nodeId: fixtureCatalog.identifier.nodeSecondary(),
+			nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+			verifiedAt: Date.now(),
+			lastError: null,
+		});
+		let resolveTransaction: (() => void) | undefined;
+		const transaction = withPrimaryBackendMutation(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveTransaction = resolve;
+				}),
+		);
+		await Promise.resolve();
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
+		resolveTransaction?.();
+		await transaction;
+		await switchPromise;
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			fixtureCatalog.url.secondaryApi(),
+		);
+	});
+
 	it("rewrites SSE requests to the selected backend while keeping page assets local", async () => {
 		const fetchMock = vi.fn(
 			(_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>

@@ -23,19 +23,27 @@ export function PrimaryBackendProvider({
 	const [snapshot, setSnapshot] = useState(getPrimaryBackendSnapshot);
 	const queryClient = useQueryClient();
 	const previousGeneration = useRef(snapshot.generation);
+	const previousSnapshot = useRef(snapshot);
 
 	useEffect(() => {
 		const unsubscribe = subscribePrimaryBackend(setSnapshot);
 		return unsubscribe;
 	}, []);
 	useEffect(() => {
+		const previous = previousSnapshot.current;
+		previousSnapshot.current = snapshot;
 		if (previousGeneration.current === snapshot.generation) return;
 		previousGeneration.current = snapshot.generation;
+		const identityChanged =
+			previous.primaryOrigin !== snapshot.primaryOrigin ||
+			(previous.clusterId !== null &&
+				previous.clusterId !== snapshot.clusterId);
+		if (!identityChanged) return;
 		void queryClient.cancelQueries().then(async () => {
 			queryClient.removeQueries();
 			await clearPersistedQueryCache();
 		});
-	}, [queryClient, snapshot.generation]);
+	}, [queryClient, snapshot]);
 
 	return (
 		<PrimaryBackendContext.Provider value={snapshotOverride ?? snapshot}>

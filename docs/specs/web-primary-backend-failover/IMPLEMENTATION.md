@@ -45,6 +45,12 @@
   token-bearing compatibility traffic; its inventory query is cluster-keyed and only matching
   inventory can hydrate or persist the active profile. All token-bearing inventory requests also
   require that same origin-and-cluster public-readiness gate.
+- Returning from offline mode forces a fresh public identity probe before protected requests are
+  enabled again; a background re-probe for the same identity keeps the active editor mounted.
+- Authenticated resource cache identities use stable cluster/origin values rather than the volatile
+  in-memory generation, so a same-target reload can recover offline data while an actual target
+  change still invalidates the cache; the existing release compatibility snapshot remains the
+  release-level offline fallback.
 - An authenticated public probe that proves a different cluster is treated as a credential
   boundary: the token is cleared, the current transport is reset to its page/bootstrap recovery
   origin, and the UI returns to Login before any credentialed request is sent to the new cluster.
@@ -57,6 +63,9 @@
   backend identity boundary.
 - A mutation-barrier switch rechecks the cluster identity and backend generation before committing;
   a target verified for an obsolete identity is rejected instead of becoming primary.
+- The authenticated backend switcher is disabled while public identity readiness is unresolved, and
+  login-link verification locks the selector, token form, and clear action against concurrent manual
+  submissions.
 - Login-page probe completions are epoch-bound so a probe from a discarded cluster cannot mark a
   candidate ready after a stale-profile rebind.
 - Login verification responses are bound to the starting origin, cluster identity, and backend
