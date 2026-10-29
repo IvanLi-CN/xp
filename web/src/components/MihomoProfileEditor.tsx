@@ -12,6 +12,7 @@ import type { EditorView } from "@uiw/react-codemirror";
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
 import {
 	MIHOMO_PROFILE_DOCUMENTS,
+	type MihomoProfileConflict,
 	type MihomoProfileDocumentId,
 } from "../hooks/useMihomoProfileDraft";
 import { cn } from "../lib/utils";
@@ -57,9 +58,13 @@ type MihomoProfileEditorProps = {
 	isSaving: boolean;
 	readOnly?: boolean;
 	error: string | null;
+	storageError?: string | null;
+	conflict?: MihomoProfileConflict | null;
 	isLoaded: boolean;
 	onChange: (documentId: MihomoProfileDocumentId, value: string) => void;
 	onSave: () => Promise<boolean>;
+	onContinueDraft?: () => void;
+	onUseServer?: () => void;
 	onExpandAvailabilityChange?: (available: boolean) => void;
 	adminToken?: string;
 	importAvailable?: boolean;
@@ -124,9 +129,13 @@ export function MihomoProfileEditor({
 	isSaving,
 	readOnly = false,
 	error,
+	storageError = null,
+	conflict = null,
 	isLoaded,
 	onChange,
 	onSave,
+	onContinueDraft,
+	onUseServer,
 	onExpandAvailabilityChange,
 	adminToken = "",
 	importAvailable = false,
@@ -150,6 +159,58 @@ export function MihomoProfileEditor({
 	const viewportMetrics = useVisualViewportMetrics(expanded);
 	const currentStatus = statusLabel(readOnly, dirty);
 	const canImport = importAvailable && !readOnly && isLoaded;
+	const conflictNotice = conflict ? (
+		<div
+			className={cn(
+				"fixed inset-x-4 bottom-20 z-[60] flex-col px-4 py-3 shadow-2xl",
+				"xp-alert xp-alert-warning backdrop-blur sm:left-auto sm:w-[min(32rem,calc(100vw-2rem))]",
+			)}
+			role="alert"
+			aria-live="polite"
+		>
+			<div className="flex items-start gap-2">
+				<Icon
+					name="tabler:alert-triangle"
+					className="mt-0.5 size-4 shrink-0"
+					ariaLabel="Profile conflict"
+				/>
+				<div className="min-w-0 font-medium">
+					The server profile changed. Your draft is preserved.
+				</div>
+			</div>
+			<details className="text-xs text-muted-foreground">
+				<summary className="cursor-pointer font-medium text-foreground">
+					View differences
+				</summary>
+				<ul className="mt-2 space-y-1">
+					{MIHOMO_PROFILE_DOCUMENTS.map((documentId) =>
+						conflict.draftBaseline[documentId] ===
+						profile?.[documentId] ? null : (
+							<li key={documentId}>{documentId}: server baseline changed</li>
+						),
+					)}
+				</ul>
+			</details>
+			<div className="flex flex-wrap gap-2">
+				<Button
+					size="sm"
+					variant="outline"
+					disabled={isSaving || !onContinueDraft}
+					onClick={onContinueDraft}
+				>
+					Continue editing draft
+				</Button>
+				<Button
+					size="sm"
+					variant="ghost"
+					disabled={isSaving || !onUseServer}
+					onClick={onUseServer}
+				>
+					Use server version
+				</Button>
+			</div>
+		</div>
+	) : null;
 
 	useEffect(() => {
 		if (typeof document === "undefined") return;
@@ -337,6 +398,7 @@ export function MihomoProfileEditor({
 
 	return (
 		<>
+			{conflictNotice}
 			<div
 				className="flex items-center justify-between gap-3"
 				data-mihomo-profile-loaded={isLoaded ? "true" : "false"}
@@ -364,10 +426,15 @@ export function MihomoProfileEditor({
 					</IconButton>
 				</div>
 			</div>
-			<div ref={inlineMount} className="min-w-0" />
 			{error ? (
 				<div className="xp-alert xp-alert-error px-4 py-2">{error}</div>
 			) : null}
+			{storageError ? (
+				<div className="xp-alert xp-alert-error px-4 py-2" role="alert">
+					{storageError}
+				</div>
+			) : null}
+			<div ref={inlineMount} className="min-w-0" />
 			<div className="flex items-center justify-between gap-3">
 				<span className="text-xs text-muted-foreground">
 					{readOnly ? "Read-only profile" : "Changes apply to all three files."}
@@ -375,7 +442,7 @@ export function MihomoProfileEditor({
 				<div className="flex items-center gap-2">
 					<Button
 						loading={isSaving}
-						disabled={readOnly || !dirty || !isLoaded}
+						disabled={readOnly || !dirty || !isLoaded || Boolean(conflict)}
 						iconLeft={<Icon name="tabler:device-floppy" />}
 						onClick={() => void onSave()}
 					>

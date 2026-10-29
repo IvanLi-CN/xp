@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { hydrateStaticRuntimePolicy } from "../backend/primaryBackend";
+import { expireStaticRuntimePolicy } from "../backend/primaryBackend";
 import { clearAppliedRuntimePolicyId } from "./runtimePolicySession";
 import { clearServiceWorkerRuntimePolicy } from "./serviceWorkerPolicy";
 
@@ -13,7 +13,7 @@ export function useRuntimePolicyExpiry(args: {
 		if (!args.enabled || !args.expiresAt) return;
 		const delayMs = Math.max(0, Date.parse(args.expiresAt) - Date.now());
 		const timer = window.setTimeout(() => {
-			if (args.clusterId) hydrateStaticRuntimePolicy(args.clusterId, []);
+			expireStaticRuntimePolicy(args.clusterId);
 			clearServiceWorkerRuntimePolicy();
 			clearAppliedRuntimePolicyId();
 		}, delayMs);

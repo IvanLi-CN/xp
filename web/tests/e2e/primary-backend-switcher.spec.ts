@@ -121,6 +121,28 @@ test("switches API and SSE traffic to a verified recovery origin", async ({
 			});
 			return;
 		}
+		if (url.pathname === "/api/admin/nodes/versions") {
+			await route.fulfill({
+				status: 200,
+				headers,
+				contentType: "application/json",
+				body: JSON.stringify({
+					items: [
+						{
+							node_id: fixtureCatalog.identifier.nodePrimary(),
+							xp_version: "v3.22.5",
+							error: null,
+						},
+						{
+							node_id: fixtureCatalog.identifier.nodeSecondary(),
+							xp_version: "v3.22.5",
+							error: null,
+						},
+					],
+				}),
+			});
+			return;
+		}
 		if (url.pathname === "/api/admin/status/events") {
 			await route.fulfill({
 				status: 200,

@@ -452,6 +452,7 @@ export function UserDetailsPage() {
 		[adminToken, pushToast, queryClient, userId],
 	);
 	const mihomoDraft = useMihomoProfileDraft({
+		clusterId: primaryBackend.clusterId ?? undefined,
 		userId,
 		sessionKey: adminToken,
 		profile: mihomoProfileQuery.data,
@@ -1312,10 +1313,6 @@ export function UserDetailsPage() {
 										Fetch
 									</Button>
 								</div>
-								<div className="text-xs text-muted-foreground">
-									Preview opens in a modal. Mihomo uses the canonical
-									provider-backed delivery path.
-								</div>
 							</div>
 							<div className="border-t border-border/70 pt-4 space-y-3">
 								{mihomoProfileQuery.isLoading ? (
@@ -1337,11 +1334,15 @@ export function UserDetailsPage() {
 									isSaving={mihomoDraft.isSaving}
 									readOnly={runtime.isReadOnly}
 									error={mihomoDraft.error}
+									storageError={mihomoDraft.storageError}
+									conflict={mihomoDraft.conflict}
 									isLoaded={mihomoDraft.isLoaded}
 									adminToken={adminToken}
 									importAvailable={enabledFor(mihomoImportCapability)}
 									onChange={mihomoDraft.setField}
 									onSave={mihomoDraft.save}
+									onContinueDraft={mihomoDraft.continueDraft}
+									onUseServer={mihomoDraft.useServer}
 								/>
 							</div>
 						</section>

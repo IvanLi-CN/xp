@@ -143,6 +143,7 @@ mod join_capability;
 mod join_protocol;
 mod membership_restore;
 mod node_metadata;
+mod node_versions;
 mod service_monitors;
 mod version_check;
 mod web_assets;
@@ -1201,6 +1202,10 @@ pub fn build_router_with_mesh_telemetry(
         .route("/status/events", get(admin_stream_status_events))
         .route("/nodes", get(admin_list_nodes))
         .route(
+            "/nodes/versions",
+            get(node_versions::admin_list_node_versions),
+        )
+        .route(
             "/membership-operations/{operation_id}",
             get(admin_get_membership_operation),
         )
@@ -1869,7 +1874,13 @@ fn validate_https_origin(origin: &str) -> Result<(), ApiError> {
     if url.scheme() != "https" {
         return Err(ApiError::invalid_request("api_base_url must use https"));
     }
-    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+    if url.path() != "/"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.as_str().contains('@')
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return Err(ApiError::invalid_request(
             "api_base_url must be an origin (no path/query)",
         ));

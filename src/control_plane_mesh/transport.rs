@@ -20,7 +20,11 @@ pub(super) fn join_url(
     if !matches!(base.scheme(), "https" | "http")
         || (require_https && base.scheme() != "https")
         || base.path() != "/"
+        || !base.username().is_empty()
+        || base.password().is_some()
+        || base.as_str().contains('@')
         || base.query().is_some()
+        || base.fragment().is_some()
     {
         return Err(MeshRequestError::InvalidTarget(
             "invalid peer base URL".to_string(),
@@ -54,13 +58,16 @@ fn authenticated_client_builder(
     let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())?;
     Ok(reqwest::Client::builder()
         .add_root_certificate(ca)
-        .identity(identity))
+        .identity(identity)
+        .redirect(reqwest::redirect::Policy::none()))
 }
 
 fn public_direct_client_builder() -> reqwest::ClientBuilder {
     // Public API origins may terminate HTTP/2 without sending END_STREAM; keep
     // the signed direct control-plane path on a bounded HTTP/1.1 exchange.
-    reqwest::Client::builder().http1_only()
+    reqwest::Client::builder()
+        .http1_only()
+        .redirect(reqwest::redirect::Policy::none())
 }
 
 fn strict_mesh_client(

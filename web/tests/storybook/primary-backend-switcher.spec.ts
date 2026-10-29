@@ -92,7 +92,7 @@ function expectNonOverlapping(rects: Array<Rect | null>) {
 	}
 }
 
-test("shows the verified backend list from the AppShell switcher", async ({
+test("shows the registered node list from the AppShell switcher", async ({
 	page,
 }) => {
 	await page.goto(storyUrl("components-primarybackendswitcher--default"), {
@@ -104,11 +104,67 @@ test("shows the verified backend list from the AppShell switcher", async ({
 	await expect(
 		page.getByRole("menuitem", {
 			name: fixtureCatalog.identifier.nodeNameSecondary(),
+			exact: true,
 		}),
 	).toBeVisible();
+	const currentItem = page.getByRole("menuitem", { name: /Current page/ });
+	await expect(currentItem).not.toBeDisabled();
+	await expect(currentItem).toHaveAttribute("aria-current", "true");
+	const currentRow = currentItem.locator("..");
+	await expect(currentRow).toHaveClass(/bg-primary\/10/);
+});
+
+test("shows version differences and separate frontend links", async ({
+	page,
+}) => {
+	await page.goto(
+		storyUrl("components-primarybackendswitcher--version-mismatch-and-links"),
+		{ waitUntil: "networkidle" },
+	);
+	await page.getByRole("button", { name: "Open primary backend" }).click();
+
+	const menu = page.getByRole("menu");
+	const menuBox = await menu.boundingBox();
+	if (!menuBox) throw new Error("Primary backend menu has no bounding box");
+	expect(menuBox.width).toBeLessThanOrEqual(336);
+	const currentRow = page.locator('[aria-current="true"]').locator("..");
+	await expect(currentRow).toHaveClass(/bg-primary\/10/);
+	await expect(currentRow.locator('a[target="_blank"]')).toBeVisible();
+	await expect(page.getByText("v3.21.11")).toBeVisible();
+	await expect(page.getByText("Service v3.21.11")).toHaveCount(0);
+	await expect(page.getByText("Version unknown")).toHaveCount(0);
+	await expect(page.getByText("Verified backend")).toHaveCount(0);
+
+	const nodeLink = page.locator(
+		`a[aria-label="Open ${fixtureCatalog.nodeName.fixture18()} frontend in a new tab"]`,
+	);
+	await expect(nodeLink).toHaveAttribute("target", "_blank");
+	await expect(nodeLink).toHaveAttribute("rel", "noopener noreferrer");
+	await expect(nodeLink).toHaveAttribute(
+		"href",
+		/https:\/\/legacy\.xp\.example\//,
+	);
+
 	await expect(
-		page.getByRole("menuitem", { name: /Current page/ }),
+		page.getByRole("menuitem", {
+			name: /Open on node unavailable: API base URL must use HTTPS/,
+		}),
 	).toBeDisabled();
+});
+
+test("hides service-version comparisons for an unrecognized frontend release", async ({
+	page,
+}) => {
+	await page.goto(
+		storyUrl(
+			"components-primarybackendswitcher--unrecognized-frontend-version",
+		),
+		{ waitUntil: "networkidle" },
+	);
+	await page.getByRole("button", { name: "Open primary backend" }).click();
+
+	await expect(page.getByText("v3.21.11")).toHaveCount(0);
+	await expect(page.getByText("Version unknown")).toHaveCount(0);
 });
 
 test("keeps the switcher menu inside a narrow viewport", async ({ page }) => {

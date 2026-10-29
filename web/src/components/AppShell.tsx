@@ -15,14 +15,15 @@ import {
 	useState,
 } from "react";
 
-import { fetchAdminNodes } from "@/api/adminNodes";
 import { startAdminStatusEvents } from "@/api/adminStatusEvents";
 import { fetchRuntimePolicy } from "@/api/runtimePolicy";
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
 import {
-	hydratePrimaryBackendProfile,
+	STATIC_BOOTSTRAP_ORIGIN,
+	canonicalBackendOrigin,
 	isStaticWebConsole,
 } from "@/backend/primaryBackend";
+import { useBackendDirectory } from "@/backend/useBackendDirectory";
 import { Badge } from "@/components/ui/badge";
 import {
 	CommandDialog,
@@ -166,6 +167,7 @@ export function AppShell({
 		apiCompatibility.data?.kind === "compatible" &&
 		apiCompatibility.data.isFeatureAvailable("admin.upgrade");
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+	const [backendSelectorOpen, setBackendSelectorOpen] = useState(false);
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
 	const [versionCheck, dispatchVersionCheck] = useReducer(
 		reduceVersionCheckUiState,
@@ -207,6 +209,20 @@ export function AppShell({
 		refetchIntervalInBackground: true,
 		retry: false,
 	});
+	const activeBackendOrigin = canonicalBackendOrigin(
+		primaryBackend.primaryOrigin,
+	);
+	const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
+	const runtimePolicyReady =
+		!staticConsole ||
+		(runtimePolicy.data !== undefined &&
+			runtimePolicy.data.cluster_id === clusterInfo.data?.cluster_id &&
+			Date.parse(runtimePolicy.data.expires_at) > Date.now() &&
+			activeBackendOrigin !== null &&
+			(activeBackendOrigin === bootstrapOrigin ||
+				runtimePolicy.data.api_origins.some(
+					(origin) => canonicalBackendOrigin(origin) === activeBackendOrigin,
+				)));
 	const compatibilityError =
 		staticConsole &&
 		adminToken.length > 0 &&
@@ -219,40 +235,18 @@ export function AppShell({
 					? "API compatibility is unavailable while offline."
 					: null;
 
-	const backendNodes = useQuery({
-		queryKey: ["adminNodes", adminToken],
-		enabled:
-			!staticConsole &&
-			adminToken.length > 0 &&
-			Boolean(clusterInfo.data?.cluster_id) &&
-			clusterInfo.data?.cluster_id === primaryBackend.clusterId,
-		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
-	});
-
-	const refreshBackendCandidates = useCallback(() => {
-		if (!adminToken || !primaryBackend.clusterId) return;
-		if (staticConsole) void runtimePolicy.refetch();
-		else void backendNodes.refetch();
-	}, [
-		adminToken,
-		backendNodes.refetch,
-		primaryBackend.clusterId,
-		runtimePolicy.refetch,
-		staticConsole,
-	]);
-
-	useEffect(() => {
-		const clusterId = clusterInfo.data?.cluster_id;
-		if (!clusterId) return;
-		hydratePrimaryBackendProfile(
-			clusterId,
-			backendNodes.isSuccess ? backendNodes.data.items : undefined,
-		);
-	}, [
-		clusterInfo.data?.cluster_id,
-		backendNodes.data?.items,
-		backendNodes.isSuccess,
-	]);
+	const { refreshBackendCandidates, revalidateBackendCandidate } =
+		useBackendDirectory({
+			adminToken,
+			clusterId: clusterInfo.data?.cluster_id,
+			primaryClusterId: primaryBackend.clusterId,
+			primaryOrigin: primaryBackend.primaryOrigin,
+			runtimeOnline: runtime.isOnline,
+			staticConsole,
+			runtimePolicyReady,
+			selectorOpen: backendSelectorOpen,
+			refreshRuntimePolicy: runtimePolicy.refetch,
+		});
 
 	useStaticRuntimePolicy({
 		enabled: staticConsole,
@@ -941,6 +935,8 @@ export function AppShell({
 										clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
 									}
 									onOpened={refreshBackendCandidates}
+									onOpenChange={setBackendSelectorOpen}
+									revalidateBeforeSwitch={revalidateBackendCandidate}
 								/>
 							</div>
 						</div>

@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { fixtureCatalog } from "@/fixture-policy/catalog";
+
 import {
+	buildLoginHandoffHash,
 	buildNodePageHref,
 	buildRedirectTarget,
+	parseLoginHandoffHash,
 	resolveLoginRedirectFromHref,
 	sanitizeRedirectPath,
 	stripLoginToken,
@@ -42,6 +46,21 @@ describe("navigation helpers", () => {
 		).toBe("/dashboard?foo=1#frag");
 	});
 
+	it("resolves fragment handoff redirects without carrying the token", () => {
+		vi.stubGlobal("window", {
+			location: {
+				origin: "https://node-a.example.com",
+			},
+		});
+		const handoff = buildLoginHandoffHash("fresh-token", "#history");
+
+		expect(
+			resolveLoginRedirectFromHref(
+				`https://node-b.example.com/nodes?view=table${handoff}`,
+			),
+		).toBe("/nodes?view=table#history");
+	});
+
 	it("replaces login_token when building cross-node hrefs", () => {
 		const resolved = buildNodePageHref(
 			"https://node-b.example.com",
@@ -56,8 +75,38 @@ describe("navigation helpers", () => {
 		);
 	});
 
+	it("keeps the new-tab login handoff out of the request URL", () => {
+		const resolved = buildNodePageHref(
+			"https://node-b.example.com",
+			"https://node-a.example.com/nodes?view=table#history",
+			fixtureCatalog.token.fixture45(),
+			{ loginHandoff: "fragment" },
+		);
+
+		expect(resolved.disabled).toBe(false);
+		if (resolved.disabled) return;
+		const target = new URL(resolved.href);
+		expect(target.search).toBe("?view=table");
+		expect(target.hash).toBe(
+			buildLoginHandoffHash(fixtureCatalog.token.fixture45(), "#history"),
+		);
+		expect(parseLoginHandoffHash(target.hash)).toEqual({
+			token: fixtureCatalog.token.fixture45(),
+			redirectHash: "#history",
+		});
+	});
+
 	it("disables cross-node hrefs for invalid base URLs", () => {
 		expect(buildNodePageHref("http://node-b.example.com").disabled).toBe(true);
+		expect(buildNodePageHref("https://node-b.example.com/path").disabled).toBe(
+			true,
+		);
+		expect(
+			buildNodePageHref("https://user:password@node-b.example.com").disabled,
+		).toBe(true);
+		expect(buildNodePageHref("https://@node-b.example.com").disabled).toBe(
+			true,
+		);
 		expect(buildNodePageHref("")).toEqual({
 			disabled: true,
 			reason: "Open on node unavailable: API base URL is empty.",

@@ -36,7 +36,8 @@ The following rendering requirements were clarified after delivery and are now i
 
 - `REQ-MIHOMO-WORKSPACE-001`: Expand entry, full viewport, same URL, and user context.
 - `REQ-MIHOMO-WORKSPACE-002`: Three fixed documents share mounted CodeMirror instances.
-- `REQ-MIHOMO-WORKSPACE-003`: Draft Hook protects dirty state and navigation guards.
+- `REQ-MIHOMO-WORKSPACE-003`: Draft Hook protects dirty state and navigation guards, persists the
+  three-document draft in same-tab `sessionStorage`, and exposes explicit server-conflict choices.
 - `REQ-MIHOMO-WORKSPACE-004`: One save submits all fields and keeps retryable errors.
 - `REQ-MIHOMO-WORKSPACE-005`: Desktop tree, mobile drawer, dynamic viewport, and scrolling.
 - `REQ-MIHOMO-WORKSPACE-006`: Theme, labels, focus restoration, keyboard, and read-only mode.
@@ -48,6 +49,10 @@ The following rendering requirements were clarified after delivery and are now i
 - Save generations reject late PUTs; fresh baselines reject stale drafts and protect cache.
 - Browser saves require same-origin Web Locks and hold the backend switch barrier.
 - Cross-origin Profile coordination remains a future server-side CAS concern.
+- Same-tab Mihomo draft recovery uses a versioned cluster/user/profile key and never stores the
+  admin token. Save, discard, or choosing the server version clears the draft; baseline conflicts
+  retain the draft until the administrator explicitly chooses how to proceed. The conflict is a
+  fixed viewport-level repair notice, not a block in the long form document flow.
 - Production/Demo links, list rows, app navigation, logout, and delete use the dirty guard.
 - The guard detects pending Mihomo saves, blocks discard, and reuses the request.
 - User Details preserves raw profiles and migrates legacy conflicts only after API rejection.
