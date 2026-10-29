@@ -406,6 +406,79 @@ fn local_history_backfill_tombstone_protects_the_independent_record_stream() {
 }
 
 #[test]
+fn local_history_backfill_exact_tombstone_removes_the_independent_record() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let historical_key = b"exact-history-key".to_vec();
+    let mut runtime = load(temporary.path());
+    runtime
+        .apply_local_history_backfill_page(
+            "cluster-a",
+            identity.clone(),
+            &key,
+            Some("history-page-1".to_owned()),
+            false,
+            vec![(
+                vec![SyncRecord::new(
+                    "subject-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    historical_key.clone(),
+                    b"historical".to_vec(),
+                    false,
+                )],
+                1_000,
+            )],
+            1_001,
+            &["local".to_owned()],
+            "local",
+        )
+        .expect("apply historical record");
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_records(None, None, None, 0, 8)
+            .expect("read historical record")
+            .len(),
+        1
+    );
+
+    runtime
+        .apply_local_history_backfill_page(
+            "cluster-a",
+            identity,
+            &key,
+            Some("history-page-2".to_owned()),
+            true,
+            vec![(
+                vec![SyncRecord::new(
+                    "subject-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    historical_key,
+                    Vec::new(),
+                    true,
+                )],
+                1_001,
+            )],
+            1_002,
+            &["local".to_owned()],
+            "local",
+        )
+        .expect("apply exact tombstone");
+    assert!(
+        runtime
+            .storage
+            .repository_history_records(None, None, None, 0, 8)
+            .expect("read records after exact tombstone")
+            .is_empty()
+    );
+}
+
+#[test]
 fn local_history_backfill_page_replays_all_segments_before_checkpoint() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
