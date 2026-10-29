@@ -45,8 +45,15 @@
   token-bearing compatibility traffic; its inventory query is cluster-keyed and only matching
   inventory can hydrate or persist the active profile. All token-bearing inventory requests also
   require that same origin-and-cluster public-readiness gate.
+- An authenticated public probe that proves a different cluster is treated as a credential
+  boundary: the token is cleared, the current transport is reset to its page/bootstrap recovery
+  origin, and the UI returns to Login before any credentialed request is sent to the new cluster.
+  Backend generation changes cancel and remove cached queries, and logout resets static policy
+  transport so a later login cannot reuse a stale target.
 - Login-page probe completions are epoch-bound so a probe from a discarded cluster cannot mark a
   candidate ready after a stale-profile rebind.
+- Login verification responses are bound to the starting origin, cluster identity, and backend
+  generation; selector interaction is disabled while verification is in flight.
 - Successful authenticated node-inventory hydration is the persistence gate for a new primary;
   authentication rejection keeps the login page and unverified token out of local storage.
 - Login submission is gated on the selected target's public probe and the existing mutation

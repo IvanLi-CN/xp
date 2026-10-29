@@ -1,5 +1,6 @@
+import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 import {
 	type PrimaryBackendSnapshot,
@@ -19,11 +20,18 @@ export function PrimaryBackendProvider({
 	snapshot?: PrimaryBackendSnapshot;
 }) {
 	const [snapshot, setSnapshot] = useState(getPrimaryBackendSnapshot);
+	const queryClient = useQueryClient();
+	const previousGeneration = useRef(snapshot.generation);
 
 	useEffect(() => {
 		const unsubscribe = subscribePrimaryBackend(setSnapshot);
 		return unsubscribe;
 	}, []);
+	useEffect(() => {
+		if (previousGeneration.current === snapshot.generation) return;
+		previousGeneration.current = snapshot.generation;
+		void queryClient.cancelQueries().then(() => queryClient.removeQueries());
+	}, [queryClient, snapshot.generation]);
 
 	return (
 		<PrimaryBackendContext.Provider value={snapshotOverride ?? snapshot}>

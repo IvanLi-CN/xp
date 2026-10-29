@@ -84,6 +84,10 @@ login page, selected node, and unverified token available for correction without
 After authentication succeeds, the authenticated node inventory is the persistence gate for a new
 Primary Backend target. If the selector is unavailable, operators should use the current page
 origin or an already recorded active-profile candidate rather than entering an arbitrary URL.
+If an authenticated public probe detects that the restored target belongs to another cluster, XP
+clears the token, resets transport to the page/bootstrap recovery origin, and returns to Login
+without sending the token to that cluster. Logout also clears the static runtime-policy transport;
+the next login must establish it again from the bootstrap path.
 
 ### Independent static Web console
 

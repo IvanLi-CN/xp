@@ -19,7 +19,10 @@ import { fetchAdminNodes } from "@/api/adminNodes";
 import { startAdminStatusEvents } from "@/api/adminStatusEvents";
 import { fetchRuntimePolicy } from "@/api/runtimePolicy";
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
-import { isStaticWebConsole } from "@/backend/primaryBackend";
+import {
+	isStaticWebConsole,
+	resetPrimaryBackendSelection,
+} from "@/backend/primaryBackend";
 import { Badge } from "@/components/ui/badge";
 import {
 	CommandDialog,
@@ -106,7 +109,6 @@ import {
 	shouldAutoCheckVersion,
 	writeVersionCheckLastAtMs,
 } from "./versionCheckUi";
-
 type AppShellProps = {
 	brand: {
 		name: string;
@@ -119,7 +121,6 @@ type AppShellProps = {
 	headerStatus?: ReactNode;
 	children?: ReactNode;
 };
-
 function safeHostFromUrl(value: string): string | null {
 	try {
 		const url = new URL(value);
@@ -137,7 +138,6 @@ function formatApiError(err: unknown): string {
 	}
 	return err instanceof Error ? err.message : "request failed";
 }
-
 export function AppShell({
 	brand,
 	navItems,
@@ -154,7 +154,7 @@ export function AppShell({
 	const prefs = useUiPrefs();
 	const primaryBackend = usePrimaryBackend();
 	const staticConsole = isStaticWebConsole();
-	const [adminToken] = useState(() => readAdminToken());
+	const [adminToken, setAdminToken] = useState(() => readAdminToken());
 	const { requestNavigation } = useObjectNavigationGuard();
 	useObjectNavigationBrowserBlocker();
 	const publicBackend = useAuthenticatedBackendProbe({
@@ -163,6 +163,13 @@ export function AppShell({
 		origin: primaryBackend.primaryOrigin,
 		staticConsole,
 	});
+	useEffect(() => {
+		if (!publicBackend.clusterMismatch) return;
+		clearAdminToken();
+		setAdminToken("");
+		resetPrimaryBackendSelection();
+		void navigate({ to: "/login" });
+	}, [navigate, publicBackend.clusterMismatch]);
 	const apiCompatibility = useApiCompatibility(
 		adminToken,
 		runtime.isOnline,
@@ -526,6 +533,7 @@ export function AppShell({
 	const statusBadges = useMemo(() => {
 		const items: ReactNode[] = [];
 		const compatibilityUnavailable =
+			compatibility === null ||
 			compatibility?.kind === "incompatible" ||
 			(compatibility?.kind === "compatible" &&
 				!compatibility.isFeatureAvailable("admin.status-events"));
@@ -596,7 +604,6 @@ export function AppShell({
 				</Badge>,
 			);
 		}
-
 		items.push(
 			<Badge
 				key="realtime"
@@ -623,7 +630,6 @@ export function AppShell({
 				</span>
 			</Badge>,
 		);
-
 		return items;
 	}, [
 		adminAlerts.data,
@@ -686,7 +692,6 @@ export function AppShell({
 		upgradeObservation,
 		versionCheck,
 	]);
-
 	const globalReadStateIndicator = runtime.isReadOnly ? (
 		<ReadStateIndicator
 			tone="warning"
@@ -698,7 +703,6 @@ export function AppShell({
 		/>
 	) : null;
 	const serviceMonitorWorkspace = pathname.startsWith("/monitors");
-
 	const navContent = (
 		<AppResourceNavigation
 			adminToken={adminToken}
@@ -722,7 +726,6 @@ export function AppShell({
 			onRetryCompatibility={() => void apiCompatibility.refetch()}
 		/>
 	);
-
 	return (
 		<div className="min-h-screen bg-background">
 			<div className="p-1.5 sm:p-4 md:p-5">
@@ -776,7 +779,6 @@ export function AppShell({
 									) : null}
 								</Link>
 							</div>
-
 							<div className="hidden items-center justify-center lg:col-start-2 lg:row-start-1 lg:flex">
 								<div className="relative w-full max-w-md">
 									<button
@@ -798,7 +800,6 @@ export function AppShell({
 									</div>
 								</div>
 							</div>
-
 							<div className="flex min-w-0 flex-1 items-center justify-end gap-px sm:gap-2 lg:flex-none">
 								<div className="flex min-w-0 items-center gap-px sm:gap-2">
 									<span className="hidden items-center sm:inline-flex">
@@ -806,7 +807,6 @@ export function AppShell({
 									</span>
 									{versionIndicator}
 								</div>
-
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
 										<Button
@@ -830,7 +830,6 @@ export function AppShell({
 										</div>
 									</DropdownMenuContent>
 								</DropdownMenu>
-
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
 										<Button
@@ -905,7 +904,12 @@ export function AppShell({
 												requestNavigation(() => {
 													clearServiceWorkerRuntimePolicy();
 													clearAppliedRuntimePolicyId();
+													queryClient.removeQueries({
+														queryKey: ["runtimePolicy"],
+													});
+													resetPrimaryBackendSelection();
 													clearAdminToken();
+													setAdminToken("");
 													void navigate({ to: "/login" });
 												});
 											}}
@@ -915,7 +919,6 @@ export function AppShell({
 										</DropdownMenuItem>
 									</DropdownMenuContent>
 								</DropdownMenu>
-
 								<PrimaryBackendSwitcher
 									adminToken={adminToken}
 									clusterId={
@@ -926,7 +929,6 @@ export function AppShell({
 							</div>
 						</div>
 					</header>
-
 					<div className="grid grid-cols-1 gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
 						<aside className="hidden lg:block">{navContent}</aside>
 						<main className="xp-panel p-[var(--xp-page-padding)]">
@@ -951,7 +953,6 @@ export function AppShell({
 					</div>
 				</div>
 			</div>
-
 			<CommandDialog
 				open={commandPaletteOpen}
 				onOpenChange={setCommandPaletteOpen}
@@ -980,7 +981,6 @@ export function AppShell({
 					</CommandGroup>
 				</CommandList>
 			</CommandDialog>
-
 			<Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
 				<SheetContent
 					side="left"

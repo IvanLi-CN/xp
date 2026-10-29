@@ -23,14 +23,25 @@ export function useAuthenticatedBackendProbe(args: {
 		clusterId,
 		origin,
 		ready: staticConsole || !isOnline,
+		clusterMismatch: false,
 	});
 	const probe = useCallback(
 		async (signal?: AbortSignal): Promise<boolean> => {
 			if (staticConsole || !isOnline) {
-				setProbeState({ clusterId, origin, ready: true });
+				setProbeState({
+					clusterId,
+					origin,
+					ready: true,
+					clusterMismatch: false,
+				});
 				return true;
 			}
-			setProbeState({ clusterId, origin, ready: false });
+			setProbeState({
+				clusterId,
+				origin,
+				ready: false,
+				clusterMismatch: false,
+			});
 			const result = await probeBackendOrigin({ origin, signal });
 			if (signal?.aborted) return false;
 			const current = getPrimaryBackendSnapshot();
@@ -39,9 +50,21 @@ export function useAuthenticatedBackendProbe(args: {
 			}
 			if (result.clusterId !== clusterId) {
 				hydratePrimaryBackendProfile(result.clusterId);
+				const clusterMismatch = clusterId !== null;
+				setProbeState({
+					clusterId,
+					origin,
+					ready: false,
+					clusterMismatch,
+				});
 				return false;
 			}
-			setProbeState({ clusterId, origin, ready: true });
+			setProbeState({
+				clusterId,
+				origin,
+				ready: true,
+				clusterMismatch: false,
+			});
 			return true;
 		},
 		[clusterId, isOnline, origin, staticConsole],
@@ -58,7 +81,7 @@ export function useAuthenticatedBackendProbe(args: {
 		void probe(controller.signal).catch(() => undefined);
 		return () => controller.abort();
 	}, [isOnline, probe, staticConsole]);
-	return { probe, ready };
+	return { probe, ready, clusterMismatch: probeState.clusterMismatch };
 }
 
 export function useHydratePrimaryBackendProfile(args: {
