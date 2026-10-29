@@ -101,6 +101,50 @@ pub(super) async fn require_mesh_gate_on_voters(state: &AppState) -> Result<(), 
     require_capability_on_voters_with_probe(state, MESH_GATE_CAPABILITY, None, true).await
 }
 
+pub(super) async fn require_xmux_settings_on_members(state: &AppState) -> Result<(), ApiError> {
+    require_capability_on_voters_with_probe(
+        state,
+        "admin.endpoint-vless-xmux-settings-v1",
+        None,
+        true,
+    )
+    .await
+}
+
+pub(super) async fn lock_xmux_settings_change(
+    state: &AppState,
+) -> Result<Option<tokio::sync::OwnedMutexGuard<()>>, ApiError> {
+    if !super::is_leader(&raft_metrics(state)) {
+        return Err(ApiError::conflict(
+            "XMUX settings must be changed on the current cluster leader",
+        ));
+    }
+    let guard = crate::raft_membership_guard::membership_operation_gate()
+        .lock_owned()
+        .await;
+    if !super::is_leader(&raft_metrics(state)) {
+        return Err(ApiError::conflict(
+            "cluster leadership changed; retry XMUX settings on the current leader",
+        ));
+    }
+    if state
+        .store
+        .lock()
+        .await
+        .state()
+        .active_membership_operation()
+        .is_some()
+    {
+        return Err(ApiError::new(
+            "coordinated_upgrade_required",
+            StatusCode::CONFLICT,
+            "XMUX settings cannot change while a membership operation is active",
+        ));
+    }
+    require_xmux_settings_on_members(state).await?;
+    Ok(Some(guard))
+}
+
 async fn require_capability_on_voters(
     state: &AppState,
     capability: &str,

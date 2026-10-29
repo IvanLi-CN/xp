@@ -199,6 +199,100 @@ fn xhttp_clash_yaml_and_raw_uri_carry_the_fixed_reuse_contract() {
 }
 
 #[test]
+fn custom_xmux_is_used_in_yaml_and_raw_uri() {
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
+    let mut endpoint = xhttp_endpoint();
+    endpoint.meta["mihomo_xmux"] = serde_json::json!({
+        "max_connections": "0",
+        "max_concurrency": "16-32",
+        "c_max_reuse_times": "10-20",
+        "h_max_reusable_secs": "60-120",
+        "h_keep_alive_period": 45
+    });
+    let membership = membership("n1", "e1");
+    let yaml = build_clash_yaml(
+        SEED,
+        &u,
+        std::slice::from_ref(&membership),
+        std::slice::from_ref(&endpoint),
+        std::slice::from_ref(&n),
+    )
+    .unwrap();
+    if let Some(binary) = std::env::var_os("XP_TEST_MIHOMO_BIN") {
+        let fixture = tempfile::NamedTempFile::new().unwrap();
+        let mut connection_endpoint = endpoint.clone();
+        connection_endpoint.meta["mihomo_xmux"]["max_connections"] = serde_json::json!("2-4");
+        connection_endpoint.meta["mihomo_xmux"]["max_concurrency"] = serde_json::json!("0");
+        let connection_yaml = build_clash_yaml(
+            SEED,
+            &u,
+            std::slice::from_ref(&membership),
+            &[connection_endpoint],
+            std::slice::from_ref(&n),
+        )
+        .unwrap();
+        for generated in [&yaml, &connection_yaml] {
+            std::fs::write(fixture.path(), generated).unwrap();
+            let result = std::process::Command::new(&binary)
+                .args(["-t", "-f"])
+                .arg(fixture.path())
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "Mihomo rejected generated YAML: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+    }
+    let root: Value = serde_yaml::from_str(&yaml).unwrap();
+    let reuse = &proxies(&root)[0]["xhttp-opts"]["reuse-settings"];
+    assert_eq!(reuse["max-concurrency"].as_str(), Some("16-32"));
+    assert_eq!(reuse["c-max-reuse-times"].as_str(), Some("10-20"));
+    assert_eq!(reuse["h-max-reusable-secs"].as_str(), Some("60-120"));
+    assert_eq!(reuse["h-keep-alive-period"].as_i64(), Some(45));
+    let profile = profile();
+    let main_yaml = build_mihomo_yaml(
+        SEED,
+        &u,
+        std::slice::from_ref(&membership),
+        std::slice::from_ref(&endpoint),
+        std::slice::from_ref(&n),
+        &profile,
+    )
+    .unwrap();
+    let main: Value = serde_yaml::from_str(&main_yaml).unwrap();
+    let system_yaml = build_mihomo_provider_system_yaml(
+        SEED,
+        &u,
+        std::slice::from_ref(&membership),
+        std::slice::from_ref(&endpoint),
+        std::slice::from_ref(&n),
+    )
+    .unwrap();
+    let system: Value = serde_yaml::from_str(&system_yaml).unwrap();
+    for rendered in [&main, &system] {
+        for name in ["node-1-reality", "node-1-reality-chain"] {
+            assert_eq!(
+                &named_proxy(rendered, name)["xhttp-opts"]["reuse-settings"],
+                reuse
+            );
+        }
+    }
+    let raw = build_raw_text(SEED, &u, &[membership], &[endpoint], &[n]).unwrap();
+    let url = reqwest::Url::parse(raw.trim()).unwrap();
+    let extra = url.query_pairs().find(|(key, _)| key == "extra").unwrap().1;
+    let extra: serde_json::Value = serde_json::from_str(&extra).unwrap();
+    assert_eq!(extra["xmux"]["maxConcurrency"], "16-32");
+    assert_eq!(extra["xmux"]["hKeepAlivePeriod"], 45);
+}
+
+#[test]
 fn xhttp_is_preserved_for_direct_chain_and_provider_render_paths() {
     let u = user("alice");
     let n = node(

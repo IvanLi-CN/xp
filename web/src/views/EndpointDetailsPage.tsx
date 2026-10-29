@@ -22,6 +22,7 @@ import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EndpointMihomoSmuxSettings } from "../components/EndpointMihomoSmuxSettings";
+import { EndpointRealityFingerprintSettings } from "../components/EndpointRealityFingerprintSettings";
 import { EndpointVlessTransportSettings } from "../components/EndpointVlessTransportSettings";
 import { InlineHelpTooltip } from "../components/InlineHelpTooltip";
 import { PageHeader } from "../components/PageHeader";
@@ -70,6 +71,7 @@ import {
 	canaryUpstreamSuggestionsFromAuthorities,
 } from "../utils/managedVlessForm";
 import { changedMihomoSmuxConfig } from "../utils/mihomoSmux";
+import { xmuxFromDraft } from "../utils/mihomoXmux";
 import {
 	normalizeRealityServerName,
 	realityServerNameSuggestionFromDest,
@@ -101,6 +103,9 @@ export function EndpointDetailsPage() {
 	const probesCapability = useApiCapability("admin.node-probes");
 	const mihomoSmuxCapability = useApiCapability("admin.endpoint-mihomo-smux");
 	const vlessXhttpCapability = useApiCapability("admin.endpoint-vless-xhttp");
+	const xmuxCapability = useApiCapability(
+		"admin.endpoint-vless-xmux-settings-v1",
+	);
 	const inputClass = inputControlClass(prefs.density);
 	const selectClass = selectControlClass(prefs.density);
 	const endpointQuery = useQuery({
@@ -183,6 +188,8 @@ export function EndpointDetailsPage() {
 			}
 			if (endpoint.kind === "vless_reality_vision_tcp") {
 				if (transportChanged) payload.transport = endpointDraft.vlessTransport;
+				if (xmuxCapability.available && endpointDraft.xmuxChanged)
+					payload.mihomo_xmux = xmuxFromDraft(endpointDraft.xmux);
 				const metaSnapshot = parseVlessMeta(endpoint.meta);
 				if (!metaSnapshot.managedDefault) {
 					const fingerprintValue = realityFingerprint.trim() || "chrome";
@@ -634,6 +641,10 @@ export function EndpointDetailsPage() {
 								<EndpointVlessTransportSettings
 									visible={Boolean(vlessMeta) && vlessXhttpCapability.available}
 									value={endpointDraft.vlessTransport}
+									xmux={
+										xmuxCapability.available ? endpointDraft.xmux : undefined
+									}
+									onXmuxChange={endpointDraft.setXmux}
 									onValueChange={endpointDraft.setVlessTransport}
 									disabled={patchMutation.isPending || runtime.isReadOnly}
 									existing
@@ -676,35 +687,12 @@ export function EndpointDetailsPage() {
 												"Camouflage domains (TLS SNI). Use the destination suggestion only when it should also be a serverName."
 											}
 										/>
-										<details className="border-t border-border/70 pt-3">
-											<summary className="cursor-pointer list-none text-sm font-medium">
-												Advanced (optional)
-											</summary>
-											<div className="pt-3">
-												<div className={FORM_ROW_CLASS}>
-													<div className="flex items-center gap-1">
-														<span className="text-sm font-medium font-mono">
-															fingerprint
-														</span>
-														<InlineHelpTooltip label="About REALITY fingerprint">
-															Defaults to chrome.
-														</InlineHelpTooltip>
-													</div>
-													<Input
-														type="text"
-														className={inputClass}
-														value={realityFingerprint}
-														disabled={
-															patchMutation.isPending || runtime.isReadOnly
-														}
-														placeholder="chrome"
-														onChange={(event) =>
-															setRealityFingerprint(event.target.value)
-														}
-													/>
-												</div>
-											</div>
-										</details>
+										<EndpointRealityFingerprintSettings
+											value={realityFingerprint}
+											inputClass={inputClass}
+											disabled={patchMutation.isPending || runtime.isReadOnly}
+											onChange={setRealityFingerprint}
+										/>
 									</>
 								) : null}
 								{vlessMeta?.managedDefault ? (

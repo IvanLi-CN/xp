@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { MihomoXmuxConfig } from "../utils/mihomoXmux";
 
 import { throwIfNotOk } from "./backendError";
 import { fetchJsonWithTimeout } from "./request";
@@ -134,6 +135,7 @@ export type AdminEndpointCreateRequest =
 			accepted_authorities?: never;
 			mihomo_smux?: MihomoSmuxConfig;
 			transport?: VlessRealityTransport;
+			mihomo_xmux?: MihomoXmuxConfig;
 	  }
 	| {
 			kind: "vless_reality_vision_tcp";
@@ -144,6 +146,7 @@ export type AdminEndpointCreateRequest =
 			accepted_authorities?: string[] | null;
 			mihomo_smux?: MihomoSmuxConfig;
 			transport?: VlessRealityTransport;
+			mihomo_xmux?: MihomoXmuxConfig;
 	  }
 	| {
 			kind: "ss2022_2022_blake3_aes_128_gcm";
@@ -159,6 +162,7 @@ export type AdminEndpointPatchRequest = {
 	accepted_authorities?: string[] | null;
 	mihomo_smux?: MihomoSmuxConfig;
 	transport?: VlessRealityTransport;
+	mihomo_xmux?: MihomoXmuxConfig;
 };
 
 export async function fetchAdminEndpoints(

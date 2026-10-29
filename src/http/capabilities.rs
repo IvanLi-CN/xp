@@ -57,6 +57,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         "admin.service-monitor-tcp-v1",
         "admin.endpoint-mihomo-smux",
         "admin.endpoint-vless-xhttp",
+        "admin.endpoint-vless-xmux-settings-v1",
         "admin.endpoint-conditional-update",
         "admin.alerts",
         "admin.resource-monitoring",

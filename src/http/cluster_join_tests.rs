@@ -525,6 +525,57 @@ fn app_with_blocking_catch_up(
 }
 
 #[tokio::test]
+async fn cluster_join_requires_xmux_capability_when_custom_settings_exist() {
+    let tmp = TempDir::new().unwrap();
+    let (app, store, _, _) = app_with_blocking_catch_up(&tmp);
+    store.lock().await.state_mut().endpoints.insert(
+        "xmux-test".to_owned(),
+        crate::domain::Endpoint {
+            endpoint_id: "xmux-test".to_owned(),
+            node_id: "node-1".to_owned(),
+            tag: "xmux-test".to_owned(),
+            kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: json!({"mihomo_xmux": {"max_connections": "2"}}),
+        },
+    );
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .unwrap();
+    let join_token = signed_join_token(&cluster, &ca_pem, &ca_key_pem);
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+            .unwrap();
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
+    let mut request = json!({
+        "join_token": join_token,
+        "node_name": "node-2",
+        "access_host": "example.com",
+        "api_base_url": "https://node-2.internal:8443",
+        "csr_pem": csr.csr_pem,
+    });
+    let response = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/cluster/join",
+            request.clone(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    request["xmux_settings_v1"] = json!(true);
+    let response = app
+        .oneshot(req_authed_json("POST", "/api/cluster/join", request))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn cluster_join_returns_bootstrap_before_learner_catch_up() {
     let tmp = TempDir::new().unwrap();
     let (app, _store, wait_calls, promotion_calls) = app_with_blocking_catch_up(&tmp);

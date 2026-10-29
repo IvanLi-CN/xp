@@ -19,3 +19,27 @@ fn desired_inbound_hash_changes_for_vless_transport() {
     endpoint.meta["transport"] = serde_json::json!("xhttp");
     assert_ne!(desired_inbound_hash(&endpoint).unwrap(), vision_hash);
 }
+
+#[test]
+fn desired_inbound_hash_ignores_xmux_subscription_policy() {
+    let mut endpoint = Endpoint {
+        endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+        node_id: xp_test_fixtures::label_node1().to_owned(),
+        tag: xp_test_fixtures::label_vless_test().to_owned(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: 443,
+        meta: serde_json::json!({
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
+            "transport": "xhttp"
+        }),
+    };
+    let before = desired_inbound_hash(&endpoint).unwrap();
+    endpoint.meta["mihomo_xmux"] = serde_json::json!({
+        "max_connections":"2", "max_concurrency":"0", "c_max_reuse_times":"0",
+        "h_max_reusable_secs":"0", "h_keep_alive_period":-1
+    });
+    std::assert_eq!(desired_inbound_hash(&endpoint).unwrap(), before);
+}

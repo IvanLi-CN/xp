@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { fetchAdminConfig } from "../api/adminConfig";
@@ -15,6 +15,7 @@ import {
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { useApiCapability } from "../api/useApiCompatibility";
+import { AdvancedSettings } from "../components/AdvancedSettings";
 import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { EndpointVlessTransportSettings } from "../components/EndpointVlessTransportSettings";
@@ -57,6 +58,7 @@ import {
 	mergeManagedVlessAutocompleteSuggestions,
 	normalizeAcceptedAuthorities,
 } from "../utils/managedVlessForm";
+import { DEFAULT_XMUX_DRAFT, xmuxFromDraft } from "../utils/mihomoXmux";
 import { resourceListCache } from "./adminEndpointsCache";
 
 const kindOptions = [
@@ -117,6 +119,10 @@ export function EndpointNewPage() {
 	const configCapability = useApiCapability("admin.config");
 	const mihomoSmuxCapability = useApiCapability("admin.endpoint-mihomo-smux");
 	const vlessXhttpCapability = useApiCapability("admin.endpoint-vless-xhttp");
+	const xmuxCapability = useApiCapability(
+		"admin.endpoint-vless-xmux-settings-v1",
+	);
+	const [xmux, setXmux] = useState(DEFAULT_XMUX_DRAFT);
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -210,6 +216,10 @@ export function EndpointNewPage() {
 				}
 
 				return createAdminEndpoint(adminToken, {
+					...(xmuxCapability.available &&
+					JSON.stringify(xmux) !== JSON.stringify(DEFAULT_XMUX_DRAFT)
+						? { mihomo_xmux: xmuxFromDraft(xmux) }
+						: {}),
 					kind: values.kind,
 					node_id: values.nodeId,
 					port: values.port,
@@ -606,6 +616,8 @@ export function EndpointNewPage() {
 										{vlessXhttpCapability.available ? (
 											<EndpointVlessTransportSettings
 												value={transport}
+												xmux={xmuxCapability.available ? xmux : undefined}
+												onXmuxChange={setXmux}
 												disabled={createMutation.isPending}
 												onValueChange={(value) =>
 													form.setValue("transport", value, {
@@ -619,10 +631,7 @@ export function EndpointNewPage() {
 
 								{kind === "ss2022_2022_blake3_aes_128_gcm" ? (
 									mihomoSmuxCapability.available ? (
-										<details className="border-t border-border/70 pt-3">
-											<summary className="cursor-pointer text-sm font-medium">
-												高级设置：SS2022 连接复用 (SMux)
-											</summary>
+										<AdvancedSettings title="高级设置：SS2022 连接复用 (SMux)">
 											<div className="space-y-3 pt-3">
 												<div className="flex items-center gap-2">
 													<Checkbox
@@ -731,7 +740,7 @@ export function EndpointNewPage() {
 													</label>
 												</div>
 											</div>
-										</details>
+										</AdvancedSettings>
 									) : (
 										<p className="text-xs text-muted-foreground">
 											This server does not support per-endpoint Mihomo SMux

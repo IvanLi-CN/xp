@@ -16,6 +16,7 @@ import {
 	authoritySetsEqual,
 	parseVlessMeta,
 } from "../utils/endpointDetailsVless";
+import { DEFAULT_XMUX_DRAFT, xmuxDraftFromValue } from "../utils/mihomoXmux";
 import { normalizeRealityServerName } from "../utils/realityServerName";
 
 type SetValue<Value> = Dispatch<SetStateAction<Value>>;
@@ -78,6 +79,7 @@ export function useEndpointDraft(
 	draft: EndpointDraftState,
 	setters: EndpointDraftSetters,
 ) {
+	const [xmux, setXmux] = useState(DEFAULT_XMUX_DRAFT);
 	const [vlessTransport, setVlessTransport] =
 		useState<VlessRealityTransport>("vision_tcp");
 	const settersRef = useRef(setters);
@@ -85,6 +87,7 @@ export function useEndpointDraft(
 	const discard = useCallback(() => {
 		if (!endpoint) return;
 		hydrateEndpointDraft(endpoint, settersRef.current);
+		setXmux(xmuxDraftFromValue(endpoint.meta.mihomo_xmux));
 		setVlessTransport(
 			endpoint.kind === "vless_reality_vision_tcp"
 				? parseVlessRealityTransport(endpoint.meta.transport)
@@ -99,6 +102,10 @@ export function useEndpointDraft(
 		endpoint?.kind === "vless_reality_vision_tcp" &&
 		vlessTransport !== parseVlessRealityTransport(endpoint.meta.transport);
 
+	const xmuxChanged =
+		endpoint?.kind === "vless_reality_vision_tcp" &&
+		JSON.stringify(xmux) !==
+			JSON.stringify(xmuxDraftFromValue(endpoint.meta.mihomo_xmux));
 	const isDirty = useMemo(() => {
 		if (!endpoint || draft.port !== String(endpoint.port))
 			return Boolean(endpoint);
@@ -121,6 +128,7 @@ export function useEndpointDraft(
 				.filter((value) => value.length > 0);
 			return (
 				vlessTransportChanged ||
+				xmuxChanged ||
 				draft.realityDest.trim() !== snapshot.realityDest ||
 				(draft.realityFingerprint.trim() || "chrome") !==
 					snapshot.realityFingerprint ||
@@ -132,15 +140,19 @@ export function useEndpointDraft(
 			.filter((value) => value.length > 0);
 		return (
 			vlessTransportChanged ||
+			xmuxChanged ||
 			draft.upstreamUrl.trim() !== snapshot.canaryUpstreamUrl ||
 			draft.upstreamMode !== snapshot.canaryUpstreamMode ||
 			!authoritySetsEqual(authorities, snapshot.acceptedAuthorities)
 		);
-	}, [draft, endpoint, vlessTransportChanged]);
+	}, [draft, endpoint, vlessTransportChanged, xmuxChanged]);
 
 	return {
 		discard,
 		isDirty,
+		xmux,
+		setXmux,
+		xmuxChanged,
 		vlessTransport,
 		setVlessTransport,
 		vlessTransportChanged,

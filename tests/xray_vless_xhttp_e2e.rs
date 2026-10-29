@@ -448,6 +448,7 @@ fn xhttp_endpoint(port: u16) -> Endpoint {
             active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
             canary_upstream: xp_test_fixtures::none(),
             accepted_authorities: xp_test_fixtures::host_list_empty(),
+            mihomo_xmux: None,
             mihomo_smux: MihomoSmuxConfig::default(),
             transport: VlessRealityTransport::Xhttp,
             managed_default: true,
@@ -577,6 +578,13 @@ async fn mihomo_xhttp_xmux_reuses_one_connection_and_recovers_after_disconnect()
     let reality_destination = spawn_reality_destination().await;
     let target = spawn_plain_http_server().await;
     let mut endpoint = xhttp_endpoint(vless_port);
+    endpoint.meta["mihomo_xmux"] = serde_json::json!({
+        "max_connections": "1-1",
+        "max_concurrency": "0",
+        "c_max_reuse_times": "0",
+        "h_max_reusable_secs": "0",
+        "h_keep_alive_period": -1
+    });
     set_reality_destination_port(&mut endpoint, reality_destination.addr.port());
     let uuid = credentials::derive_vless_uuid(
         xp_test_fixtures::primary_token(),

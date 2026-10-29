@@ -95,6 +95,7 @@ fn short_id_rotation_preserves_missing_legacy_optional_fields() {
         active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
         canary_upstream: xp_test_fixtures::none(),
         accepted_authorities: xp_test_fixtures::host_list_empty(),
+        mihomo_xmux: None,
         mihomo_smux: Default::default(),
         transport: Default::default(),
         managed_default: false,

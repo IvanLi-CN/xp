@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { MihomoSmuxConfig } from "../api/adminEndpoints";
+import { AdvancedSettings } from "./AdvancedSettings";
 import { InlineHelpTooltip } from "./InlineHelpTooltip";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
@@ -38,10 +39,7 @@ export function EndpointMihomoSmuxSettings({
 	const controlsDisabled = disabled || !config.enabled;
 
 	return (
-		<details className="border-t border-border/70 pt-3">
-			<summary className="cursor-pointer list-none text-sm font-medium">
-				高级设置：SS2022 连接复用 (SMux)
-			</summary>
+		<AdvancedSettings title="高级设置：SS2022 连接复用 (SMux)">
 			<div className="space-y-3 pt-3">
 				<div className="flex items-center gap-2">
 					<Checkbox
@@ -124,6 +122,6 @@ export function EndpointMihomoSmuxSettings({
 					</label>
 				</div>
 			</div>
-		</details>
+		</AdvancedSettings>
 	);
 }

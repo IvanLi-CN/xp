@@ -73,6 +73,9 @@ export const ManagedDefaultFieldsVisible: Story = {
 		await expect(
 			await canvas.findByRole("radio", { name: "XHTTP / XMUX" }),
 		).toBeChecked();
+		await expect(
+			await canvas.findByRole("textbox", { name: "Maximum connections" }),
+		).toHaveValue("1");
 		await userEvent.hover(
 			await canvas.findByRole("button", { name: "About VLESS transport" }),
 		);

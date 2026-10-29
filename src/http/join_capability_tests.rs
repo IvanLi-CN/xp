@@ -55,6 +55,44 @@ const LEGACY_CAPABILITIES_PATH: &str = "/api/capabilities";
 const MESH_HEALTH_PATH: &str = "/api/admin/_internal/mesh/health";
 const CAPABILITY_RESPONSE_TEST_TIMEOUT: Duration = Duration::from_secs(20);
 
+#[test]
+fn xmux_change_detection_covers_forwarded_create_patch_and_reset() {
+    let mut endpoint = crate::domain::Endpoint {
+        endpoint_id: "endpoint".into(),
+        node_id: "node".into(),
+        tag: "tag".into(),
+        kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
+        port: 443,
+        meta: serde_json::json!({}),
+    };
+    let baseline = endpoint.clone();
+    endpoint.meta["mihomo_xmux"] = serde_json::json!({"max_connections": "2"});
+    assert!(crate::raft::app::xmux_command_requires_local_leader(
+        &DesiredStateCommand::UpsertEndpoint {
+            endpoint: endpoint.clone(),
+            expected: None,
+        }
+    ));
+    assert!(crate::raft::app::xmux_command_requires_local_leader(
+        &DesiredStateCommand::UpsertEndpoint {
+            endpoint: endpoint.clone(),
+            expected: Some(baseline.clone()),
+        }
+    ));
+    assert!(!crate::raft::app::xmux_command_requires_local_leader(
+        &DesiredStateCommand::UpsertEndpoint {
+            endpoint: endpoint.clone(),
+            expected: Some(endpoint.clone()),
+        }
+    ));
+    assert!(crate::raft::app::xmux_command_requires_local_leader(
+        &DesiredStateCommand::UpsertEndpoint {
+            endpoint: baseline,
+            expected: Some(endpoint),
+        }
+    ));
+}
+
 #[derive(Clone, Copy)]
 enum InternalCapabilitiesBody {
     Json,

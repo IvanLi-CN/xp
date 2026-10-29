@@ -75,7 +75,12 @@ function renderPage({
 			...API_CAPABILITIES.filter(
 				(capability) => capability !== "admin.endpoint-vless-xhttp",
 			),
-			...(xhttpSupported ? ["admin.endpoint-vless-xhttp"] : []),
+			...(xhttpSupported
+				? [
+						"admin.endpoint-vless-xhttp",
+						"admin.endpoint-vless-xmux-settings-v1",
+					]
+				: []),
 			...(smuxSupported ? ["admin.endpoint-mihomo-smux"] : []),
 		],
 	});
@@ -204,6 +209,71 @@ describe("EndpointDetailsPage", () => {
 				},
 			);
 		});
+	});
+
+	it("saves an XMUX policy and retains values across strategy switches", async () => {
+		vi.mocked(fetchAdminEndpoint).mockResolvedValue({
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port53844(),
+			meta: {
+				reality: {
+					dest: fixtureCatalog.address.loopback39043(),
+					server_names: fixtureCatalog.hostList.edge5(),
+					server_names_source: "manual",
+					fingerprint: "chrome",
+				},
+				transport: "xhttp",
+				managed_default: false,
+			},
+		});
+		renderPage();
+		fireEvent.click(await screen.findByText("Advanced: VLESS transport"));
+		fireEvent.change(screen.getByLabelText("Maximum connections"), {
+			target: { value: "3-5" },
+		});
+		fireEvent.click(
+			screen.getByRole("radio", { name: "Per-connection concurrency" }),
+		);
+		expect(screen.getByLabelText("Maximum concurrency")).toHaveValue("16-32");
+		fireEvent.keyDown(
+			screen.getByRole("slider", {
+				name: "Maximum concurrency adjustment minimum",
+			}),
+			{ key: "ArrowRight" },
+		);
+		expect(screen.getByLabelText("Maximum concurrency")).toHaveValue("17-32");
+		fireEvent.change(screen.getByLabelText("Maximum concurrency"), {
+			target: { value: "16-32" },
+		});
+		fireEvent.click(
+			screen.getByRole("radio", { name: "Limit total connections" }),
+		);
+		expect(screen.getByLabelText("Maximum connections")).toHaveValue("3-5");
+		fireEvent.click(
+			screen.getByRole("radio", { name: "Per-connection concurrency" }),
+		);
+		fireEvent.change(screen.getByLabelText("Maximum reuse times"), {
+			target: { value: "5-10" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(patchAdminEndpoint).toHaveBeenCalledWith(
+				"admintoken",
+				fixtureCatalog.endpointId.fixture172(),
+				expect.objectContaining({
+					mihomo_xmux: {
+						max_connections: "0",
+						max_concurrency: "16-32",
+						c_max_reuse_times: "5-10",
+						h_max_reusable_secs: "0",
+						h_keep_alive_period: -1,
+					},
+				}),
+			),
+		);
 	});
 
 	it("falls back missing legacy transport metadata and patches an XHTTP switch", async () => {
