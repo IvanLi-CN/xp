@@ -41,6 +41,11 @@
 - A current-origin probe that proves the persisted cluster identity is stale rebinds only the
   current tab to the new cluster and discards old candidates before authentication; the new
   profile remains non-durable until authenticated inventory hydration.
+- The authenticated AppShell waits for a current-mount public cluster identity before sending
+  token-bearing compatibility traffic; its inventory query is cluster-keyed and only matching
+  inventory can hydrate or persist the active profile.
+- Login-page probe completions are epoch-bound so a probe from a discarded cluster cannot mark a
+  candidate ready after a stale-profile rebind.
 - Successful authenticated node-inventory hydration is the persistence gate for a new primary;
   authentication rejection keeps the login page and unverified token out of local storage.
 - Login submission is gated on the selected target's public probe and the existing mutation

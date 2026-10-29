@@ -221,7 +221,7 @@ export const DashboardMobile: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		expect(
-			within(canvasElement).getByTestId("dashboard-alert-mobile-list"),
+			await within(canvasElement).findByTestId("dashboard-alert-mobile-list"),
 		).toBeInTheDocument();
 	},
 };

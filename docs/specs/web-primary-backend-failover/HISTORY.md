@@ -30,3 +30,5 @@
   失败候选可重试，未知写入结果显式提示，并补齐移动端边距视觉证据。
 - 处理 stale profile：当前 origin 的公共探测确认集群身份变化时，只重绑当前 tab 的内存状态，
   丢弃旧集群候选并延迟到 authenticated inventory 后再持久化。
+- 收口认证启动边界：AppShell 先完成当前挂载的公开 cluster identity，再启动带 token 的
+  compatibility 请求；inventory query 按 cluster 隔离，过期 probe 不能污染新 profile。

@@ -19,10 +19,7 @@ import { fetchAdminNodes } from "@/api/adminNodes";
 import { startAdminStatusEvents } from "@/api/adminStatusEvents";
 import { fetchRuntimePolicy } from "@/api/runtimePolicy";
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
-import {
-	hydratePrimaryBackendProfile,
-	isStaticWebConsole,
-} from "@/backend/primaryBackend";
+import { isStaticWebConsole } from "@/backend/primaryBackend";
 import { Badge } from "@/components/ui/badge";
 import {
 	CommandDialog,
@@ -68,6 +65,10 @@ import {
 	useApiCompatibility,
 } from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
+import {
+	useAuthenticatedBackendProbe,
+	useHydratePrimaryBackendProfile,
+} from "../hooks/usePublicBackendReadiness";
 import { useAppRuntime } from "../offline/appRuntime";
 import { clearAppliedRuntimePolicyId } from "../offline/runtimePolicySession";
 import { clearServiceWorkerRuntimePolicy } from "../offline/serviceWorkerPolicy";
@@ -150,9 +151,19 @@ export function AppShell({
 	const primaryBackend = usePrimaryBackend();
 	const staticConsole = isStaticWebConsole();
 	const [adminToken] = useState(() => readAdminToken());
-	const apiCompatibility = useApiCompatibility(adminToken, runtime.isOnline);
 	const { requestNavigation } = useObjectNavigationGuard();
 	useObjectNavigationBrowserBlocker();
+	const publicBackendProbe = useAuthenticatedBackendProbe({
+		clusterId: primaryBackend.clusterId,
+		origin: primaryBackend.primaryOrigin,
+		staticConsole,
+	});
+	const apiCompatibility = useApiCompatibility(
+		adminToken,
+		runtime.isOnline,
+		publicBackendProbe,
+		primaryBackend.clusterId,
+	);
 	const compatibility = apiCompatibility.data ?? null;
 	const alertsCapabilityAvailable =
 		apiCompatibility.data?.kind === "compatible" &&
@@ -214,9 +225,8 @@ export function AppShell({
 				: !runtime.isOnline && compatibility === null
 					? "API compatibility is unavailable while offline."
 					: null;
-
 	const backendNodes = useQuery({
-		queryKey: ["adminNodes", adminToken],
+		queryKey: ["adminNodes", adminToken, primaryBackend.clusterId],
 		enabled:
 			!staticConsole &&
 			adminToken.length > 0 &&
@@ -224,7 +234,12 @@ export function AppShell({
 			clusterInfo.data?.cluster_id === primaryBackend.clusterId,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
-
+	useHydratePrimaryBackendProfile({
+		clusterId: clusterInfo.data?.cluster_id,
+		primaryClusterId: primaryBackend.clusterId,
+		nodes: backendNodes.data?.items,
+		nodesReady: backendNodes.isSuccess,
+	});
 	const refreshBackendCandidates = useCallback(() => {
 		if (!adminToken || !primaryBackend.clusterId) return;
 		if (staticConsole) void runtimePolicy.refetch();
@@ -236,20 +251,6 @@ export function AppShell({
 		runtimePolicy.refetch,
 		staticConsole,
 	]);
-
-	useEffect(() => {
-		const clusterId = clusterInfo.data?.cluster_id;
-		if (!clusterId) return;
-		hydratePrimaryBackendProfile(
-			clusterId,
-			backendNodes.isSuccess ? backendNodes.data.items : undefined,
-		);
-	}, [
-		clusterInfo.data?.cluster_id,
-		backendNodes.data?.items,
-		backendNodes.isSuccess,
-	]);
-
 	useStaticRuntimePolicy({
 		enabled: staticConsole,
 		clusterId: clusterInfo.data?.cluster_id,
@@ -261,7 +262,6 @@ export function AppShell({
 		clusterId: clusterInfo.data?.cluster_id,
 		expiresAt: runtimePolicy.data?.expires_at,
 	});
-
 	useEffect(() => {
 		if (primaryBackend.state !== "unreachable") return;
 		refreshBackendCandidates();

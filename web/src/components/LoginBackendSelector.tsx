@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
 import {
@@ -70,6 +70,7 @@ export function LoginBackendSelector({
 	const [probeErrors, setProbeErrors] = useState<Record<string, string>>({});
 	const [selectingOrigin, setSelectingOrigin] = useState<string | null>(null);
 	const [selectionError, setSelectionError] = useState<string | null>(null);
+	const probeEpoch = useRef(0);
 	const candidates = useMemo(() => {
 		const byOrigin = new Map<string, BackendCandidate>();
 		const current = currentPageCandidate();
@@ -89,9 +90,11 @@ export function LoginBackendSelector({
 		typeof window === "undefined" ? "" : window.location.origin;
 
 	const runProbe = useCallback(
-		async (candidate: BackendCandidate) => {
+		async (candidate: BackendCandidate, epoch = probeEpoch.current) => {
 			const origin = candidate.origin;
+			const isCurrentEpoch = () => epoch === probeEpoch.current;
 			if (!backend.clusterId && origin !== pageOrigin) {
+				if (!isCurrentEpoch()) return;
 				setProbeStatus((current) => ({ ...current, [origin]: "error" }));
 				setProbeErrors((current) => ({
 					...current,
@@ -108,8 +111,11 @@ export function LoginBackendSelector({
 			try {
 				if (origin === pageOrigin) {
 					const result = await probeBackendOrigin({ origin });
+					if (!isCurrentEpoch()) return;
 					if (result.clusterId !== backend.clusterId) {
+						probeEpoch.current += 1;
 						hydratePrimaryBackendProfile(result.clusterId);
+						return;
 					}
 				} else if (backend.clusterId) {
 					await probeBackendCandidate({
@@ -119,8 +125,10 @@ export function LoginBackendSelector({
 				} else {
 					await probeBackendOrigin({ origin });
 				}
+				if (!isCurrentEpoch()) return;
 				setProbeStatus((current) => ({ ...current, [origin]: "ready" }));
 			} catch (error) {
+				if (!isCurrentEpoch()) return;
 				setProbeStatus((current) => ({ ...current, [origin]: "error" }));
 				setProbeErrors((current) => ({
 					...current,
@@ -134,10 +142,11 @@ export function LoginBackendSelector({
 
 	useEffect(() => {
 		if (staticConsole) return;
+		const epoch = ++probeEpoch.current;
 		setSelectionError(null);
 		setProbeStatus({});
 		setProbeErrors({});
-		for (const candidate of candidates) void runProbe(candidate);
+		for (const candidate of candidates) void runProbe(candidate, epoch);
 	}, [candidates, runProbe, staticConsole]);
 
 	const currentTargetReady =
@@ -227,7 +236,7 @@ export function LoginBackendSelector({
 								const status = probeStatus[candidate.origin];
 								const isCurrent = candidate.origin === backend.primaryOrigin;
 								const isChecking =
-									status === undefined || status === "checking";
+									!isCurrent && (status === undefined || status === "checking");
 								const isError = status === "error";
 								const isSelecting = selectingOrigin === candidate.origin;
 								return (
