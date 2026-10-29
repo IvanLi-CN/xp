@@ -373,7 +373,13 @@ export const SaveError: Story = {
 		await expect(feedback.getByRole("alert")).toHaveTextContent(
 			"The previous save failed",
 		);
-		await expect(dialog).not.toHaveTextContent("The previous save failed");
+		await expect(
+			within(dialog).getByTestId("mihomo-workspace-surface"),
+		).not.toHaveTextContent("The previous save failed");
+		const feedbackOverlay = document.querySelector(
+			"[data-mihomo-feedback-overlay]",
+		);
+		expect(feedbackOverlay?.closest('[role="dialog"]')).toBe(dialog);
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: /extra_proxies_yaml/ }),
 		);
@@ -453,6 +459,65 @@ export const Saving: Story = {
 	},
 };
 
+const mobileFilesPlay = async ({
+	canvasElement,
+}: { canvasElement: HTMLElement }) => {
+	const canvas = within(canvasElement);
+	await userEvent.click(canvas.getByRole("button", { name: "Expand editor" }));
+	const dialog = await within(document.body).findByRole("dialog");
+	const filesButton = within(dialog).queryByRole("button", {
+		name: "Open files",
+	});
+	if (filesButton) {
+		await userEvent.click(filesButton);
+		await expect(
+			within(document.body).getByRole("heading", { name: "Files" }),
+		).toBeInTheDocument();
+		await userEvent.click(
+			within(document.body).getByRole("button", {
+				name: /extra_proxies_yaml/,
+			}),
+		);
+		await expect(filesButton).toHaveFocus();
+	} else {
+		await expect(dialog.querySelector("aside")).not.toBeNull();
+	}
+};
+
+const mobileFilesOutcomeUnknownPlay = async ({
+	canvasElement,
+}: { canvasElement: HTMLElement }) => {
+	const canvas = within(canvasElement);
+	await userEvent.click(canvas.getByRole("button", { name: "Expand editor" }));
+	const dialog = await within(document.body).findByRole("dialog");
+	const filesButton = within(dialog).queryByRole("button", {
+		name: "Open files",
+	});
+	if (!filesButton) {
+		const feedbackStatus = within(document.body).getByRole("status");
+		await expect(feedbackStatus).toBeVisible();
+		expect(
+			document
+				.querySelector("[data-mihomo-feedback-overlay]")
+				?.closest('[role="dialog"]'),
+		).toBe(dialog);
+		return;
+	}
+	await userEvent.click(filesButton);
+	const filesHeading = await within(document.body).findByRole("heading", {
+		name: "Files",
+	});
+	const sheet = filesHeading.closest('[role="dialog"]');
+	expect(sheet).not.toBeNull();
+	const feedbackStatus = within(document.body).getByRole("status");
+	await expect(feedbackStatus).toBeVisible();
+	expect(
+		document
+			.querySelector("[data-mihomo-feedback-overlay]")
+			?.closest('[role="dialog"]'),
+	).toBe(sheet);
+};
+
 export const MobileFiles: Story = {
 	args: {},
 	parameters: {
@@ -467,28 +532,39 @@ export const MobileFiles: Story = {
 			},
 		},
 	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await userEvent.click(
-			canvas.getByRole("button", { name: "Expand editor" }),
-		);
-		const dialog = await within(document.body).findByRole("dialog");
-		const filesButton = within(dialog).queryByRole("button", {
-			name: "Files",
-		});
-		if (filesButton) {
-			await userEvent.click(filesButton);
-			await expect(
-				within(document.body).getByRole("heading", { name: "Files" }),
-			).toBeInTheDocument();
-			await userEvent.click(
-				within(document.body).getByRole("button", {
-					name: /extra_proxies_yaml/,
-				}),
-			);
-			await expect(filesButton).toHaveFocus();
-		} else {
-			await expect(dialog.querySelector("aside")).not.toBeNull();
-		}
+	play: mobileFilesPlay,
+};
+
+export const MobileFilesNarrow: Story = {
+	args: {},
+	parameters: {
+		viewport: {
+			defaultViewport: "mihomoMobile320",
+			viewports: {
+				mihomoMobile320: {
+					name: "Mihomo mobile (320x568)",
+					styles: { width: "320px", height: "568px" },
+					type: "mobile",
+				},
+			},
+		},
 	},
+	play: mobileFilesPlay,
+};
+
+export const MobileFilesOutcomeUnknown: Story = {
+	args: { startWithUnknown: true },
+	parameters: {
+		viewport: {
+			defaultViewport: "mihomoMobile393",
+			viewports: {
+				mihomoMobile393: {
+					name: "Mihomo mobile (393x852)",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	play: mobileFilesOutcomeUnknownPlay,
 };

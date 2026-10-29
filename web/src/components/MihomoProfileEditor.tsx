@@ -194,7 +194,7 @@ function MihomoSaveFeedbackPanel({
 				className={cn(
 					"pointer-events-auto max-h-[min(60vh,32rem)] w-full overflow-y-auto",
 					"rounded-xl border border-border bg-popover/95 p-4 text-popover-foreground",
-					"shadow-2xl backdrop-blur",
+					"shadow-sm",
 				)}
 			>
 				{feedback && copy ? (
@@ -206,7 +206,7 @@ function MihomoSaveFeedbackPanel({
 						<div className="flex items-start gap-2">
 							<Icon
 								name="tabler:alert-triangle"
-								className="mt-0.5 size-4 shrink-0 text-warning-foreground"
+								className="mt-0.5 size-4 shrink-0 text-foreground"
 								ariaLabel="Save result unknown"
 							/>
 							<div className="min-w-0 space-y-1">
@@ -216,7 +216,7 @@ function MihomoSaveFeedbackPanel({
 								</div>
 							</div>
 						</div>
-						<div className="text-xs text-warning-foreground">
+						<div className="text-xs text-foreground">
 							A manual retry may overwrite changes made elsewhere in the
 							meantime.
 						</div>
@@ -262,7 +262,7 @@ function MihomoSaveFeedbackPanel({
 					</div>
 				) : null}
 				{showRetryWarning ? (
-					<div className="mt-3 text-xs text-warning-foreground" role="alert">
+					<div className="mt-3 text-xs text-foreground" role="alert">
 						Click Retry save again to confirm. This may overwrite changes made
 						elsewhere.
 					</div>
@@ -299,6 +299,10 @@ export function MihomoProfileEditor({
 	const [selectedDocument, setSelectedDocument] =
 		useState<MihomoProfileDocumentId>("mixin_yaml");
 	const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
+	const [expandedFeedbackMount, setExpandedFeedbackMount] =
+		useState<HTMLElement | null>(null);
+	const [filesFeedbackMount, setFilesFeedbackMount] =
+		useState<HTMLElement | null>(null);
 	const inlineMount = useRef<HTMLDivElement>(null);
 	const expandedMount = useRef<HTMLDivElement>(null);
 	const entryButton = useRef<HTMLDivElement>(null);
@@ -521,7 +525,9 @@ export function MihomoProfileEditor({
 			)
 		: null;
 	const feedbackPortalContainer =
-		portalContainer?.ownerDocument.body ??
+		(filesOpen && filesFeedbackMount) ||
+		(expanded && expandedFeedbackMount) ||
+		portalContainer?.ownerDocument.body ||
 		(typeof document !== "undefined" ? document.body : null);
 	const feedbackContent =
 		feedbackPortalContainer &&
@@ -611,7 +617,7 @@ export function MihomoProfileEditor({
 				>
 					<div
 						data-testid="mihomo-workspace-surface"
-						className="flex min-h-0 flex-1 flex-col bg-background text-foreground"
+						className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground"
 						style={{
 							height: viewportMetrics
 								? `${viewportMetrics.height}px`
@@ -685,14 +691,13 @@ export function MihomoProfileEditor({
 									</>
 								) : null}
 								<div ref={filesTrigger} className="md:hidden">
-									<Button
-										variant="outline"
-										size="sm"
-										iconLeft={<Icon name="tabler:files" />}
+									<IconButton
+										label="Open files"
+										tooltip="Open files"
 										onClick={() => setFilesOpen(true)}
 									>
-										Files
-									</Button>
+										<Icon name="tabler:files" ariaLabel="Open files" />
+									</IconButton>
 								</div>
 								<Button
 									className="hidden sm:inline-flex"
@@ -791,6 +796,10 @@ export function MihomoProfileEditor({
 							</main>
 						</div>
 					</div>
+					<div
+						ref={setExpandedFeedbackMount}
+						className="pointer-events-none fixed inset-0"
+					/>
 				</DialogContent>
 			</Dialog>
 
@@ -820,6 +829,10 @@ export function MihomoProfileEditor({
 						</div>
 					</div>
 					<div className="min-h-0 flex-1 overflow-y-auto p-2">{fileList}</div>
+					<div
+						ref={setFilesFeedbackMount}
+						className="pointer-events-none fixed inset-0"
+					/>
 				</SheetContent>
 			</Sheet>
 			<MihomoSubscriptionImportDialog
