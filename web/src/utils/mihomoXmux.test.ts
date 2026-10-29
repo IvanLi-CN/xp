@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { buildEndpointCreateMeta } from "../../.storybook/mocks/buildEndpointCreateMeta";
+import { normalizeFixtureEndpointPatch } from "../../.storybook/mocks/fixtureMutationPolicy";
+import { type AdminEndpoint, RealityConfigSchema } from "../api/adminEndpoints";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	DEFAULT_XMUX_DRAFT,
 	xmuxDraftFromValue,
@@ -34,5 +38,53 @@ describe("XMUX draft", () => {
 		expect(() =>
 			xmuxFromDraft({ ...DEFAULT_XMUX_DRAFT, keepAlive: "-2" }),
 		).toThrow();
+	});
+	it("preserves custom policy in Storybook create and update responses", () => {
+		const policy = xmuxFromDraft({
+			...DEFAULT_XMUX_DRAFT,
+			strategy: "concurrency",
+		});
+		const meta = buildEndpointCreateMeta(
+			{
+				kind: fixtureCatalog.endpoint.vlessKind(),
+				node_id: fixtureCatalog.nodeId.fixture118(),
+				port: fixtureCatalog.endpoint.port53844(),
+				reality: RealityConfigSchema.parse(fixtureCatalog.endpoint.reality()),
+				mihomo_xmux: policy,
+			},
+			[],
+		);
+		expect(meta.mihomo_xmux).toEqual(policy);
+		const managed = buildEndpointCreateMeta(
+			{
+				kind: fixtureCatalog.endpoint.vlessKind(),
+				node_id: fixtureCatalog.nodeId.fixture118(),
+				port: fixtureCatalog.endpoint.port53844(),
+				mihomo_xmux: policy,
+			},
+			[
+				{
+					node_id: fixtureCatalog.nodeId.fixture118(),
+					node_name: fixtureCatalog.nodeName.fixture33(),
+					access_host: fixtureCatalog.host.fixture119(),
+					api_base_url: fixtureCatalog.service.fixture34(),
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.resetNode(),
+				},
+			],
+		);
+		expect(managed.mihomo_xmux).toEqual(policy);
+		const updated = normalizeFixtureEndpointPatch<AdminEndpoint>(
+			{
+				endpoint_id: fixtureCatalog.endpointId.fixture120(),
+				node_id: fixtureCatalog.nodeId.fixture118(),
+				tag: fixtureCatalog.endpointTag.fixture121(),
+				kind: fixtureCatalog.endpoint.vlessKind(),
+				port: fixtureCatalog.endpoint.port53844(),
+				meta: {},
+			},
+			{ mihomo_xmux: policy },
+		);
+		expect(updated?.meta.mihomo_xmux).toEqual(policy);
 	});
 });

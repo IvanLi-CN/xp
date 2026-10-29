@@ -793,8 +793,8 @@ and confirm every affected client runs Mihomo `v1.19.29` or newer. Change one en
 1. Select **XHTTP / XMUX** and save. XP removes and rebuilds that endpoint's Xray inbound, so
    active connections on that endpoint are interrupted briefly.
 2. Re-render and refresh the affected YAML subscriptions. The new profile carries `network: xhttp`
-   and fixed low-resource XMUX settings; an old Vision/TCP profile cannot connect to the rebuilt
-   inbound.
+   and the endpoint's configured XMUX policy (one connection by default).
+   An old Vision/TCP profile cannot connect to the rebuilt inbound.
 3. Observe new connection samples after the historical chart window has rolled forward. The TCP
    chart still combines business traffic and Mesh traffic, so use the endpoint's new steady-state
    samples rather than an old 24-hour peak as the migration verdict.

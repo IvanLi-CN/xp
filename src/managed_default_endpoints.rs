@@ -360,7 +360,7 @@ where
             );
             write_command(DesiredStateCommand::UpsertEndpoint {
                 endpoint: next,
-                expected: None,
+                expected: Some(endpoint.clone()),
             })
             .await?;
         }
@@ -384,7 +384,7 @@ where
             );
             write_command(DesiredStateCommand::UpsertEndpoint {
                 endpoint: next,
-                expected: None,
+                expected: Some(endpoint.clone()),
             })
             .await?;
         } else {

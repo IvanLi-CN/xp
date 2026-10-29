@@ -58,9 +58,9 @@ const CAPABILITY_RESPONSE_TEST_TIMEOUT: Duration = Duration::from_secs(20);
 #[test]
 fn xmux_change_detection_covers_forwarded_create_patch_and_reset() {
     let mut endpoint = crate::domain::Endpoint {
-        endpoint_id: "endpoint".into(),
-        node_id: "node".into(),
-        tag: "tag".into(),
+        endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
         kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::json!({}),

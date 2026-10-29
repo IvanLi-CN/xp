@@ -131,3 +131,34 @@ fn short_id_rotation_preserves_missing_legacy_optional_fields() {
     assert!(endpoint.meta.get("mihomo_smux").is_none());
     assert!(endpoint.meta.get("transport").is_none());
 }
+
+#[test]
+fn stale_short_id_rotation_does_not_overwrite_xmux_policy() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
+    let endpoint = vless_endpoint("vless_1", xp_test_fixtures::label_node1());
+    let endpoint_id = endpoint.endpoint_id.clone();
+    store
+        .state_mut()
+        .endpoints
+        .insert(endpoint_id.clone(), endpoint);
+    let mut rng = StdRng::seed_from_u64(42);
+    let (rotation, _) = store
+        .build_rotate_vless_reality_short_id_command(&endpoint_id, &mut rng)
+        .unwrap()
+        .unwrap();
+    store
+        .state_mut()
+        .endpoints
+        .get_mut(&endpoint_id)
+        .unwrap()
+        .meta["mihomo_xmux"] =
+        serde_json::to_value(crate::protocol::MihomoXmuxConfig::default()).unwrap();
+    assert!(rotation.apply(store.state_mut()).is_err());
+    assert!(
+        store.state().endpoints[&endpoint_id]
+            .meta
+            .get("mihomo_xmux")
+            .is_some()
+    );
+}

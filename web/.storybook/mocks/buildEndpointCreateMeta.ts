@@ -68,6 +68,7 @@ export function buildEndpointCreateMeta(
 		return {};
 	}
 	const transport = payload.transport ?? "xhttp";
+	const xmux = payload.mihomo_xmux ? { mihomo_xmux: payload.mihomo_xmux } : {};
 
 	if (payload.reality) {
 		if (
@@ -76,6 +77,7 @@ export function buildEndpointCreateMeta(
 			return {
 				reality: fixtureCatalog.endpoint.reality(),
 				transport,
+				...xmux,
 			};
 		}
 		if (
@@ -87,6 +89,7 @@ export function buildEndpointCreateMeta(
 			return {
 				reality: fixtureCatalog.endpoint.realityAlternate(),
 				transport,
+				...xmux,
 			};
 		}
 		throw new Error("reality must be an approved synthetic fixture value");
@@ -101,6 +104,7 @@ export function buildEndpointCreateMeta(
 				: fixtureCatalog.endpoint.reality(),
 		managed_default: true,
 		transport,
+		...xmux,
 	};
 	applyFixtureCanaryUpstream(meta, payload.canary_upstream);
 	applyFixtureAuthorities(meta, payload.accepted_authorities);

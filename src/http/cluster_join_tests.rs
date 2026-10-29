@@ -529,11 +529,11 @@ async fn cluster_join_requires_xmux_capability_when_custom_settings_exist() {
     let tmp = TempDir::new().unwrap();
     let (app, store, _, _) = app_with_blocking_catch_up(&tmp);
     store.lock().await.state_mut().endpoints.insert(
-        "xmux-test".to_owned(),
+        xp_test_fixtures::primary_endpoint_id().to_owned(),
         crate::domain::Endpoint {
-            endpoint_id: "xmux-test".to_owned(),
-            node_id: "node-1".to_owned(),
-            tag: "xmux-test".to_owned(),
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
             kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
             port: 443,
             meta: json!({"mihomo_xmux": {"max_connections": "2"}}),
