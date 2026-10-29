@@ -11,6 +11,7 @@
 - Missing or invalid tab values default to Service runtime.
 - Runtime aggregation, persistent status, and Web presentation remain maintained in their sources.
 - DDNS reconciles each family independently and retains partial errors in the runtime snapshot.
+  Restart clears missing counts and keeps the restored status unknown until a new round completes.
 
 ## Recorded Delivery State
 
