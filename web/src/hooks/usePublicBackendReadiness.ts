@@ -49,6 +49,12 @@ export function useAuthenticatedBackendProbe(args: {
 		probeState.origin === origin &&
 		probeState.clusterId === clusterId &&
 		probeState.ready;
+	useEffect(() => {
+		if (staticConsole) return;
+		const controller = new AbortController();
+		void probe(controller.signal).catch(() => undefined);
+		return () => controller.abort();
+	}, [probe, staticConsole]);
 	return { probe, ready };
 }
 
@@ -57,10 +63,18 @@ export function useHydratePrimaryBackendProfile(args: {
 	primaryClusterId: string | null;
 	nodes?: BackendNode[];
 	nodesReady: boolean;
+	staticConsole?: boolean;
 }) {
-	const { clusterId, nodes, nodesReady, primaryClusterId } = args;
+	const {
+		clusterId,
+		nodes,
+		nodesReady,
+		primaryClusterId,
+		staticConsole = false,
+	} = args;
 	useEffect(() => {
-		if (!clusterId || clusterId !== primaryClusterId) return;
+		if (!clusterId || (!staticConsole && clusterId !== primaryClusterId))
+			return;
 		hydratePrimaryBackendProfile(clusterId, nodesReady ? nodes : undefined);
-	}, [clusterId, nodes, nodesReady, primaryClusterId]);
+	}, [clusterId, nodes, nodesReady, primaryClusterId, staticConsole]);
 }

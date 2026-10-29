@@ -603,6 +603,8 @@ export async function selectPreAuthBackend(
 	const origin = canonicalBackendOrigin(originValue);
 	if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
 	const pageOrigin = getPageOrigin();
+	const startingClusterId = state.clusterId;
+	const startingGeneration = state.generation;
 	const knownCandidate = state.candidates.some(
 		(candidate) => canonicalBackendOrigin(candidate.origin) === origin,
 	);
@@ -619,9 +621,20 @@ export async function selectPreAuthBackend(
 			lastSwitchTimedOut: true,
 		};
 	}
+	if (
+		state.clusterId !== startingClusterId ||
+		state.generation !== startingGeneration
+	) {
+		updateState({ state: "ready" });
+		throw new Error("Backend candidates changed while waiting for a mutation.");
+	}
 	const currentCandidate = state.candidates.find(
 		(candidate) => canonicalBackendOrigin(candidate.origin) === origin,
 	);
+	if (!currentCandidate && origin !== pageOrigin) {
+		updateState({ state: "ready" });
+		throw new Error("Backend candidate is no longer available.");
+	}
 	const candidate =
 		currentCandidate ??
 		({

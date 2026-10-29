@@ -58,13 +58,17 @@ import {
 	startAdminUpgrade,
 } from "../api/adminUpgrade";
 import { isBackendApiError } from "../api/backendError";
-import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import {
 	ApiCompatibilityProvider,
 	useApiCompatibility,
 } from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
+import {
+	primaryClusterInfoQueryKey,
+	usePrimaryClusterInfo,
+	useRefreshBackendCandidates,
+} from "../hooks/usePrimaryBackendQueries";
 import {
 	useAuthenticatedBackendProbe,
 	useHydratePrimaryBackendProfile,
@@ -164,13 +168,15 @@ export function AppShell({
 		publicBackend.probe,
 		`${primaryBackend.primaryOrigin}:${primaryBackend.generation}`,
 	);
-	const compatibility = apiCompatibility.data ?? null;
+	const compatibility = publicBackend.ready
+		? (apiCompatibility.data ?? null)
+		: null;
 	const alertsCapabilityAvailable =
-		apiCompatibility.data?.kind === "compatible" &&
-		apiCompatibility.data.isFeatureAvailable("admin.alerts");
+		compatibility?.kind === "compatible" &&
+		compatibility.isFeatureAvailable("admin.alerts");
 	const upgradeCapabilityAvailable =
-		apiCompatibility.data?.kind === "compatible" &&
-		apiCompatibility.data.isFeatureAvailable("admin.upgrade");
+		compatibility?.kind === "compatible" &&
+		compatibility.isFeatureAvailable("admin.upgrade");
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
 	const [versionCheck, dispatchVersionCheck] = useReducer(
@@ -192,15 +198,14 @@ export function AppShell({
 	const lastUpgradeStateRef = useRef<string | null>(null);
 	const lastMeshRevisionRef = useRef<number | null>(null);
 	const upgradeObservation = useUpgradeObservation();
-
 	const health = useQuery({
 		queryKey: ["health"],
 		queryFn: ({ signal }) => fetchHealth(signal),
 	});
-	const clusterInfo = useQuery({
-		queryKey: ["clusterInfo"],
-		queryFn: ({ signal }) => fetchClusterInfo(signal),
-	});
+	const clusterInfo = usePrimaryClusterInfo(
+		primaryBackend.primaryOrigin,
+		primaryBackend.generation,
+	);
 	const runtimePolicy = useQuery({
 		queryKey: ["runtimePolicy", adminToken, primaryBackend.clusterId],
 		enabled:
@@ -240,18 +245,16 @@ export function AppShell({
 		primaryClusterId: primaryBackend.clusterId,
 		nodes: backendNodes.data?.items,
 		nodesReady: backendNodes.isSuccess,
-	});
-	const refreshBackendCandidates = useCallback(() => {
-		if (!adminToken || !primaryBackend.clusterId) return;
-		if (staticConsole) void runtimePolicy.refetch();
-		else void backendNodes.refetch();
-	}, [
-		adminToken,
-		backendNodes.refetch,
-		primaryBackend.clusterId,
-		runtimePolicy.refetch,
 		staticConsole,
-	]);
+	});
+	const refreshBackendCandidates = useRefreshBackendCandidates({
+		adminToken,
+		clusterId: primaryBackend.clusterId,
+		probe: publicBackend.probe,
+		refetchInventory: backendNodes.refetch,
+		refetchPolicy: runtimePolicy.refetch,
+		staticConsole,
+	});
 	useStaticRuntimePolicy({
 		enabled: staticConsole,
 		clusterId: clusterInfo.data?.cluster_id,
@@ -266,7 +269,6 @@ export function AppShell({
 		if (primaryBackend.state !== "unreachable") return;
 		refreshBackendCandidates();
 	}, [primaryBackend.state, refreshBackendCandidates]);
-
 	const previousBackendGeneration = useRef(primaryBackend.generation);
 	useEffect(() => {
 		if (previousBackendGeneration.current === primaryBackend.generation) return;
@@ -276,13 +278,11 @@ export function AppShell({
 			await queryClient.invalidateQueries();
 		})();
 	}, [primaryBackend.generation, queryClient]);
-
 	const adminAlerts = useQuery({
 		queryKey: ["adminAlerts", adminToken],
 		enabled: adminToken.length > 0 && alertsCapabilityAvailable,
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
 	});
-
 	const adminUpgradeStatus = useQuery({
 		queryKey: ["adminUpgradeStatus", adminToken],
 		enabled: adminToken.length > 0 && upgradeCapabilityAvailable,
@@ -296,7 +296,6 @@ export function AppShell({
 				: false;
 		},
 	});
-
 	const adminUpgradeStart = useMutation({
 		mutationFn: async (payload: { targetTag: string }) => {
 			if (!upgradeCapabilityAvailable) {
@@ -333,12 +332,10 @@ export function AppShell({
 		adminUpgradeStart.reset();
 		upgradeObservation.clear();
 	}, [adminUpgradeStart.reset, upgradeObservation.clear]);
-
 	useEffect(() => {
 		if (!upgradeStatusData) return;
 		upgradeObservation.observeStatus(upgradeStatusData.status);
 	}, [upgradeObservation.observeStatus, upgradeStatusData]);
-
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (!(event.ctrlKey || event.metaKey)) return;
@@ -349,11 +346,10 @@ export function AppShell({
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, []);
-
 	const runVersionCheck = useCallback(
 		async (options?: { force?: boolean }) => {
 			const force = options?.force ?? false;
-			if (!runtime.isOnline) return;
+			if (!runtime.isOnline || (!staticConsole && !publicBackend.ready)) return;
 			const nowMs = Date.now();
 			const canRun =
 				force ||
@@ -379,9 +375,14 @@ export function AppShell({
 				dispatchVersionCheck({ type: "fail", message });
 			}
 		},
-		[adminToken, runtime.isOnline, versionCheckLastAtMs],
+		[
+			adminToken,
+			publicBackend.ready,
+			runtime.isOnline,
+			staticConsole,
+			versionCheckLastAtMs,
+		],
 	);
-
 	useEffect(() => {
 		// The stream lifetime is bound to the selected backend generation.
 		void primaryBackend.generation;
@@ -390,7 +391,6 @@ export function AppShell({
 			return;
 		}
 
-		const compatibility = apiCompatibility.data;
 		const statusEventsAvailable =
 			runtime.isOnline &&
 			compatibility?.kind === "compatible" &&
@@ -434,7 +434,13 @@ export function AppShell({
 				if (message.type === "snapshot") {
 					const lastEventAtMs = Date.parse(message.data.emitted_at);
 					queryClient.setQueryData(["health"], message.data.health);
-					queryClient.setQueryData(["clusterInfo"], message.data.cluster_info);
+					queryClient.setQueryData(
+						primaryClusterInfoQueryKey(
+							primaryBackend.primaryOrigin,
+							primaryBackend.generation,
+						),
+						message.data.cluster_info,
+					);
 					queryClient.setQueryData(
 						["adminAlerts", adminToken],
 						message.data.alerts,
@@ -463,16 +469,15 @@ export function AppShell({
 				}
 			},
 		});
-
 		return () => handle.close();
 	}, [
 		adminToken,
-		apiCompatibility.data,
+		compatibility,
 		primaryBackend.generation,
+		primaryBackend.primaryOrigin,
 		queryClient,
 		runtime.isOnline,
 	]);
-
 	useEffect(() => {
 		const onFocus = () => {
 			void runVersionCheck();
@@ -485,12 +490,10 @@ export function AppShell({
 
 		return () => window.removeEventListener("focus", onFocus);
 	}, [runVersionCheck]);
-
 	useEffect(() => {
 		const nextState = adminUpgradeStatus.data?.status.state ?? null;
 		const prevState = lastUpgradeStateRef.current;
 		lastUpgradeStateRef.current = nextState;
-
 		if (!shouldRefreshAfterUpgradeTransition(prevState, nextState)) {
 			return;
 		}
@@ -507,7 +510,6 @@ export function AppShell({
 		health,
 		runVersionCheck,
 	]);
-
 	const effectiveNavGroups =
 		navGroups ??
 		(navItems
@@ -535,13 +537,12 @@ export function AppShell({
 			),
 		[effectiveNavGroups],
 	);
-
 	const statusBadges = useMemo(() => {
 		const items: ReactNode[] = [];
 		const compatibilityUnavailable =
-			apiCompatibility.data?.kind === "incompatible" ||
-			(apiCompatibility.data?.kind === "compatible" &&
-				!apiCompatibility.data.isFeatureAvailable("admin.status-events"));
+			compatibility?.kind === "incompatible" ||
+			(compatibility?.kind === "compatible" &&
+				!compatibility.isFeatureAvailable("admin.status-events"));
 		const healthOk = health.isSuccess && health.data?.status === "ok";
 		items.push(
 			<Badge
@@ -647,13 +648,11 @@ export function AppShell({
 		clusterInfo.isSuccess,
 		health.data,
 		health.isSuccess,
-		apiCompatibility.data,
+		compatibility,
 		runtime.isOnline,
 		statusStream.connected,
 	]);
-
 	const statusMenuBadges = headerStatus ?? statusBadges;
-
 	const versionIndicator = useMemo(() => {
 		const xpVersion =
 			clusterInfo.isSuccess && clusterInfo.data?.xp_version
@@ -722,6 +721,7 @@ export function AppShell({
 			compatibility={compatibility}
 			compatibilityError={compatibilityError}
 			compatibilityPending={
+				(!staticConsole && !publicBackend.ready) ||
 				apiCompatibility.isFetching ||
 				(staticConsole &&
 					adminToken.length > 0 &&
@@ -944,7 +944,7 @@ export function AppShell({
 					<div className="grid grid-cols-1 gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
 						<aside className="hidden lg:block">{navContent}</aside>
 						<main className="xp-panel p-[var(--xp-page-padding)]">
-							<ApiCompatibilityProvider value={apiCompatibility.data ?? null}>
+							<ApiCompatibilityProvider value={compatibility}>
 								{children ?? <Outlet />}
 							</ApiCompatibilityProvider>
 						</main>
