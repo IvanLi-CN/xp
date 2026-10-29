@@ -222,7 +222,7 @@ describe("<UserDetailsPage /> Mihomo cache", () => {
 		expect(mockPutAdminUserMihomoProfile).not.toHaveBeenCalled();
 		await waitFor(() =>
 			expect(
-				within(page.container).getByText(/changed elsewhere/),
+				within(document.body).getByText(/changed elsewhere/),
 			).toBeInTheDocument(),
 		);
 		expect(editor).toHaveTextContent("local draft");
@@ -253,12 +253,12 @@ describe("<UserDetailsPage /> Mihomo cache", () => {
 		);
 		await waitFor(() =>
 			expect(
-				within(page.container).getByText("Save result is still unknown"),
+				within(document.body).getByText("Save result is still unknown"),
 			).toBeTruthy(),
 		);
 		expect(editor).toHaveTextContent("draft after timeout");
 		expect(
-			within(page.container).getByRole("button", { name: "Check again" }),
+			within(document.body).getByRole("button", { name: "Check again" }),
 		).toBeTruthy();
 	});
 });

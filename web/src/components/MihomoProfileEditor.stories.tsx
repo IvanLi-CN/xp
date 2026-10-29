@@ -360,6 +360,7 @@ export const SaveError: Story = {
 	args: { startWithError: true },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const feedback = within(document.body);
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Expand editor" }),
 		);
@@ -369,9 +370,10 @@ export const SaveError: Story = {
 		});
 		expect(saveButton).toBeEnabled();
 		await userEvent.click(saveButton);
-		await expect(within(dialog).getByRole("alert")).toHaveTextContent(
+		await expect(feedback.getByRole("alert")).toHaveTextContent(
 			"The previous save failed",
 		);
+		await expect(dialog).not.toHaveTextContent("The previous save failed");
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: /extra_proxies_yaml/ }),
 		);
@@ -383,7 +385,7 @@ export const SaveError: Story = {
 		);
 		await expect(dialog).toHaveTextContent("keep me too");
 		await userEvent.click(saveButton);
-		await expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+		await expect(feedback.queryByRole("alert")).not.toBeInTheDocument();
 	},
 };
 
@@ -391,22 +393,28 @@ export const OutcomeUnknown: Story = {
 	args: { startWithUnknown: true },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const feedback = within(document.body);
 		await expect(
-			canvas.getByText("Save result is still unknown"),
+			canvas.queryByText("Save result is still unknown"),
+		).not.toBeInTheDocument();
+		await expect(
+			feedback.getByText("Save result is still unknown"),
 		).toBeVisible();
-		await expect(canvas.getByRole("status")).toHaveAttribute(
+		await expect(feedback.getByRole("status")).toHaveAttribute(
 			"aria-live",
 			"polite",
 		);
 		await expect(
-			canvas.getByRole("button", { name: "Check again" }),
+			feedback.getByRole("button", { name: "Check again" }),
 		).toBeEnabled();
-		await userEvent.click(canvas.getByRole("button", { name: "Retry save" }));
-		await expect(canvasElement).toHaveTextContent(
+		await userEvent.click(feedback.getByRole("button", { name: "Retry save" }));
+		await expect(feedback.getByRole("alert")).toHaveTextContent(
 			"Click Retry save again to confirm",
 		);
-		await userEvent.click(canvas.getByRole("button", { name: "Check again" }));
-		await expect(canvas.getByRole("status")).toHaveTextContent(
+		await userEvent.click(
+			feedback.getByRole("button", { name: "Check again" }),
+		);
+		await expect(feedback.getByRole("status")).toHaveTextContent(
 			"Read-back matches your draft",
 		);
 	},

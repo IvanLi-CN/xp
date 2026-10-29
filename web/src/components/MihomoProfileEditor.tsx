@@ -155,69 +155,120 @@ function feedbackCopy(verification: MihomoSaveVerification): {
 
 function MihomoSaveFeedbackPanel({
 	feedback,
+	error,
+	retryAcknowledged,
 	isVerifying,
 	onVerify,
 }: {
 	feedback: MihomoSaveFeedback | null | undefined;
+	error: string | null;
+	retryAcknowledged: boolean;
 	isVerifying: boolean;
 	onVerify?: () => Promise<boolean>;
 }) {
-	if (!feedback) return null;
-	const copy = feedbackCopy(feedback.verification);
-	const details = [
-		["Error code", feedback.diagnostics.code],
-		["Dispatch state", feedback.diagnostics.dispatchState],
-		["Cause", feedback.diagnostics.cause],
-		["Target node", feedback.diagnostics.targetNodeId],
-		["Support ID", feedback.diagnostics.supportId],
-	].filter(([, value]) => value);
+	const copy = feedback ? feedbackCopy(feedback.verification) : null;
+	const details = feedback
+		? [
+				["Error code", feedback.diagnostics.code],
+				["Dispatch state", feedback.diagnostics.dispatchState],
+				["Cause", feedback.diagnostics.cause],
+				["Target node", feedback.diagnostics.targetNodeId],
+				["Support ID", feedback.diagnostics.supportId],
+			].filter(([, value]) => value)
+		: [];
+	const showError =
+		error !== null && (!feedback || error === MIHOMO_DRAFT_PERSISTENCE_WARNING);
+	const showRetryWarning =
+		retryAcknowledged && feedback?.kind === "outcome_unknown";
+	if (!feedback && !showError && !showRetryWarning) return null;
+
 	return (
-		<output
-			className="xp-alert xp-alert-warning space-y-2 px-4 py-3"
-			aria-live="polite"
-			aria-atomic="true"
+		<div
+			className={
+				"pointer-events-none fixed inset-x-4 bottom-4 z-[70] flex justify-end " +
+				"sm:inset-x-auto sm:right-4 sm:w-[min(32rem,calc(100vw-2rem))]"
+			}
+			data-mihomo-feedback-overlay
 		>
-			<div className="flex items-start gap-2">
-				<Icon
-					name="tabler:alert-triangle"
-					className="mt-0.5 size-4 shrink-0"
-					ariaLabel="Save result unknown"
-				/>
-				<div className="min-w-0 space-y-1">
-					<div className="font-medium">{copy.title}</div>
-					<div className="text-sm">{copy.description}</div>
-				</div>
-			</div>
-			<div className="text-xs text-warning-foreground">
-				A manual retry may overwrite changes made elsewhere in the meantime.
-			</div>
-			{details.length > 0 ? (
-				<details className="text-xs">
-					<summary className="cursor-pointer select-none font-medium">
-						Technical details
-					</summary>
-					<dl className="mt-2 grid gap-1 sm:grid-cols-[auto_1fr] sm:gap-x-3">
-						{details.map(([label, value]) => (
-							<div key={label} className="contents">
-								<dt className="text-muted-foreground">{label}</dt>
-								<dd className="font-mono break-all">{value}</dd>
+			<div
+				className={cn(
+					"pointer-events-auto max-h-[min(60vh,32rem)] w-full overflow-y-auto",
+					"rounded-xl border border-border bg-popover/95 p-4 text-popover-foreground",
+					"shadow-2xl backdrop-blur",
+				)}
+			>
+				{feedback && copy ? (
+					<output
+						className="block space-y-2"
+						aria-live="polite"
+						aria-atomic="true"
+					>
+						<div className="flex items-start gap-2">
+							<Icon
+								name="tabler:alert-triangle"
+								className="mt-0.5 size-4 shrink-0 text-warning-foreground"
+								ariaLabel="Save result unknown"
+							/>
+							<div className="min-w-0 space-y-1">
+								<div className="font-medium">{copy.title}</div>
+								<div className="text-sm text-muted-foreground">
+									{copy.description}
+								</div>
 							</div>
-						))}
-					</dl>
-				</details>
-			) : null}
-			{onVerify ? (
-				<Button
-					variant="outline"
-					size="sm"
-					loading={isVerifying}
-					disabled={isVerifying}
-					onClick={() => void onVerify()}
-				>
-					Check again
-				</Button>
-			) : null}
-		</output>
+						</div>
+						<div className="text-xs text-warning-foreground">
+							A manual retry may overwrite changes made elsewhere in the
+							meantime.
+						</div>
+						{details.length > 0 ? (
+							<details className="text-xs">
+								<summary className="cursor-pointer select-none font-medium">
+									Technical details
+								</summary>
+								<dl className="mt-2 grid gap-1 sm:grid-cols-[auto_1fr] sm:gap-x-3">
+									{details.map(([label, value]) => (
+										<div key={label} className="contents">
+											<dt className="text-muted-foreground">{label}</dt>
+											<dd className="break-all font-mono">{value}</dd>
+										</div>
+									))}
+								</dl>
+							</details>
+						) : null}
+						{onVerify ? (
+							<Button
+								variant="outline"
+								size="sm"
+								loading={isVerifying}
+								disabled={isVerifying}
+								onClick={() => void onVerify()}
+							>
+								Check again
+							</Button>
+						) : null}
+					</output>
+				) : null}
+				{showError ? (
+					<div
+						className="xp-alert xp-alert-error mt-3 flex items-start gap-2 px-3 py-2 text-xs"
+						role="alert"
+					>
+						<Icon
+							name="tabler:alert-circle"
+							className="mt-0.5 size-4 shrink-0"
+							ariaLabel="Save error"
+						/>
+						<span className="min-w-0 break-words">{error}</span>
+					</div>
+				) : null}
+				{showRetryWarning ? (
+					<div className="mt-3 text-xs text-warning-foreground" role="alert">
+						Click Retry save again to confirm. This may overwrite changes made
+						elsewhere.
+					</div>
+				) : null}
+			</div>
+		</div>
 	);
 }
 
@@ -275,6 +326,14 @@ export function MihomoProfileEditor({
 		setRetryAcknowledged(false);
 		void onSave(allowOverwrite);
 	}, [needsRetryWarning, onSave, retryAcknowledged]);
+	const handleVerify = useCallback(async () => {
+		if (!onVerify) return false;
+		try {
+			return await onVerify();
+		} finally {
+			setRetryAcknowledged(false);
+		}
+	}, [onVerify]);
 
 	const saveLabel = needsRetryWarning ? "Retry save" : "Save configuration";
 
@@ -461,6 +520,23 @@ export function MihomoProfileEditor({
 				portalHost,
 			)
 		: null;
+	const feedbackPortalContainer =
+		portalContainer?.ownerDocument.body ??
+		(typeof document !== "undefined" ? document.body : null);
+	const feedbackContent =
+		feedbackPortalContainer &&
+		(saveFeedback || error || (needsRetryWarning && retryAcknowledged))
+			? createPortal(
+					<MihomoSaveFeedbackPanel
+						feedback={saveFeedback}
+						error={error}
+						retryAcknowledged={retryAcknowledged}
+						isVerifying={isVerifying}
+						onVerify={onVerify ? handleVerify : undefined}
+					/>,
+					feedbackPortalContainer,
+				)
+			: null;
 
 	return (
 		<>
@@ -493,21 +569,6 @@ export function MihomoProfileEditor({
 				</div>
 			</div>
 			<div ref={inlineMount} className="min-w-0" />
-			<MihomoSaveFeedbackPanel
-				feedback={saveFeedback}
-				isVerifying={isVerifying}
-				onVerify={onVerify}
-			/>
-			{error &&
-			(!saveFeedback || error === MIHOMO_DRAFT_PERSISTENCE_WARNING) ? (
-				<div className="xp-alert xp-alert-error px-4 py-2">{error}</div>
-			) : null}
-			{needsRetryWarning && retryAcknowledged ? (
-				<div className="text-xs text-warning-foreground" role="alert">
-					Click Retry save again to confirm. This may overwrite changes made
-					elsewhere.
-				</div>
-			) : null}
 			<div className="flex items-center justify-between gap-3">
 				<span className="text-xs text-muted-foreground">
 					{readOnly ? "Read-only profile" : "Changes apply to all three files."}
@@ -711,26 +772,6 @@ export function MihomoProfileEditor({
 										{readOnly ? <span>Read-only</span> : null}
 									</div>
 								</div>
-								<MihomoSaveFeedbackPanel
-									feedback={saveFeedback}
-									isVerifying={isVerifying}
-									onVerify={onVerify}
-								/>
-								{error &&
-								(!saveFeedback ||
-									error === MIHOMO_DRAFT_PERSISTENCE_WARNING) ? (
-									<div
-										className="xp-alert xp-alert-error mx-3 mt-3 shrink-0 px-3 py-2 text-xs sm:mx-4"
-										role="alert"
-									>
-										<Icon
-											name="tabler:alert-circle"
-											className="mt-0.5 size-4 shrink-0"
-											ariaLabel="Save error"
-										/>
-										<span className="min-w-0 break-words">{error}</span>
-									</div>
-								) : null}
 								<div
 									ref={expandedMount}
 									className="min-h-0 flex-1 overflow-hidden"
@@ -793,6 +834,7 @@ export function MihomoProfileEditor({
 				previewRequest={previewImport}
 				portalContainer={portalContainer}
 			/>
+			{feedbackContent}
 			{editorContent}
 		</>
 	);
