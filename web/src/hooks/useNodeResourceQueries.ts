@@ -1,5 +1,5 @@
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 
 import {
 	NODE_RESOURCE_HISTORY_METRICS,
@@ -12,7 +12,7 @@ import {
 } from "../api/adminResources";
 import { useApiCapability } from "../api/useApiCompatibility";
 
-let resourcePageSessionSequence = 0;
+const RESOURCE_QUERY_GC_TIME_MS = 5 * 60 * 1000;
 
 export function resourceQueryRefetchInterval(
 	isOnline: boolean,
@@ -31,19 +31,32 @@ export function useNodeResourceQueries(props: {
 	selectedRuntimeRole: ResourceRole | null;
 }) {
 	const resourceCapability = useApiCapability("admin.resource-monitoring");
-	const [resourcePageSessionId] = useState(() => ++resourcePageSessionSequence);
+	const queryClient = useQueryClient();
 	const enabled =
 		props.adminToken.length > 0 &&
 		props.nodesAvailable &&
 		resourceCapability.available;
+	useEffect(() => {
+		return () => {
+			queryClient.removeQueries({
+				queryKey: ["adminNodeResources", props.adminToken, props.nodeId],
+			});
+			queryClient.removeQueries({
+				queryKey: ["adminNodeResourceHistory", props.adminToken, props.nodeId],
+			});
+			queryClient.removeQueries({
+				queryKey: [
+					"adminNodeRuntimeResourceHistory",
+					props.adminToken,
+					props.nodeId,
+				],
+			});
+		};
+	}, [queryClient, props.adminToken, props.nodeId]);
 	const resourceQuery = useQuery({
-		queryKey: [
-			"adminNodeResources",
-			resourcePageSessionId,
-			props.adminToken,
-			props.nodeId,
-		],
+		queryKey: ["adminNodeResources", props.adminToken, props.nodeId],
 		enabled,
+		gcTime: RESOURCE_QUERY_GC_TIME_MS,
 		refetchOnMount: false,
 		refetchOnReconnect: false,
 		refetchOnWindowFocus: false,
@@ -57,12 +70,12 @@ export function useNodeResourceQueries(props: {
 		queries: NODE_RESOURCE_HISTORY_METRICS.map((metric) => ({
 			queryKey: [
 				"adminNodeResourceHistory",
-				resourcePageSessionId,
 				props.adminToken,
 				props.nodeId,
 				metric,
 			],
 			enabled: enabled && props.activeTab === "resources",
+			gcTime: RESOURCE_QUERY_GC_TIME_MS,
 			refetchOnMount: false,
 			refetchOnReconnect: false,
 			refetchOnWindowFocus: false,
@@ -104,7 +117,6 @@ export function useNodeResourceQueries(props: {
 		queries: RUNTIME_RESOURCE_HISTORY_METRICS.map((metric) => ({
 			queryKey: [
 				"adminNodeRuntimeResourceHistory",
-				resourcePageSessionId,
 				props.adminToken,
 				props.nodeId,
 				props.selectedRuntimeRole,
@@ -114,6 +126,7 @@ export function useNodeResourceQueries(props: {
 				enabled &&
 				props.activeTab === "resources" &&
 				props.selectedRuntimeRole !== null,
+			gcTime: RESOURCE_QUERY_GC_TIME_MS,
 			refetchOnMount: false,
 			refetchOnReconnect: false,
 			refetchOnWindowFocus: false,
