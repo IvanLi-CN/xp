@@ -102,7 +102,6 @@ import { USER_TAB_OPTIONS, type UserDetailsTab } from "./UserDetailsTabs";
 import { removeAdminUser, replaceAdminUser } from "./adminUsersCache";
 import { useUserRouteTransientState } from "./useUserRouteTransientState";
 import { resolveUserTrafficNodeFilter } from "./userTrafficNodeFilter";
-
 const PROTOCOLS = [
 	{ protocolId: "vless_reality_vision_tcp", label: "VLESS" },
 	{ protocolId: "ss2022_2022_blake3_aes_128_gcm", label: "SS2022" },
@@ -233,6 +232,7 @@ export function UserDetailsPage() {
 	const mihomoProfileQuery = useQuery({
 		queryKey: ["adminUserMihomoProfile", adminToken, userId],
 		enabled: enabledFor(usersCapability),
+		refetchOnMount: "always",
 		queryFn: ({ signal }) =>
 			mihomoSaveQueue.fetchMihomoProfileWithSaveSnapshot(
 				`${adminToken}\u0000${userId}`,
