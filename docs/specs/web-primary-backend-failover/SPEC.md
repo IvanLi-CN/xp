@@ -279,7 +279,9 @@ ADR 0012 and does not alter this embedded-PWA contract.
 - **VER-UI** covers: REQ-NAV. The Storybook suite
   `primary-backend-switcher.spec.ts` verifies right-edge control ordering,
   narrow-menu bounds, keyboard-accessible labels, and non-overlapping
-  AppShell controls. The approved controlled captures below are the visual
+  AppShell controls. Storybook interaction checks wait for backend identity
+  verification and authenticated page hydration before asserting controls.
+  The approved controlled captures below are the visual
   evidence set.
 - **VER-PREAUTH-SELECTOR** covers: REQ-PREAUTH-SELECTOR, REQ-PREAUTH-SOURCE.
   Login-page and Storybook tests MUST cover keyboard
