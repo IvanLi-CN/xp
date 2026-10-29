@@ -4,10 +4,16 @@ import { fixtureCatalog } from "@/fixture-policy/catalog";
 
 import {
 	canonicalBackendOrigin,
+	currentWebReleaseVersion,
 	getPrimaryBackendSnapshot,
+	hydrateBackendVersions,
 	hydratePrimaryBackendProfile,
+	hydrateStaticRuntimePolicy,
 	installPrimaryBackendTransport,
+	normalizeReleaseVersion,
+	recognizedReleaseVersion,
 	resetPrimaryBackendTransportForTests,
+	subscribePrimaryBackend,
 	switchPrimaryBackend,
 	verifyBackendCandidate,
 	withPrimaryBackendMutation,
@@ -195,6 +201,81 @@ describe("primary backend transport", () => {
 		).toBe(false);
 	});
 
+	it("attaches service versions by registered node id and preserves unknowns", () => {
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeTertiary(),
+				node_name: fixtureCatalog.identifier.nodeNameTertiary(),
+				api_base_url: fixtureCatalog.url.tertiaryApi(),
+			},
+		]);
+
+		hydrateBackendVersions([
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				xp_version: "v3.22.5",
+				error: null,
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				xp_version: null,
+				error: "unreachable",
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeTertiary(),
+				xp_version: "v3.21.4",
+				error: null,
+			},
+		]);
+
+		const snapshot = getPrimaryBackendSnapshot();
+		expect(snapshot.candidates).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					nodeId: fixtureCatalog.identifier.nodePrimary(),
+					serviceVersion: "3.22.5",
+					versionState: "ready",
+				}),
+				expect.objectContaining({
+					nodeId: fixtureCatalog.identifier.nodeSecondary(),
+					serviceVersion: null,
+					versionState: "unavailable",
+					lastError: "unreachable",
+				}),
+				expect.objectContaining({
+					nodeId: fixtureCatalog.identifier.nodeTertiary(),
+					serviceVersion: "3.21.4",
+					versionState: "ready",
+				}),
+			]),
+		);
+		expect(normalizeReleaseVersion(" v3.21.4 ")).toBe("3.21.4");
+		expect(recognizedReleaseVersion("3.22.5-buildhash")).toBeNull();
+		expect(currentWebReleaseVersion()).toBe("3.22.5");
+
+		hydrateBackendVersions([]);
+		expect(getPrimaryBackendSnapshot().candidates).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					nodeId: fixtureCatalog.identifier.nodePrimary(),
+					serviceVersion: null,
+					versionState: "unknown",
+					lastError: "unknown",
+				}),
+			]),
+		);
+	});
+
 	it("allows manual switching after the mutation barrier times out without replay", async () => {
 		vi.useFakeTimers();
 		let resolveMutation: ((response: Response) => void) | undefined;
@@ -278,6 +359,271 @@ describe("primary backend transport", () => {
 
 		resolveTransaction?.();
 		await transaction;
+		await switchPromise;
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			fixtureCatalog.url.secondaryApi(),
+		);
+	});
+
+	it("rechecks the barrier when a subscriber starts a mutation during drain", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		let resolveFirst: (() => void) | undefined;
+		const reentrantResolvers: Array<() => void> = [];
+		const reentrantTransactions: Array<Promise<void>> = [];
+		const first = withPrimaryBackendMutation(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveFirst = resolve;
+				}),
+		);
+		await Promise.resolve();
+		const unsubscribe = subscribePrimaryBackend((snapshot) => {
+			if (
+				snapshot.state !== "switching" ||
+				snapshot.pendingMutations !== 0 ||
+				reentrantTransactions.length >= 2
+			) {
+				return;
+			}
+			const transaction = withPrimaryBackendMutation(
+				() =>
+					new Promise<void>((resolve) => {
+						reentrantResolvers.push(resolve);
+					}),
+			);
+			reentrantTransactions.push(transaction);
+		});
+
+		const switchPromise = switchPrimaryBackend({
+			origin: fixtureCatalog.url.secondaryApi(),
+			nodeId: fixtureCatalog.identifier.nodeSecondary(),
+			nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+			verifiedAt: Date.now(),
+			lastError: null,
+		});
+		await Promise.resolve();
+		resolveFirst?.();
+		await first;
+		await Promise.resolve();
+		expect(reentrantTransactions).toHaveLength(1);
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
+		reentrantResolvers.shift()?.();
+		await reentrantTransactions[0];
+		await Promise.resolve();
+		expect(reentrantTransactions).toHaveLength(2);
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
+		reentrantResolvers.shift()?.();
+		await reentrantTransactions[1];
+		await switchPromise;
+		unsubscribe();
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			fixtureCatalog.url.secondaryApi(),
+		);
+	});
+
+	it("rejects a candidate removed while the mutation barrier is draining", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		let resolveTransaction: (() => void) | undefined;
+		const transaction = withPrimaryBackendMutation(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveTransaction = resolve;
+				}),
+		);
+		await Promise.resolve();
+		const switchPromise = switchPrimaryBackend({
+			origin: fixtureCatalog.url.secondaryApi(),
+			nodeId: fixtureCatalog.identifier.nodeSecondary(),
+			nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+			verifiedAt: Date.now(),
+			lastError: null,
+		});
+		await Promise.resolve();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+		]);
+		resolveTransaction?.();
+		await transaction;
+		await expect(switchPromise).rejects.toThrow(
+			"no longer available for switching",
+		);
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
+		expect(getPrimaryBackendSnapshot().state).toBe("ready");
+	});
+
+	it("keeps switching state while inventory refreshes during the barrier", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		let resolveTransaction: (() => void) | undefined;
+		const transaction = withPrimaryBackendMutation(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveTransaction = resolve;
+				}),
+		);
+		await Promise.resolve();
+
+		const switchPromise = switchPrimaryBackend({
+			origin: fixtureCatalog.url.secondaryApi(),
+			nodeId: fixtureCatalog.identifier.nodeSecondary(),
+			nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+			verifiedAt: Date.now(),
+			lastError: null,
+		});
+		await Promise.resolve();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		hydrateStaticRuntimePolicy(fixtureCatalog.cluster.fixture84(), [
+			fixtureCatalog.url.primaryApi(),
+			fixtureCatalog.url.secondaryApi(),
+		]);
+		expect(getPrimaryBackendSnapshot().state).toBe("switching");
+
+		resolveTransaction?.();
+		await transaction;
+		await switchPromise;
+		expect(getPrimaryBackendSnapshot().state).toBe("ready");
+	});
+
+	it("restores the ready state when refreshed directory validation fails", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+
+		await expect(
+			switchPrimaryBackend(
+				{
+					origin: fixtureCatalog.url.secondaryApi(),
+					nodeId: fixtureCatalog.identifier.nodeSecondary(),
+					nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+					verifiedAt: Date.now(),
+					lastError: null,
+				},
+				{ revalidate: async () => false },
+			),
+		).rejects.toThrow("directory is no longer available");
+		expect(getPrimaryBackendSnapshot().state).toBe("ready");
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
+	});
+
+	it("drains mutations that start during candidate revalidation", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		let resolveTransaction: (() => void) | undefined;
+		let resolveRevalidation: ((value: boolean) => void) | undefined;
+		const switchPromise = switchPrimaryBackend(
+			{
+				origin: fixtureCatalog.url.secondaryApi(),
+				nodeId: fixtureCatalog.identifier.nodeSecondary(),
+				nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+				verifiedAt: Date.now(),
+				lastError: null,
+			},
+			{
+				revalidate: async () => {
+					void withPrimaryBackendMutation(
+						() =>
+							new Promise<void>((resolve) => {
+								resolveTransaction = resolve;
+							}),
+					);
+					return new Promise<boolean>((resolve) => {
+						resolveRevalidation = resolve;
+					});
+				},
+			},
+		);
+		await Promise.resolve();
+		resolveRevalidation?.(true);
+		await Promise.resolve();
+		expect(getPrimaryBackendSnapshot().pendingMutations).toBe(1);
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
+		resolveTransaction?.();
 		await switchPromise;
 		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
 			fixtureCatalog.url.secondaryApi(),

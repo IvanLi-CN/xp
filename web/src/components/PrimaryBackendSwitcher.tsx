@@ -3,9 +3,13 @@ import { useMemo, useState } from "react";
 import {
 	type BackendCandidate,
 	canonicalBackendOrigin,
+	currentWebReleaseVersion,
+	recognizedReleaseVersion,
 	switchPrimaryBackend,
 	verifyBackendCandidate,
 } from "@/backend/primaryBackend";
+import { cn } from "@/lib/utils";
+import { buildNodePageHref } from "@/utils/navigation";
 
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
 import { Button } from "./Button";
@@ -31,7 +35,10 @@ export function PrimaryBackendSwitcher(props: {
 	adminToken: string;
 	clusterId: string | null;
 	onOpened?: () => void;
+	onOpenChange?: (open: boolean) => void;
 	onSwitched?: () => void;
+	revalidateBeforeSwitch?: () => Promise<boolean>;
+	frontendVersion?: string | null;
 }) {
 	const backend = usePrimaryBackend();
 	const [open, setOpen] = useState(false);
@@ -56,6 +63,13 @@ export function PrimaryBackendSwitcher(props: {
 			setOpen(false);
 			return;
 		}
+		if (candidate.switchable === false) {
+			setError(
+				candidate.switchBlockedReason ??
+					"This node cannot be selected as the primary backend.",
+			);
+			return;
+		}
 		setCheckingOrigin(candidate.origin);
 		setError(null);
 		try {
@@ -64,7 +78,9 @@ export function PrimaryBackendSwitcher(props: {
 				clusterId: props.clusterId,
 				adminToken: props.adminToken,
 			});
-			await switchPrimaryBackend(verified);
+			await switchPrimaryBackend(verified, {
+				revalidate: props.revalidateBeforeSwitch,
+			});
 			props.onSwitched?.();
 			setOpen(false);
 		} catch (reason) {
@@ -78,6 +94,22 @@ export function PrimaryBackendSwitcher(props: {
 		}
 	};
 
+	const frontendVersion =
+		props.frontendVersion === undefined
+			? currentWebReleaseVersion()
+			: recognizedReleaseVersion(props.frontendVersion);
+	const versionLabel = (candidate: BackendCandidate) => {
+		if (
+			!frontendVersion ||
+			candidate.versionState !== "ready" ||
+			!candidate.serviceVersion
+		) {
+			return null;
+		}
+		if (candidate.serviceVersion === frontendVersion) return null;
+		return `v${candidate.serviceVersion}`;
+	};
+
 	const label =
 		backend.state === "unreachable"
 			? "Primary backend unavailable"
@@ -88,6 +120,7 @@ export function PrimaryBackendSwitcher(props: {
 			open={open}
 			onOpenChange={(nextOpen) => {
 				setOpen(nextOpen);
+				props.onOpenChange?.(nextOpen);
 				if (nextOpen) props.onOpened?.();
 			}}
 		>
@@ -118,36 +151,93 @@ export function PrimaryBackendSwitcher(props: {
 					) : (
 						candidates.map((candidate) => {
 							const isCurrent = candidate.origin === backend.primaryOrigin;
-							const isChecking = checkingOrigin === candidate.origin;
+							const resolved = buildNodePageHref(
+								candidate.origin,
+								window.location.href,
+								props.adminToken,
+								{
+									loginHandoff: "fragment",
+								},
+							);
+							const version = versionLabel(candidate);
 							return (
-								<DropdownMenuItem
+								<div
 									key={candidate.origin}
-									disabled={Boolean(checkingOrigin) || isCurrent}
-									onSelect={(event) => {
-										event.preventDefault();
-										void handleSelect(candidate);
-									}}
-									className="items-start py-2"
+									className={cn(
+										"grid grid-cols-[minmax(0,1fr)_auto] gap-1",
+										isCurrent &&
+											"rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15",
+									)}
 								>
-									<Icon
-										name={isCurrent ? "tabler:circle-check" : "tabler:server"}
-										ariaLabel={isCurrent ? "Current" : "Backend"}
-										className="mt-0.5 shrink-0"
-									/>
-									<span className="min-w-0 flex-1">
-										<span className="block truncate font-medium">
-											{candidate.nodeName}
+									<DropdownMenuItem
+										disabled={
+											!isCurrent &&
+											(Boolean(checkingOrigin) ||
+												candidate.switchable === false)
+										}
+										aria-current={isCurrent ? "true" : undefined}
+										onSelect={(event) => {
+											event.preventDefault();
+											void handleSelect(candidate);
+										}}
+										className="items-start py-2"
+										aria-label={
+											isCurrent
+												? `${candidate.nodeName}, current backend`
+												: candidate.switchable === false &&
+														candidate.switchBlockedReason
+													? `${candidate.nodeName}, ${candidate.switchBlockedReason}`
+													: candidate.nodeName
+										}
+									>
+										<Icon
+											name={isCurrent ? "tabler:circle-check" : "tabler:server"}
+											ariaLabel={isCurrent ? "Current" : "Backend"}
+											className={`mt-0.5 shrink-0${isCurrent ? " text-primary" : ""}`}
+										/>
+										<span className="min-w-0 flex-1">
+											<span className="block truncate font-medium">
+												{candidate.nodeName}
+											</span>
+											<span className="block truncate text-xs text-muted-foreground">
+												{hostLabel(candidate.origin)}
+												{version ? (
+													<span className="font-medium text-warning">
+														{` · ${version}`}
+													</span>
+												) : null}
+											</span>
 										</span>
-										<span className="block truncate text-xs text-muted-foreground">
-											{hostLabel(candidate.origin)}
-										</span>
-									</span>
-									{isChecking ? (
-										<span className="text-xs text-muted-foreground">
-											Checking
-										</span>
-									) : null}
-								</DropdownMenuItem>
+									</DropdownMenuItem>
+									{resolved.disabled ? (
+										<DropdownMenuItem
+											disabled
+											title={resolved.reason}
+											aria-label={resolved.reason}
+											className="px-2"
+										>
+											<Icon
+												name="tabler:external-link-off"
+												ariaLabel="Open node unavailable"
+											/>
+										</DropdownMenuItem>
+									) : (
+										<DropdownMenuItem asChild className="px-2">
+											<a
+												href={resolved.href}
+												target="_blank"
+												rel="noopener noreferrer"
+												title={`Open ${candidate.nodeName} frontend in a new tab`}
+												aria-label={`Open ${candidate.nodeName} frontend in a new tab`}
+											>
+												<Icon
+													name="tabler:external-link"
+													ariaLabel="Open node frontend"
+												/>
+											</a>
+										</DropdownMenuItem>
+									)}
+								</div>
 							);
 						})
 					)}

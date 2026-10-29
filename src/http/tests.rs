@@ -37,6 +37,8 @@ mod mihomo_import_tests;
 #[path = "tests/mihomo_resource_route.rs"]
 mod mihomo_resource_route;
 mod mihomo_smux;
+#[path = "tests/node_versions.rs"]
+mod node_versions;
 #[path = "tests/platform_assets.rs"]
 mod platform_assets;
 mod resource_error;
@@ -2531,7 +2533,6 @@ async fn put_user_node_quota_is_gone() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
-    // Create user.
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -2547,7 +2548,6 @@ async fn put_user_node_quota_is_gone() {
     let created = body_json(res).await;
     let user_id = created["user_id"].as_str().unwrap().to_string();
 
-    // Bootstrap node exists.
     let res = app
         .clone()
         .oneshot(req_authed("GET", "/api/admin/nodes"))
