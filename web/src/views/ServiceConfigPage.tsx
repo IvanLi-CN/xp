@@ -251,11 +251,6 @@ export function ServiceConfigPage() {
 
 	const refreshMeshStatus = async () => {
 		const result = await meshQuery.refetch();
-		if (result.data && !result.isError) {
-			setMeshMutationIssue((issue) =>
-				issue?.kind === "success_unconfirmed" ? null : issue,
-			);
-		}
 		return result;
 	};
 
@@ -347,6 +342,16 @@ export function ServiceConfigPage() {
 				const lockResult = await withMeshMutationLock(
 					lock,
 					async ({ clear }) => {
+						if (generation !== meshDialogGeneration.current) {
+							if (!clear()) {
+								setMeshMutationIssue({
+									kind: "persistence",
+									message:
+										"The confirmation was canceled, but the local safety lock could not be cleared.",
+								});
+							}
+							return;
+						}
 						const currentBackend = getPrimaryBackendSnapshot();
 						if (
 							currentBackend.primaryOrigin !== expectedOrigin ||
@@ -370,8 +375,6 @@ export function ServiceConfigPage() {
 							await withPrimaryBackendMutation(() =>
 								updateAdminMeshConfig(adminToken, target),
 							);
-							const cleared = clear();
-							setMeshLockRevision((revision) => revision + 1);
 							const refreshed = await meshQuery.refetch();
 							if (!refreshed.data || refreshed.isError) {
 								setMeshMutationIssue({
@@ -391,15 +394,19 @@ export function ServiceConfigPage() {
 										"Another administrator or replication delay may be involved.",
 									].join(" "),
 								});
-							} else if (!cleared) {
-								setMeshMutationIssue({
-									kind: "persistence",
-									message:
-										"The setting was accepted, but the local safety lock could not be " +
-										"cleared. Verify the cluster before unlocking it.",
-								});
 							} else {
-								setMeshMutationIssue(null);
+								const cleared = clear();
+								setMeshLockRevision((revision) => revision + 1);
+								setMeshMutationIssue(
+									cleared
+										? null
+										: {
+												kind: "persistence",
+												message:
+													"The setting was accepted, but the local safety lock could not be " +
+													"cleared. Verify the cluster before unlocking it.",
+											},
+								);
 							}
 						} catch (error) {
 							if (isAmbiguousMeshMutationError(error)) {

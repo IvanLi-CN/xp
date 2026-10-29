@@ -146,6 +146,7 @@ describe("ServiceConfigPage", () => {
 			expect(updateAdminMeshConfig).toHaveBeenCalledWith("admintoken", true),
 		);
 		expect(fetchAdminMeshStatus).toHaveBeenCalledTimes(4);
+		expect(screen.getByText("Mutation result unknown")).toBeInTheDocument();
 	});
 
 	it("shows directed preflight failures without exposing transport details", async () => {
@@ -272,6 +273,51 @@ describe("ServiceConfigPage", () => {
 		await user.click(await screen.findByRole("button", { name: "Enable" }));
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
 		resolveRefresh({ ...demoMeshStatus, cluster_mesh_enabled: false });
+
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("alertdialog", {
+					name: "Enable Reality Direct Mesh?",
+				}),
+			).toBeNull(),
+		);
+		expect(updateAdminMeshConfig).not.toHaveBeenCalled();
+	});
+
+	it("does not submit after canceling while acquiring the mutation lock", async () => {
+		const user = userEvent.setup();
+		let lockRequested!: () => void;
+		let releaseLock!: () => void;
+		const lockRequestStarted = new Promise<void>((resolve) => {
+			lockRequested = resolve;
+		});
+		const lockRelease = new Promise<void>((resolve) => {
+			releaseLock = resolve;
+		});
+		vi.stubGlobal("navigator", {
+			locks: {
+				request: async (
+					_name: string,
+					_options: LockOptions,
+					callback: (lock: Lock | null) => Promise<unknown>,
+				) => {
+					lockRequested();
+					await lockRelease;
+					return callback({ name: fixtureCatalog.cluster.fixture53() } as Lock);
+				},
+			},
+		});
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+		await lockRequestStarted;
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+		releaseLock();
 
 		await waitFor(() =>
 			expect(

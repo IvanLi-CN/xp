@@ -16,7 +16,9 @@
   independently by the compatibility inventory's server route set; unknown values use an
   indeterminate switch and stale or unsampled peer observations are labeled explicitly. The
   shared localStorage lock map is serialized across cluster ids, and the selected backend is
-  rechecked after lock acquisition before any write begins. Missing observer data renders as
+  rechecked after lock acquisition before any write begins. The lock remains held until a
+  successful observation confirms the accepted target, cancellation during lock acquisition is
+  fail-closed, and unreadable lock storage blocks writes. Missing observer data renders as
   unknown rather than zero-valued path counts. System Status remains diagnostic and links to
   Service config.
 

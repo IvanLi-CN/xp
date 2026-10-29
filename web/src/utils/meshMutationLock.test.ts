@@ -44,6 +44,29 @@ describe("mesh mutation lock", () => {
 		).toBe(true);
 	});
 
+	it("fails closed when the persisted lock map is unreadable", async () => {
+		vi.stubGlobal("navigator", {
+			locks: {
+				request: async (
+					_name: string,
+					_options: LockOptions,
+					callback: (lock: Lock | null) => Promise<unknown>,
+				) => callback({ name: "xp-mesh-config-mutation-storage" } as Lock),
+			},
+		});
+		window.localStorage.setItem("xp-mesh-config-mutation-locks", "{malformed");
+		const lock = {
+			clusterId: fixtureCatalog.cluster.fixture53(),
+			targetEnabled: true,
+			createdAt: fixtureCatalog.number.value123(),
+		};
+
+		expect(await withMeshMutationLock(lock, async () => "unexpected")).toEqual({
+			acquired: false,
+			reason: "persistence",
+		});
+	});
+
 	it("rejects a concurrent tab before it can send a second mutation", async () => {
 		let active = false;
 		let releaseFirst: (() => void) | undefined;

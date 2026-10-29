@@ -33,7 +33,9 @@ function persistLock(lock: MeshMutationLock): boolean {
 	const store = storage();
 	if (!store || !lock.clusterId) return false;
 	try {
-		const next = { ...readAll(), [lock.clusterId]: lock };
+		const current = readAll();
+		if (current === null) return false;
+		const next = { ...current, [lock.clusterId]: lock };
 		store.setItem(STORAGE_KEY, JSON.stringify(next));
 		const persisted = readMeshMutationLock(lock.clusterId);
 		return (
@@ -46,13 +48,15 @@ function persistLock(lock: MeshMutationLock): boolean {
 	}
 }
 
-function readAll(): Record<string, MeshMutationLock> {
+function readAll(): Record<string, MeshMutationLock> | null {
 	const store = storage();
-	if (!store) return {};
+	if (!store) return null;
 	try {
-		const parsed: unknown = JSON.parse(store.getItem(STORAGE_KEY) ?? "{}");
+		const raw = store.getItem(STORAGE_KEY);
+		if (raw === null) return {};
+		const parsed: unknown = JSON.parse(raw);
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-			return {};
+			return null;
 		const result: Record<string, MeshMutationLock> = {};
 		for (const [clusterId, value] of Object.entries(parsed)) {
 			if (
@@ -63,11 +67,13 @@ function readAll(): Record<string, MeshMutationLock> {
 				typeof (value as MeshMutationLock).createdAt === "number"
 			) {
 				result[clusterId] = value as MeshMutationLock;
+				continue;
 			}
+			return null;
 		}
 		return result;
 	} catch {
-		return {};
+		return null;
 	}
 }
 
@@ -75,11 +81,11 @@ export function readMeshMutationLock(
 	clusterId: string | null | undefined,
 ): MeshMutationLock | null {
 	if (!clusterId) return null;
-	return readAll()[clusterId] ?? null;
+	return readAll()?.[clusterId] ?? null;
 }
 
 export function readMeshMutationLocks(): MeshMutationLock[] {
-	return Object.values(readAll());
+	return Object.values(readAll() ?? {});
 }
 
 /**
@@ -119,6 +125,7 @@ function clearMeshMutationLockValue(clusterId: string): boolean {
 	if (!store) return false;
 	try {
 		const next = readAll();
+		if (next === null) return false;
 		delete next[clusterId];
 		store.setItem(STORAGE_KEY, JSON.stringify(next));
 		return readMeshMutationLock(clusterId) === null;
