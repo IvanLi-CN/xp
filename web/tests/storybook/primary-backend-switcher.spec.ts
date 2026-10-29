@@ -100,18 +100,24 @@ test("shows the registered node list from the AppShell switcher", async ({
 	});
 	await page.getByRole("button", { name: "Open primary backend" }).click();
 
-	await expect(page.getByRole("menu")).toBeVisible();
 	await expect(
-		page.getByRole("menuitem", {
+		page.getByRole("dialog", { name: "Primary backend" }),
+	).toBeVisible();
+	await expect(
+		page.getByRole("button", {
 			name: fixtureCatalog.identifier.nodeNameSecondary(),
 			exact: true,
 		}),
 	).toBeVisible();
-	const currentItem = page.getByRole("menuitem", { name: /Current page/ });
-	await expect(currentItem).not.toBeDisabled();
-	await expect(currentItem).toHaveAttribute("aria-current", "true");
-	const currentRow = currentItem.locator("..");
-	await expect(currentRow).toHaveClass(/bg-primary\/10/);
+	await expect(page.getByRole("button", { name: /Current page/ })).toHaveCount(
+		0,
+	);
+	await expect(
+		page.getByRole("button", {
+			name: fixtureCatalog.identifier.nodeNamePrimary(),
+			exact: true,
+		}),
+	).toBeVisible();
 });
 
 test("shows version differences and separate frontend links", async ({
@@ -123,7 +129,7 @@ test("shows version differences and separate frontend links", async ({
 	);
 	await page.getByRole("button", { name: "Open primary backend" }).click();
 
-	const menu = page.getByRole("menu");
+	const menu = page.getByRole("dialog", { name: "Primary backend" });
 	const menuBox = await menu.boundingBox();
 	if (!menuBox) throw new Error("Primary backend menu has no bounding box");
 	expect(menuBox.width).toBeLessThanOrEqual(336);
@@ -146,7 +152,7 @@ test("shows version differences and separate frontend links", async ({
 	);
 
 	await expect(
-		page.getByRole("menuitem", {
+		page.getByRole("button", {
 			name: /Open on node unavailable: API base URL must use HTTPS/,
 		}),
 	).toBeDisabled();
@@ -175,7 +181,7 @@ test("keeps the switcher menu inside a narrow viewport", async ({ page }) => {
 		});
 		await page.getByRole("button", { name: "Open primary backend" }).click();
 
-		const menu = page.getByRole("menu");
+		const menu = page.getByRole("dialog", { name: "Primary backend" });
 		await expect(menu).toBeVisible();
 		const box = await menu.boundingBox();
 		if (!box) throw new Error("Primary backend menu has no bounding box");
@@ -193,6 +199,9 @@ test("keeps AppShell header controls in one non-wrapping mobile row", async ({
 		await page.goto(storyUrl("components-appshell--default"), {
 			waitUntil: "networkidle",
 		});
+		await expect(
+			page.getByRole("button", { name: "Open status" }),
+		).toBeVisible();
 
 		const layout = await appShellLayout(page);
 		expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
@@ -225,6 +234,7 @@ test("keeps AppShell desktop header controls in one non-overlapping row", async 
 	await page.goto(storyUrl("components-appshell--default"), {
 		waitUntil: "networkidle",
 	});
+	await expect(page.getByRole("button", { name: "Open status" })).toBeVisible();
 
 	const layout = await appShellLayout(page);
 	expect(layout.header?.height).toBeLessThan(90);
@@ -278,7 +288,8 @@ test("keeps AppShell overlays inside mobile viewports and restores focus", async
 		}
 
 		const versionTrigger = page.locator("header button.xp-badge");
-		await versionTrigger.click();
+		await versionTrigger.focus();
+		await page.keyboard.press("Enter");
 		const versionOverlay = page
 			.locator("[data-radix-popper-content-wrapper]:visible")
 			.last();

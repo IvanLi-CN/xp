@@ -1,11 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, fn, screen, userEvent } from "@storybook/test";
+import { expect, fn, screen, userEvent, within } from "@storybook/test";
+import { useState } from "react";
 
 import { PrimaryBackendProvider } from "@/backend/PrimaryBackendProvider";
 import {
 	type PrimaryBackendSnapshot,
 	getPrimaryBackendSnapshot,
-	hydratePrimaryBackendProfile,
 } from "@/backend/primaryBackend";
 import { fixtureCatalog } from "@/fixture-policy/catalog";
 
@@ -18,9 +18,29 @@ const meta: Meta<typeof PrimaryBackendSwitcher> = {
 	args: {
 		adminToken: "test-token",
 		clusterId: "cluster-demo",
+		onOpenChange: fn(),
+		onOpened: fn(),
+		onSwitched: fn(),
 	},
 	decorators: [
-		(Story) => {
+		(Story, context) => {
+			const [target, setTarget] = useState<HTMLElement | null>(null);
+			if (context.parameters.portalEvidence) {
+				return (
+					<div
+						data-visual-evidence-surface
+						className="w-fit bg-background p-6 text-foreground"
+					>
+						<div
+							data-visual-evidence-target
+							ref={setTarget}
+							className="flex h-[360px] w-[344px] justify-end"
+						>
+							<Story args={{ ...context.args, portalContainer: target }} />
+						</div>
+					</div>
+				);
+			}
 			return (
 				<div
 					data-visual-evidence-surface
@@ -108,25 +128,12 @@ function withSnapshot(snapshot: PrimaryBackendSnapshot): Story["render"] {
 }
 
 export const Default: Story = {
-	render: (args) => {
-		hydratePrimaryBackendProfile("cluster-demo", [
-			{
-				node_id: fixtureCatalog.identifier.nodePrimary(),
-				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
-				api_base_url: fixtureCatalog.url.primaryApi(),
-			},
-			{
-				node_id: fixtureCatalog.identifier.nodeSecondary(),
-				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
-				api_base_url: fixtureCatalog.url.secondaryApi(),
-			},
-		]);
-		return (
-			<PrimaryBackendProvider>
-				<PrimaryBackendSwitcher {...args} />
-			</PrimaryBackendProvider>
-		);
-	},
+	render: withSnapshot({
+		...getPrimaryBackendSnapshot(),
+		clusterId: "cluster-demo",
+		primaryOrigin: window.location.origin,
+		candidates,
+	}),
 };
 
 export const SignedOut: Story = {
@@ -168,6 +175,41 @@ export const VersionMismatchAndLinks: Story = {
 		primaryOrigin: fixtureCatalog.url.primaryApi(),
 		candidates: versionedCandidates,
 		state: "ready",
+	}),
+};
+
+export const StaleDirectory: Story = {
+	args: { frontendVersion: "3.22.5", directoryStatus: "stale" },
+	parameters: { portalEvidence: true },
+	render: withSnapshot({
+		...getPrimaryBackendSnapshot(),
+		clusterId: "cluster-demo",
+		primaryOrigin: fixtureCatalog.url.primaryApi(),
+		candidates: versionedCandidates,
+		state: "ready",
+	}),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Open primary backend" }),
+		);
+		await expect(canvas.getByRole("status")).toHaveTextContent(
+			"Node list may be out of date.",
+		);
+		await expect(
+			canvas.getByText(fixtureCatalog.identifier.nodeNamePrimary()),
+		).toBeVisible();
+	},
+};
+
+export const DirectoryUnavailable: Story = {
+	args: { directoryStatus: "error" },
+	render: withSnapshot({
+		...getPrimaryBackendSnapshot(),
+		clusterId: "cluster-demo",
+		primaryOrigin: fixtureCatalog.url.primaryApi(),
+		candidates: [],
+		state: "unreachable",
 	}),
 };
 

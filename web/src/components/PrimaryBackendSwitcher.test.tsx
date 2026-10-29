@@ -123,3 +123,49 @@ describe("getCurrentReloadCandidate", () => {
 		expect(screen.queryByRole("button", { name: "Reload once" })).toBeNull();
 	});
 });
+
+describe("directory state", () => {
+	it("shows one stale notice while keeping nodes and does not show unknown versions", async () => {
+		mockUsePrimaryBackend.mockReturnValue(
+			snapshot({ ...stagedCandidate, versionState: "unknown" }),
+		);
+		const user = userEvent.setup();
+		render(
+			<PrimaryBackendSwitcher
+				adminToken="admin-token"
+				clusterId="cluster-test"
+				directoryStatus="stale"
+			/>,
+		);
+		await user.click(
+			screen.getByRole("button", { name: "Open primary backend" }),
+		);
+		expect(screen.getByRole("status")).toHaveTextContent(
+			"Node list may be out of date.",
+		);
+		expect(
+			screen.getByRole("button", { name: stagedCandidate.nodeName }),
+		).toBeVisible();
+		expect(screen.queryByText(/version unknown/i)).toBeNull();
+	});
+
+	it("shows a failure instead of rows before the first inventory", async () => {
+		const user = userEvent.setup();
+		render(
+			<PrimaryBackendSwitcher
+				adminToken="admin-token"
+				clusterId="cluster-test"
+				directoryStatus="error"
+			/>,
+		);
+		await user.click(
+			screen.getByRole("button", { name: "Open primary backend" }),
+		);
+		expect(screen.getByRole("alert")).toHaveTextContent(
+			"Unable to load node list.",
+		);
+		expect(
+			screen.queryByRole("button", { name: stagedCandidate.nodeName }),
+		).toBeNull();
+	});
+});

@@ -1,8 +1,17 @@
-# XP Mihomo Subscription
+# XP Glossary
 
-This glossary defines XP Mihomo subscription, dynamic proxy-group, and external resource terms.
+This glossary defines XP cluster terms and Mihomo subscription vocabulary.
+It also covers dynamic proxy groups and external resources.
 
 ## Language
+
+### Cluster Nodes
+
+**Registered Cluster Node**:
+A node recorded in the current XP cluster's node directory.
+_Avoid_: Available backend, subscription node
+
+### Subscription Nodes
 
 **Subscription Node**:
 A node with an endpoint membership in the current user's subscription.

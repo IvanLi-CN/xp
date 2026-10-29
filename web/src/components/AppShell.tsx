@@ -21,6 +21,7 @@ import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
 import {
 	STATIC_BOOTSTRAP_ORIGIN,
 	canonicalBackendOrigin,
+	getDirectorySessionEpoch,
 	isStaticWebConsole,
 } from "@/backend/primaryBackend";
 import { useBackendDirectory } from "@/backend/useBackendDirectory";
@@ -70,8 +71,6 @@ import {
 } from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
 import { useAppRuntime } from "../offline/appRuntime";
-import { clearAppliedRuntimePolicyId } from "../offline/runtimePolicySession";
-import { clearServiceWorkerRuntimePolicy } from "../offline/serviceWorkerPolicy";
 import { requestServiceWorkerUpdateCheck } from "../offline/serviceWorkerUpdates";
 import { classifyUpgradeStartError } from "../offline/upgradeObservation";
 import { shouldRefreshAfterUpgradeTransition } from "../offline/upgradeRefreshPolicy";
@@ -93,8 +92,9 @@ import { ReadStateIndicator } from "./ReadStateIndicator";
 import { useUiPrefs } from "./UiPrefs";
 import { VersionIndicator } from "./VersionIndicator";
 import { XpBrandLogo } from "./XpBrandLogo";
-import { clearAdminToken, readAdminToken } from "./auth";
+import { clearAdminToken } from "./auth";
 import { inputClass } from "./ui-helpers";
+import { useActiveAdminSession } from "./useActiveAdminSession";
 import {
 	type VersionCheckUiState,
 	readVersionCheckLastAtMs,
@@ -150,7 +150,9 @@ export function AppShell({
 	const prefs = useUiPrefs();
 	const primaryBackend = usePrimaryBackend();
 	const staticConsole = isStaticWebConsole();
-	const [adminToken] = useState(() => readAdminToken());
+	const adminToken = useActiveAdminSession();
+	const sessionEpoch = getDirectorySessionEpoch();
+	const activeAdminSession = adminToken.length > 0;
 	const apiCompatibility = useApiCompatibility(
 		adminToken,
 		runtime.isOnline,
@@ -197,10 +199,10 @@ export function AppShell({
 		queryFn: ({ signal }) => fetchClusterInfo(signal),
 	});
 	const runtimePolicy = useQuery({
-		queryKey: ["runtimePolicy", adminToken, primaryBackend.clusterId],
+		queryKey: ["runtimePolicy", sessionEpoch, primaryBackend.clusterId],
 		enabled:
 			staticConsole &&
-			adminToken.length > 0 &&
+			activeAdminSession &&
 			runtime.isOnline &&
 			Boolean(primaryBackend.clusterId),
 		queryFn: ({ signal }) => fetchRuntimePolicy(adminToken, signal),
@@ -235,21 +237,20 @@ export function AppShell({
 					? "API compatibility is unavailable while offline."
 					: null;
 
-	const { refreshBackendCandidates, revalidateBackendCandidate } =
-		useBackendDirectory({
-			adminToken,
-			clusterId: clusterInfo.data?.cluster_id,
-			primaryClusterId: primaryBackend.clusterId,
-			primaryOrigin: primaryBackend.primaryOrigin,
-			runtimeOnline: runtime.isOnline,
-			staticConsole,
-			runtimePolicyReady,
-			selectorOpen: backendSelectorOpen,
-			refreshRuntimePolicy: runtimePolicy.refetch,
-		});
+	const directory = useBackendDirectory({
+		adminToken: activeAdminSession ? adminToken : "",
+		clusterId: clusterInfo.data?.cluster_id,
+		primaryClusterId: primaryBackend.clusterId,
+		primaryOrigin: primaryBackend.primaryOrigin,
+		runtimeOnline: runtime.isOnline,
+		staticConsole,
+		runtimePolicyReady,
+		selectorOpen: backendSelectorOpen,
+		refreshRuntimePolicy: runtimePolicy.refetch,
+	});
 
 	useStaticRuntimePolicy({
-		enabled: staticConsole,
+		enabled: staticConsole && activeAdminSession,
 		clusterId: clusterInfo.data?.cluster_id,
 		policy: runtimePolicy.data,
 	});
@@ -262,8 +263,8 @@ export function AppShell({
 
 	useEffect(() => {
 		if (primaryBackend.state !== "unreachable") return;
-		refreshBackendCandidates();
-	}, [primaryBackend.state, refreshBackendCandidates]);
+		directory.refreshBackendCandidates();
+	}, [primaryBackend.state, directory.refreshBackendCandidates]);
 
 	const previousBackendGeneration = useRef(primaryBackend.generation);
 	useEffect(() => {
@@ -916,8 +917,6 @@ export function AppShell({
 											className="text-destructive focus:text-destructive"
 											onSelect={() => {
 												requestNavigation(() => {
-													clearServiceWorkerRuntimePolicy();
-													clearAppliedRuntimePolicyId();
 													clearAdminToken();
 													void navigate({ to: "/login" });
 												});
@@ -930,13 +929,14 @@ export function AppShell({
 								</DropdownMenu>
 
 								<PrimaryBackendSwitcher
+									directoryStatus={directory.directoryStatus}
 									adminToken={adminToken}
 									clusterId={
 										clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
 									}
-									onOpened={refreshBackendCandidates}
+									onOpened={directory.refreshBackendCandidates}
 									onOpenChange={setBackendSelectorOpen}
-									revalidateBeforeSwitch={revalidateBackendCandidate}
+									revalidateBeforeSwitch={directory.revalidateBackendCandidate}
 								/>
 							</div>
 						</div>

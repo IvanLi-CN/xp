@@ -73,6 +73,17 @@ ADR 0012 and does not alter this embedded-PWA contract.
   retain an independent frontend-opening action. Static Web Console mode MAY
   read this inventory only after its authenticated Runtime Policy has admitted
   the selected backend; anonymous pages MUST NOT discover or enumerate nodes.
+- **REQ-NODE-DIRECTORY-STABILITY**: The authenticated inventory MUST own the
+  selector rows by node ID, including nodes sharing an origin or having invalid
+  addresses. Policy refreshes, reachability, and version results MUST NOT add or
+  remove inventory rows. Only a successful, identity-matched inventory response
+  that has not been superseded by a newer request may retire a node. If refresh
+  fails or the console is offline, retain the last
+  successful inventory within the current authenticated session and display a
+  single stale-data notice; if none exists, show an inventory error. Recovery
+  clears the notice. Logout, cluster changes, and superseded asynchronous
+  responses MUST NOT expose or restore another session's inventory. Static Web
+  MUST NOT persist authenticated topology for anonymous discovery.
 - **REQ-NODE-LINK**: The per-node frontend action MUST open a new tab with
   `noopener noreferrer`, preserve the current pathname, query and hash, and
   use the existing login handoff without sending credentials through an API
@@ -115,7 +126,9 @@ ADR 0012 and does not alter this embedded-PWA contract.
   state.
 - **REQ-REVALIDATE**: After the mutation barrier drains or times out, a primary
   switch MUST refresh the authenticated registered-node directory and, in
-  Static Web mode, the current Runtime Policy before committing. A removed or
+  Static Web mode, the current Runtime Policy before committing. After a refreshed
+  policy excludes or marks a candidate unavailable, the client MUST NOT send a
+  further authenticated inventory request to that candidate. A removed or
   policy-disallowed candidate MUST be rejected, and any revalidation failure
   (including a failed refetch that retains cached data) MUST restore the
   selector to a ready state without changing the primary origin. If a mutation
@@ -145,8 +158,8 @@ ADR 0012 and does not alter this embedded-PWA contract.
   `cd web && bun run test -- src/backend/primaryBackend.test.ts` verifies
   health/cluster/compatibility ordering, the credential gate, inventory
   membership, and stale-node removal.
-- **VER-STATIC-POLICY** covers: REQ-STATIC-POLICY-STAGING and
-  REQ-STATIC-POLICY-NODE-STATES. The browser smoke evidence plus this test
+- **VER-STATIC-POLICY** covers: REQ-STATIC-POLICY-STAGING and REQ-STATIC-POLICY-NODE-STATES.
+  The browser smoke evidence plus this test
   command prove that a policy-id change is staged without activating a new
   origin, temporary unavailability is excluded from the
   active allowlist, a selected unavailable backend falls back to the bootstrap
@@ -162,6 +175,10 @@ ADR 0012 and does not alter this embedded-PWA contract.
   inventory and selector Storybook state verify real names, current-node
   marking, the static-policy gate, and the absence of the old generic
   `Verified backend` placeholder.
+- **VER-NODE-DIRECTORY-STABILITY** covers: REQ-NODE-DIRECTORY-STABILITY.
+  Directory and selector tests verify duplicate origins, policy and request
+  ordering, successful removal, stale and initial-error states, and session
+  isolation. The controlled stale-directory story demonstrates the notice.
 - **VER-NODE-LINK** covers: REQ-NODE-LINK. The Storybook browser test verifies
   independent switch/link controls, new-tab attributes, path/query/hash and
   login-token handoff, while navigation unit tests retain invalid-origin
@@ -248,3 +265,20 @@ ADR 0012 and does not alter this embedded-PWA contract.
   handling, hidden unknown versions, and a visible v3.21.11 mismatch label.
   image:
   ![Primary backend node directory](./assets/primary-backend-selector-version-links.png)
+
+- source_type: storybook_canvas
+  target_program: mock-only
+  capture_scope: element
+  requested_viewport: none
+  viewport_strategy: storybook-viewport
+  margin_policy: require_margin
+  evidence_surface: component
+  surface_selector: '[data-visual-evidence-surface]'
+  target_selector: '[data-visual-evidence-target]'
+  sensitive_exclusion: N/A
+  submission_gate: approved
+  story_id_or_title: Components/PrimaryBackendSwitcher/StaleDirectory
+  state: last authenticated directory retained after a failed refresh
+  evidence_note: verifies one concise stale-data notice and retained node rows.
+  image:
+  ![Stale backend directory](./assets/primary-backend-directory-stale.png)
