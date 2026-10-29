@@ -126,7 +126,9 @@ ADR 0012 and does not alter this embedded-PWA contract.
   state.
 - **REQ-REVALIDATE**: After the mutation barrier drains or times out, a primary
   switch MUST refresh the authenticated registered-node directory and, in
-  Static Web mode, the current Runtime Policy before committing. A removed or
+  Static Web mode, the current Runtime Policy before committing. After a refreshed
+  policy excludes or marks a candidate unavailable, the client MUST NOT send a
+  further authenticated inventory request to that candidate. A removed or
   policy-disallowed candidate MUST be rejected, and any revalidation failure
   (including a failed refetch that retains cached data) MUST restore the
   selector to a ready state without changing the primary origin. If a mutation

@@ -273,6 +273,17 @@ export function beginDirectoryRequest(): number {
 	return ++directoryRequestSerial;
 }
 
+export function canUseSupersededRevalidation(
+	serial: number,
+	failedSerial: number,
+): boolean {
+	return (
+		failedSerial === directoryRequestSerial &&
+		serial < failedSerial &&
+		directoryAppliedSerial < serial
+	);
+}
+
 export function applyDirectoryResponse(
 	clusterId: string,
 	epoch: number,

@@ -10,8 +10,11 @@ import {
 	STATIC_BOOTSTRAP_ORIGIN,
 	applyDirectoryResponse,
 	beginDirectoryRequest,
+	canUseSupersededRevalidation,
 	canonicalBackendOrigin,
 	getDirectorySessionEpoch,
+	getPrimaryBackendSnapshot,
+	getStaticRuntimePolicyOrigins,
 	hasDirectoryInventory,
 	hydrateBackendVersions,
 	hydratePrimaryBackendProfile,
@@ -35,6 +38,20 @@ export function useBackendDirectory(args: {
 	const currentArgs = useRef(args);
 	currentArgs.current = args;
 	const sessionEpoch = getDirectorySessionEpoch();
+	const failedDirectoryRequest = useRef({ epoch: sessionEpoch, serial: 0 });
+	const versionRefreshGeneration = useRef(0);
+	const recordDirectoryFailure = useCallback(
+		(serial: number) => {
+			if (getDirectorySessionEpoch() !== sessionEpoch) return;
+			if (
+				failedDirectoryRequest.current.epoch !== sessionEpoch ||
+				serial > failedDirectoryRequest.current.serial
+			) {
+				failedDirectoryRequest.current = { epoch: sessionEpoch, serial };
+			}
+		},
+		[sessionEpoch],
+	);
 	const identity = `${sessionEpoch}:${args.clusterId ?? ""}:${args.adminToken}`;
 	const [loadedIdentity, setLoadedIdentity] = useState("");
 	const hasInventory = Boolean(
@@ -59,14 +76,25 @@ export function useBackendDirectory(args: {
 		enabled,
 		queryFn: async ({ signal }) => {
 			const serial = beginDirectoryRequest();
-			const inventory = await fetchAdminNodes(args.adminToken, signal);
-			return { inventory, serial };
+			try {
+				const inventory = await fetchAdminNodes(args.adminToken, signal);
+				return { inventory, serial };
+			} catch (error) {
+				recordDirectoryFailure(serial);
+				throw error;
+			}
 		},
 	});
 	const nodeVersions = useQuery({
 		queryKey: ["adminNodeVersions", sessionEpoch, ...queryKeySuffix],
 		enabled: enabled && args.selectorOpen,
-		queryFn: ({ signal }) => fetchAdminNodeVersions(args.adminToken, signal),
+		queryFn: async ({ signal }) => {
+			const generation = versionRefreshGeneration.current;
+			return {
+				response: await fetchAdminNodeVersions(args.adminToken, signal),
+				generation,
+			};
+		},
 		staleTime: Number.POSITIVE_INFINITY,
 		retry: false,
 		refetchOnMount: false,
@@ -119,22 +147,27 @@ export function useBackendDirectory(args: {
 	useEffect(() => {
 		if (
 			!enabled ||
+			!args.selectorOpen ||
 			!hasInventory ||
 			!nodeVersions.isSuccess ||
+			nodeVersions.isFetching ||
+			nodeVersions.data.generation !== versionRefreshGeneration.current ||
 			!backendNodes.isSuccess ||
 			!backendNodeInventoryKey ||
 			!nodeVersionsUpdatedAt
 		)
 			return;
-		hydrateBackendVersions(nodeVersions.data.items);
+		hydrateBackendVersions(nodeVersions.data.response.items);
 	}, [
 		backendNodeInventoryKey,
+		args.selectorOpen,
 		enabled,
 		hasInventory,
 		backendNodes.isSuccess,
-		nodeVersions.data?.items,
+		nodeVersions.data,
 		nodeVersionsUpdatedAt,
 		nodeVersions.isSuccess,
+		nodeVersions.isFetching,
 	]);
 	const revalidateBackendCandidate = useCallback(
 		async (candidate: { origin: string; nodeId: string }) => {
@@ -181,6 +214,20 @@ export function useBackendDirectory(args: {
 					},
 					activate: readAppliedRuntimePolicyId() === policy.policy_id,
 				});
+				const origin = canonicalBackendOrigin(candidate.origin);
+				if (
+					!origin ||
+					!apiOrigins.some(
+						(value) => canonicalBackendOrigin(value) === origin,
+					) ||
+					!getStaticRuntimePolicyOrigins().includes(origin) ||
+					policy.node_states.some(
+						(node) =>
+							canonicalBackendOrigin(node.origin) === origin &&
+							node.state === "temporarily_unavailable",
+					)
+				)
+					return false;
 			}
 			let inventory: AdminNodesResponse;
 			const serial = beginDirectoryRequest();
@@ -191,18 +238,31 @@ export function useBackendDirectory(args: {
 					candidate.origin,
 				);
 			} catch {
+				recordDirectoryFailure(serial);
 				return false;
 			}
-			if (
-				!isCurrent() ||
-				!applyDirectoryResponse(
-					args.clusterId,
-					sessionEpoch,
-					serial,
-					inventory.items,
+			if (!isCurrent()) return false;
+			const applied = applyDirectoryResponse(
+				args.clusterId,
+				sessionEpoch,
+				serial,
+				inventory.items,
+			);
+			if (!applied) {
+				const failed = failedDirectoryRequest.current;
+				const stillRegistered = getPrimaryBackendSnapshot().candidates.some(
+					(item) =>
+						item.nodeId === candidate.nodeId &&
+						canonicalBackendOrigin(item.origin) ===
+							canonicalBackendOrigin(candidate.origin),
+				);
+				if (
+					failed.epoch !== sessionEpoch ||
+					!stillRegistered ||
+					!canUseSupersededRevalidation(serial, failed.serial)
 				)
-			)
-				return false;
+					return false;
+			}
 			return inventory.items.some(
 				(node) =>
 					node.node_id === candidate.nodeId &&
@@ -216,17 +276,19 @@ export function useBackendDirectory(args: {
 			args.primaryClusterId,
 			args.staticConsole,
 			args.primaryOrigin,
+			recordDirectoryFailure,
 			sessionEpoch,
 		],
 	);
 	const refreshBackendCandidates = useCallback(() => {
 		if (!args.adminToken || !args.primaryClusterId) return;
+		versionRefreshGeneration.current++;
+		hydrateBackendVersions([]);
 		if (args.staticConsole && !args.runtimePolicyReady) {
 			void args.refreshRuntimePolicy();
 			return;
 		}
 		if (args.staticConsole) void args.refreshRuntimePolicy();
-		hydrateBackendVersions([]);
 		if (backendNodes.isFetched) void backendNodes.refetch();
 		if (nodeVersions.isFetched) void nodeVersions.refetch();
 	}, [

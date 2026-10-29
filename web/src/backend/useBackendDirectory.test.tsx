@@ -3,9 +3,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fetchNodes = vi.hoisted(() => vi.fn());
+const { fetchNodes, fetchVersions } = vi.hoisted(() => ({
+	fetchNodes: vi.fn(),
+	fetchVersions: vi.fn(),
+}));
 vi.mock("@/api/adminNodes", () => ({ fetchAdminNodes: fetchNodes }));
-vi.mock("@/api/adminNodeVersions", () => ({ fetchAdminNodeVersions: vi.fn() }));
+vi.mock("@/api/adminNodeVersions", () => ({
+	fetchAdminNodeVersions: fetchVersions,
+}));
 
 import { fixtureCatalog } from "@/fixture-policy/catalog";
 import {
@@ -59,6 +64,7 @@ describe("backend directory refresh", () => {
 		window.localStorage.clear();
 		resetPrimaryBackendTransportForTests();
 		fetchNodes.mockReset();
+		fetchVersions.mockReset();
 	});
 	afterEach(() => resetPrimaryBackendTransportForTests());
 
@@ -161,5 +167,84 @@ describe("backend directory refresh", () => {
 		resolveInventory({ items: [node] });
 		expect(await pending).toBe(false);
 		expect(getPrimaryBackendSnapshot().candidates).toEqual([]);
+	});
+
+	it("allows a verified candidate when a newer directory refresh has failed", async () => {
+		fetchNodes.mockResolvedValueOnce({ items: [node] });
+		const { result } = setup();
+		await waitFor(() => expect(result.current.directoryStatus).toBe("ready"));
+		let resolveInventory!: (value: { items: (typeof node)[] }) => void;
+		fetchNodes.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveInventory = resolve;
+				}),
+		);
+		let pending!: Promise<boolean>;
+		act(() => {
+			pending = result.current.revalidateBackendCandidate({
+				nodeId: fixtureCatalog.nodeId.fixture17(),
+				origin,
+			});
+		});
+		fetchNodes.mockRejectedValueOnce(new Error("offline"));
+		act(() => result.current.refreshBackendCandidates());
+		await waitFor(() => expect(result.current.directoryStatus).toBe("stale"));
+		resolveInventory({ items: [node] });
+		expect(await pending).toBe(true);
+		expect(
+			getPrimaryBackendSnapshot().candidates.map((item) => item.nodeId),
+		).toEqual([fixtureCatalog.nodeId.fixture17()]);
+	});
+
+	it("hides a cached version when a later version refresh fails", async () => {
+		fetchNodes.mockResolvedValue({ items: [node] });
+		fetchVersions.mockResolvedValueOnce({
+			items: [
+				{
+					node_id: fixtureCatalog.nodeId.fixture17(),
+					xp_version: "3.45.0",
+					error: null,
+				},
+			],
+		});
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		});
+		const wrapper = ({ children }: { children: ReactNode }) => (
+			<QueryClientProvider client={client}>{children}</QueryClientProvider>
+		);
+		hydratePrimaryBackendProfile(clusterId);
+		const { result, rerender } = renderHook(
+			({ open }) =>
+				useBackendDirectory({
+					adminToken: "test-token",
+					clusterId,
+					primaryClusterId: clusterId,
+					primaryOrigin: window.location.origin,
+					runtimeOnline: true,
+					staticConsole: false,
+					runtimePolicyReady: true,
+					selectorOpen: open,
+					refreshRuntimePolicy: async () => ({ isSuccess: false }),
+				}),
+			{ wrapper, initialProps: { open: false } },
+		);
+		await waitFor(() => expect(result.current.directoryStatus).toBe("ready"));
+		act(() => result.current.refreshBackendCandidates());
+		rerender({ open: true });
+		await waitFor(() =>
+			expect(getPrimaryBackendSnapshot().candidates[0]?.serviceVersion).toBe(
+				"3.45.0",
+			),
+		);
+		rerender({ open: false });
+		fetchVersions.mockRejectedValueOnce(new Error("offline"));
+		act(() => result.current.refreshBackendCandidates());
+		rerender({ open: true });
+		await waitFor(() => expect(result.current.nodeVersions.isError).toBe(true));
+		expect(
+			getPrimaryBackendSnapshot().candidates[0]?.serviceVersion,
+		).toBeNull();
 	});
 });
