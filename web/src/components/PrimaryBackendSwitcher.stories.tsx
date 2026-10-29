@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, userEvent, within } from "@storybook/test";
+import { expect, fn, userEvent, within } from "@storybook/test";
 import { useState } from "react";
 
 import { PrimaryBackendProvider } from "@/backend/PrimaryBackendProvider";
@@ -18,6 +18,9 @@ const meta: Meta<typeof PrimaryBackendSwitcher> = {
 	args: {
 		adminToken: "test-token",
 		clusterId: "cluster-demo",
+		onOpenChange: fn(),
+		onOpened: fn(),
+		onSwitched: fn(),
 	},
 	decorators: [
 		(Story, context) => {

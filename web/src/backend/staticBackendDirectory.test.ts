@@ -6,6 +6,7 @@ import { clearAdminToken, writeAdminToken } from "@/components/auth";
 import {
 	getPrimaryBackendSnapshot,
 	getStaticRuntimePolicyOrigins,
+	hydrateBackendVersions,
 	hydratePrimaryBackendProfile,
 	hydrateStaticRuntimePolicy,
 	resetPrimaryBackendTransportForTests,
@@ -74,6 +75,30 @@ describe("static backend directory", () => {
 		expect(
 			window.localStorage.getItem("xp-primary-backend-profiles"),
 		).toBeNull();
+	});
+
+	it("preserves each shared-origin node's version across inventory refreshes", () => {
+		hydrateStaticRuntimePolicy(cluster, [shared], {
+			policyId: "first",
+			activate: true,
+		});
+		hydratePrimaryBackendProfile(cluster, inventory);
+		hydrateBackendVersions([
+			{ node_id: "a", xp_version: "3.45.0", error: null },
+			{ node_id: "b", xp_version: "3.46.0", error: null },
+		]);
+		hydrateStaticRuntimePolicy(cluster, [shared], {
+			policyId: "second",
+			activate: true,
+		});
+		hydratePrimaryBackendProfile(cluster, inventory);
+		const rows = getPrimaryBackendSnapshot().candidates;
+		expect(rows.find((item) => item.nodeId === "a")?.serviceVersion).toBe(
+			"3.45.0",
+		);
+		expect(rows.find((item) => item.nodeId === "b")?.serviceVersion).toBe(
+			"3.46.0",
+		);
 	});
 
 	it("clears the directory when another tab signs out", () => {

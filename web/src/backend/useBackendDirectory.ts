@@ -12,6 +12,7 @@ import {
 	beginDirectoryRequest,
 	canonicalBackendOrigin,
 	getDirectorySessionEpoch,
+	hasDirectoryInventory,
 	hydrateBackendVersions,
 	hydratePrimaryBackendProfile,
 	hydrateStaticRuntimePolicy,
@@ -37,7 +38,10 @@ export function useBackendDirectory(args: {
 	const identity = `${sessionEpoch}:${args.clusterId ?? ""}:${args.adminToken}`;
 	const [loadedIdentity, setLoadedIdentity] = useState("");
 	const hasInventory = Boolean(
-		args.clusterId && args.adminToken && loadedIdentity === identity,
+		args.clusterId &&
+			args.adminToken &&
+			(loadedIdentity === identity ||
+				hasDirectoryInventory(args.clusterId, sessionEpoch)),
 	);
 	const enabled =
 		args.adminToken.length > 0 &&

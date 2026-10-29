@@ -80,6 +80,23 @@ describe("backend directory refresh", () => {
 		await waitFor(() => expect(result.current.directoryStatus).toBe("error"));
 	});
 
+	it("retains the session inventory when the hook remounts offline", async () => {
+		fetchNodes.mockResolvedValueOnce({ items: [node] });
+		const first = setup();
+		await waitFor(() =>
+			expect(first.result.current.directoryStatus).toBe("ready"),
+		);
+		first.unmount();
+		fetchNodes.mockRejectedValue(new Error("offline"));
+		const second = setup();
+		await waitFor(() =>
+			expect(second.result.current.directoryStatus).toBe("stale"),
+		);
+		expect(
+			getPrimaryBackendSnapshot().candidates.map((item) => item.nodeId),
+		).toEqual(["node-a"]);
+	});
+
 	it("does not restore a delayed revalidation after logout", async () => {
 		fetchNodes.mockResolvedValueOnce({ items: [node] });
 		const { result } = setup();

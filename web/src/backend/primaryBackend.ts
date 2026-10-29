@@ -17,6 +17,11 @@ import {
 	isApiUrl,
 	normalizeReleaseVersion,
 } from "./primaryBackendModel";
+import {
+	STORAGE_KEY,
+	readStoredProfiles,
+	writeStoredProfiles,
+} from "./primaryBackendStorage";
 
 export {
 	type BackendCandidate,
@@ -36,14 +41,8 @@ export {
 
 export const PRIMARY_BACKEND_SWITCH_TIMEOUT_MS = 60_000;
 
-type StoredProfiles = {
-	activeClusterId?: string;
-	profiles?: Record<string, BackendProfile>;
-};
-
 type NativeFetch = typeof window.fetch;
 
-const STORAGE_KEY = "xp-primary-backend-profiles";
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const listeners = new Set<(snapshot: PrimaryBackendSnapshot) => void>();
 const mutationWaiters = new Set<(timedOut: boolean) => void>();
@@ -55,22 +54,8 @@ export function isStaticWebConsole(): boolean {
 	return !isDemoRuntime() && getPageOrigin() === STATIC_WEB_ORIGIN;
 }
 
-function readStoredProfiles(): StoredProfiles {
-	if (isDemoRuntime()) return {};
-	if (isStaticWebConsole()) return {};
-	if (typeof window === "undefined") return {};
-	try {
-		const value = window.localStorage.getItem(STORAGE_KEY);
-		if (!value) return {};
-		const parsed = JSON.parse(value) as StoredProfiles;
-		return parsed && typeof parsed === "object" ? parsed : {};
-	} catch {
-		return {};
-	}
-}
-
 function readInitialState(): PrimaryBackendSnapshot {
-	const stored = readStoredProfiles();
+	const stored = readStoredProfiles(isStaticWebConsole());
 	const active = stored.activeClusterId
 		? stored.profiles?.[stored.activeClusterId]
 		: undefined;
@@ -101,16 +86,6 @@ let directoryRequestSerial = 0;
 let directoryAppliedSerial = 0;
 let staticPolicyCandidates = new Map<string, BackendCandidate>();
 
-function writeStoredProfiles(value: StoredProfiles) {
-	if (isDemoRuntime()) return;
-	if (isStaticWebConsole() || typeof window === "undefined") return;
-	try {
-		window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
-	} catch {
-		// Private browsing and quota errors must not make the console unusable.
-	}
-}
-
 function notify() {
 	const snapshot = getPrimaryBackendSnapshot();
 	for (const listener of listeners) listener(snapshot);
@@ -118,17 +93,20 @@ function notify() {
 
 function persistCurrentProfile() {
 	if (!state.clusterId) return;
-	const stored = readStoredProfiles();
+	const stored = readStoredProfiles(isStaticWebConsole());
 	const profile: BackendProfile = {
 		clusterId: state.clusterId,
 		primaryOrigin: state.primaryOrigin,
 		candidates: state.candidates,
 		updatedAt: Date.now(),
 	};
-	writeStoredProfiles({
-		activeClusterId: state.clusterId,
-		profiles: { ...(stored.profiles ?? {}), [state.clusterId]: profile },
-	});
+	writeStoredProfiles(
+		{
+			activeClusterId: state.clusterId,
+			profiles: { ...(stored.profiles ?? {}), [state.clusterId]: profile },
+		},
+		isStaticWebConsole(),
+	);
 }
 
 function updateState(patch: Partial<PrimaryBackendSnapshot>) {
@@ -280,6 +258,17 @@ export function getDirectorySessionEpoch(): number {
 	return directorySessionEpoch;
 }
 
+export function hasDirectoryInventory(
+	clusterId: string,
+	epoch: number,
+): boolean {
+	return (
+		directoryLoaded &&
+		state.clusterId === clusterId &&
+		epoch === directorySessionEpoch
+	);
+}
+
 export function beginDirectoryRequest(): number {
 	return ++directoryRequestSerial;
 }
@@ -373,7 +362,6 @@ export function hydratePrimaryBackendProfile(
 				runtimeState !== "temporarily_unavailable";
 			candidatesByOrigin.set(candidateKey, {
 				...existing,
-				...policy,
 				origin: origin ?? rawOrigin,
 				nodeId: node.node_id,
 				nodeName: displayNodeName(node.node_name, origin ?? rawOrigin),
@@ -418,7 +406,7 @@ export function hydratePrimaryBackendProfile(
 		notify();
 		return;
 	}
-	const stored = readStoredProfiles();
+	const stored = readStoredProfiles(isStaticWebConsole());
 	const storedProfile = stored.profiles?.[clusterId];
 	const candidatesByOrigin = new Map<string, BackendCandidate>();
 	if (nodes === undefined) {
