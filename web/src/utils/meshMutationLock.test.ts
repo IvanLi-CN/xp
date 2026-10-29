@@ -67,6 +67,40 @@ describe("mesh mutation lock", () => {
 		});
 	});
 
+	it("fails closed when a persisted lock key does not match its cluster", async () => {
+		vi.stubGlobal("navigator", {
+			locks: {
+				request: async (
+					_name: string,
+					_options: LockOptions,
+					callback: (lock: Lock | null) => Promise<unknown>,
+				) => callback({ name: "xp-mesh-config-mutation-storage" } as Lock),
+			},
+		});
+		const clusterId = fixtureCatalog.cluster.fixture53();
+		window.localStorage.setItem(
+			"xp-mesh-config-mutation-locks",
+			JSON.stringify({
+				[fixtureCatalog.cluster.fixture84()]: {
+					clusterId,
+					targetEnabled: true,
+					createdAt: fixtureCatalog.number.value123(),
+				},
+			}),
+		);
+
+		expect(
+			await withMeshMutationLock(
+				{
+					clusterId,
+					targetEnabled: false,
+					createdAt: fixtureCatalog.number.value124(),
+				},
+				async () => "unexpected",
+			),
+		).toEqual({ acquired: false, reason: "persistence" });
+	});
+
 	it("rejects a concurrent tab before it can send a second mutation", async () => {
 		let active = false;
 		let releaseFirst: (() => void) | undefined;

@@ -250,7 +250,9 @@ export function MeshClusterSetting({
 							<p className="font-semibold">Enable Reality Direct Mesh</p>
 							<p className="mt-1 text-sm text-muted-foreground">
 								Applies to the whole cluster. Enabling validates directed voter
-								paths; disabling uses the registered Public Path.
+								paths; disabling uses the registered Public Path. Both changes
+								require Mesh configuration support from all current voters and
+								learners.
 							</p>
 						</div>
 						<Switch
@@ -319,6 +321,20 @@ export function MeshClusterSetting({
 							{preflightFailures.length > 0 ? (
 								<FailureList failures={preflightFailures} status={status} />
 							) : null}
+							{mutationIssue.kind === "preflight" ? (
+								<p className="mt-3 text-muted-foreground">
+									Review the observer and failed direction in{" "}
+									<a
+										href="/system-status"
+										className="font-medium text-foreground underline underline-offset-4"
+									>
+										System status
+									</a>
+									, check the endpoint and canary, and run the existing probe if
+									needed. A probe is diagnostic only; it does not prove the full
+									cluster preflight has recovered.
+								</p>
+							) : null}
 							<div className="mt-3 flex flex-wrap gap-2">
 								<Button
 									variant="secondary"
@@ -348,7 +364,10 @@ export function MeshClusterSetting({
 					<InfoCard
 						title="Public Path"
 						value="Supported fallback"
-						description="Registered public HTTPS is used when Direct Mesh is disabled or unavailable."
+						description={
+							"Registered public HTTPS is used when Direct Mesh is disabled or " +
+							"unavailable, but fallback reachability is not guaranteed."
+						}
 					/>
 					<InfoCard
 						title="Native Reverse"
@@ -435,9 +454,11 @@ export function MeshClusterSetting({
 				description={
 					pendingTarget
 						? "This changes the cluster-wide control-plane setting and validates " +
-							"directed voter paths before applying it."
+							"directed voter paths before applying it. All current voters and " +
+							"learners must support the Mesh configuration capability."
 						: "This changes the cluster-wide control-plane setting. Existing public " +
-							"paths remain available but are not guaranteed reachable."
+							"paths remain available but are not guaranteed reachable. All current " +
+							"voters and learners must support the Mesh configuration capability."
 				}
 				body={
 					<div className="space-y-3 text-sm">

@@ -11,7 +11,9 @@
   unreadable lock storage, and refuses to send after cancellation while waiting for the lock.
   The accepted follow-up observation remains inside the backend mutation barrier and must match
   the confirmed backend generation and cluster id before the lock can be cleared. Missing setting
-  values are rendered as `Unknown`, never as `Disabled`.
+  values are rendered as `Unknown`, never as `Disabled`. Authoritative capability probes use the
+  current additive route contract for the Mesh write gate; release-tag-only legacy profiles keep
+  their historical server route set. Corrupt lock maps with mismatched cluster keys fail closed.
   Unknown settings render as an indeterminate control, stale or unsampled observer peers remain
   visibly marked, and missing observations never render as zero counts.
 

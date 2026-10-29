@@ -104,7 +104,7 @@ export const Indeterminate: Story = {
 	),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const control = canvas.getByRole("switch", {
+		const control = canvas.getByRole("checkbox", {
 			name: "Unknown observation",
 		});
 		await expect(control).toHaveAttribute("aria-checked", "mixed");

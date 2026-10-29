@@ -64,7 +64,7 @@ describe("<Switch />", () => {
 			/>,
 		);
 
-		const control = screen.getByRole("switch", { name: "Unknown feature" });
+		const control = screen.getByRole("checkbox", { name: "Unknown feature" });
 		expect(control).toHaveAttribute("aria-checked", "mixed");
 		expect(control).toHaveAttribute("data-state", "indeterminate");
 		await user.tab();

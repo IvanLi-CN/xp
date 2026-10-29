@@ -1,6 +1,12 @@
-import { expect, test } from "@playwright/test";
+import { type Page, expect, test } from "@playwright/test";
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 import { setAdminToken, setupApiMocks } from "./helpers";
+
+async function waitForMihomoProfile(page: Page) {
+	await expect(
+		page.getByRole("button", { name: "Expand editor" }).first(),
+	).toBeEnabled();
+}
 
 test("creates and deletes a user, fetches subscription", async ({ page }) => {
 	await setAdminToken(page);
@@ -63,6 +69,7 @@ test("opens the Mihomo workspace from User Details", async ({ page }) => {
 	await setupApiMocks(page);
 
 	await page.goto(`/users/${fixtureCatalog.identifier.userPrimary()}`);
+	await waitForMihomoProfile(page);
 	await page.getByRole("button", { name: "Expand editor" }).click();
 
 	const workspace = page.getByRole("dialog");
@@ -85,6 +92,7 @@ test("protects production Mihomo drafts before leaving or deleting a user", asyn
 	await setupApiMocks(page);
 
 	await page.goto(`/users/${fixtureCatalog.identifier.userPrimary()}`);
+	await waitForMihomoProfile(page);
 	const editor = page.locator(
 		'[data-mihomo-document="mixin_yaml"] .cm-content',
 	);
@@ -133,6 +141,7 @@ test("protects production Mihomo drafts on browser back", async ({ page }) => {
 	await expect(
 		page.getByRole("heading", { name: "Demo user", exact: true }),
 	).toBeVisible();
+	await waitForMihomoProfile(page);
 	const editor = page.locator(
 		'[data-mihomo-document="mixin_yaml"] .cm-content',
 	);
@@ -161,6 +170,7 @@ test("persists all three Mihomo documents through the production save path", asy
 	await setupApiMocks(page);
 
 	await page.goto(`/users/${fixtureCatalog.identifier.userPrimary()}`);
+	await waitForMihomoProfile(page);
 	const values = {
 		mixin_yaml: "port: 7890\n",
 		extra_proxies_yaml: "- name: e2e-proxy\n  type: ss\n",
@@ -196,6 +206,7 @@ test("persists all three Mihomo documents through the production save path", asy
 	}
 
 	await page.reload();
+	await waitForMihomoProfile(page);
 	for (const [documentId, value] of Object.entries(values)) {
 		await expect(
 			page.locator(`[data-mihomo-document="${documentId}"] .cm-content`),
@@ -217,6 +228,7 @@ test("repairs legacy Mihomo provider fields after API rejection", async ({
 	});
 
 	await page.goto(`/users/${fixtureCatalog.identifier.userPrimary()}`);
+	await waitForMihomoProfile(page);
 	const mixinEditor = page.locator(
 		'[data-mihomo-document="mixin_yaml"] .cm-content',
 	);
@@ -237,6 +249,7 @@ test("repairs legacy Mihomo provider fields after API rejection", async ({
 	).toContainText("LegacyProvider:");
 
 	await page.reload();
+	await waitForMihomoProfile(page);
 	await expect(
 		page.locator('[data-mihomo-document="mixin_yaml"] .cm-content'),
 	).not.toContainText("proxy-providers:");

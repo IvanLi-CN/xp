@@ -46,6 +46,22 @@ describe("API capability state", () => {
 		expect(state.reason).toMatch(/PUT \/api\/admin\/mesh\/config/);
 	});
 
+	it("accepts a write route from an authoritative current capability profile", () => {
+		const compatibility = resolveApiCompatibility({
+			releaseTag: "v3.22.5",
+			capabilities: ["admin.mesh"],
+			capabilitiesAreAuthoritative: true,
+		});
+		const state = getApiRouteState(
+			compatibility,
+			"admin.mesh",
+			"PUT /api/admin/mesh/config",
+		);
+
+		expect(state.available).toBe(true);
+		expect(state.unavailable).toBe(false);
+	});
+
 	it("keeps probe-only capabilities disabled after persistence and restore", () => {
 		const compatibility = resolveApiCompatibility({
 			releaseTag: "v3.22.5",

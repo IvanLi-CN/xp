@@ -26,7 +26,7 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
 			{...props}
 			ref={ref}
 			type="button"
-			role="switch"
+			role={indeterminate ? "checkbox" : "switch"}
 			aria-checked={indeterminate ? "mixed" : checked}
 			disabled={disabled}
 			data-state={

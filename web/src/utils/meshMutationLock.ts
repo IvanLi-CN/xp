@@ -62,6 +62,7 @@ function readAll(): Record<string, MeshMutationLock> | null {
 			if (
 				typeof value === "object" &&
 				value !== null &&
+				(value as MeshMutationLock).clusterId === clusterId &&
 				typeof (value as MeshMutationLock).clusterId === "string" &&
 				typeof (value as MeshMutationLock).targetEnabled === "boolean" &&
 				typeof (value as MeshMutationLock).createdAt === "number"

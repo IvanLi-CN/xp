@@ -83,7 +83,7 @@ export const UnknownOffline: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			canvas.getByRole("switch", { name: "Enable Reality Direct Mesh" }),
+			canvas.getByRole("checkbox", { name: "Enable Reality Direct Mesh" }),
 		).toBeDisabled();
 		await expect(canvas.getAllByText("Unknown", { exact: true })).toHaveLength(
 			2,
@@ -129,6 +129,15 @@ export const PreflightFailure: Story = {
 			},
 		],
 	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("link", { name: "System status" }),
+		).toHaveAttribute("href", "/system-status");
+		await expect(
+			canvas.getByText(/check the endpoint and canary/),
+		).toBeInTheDocument();
+	},
 };
 
 export const ConfirmEnable: Story = {
@@ -147,6 +156,9 @@ export const ConfirmEnable: Story = {
 			}),
 		).toBeInTheDocument();
 		await expect(canvas.getByText(/directed voter paths/)).toBeInTheDocument();
+		await expect(
+			canvas.getByText(/all current voters and learners/),
+		).toBeInTheDocument();
 	},
 };
 

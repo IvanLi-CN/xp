@@ -21,8 +21,9 @@
   inside the backend mutation barrier and must match the confirmed backend generation and cluster
   id before the lock can be cleared. Cancellation during lock acquisition is fail-closed, and
   unreadable lock storage blocks writes. Missing observer data renders as
-  unknown rather than zero-valued path counts. System Status remains diagnostic and links to
-  Service config.
+  unknown rather than zero-valued path counts. Authoritative capability probes use the current
+  additive route contract for the Mesh write gate, while release-tag-only legacy profiles keep
+  their historical server route set. System Status remains diagnostic and links to Service config.
 
 ## Confirmed Recovery Gap
 

@@ -9,6 +9,10 @@ import { fetchAdminMeshStatus, updateAdminMeshConfig } from "../api/adminMesh";
 import { BackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
+import {
+	hydratePrimaryBackendProfile,
+	resetPrimaryBackendTransportForTests,
+} from "../backend/primaryBackend";
 import { ToastProvider } from "../components/Toast";
 import { demoMeshStatus } from "../demo/DemoSystemStatusPage";
 import { createQueryClient } from "../queryClient";
@@ -100,6 +104,7 @@ describe("ServiceConfigPage", () => {
 	afterEach(() => {
 		cleanup();
 		clearAllMeshMutationLocksForTests();
+		resetPrimaryBackendTransportForTests();
 		vi.unstubAllGlobals();
 		vi.clearAllMocks();
 	});
@@ -147,6 +152,34 @@ describe("ServiceConfigPage", () => {
 		);
 		expect(fetchAdminMeshStatus).toHaveBeenCalledTimes(4);
 		expect(screen.getByText("Mutation result unknown")).toBeInTheDocument();
+	});
+
+	it("retains the lock when the accepted observation changes cluster scope", async () => {
+		const user = userEvent.setup();
+		const observedValues = [false, false, false, true];
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus).mockImplementation(async () => ({
+			...demoMeshStatus,
+			cluster_mesh_enabled: observedValues.shift() ?? true,
+		}));
+		vi.mocked(updateAdminMeshConfig).mockImplementationOnce(async () => {
+			hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), []);
+			return { enabled: true };
+		});
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		expect(screen.getByText("Mutation result unknown")).toBeInTheDocument();
+		expect(updateAdminMeshConfig).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps an unknown observed setting labeled Unknown after acceptance", async () => {
