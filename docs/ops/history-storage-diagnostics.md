@@ -62,6 +62,10 @@ no supported automatic or operator repair for this combined condition. Preserve 
 source journal and signed page; collect diagnostics for investigation rather than deleting the page,
 forcing freshness, or marking catch-up complete.
 
+New local pages persist their creation time independently of historical record timestamps.
+An older pending page without that time also remains blocked, even if another receive later updates
+the repository verification time: that update cannot establish the age of the pending page.
+
 For a read-only US4 field sample, record the candidate SHA, node ID and `XP_DATA_DIR`, then capture
 `GET /api/admin/history-repositories` with the already-authorized admin credential on every
 configured

@@ -47,6 +47,7 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<Vec<RepositorySyncReceipt>, RepositoryRuntimeError> {
+        self.ensure_local_history_backfill_is_fresh(now_unix_seconds)?;
         self.receive_wire_batch_from_repository_with_gaps(
             cluster_id,
             segments,

@@ -13,6 +13,8 @@ pub(super) struct LocalHistoryBackfillInFlight {
     epoch: u64,
     #[serde(default)]
     stream_state: LocalHistoryBackfillStreamState,
+    #[serde(default)]
+    created_at_unix_seconds: Option<u64>,
 }
 
 impl RepositoryReplicaRuntime {
@@ -35,13 +37,17 @@ impl RepositoryReplicaRuntime {
         &self,
         now_unix_seconds: u64,
     ) -> Result<(), RepositoryRuntimeError> {
-        if self
-            .snapshot
-            .last_verified_unix_seconds
-            .is_some_and(|last_verified| {
-                ReplicaFreshness::new(last_verified, TOMBSTONE_HORIZON_SECONDS)
+        let last_verified = self.snapshot.last_verified_unix_seconds;
+        let pending = self.snapshot.local_history_backfill_inflight.as_ref();
+        let created_at = pending.and_then(|page| page.created_at_unix_seconds);
+        let expired = |timestamp: u64| {
+            timestamp > now_unix_seconds
+                || ReplicaFreshness::new(timestamp, TOMBSTONE_HORIZON_SECONDS)
                     .requires_rebuild(now_unix_seconds)
-            })
+        };
+        if last_verified.is_some_and(expired)
+            || created_at.is_some_and(expired)
+            || (pending.is_some() && created_at.is_none())
         {
             return Err(RepositoryRuntimeError::Storage(
                 concat!(
@@ -208,13 +214,14 @@ impl RepositoryReplicaRuntime {
         local_repository_id: &str,
     ) -> Result<(), RepositoryRuntimeError> {
         self.ensure_local_history_backfill_is_fresh(now_unix_seconds)?;
-        let created = self.queue_local_history_backfill_batches(
+        let created = self.queue_local_history_backfill_batches_at(
             cluster_id,
             identity,
             signing_key,
             page_cursor,
             completed,
             batches,
+            now_unix_seconds,
         )?;
         if created.is_empty() {
             return Ok(());
@@ -332,16 +339,18 @@ impl RepositoryReplicaRuntime {
         now_unix_seconds: u64,
     ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
         let page_cursor = self.snapshot.local_history_backfill_cursor.clone();
-        self.queue_local_history_backfill_batches(
+        self.queue_local_history_backfill_batches_at(
             cluster_id,
             identity,
             signing_key,
             page_cursor,
             false,
             vec![(records, now_unix_seconds)],
+            now_unix_seconds,
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn queue_local_history_backfill_batches(
         &mut self,
         cluster_id: &str,
@@ -350,6 +359,29 @@ impl RepositoryReplicaRuntime {
         page_cursor: Option<String>,
         completed: bool,
         batches: Vec<(Vec<SyncRecord>, u64)>,
+    ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
+        let created_at = batches.iter().map(|(_, at)| *at).max().unwrap_or_default();
+        self.queue_local_history_backfill_batches_at(
+            cluster_id,
+            identity,
+            signing_key,
+            page_cursor,
+            completed,
+            batches,
+            created_at,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn queue_local_history_backfill_batches_at(
+        &mut self,
+        cluster_id: &str,
+        identity: RepositoryNodeIdentity,
+        signing_key: &ed25519_dalek::SigningKey,
+        page_cursor: Option<String>,
+        completed: bool,
+        batches: Vec<(Vec<SyncRecord>, u64)>,
+        now_unix_seconds: u64,
     ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
         if self.snapshot.local_history_backfill_inflight.is_some() {
             return Err(RepositoryRuntimeError::Storage(
@@ -391,6 +423,7 @@ impl RepositoryReplicaRuntime {
             segments: stored_segments,
             epoch,
             stream_state,
+            created_at_unix_seconds: Some(now_unix_seconds),
         });
         if let Err(error) = self.persist_control_state() {
             self.snapshot = previous_snapshot;
