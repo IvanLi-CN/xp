@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import type { EChartsOption } from "echarts";
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import { LineChart } from "echarts/charts";
@@ -23,7 +24,6 @@ import {
 	escapeEChartsHtml,
 	useEChartsThemePalette,
 } from "./echarts-theme";
-import { alertClass } from "./ui-helpers";
 import { Badge } from "./ui/badge";
 import { Checkbox } from "./ui/checkbox";
 
@@ -589,13 +589,13 @@ export function TcpConnectionUsageView({
 	if (unsupportedWarning) {
 		return (
 			<div className="space-y-4">
-				<div className={alertClass("warning", "py-2")}>
+				<Alert tone="warning" className={"py-2"}>
 					<span>{unsupportedWarning.message}</span>
-				</div>
+				</Alert>
 				{nonUnsupportedWarnings.map((warning) => (
-					<div key={warning.code} className={alertClass("info", "py-2")}>
+					<Alert key={warning.code} tone="info" className={"py-2"}>
 						<span>{warning.message}</span>
-					</div>
+					</Alert>
 				))}
 				<PageState
 					variant="empty"
@@ -648,9 +648,9 @@ export function TcpConnectionUsageView({
 			</div>
 
 			{nonUnsupportedWarnings.map((warning) => (
-				<div key={warning.code} className={alertClass("info", "py-2")}>
+				<Alert key={warning.code} tone="info" className={"py-2"}>
 					<span>{warning.message}</span>
-				</div>
+				</Alert>
 			))}
 
 			<div className="space-y-4 border-t border-border/70 pt-4">

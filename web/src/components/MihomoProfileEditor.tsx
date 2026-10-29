@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import {
 	useCallback,
 	useEffect,
@@ -254,8 +255,9 @@ function MihomoSaveFeedbackPanel({
 					</output>
 				) : null}
 				{showError ? (
-					<div
-						className="xp-alert xp-alert-error mt-3 flex items-start gap-2 px-3 py-2 text-xs"
+					<Alert
+						tone="error"
+						className="mt-3 flex items-start gap-2 px-3 py-2 text-xs"
 						role="alert"
 					>
 						<Icon
@@ -264,13 +266,13 @@ function MihomoSaveFeedbackPanel({
 							ariaLabel="Save error"
 						/>
 						<span className="min-w-0 break-words">{error}</span>
-					</div>
+					</Alert>
 				) : null}
 				{showRetryWarning ? (
-					<div className="mt-3 text-xs text-foreground" role="alert">
+					<Alert tone="warning" className="mt-3 text-xs" role="alert">
 						Click Retry save again to confirm. This may overwrite changes made
 						elsewhere.
-					</div>
+					</Alert>
 				) : null}
 			</div>
 		</div>
@@ -350,10 +352,11 @@ export function MihomoProfileEditor({
 
 	const saveLabel = needsRetryWarning ? "Retry save" : "Save configuration";
 	const conflictNotice = conflict ? (
-		<div
+		<Alert
+			tone="warning"
 			className={cn(
 				"fixed inset-x-4 bottom-20 z-[60] flex-col px-4 py-3 shadow-sm",
-				"xp-alert xp-alert-warning sm:left-auto sm:w-[min(32rem,calc(100vw-2rem))]",
+				"sm:left-auto sm:w-[min(32rem,calc(100vw-2rem))]",
 			)}
 			role="alert"
 			aria-live="polite"
@@ -399,7 +402,7 @@ export function MihomoProfileEditor({
 					Use server version
 				</Button>
 			</div>
-		</div>
+		</Alert>
 	) : null;
 
 	useEffect(() => {
@@ -561,11 +564,11 @@ export function MihomoProfileEditor({
 						</span>
 						{itemDirty ? (
 							<span
-								className="flex shrink-0 items-center gap-1 text-[11px] text-warning-foreground"
+								className="flex shrink-0 items-center gap-1 text-[11px] text-foreground"
 								aria-label="Unsaved changes"
 							>
 								<span
-									className="size-1.5 rounded-full bg-warning-foreground"
+									className="size-1.5 rounded-full bg-warning"
 									aria-hidden="true"
 								/>
 								Unsaved

@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -268,9 +269,9 @@ export function UserNewPage() {
 							</div>
 
 							{serverError ? (
-								<div className="xp-alert xp-alert-error px-4 py-3">
+								<Alert tone="error" className="px-4 py-3">
 									{serverError}
-								</div>
+								</Alert>
 							) : null}
 
 							<div className="flex justify-end">

@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -621,15 +622,14 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 							{!policyCapability.available &&
 							form.observerPolicy.mode === "exclude" &&
 							form.observerPolicy.node_ids.length > 0 ? (
-								<p
-									className={[
-										"mt-2 rounded-lg border border-warning/40 bg-warning/10",
-										"px-3 py-2 text-sm text-warning-foreground",
-									].join(" ")}
+								<Alert
+									as="p"
+									tone="warning"
+									className="mt-2 rounded-lg px-3 py-2 text-sm"
 								>
 									This server needs an upgrade before exclusions can be saved.
 									Use Include only or leave exclusions empty.
-								</p>
+								</Alert>
 							) : null}
 							<fieldset
 								className={[
@@ -707,38 +707,37 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 							</Button>
 						</div>
 						{!draftForwardingAvailable ? (
-							<p
-								className={[
-									"mt-4 rounded-lg border border-warning/40 bg-warning/10",
-									"px-3 py-2 text-sm text-warning-foreground",
-								].join(" ")}
+							<Alert
+								as="p"
+								tone="warning"
+								className="mt-4 rounded-lg px-3 py-2 text-sm"
 							>
 								This server does not expose same-origin Draft Cluster Test yet.
 								You can still create the monitor.
-							</p>
+							</Alert>
 						) : null}
 						{isBackendApiError(testMutation.error) &&
 						testMutation.error.code === "leader_unavailable" ? (
-							<p className="mt-3 text-sm text-warning-foreground">
+							<Alert as="p" tone="warning" className="mt-3 text-sm">
 								Test not started because the cluster coordinator is unavailable.
 								Retry when a leader is ready.
-							</p>
+							</Alert>
 						) : null}
 						<div
 							className="mt-5 flex flex-wrap items-center justify-between gap-3"
 							aria-live="polite"
 						>
-							<div
-								className={[
-									"w-fit max-w-full rounded-lg border px-3 py-2",
+							<Alert
+								tone={
 									draftState === "succeeded"
-										? "border-success/40 bg-success/10"
+										? "success"
 										: draftState === "failed" ||
 												draftState === "unsupported" ||
 												draftState === "interrupted"
-											? "border-warning/40 bg-warning/10"
-											: "border-border/70 bg-muted/20",
-								].join(" ")}
+											? "warning"
+											: "info"
+								}
+								className="w-fit max-w-full rounded-lg px-3 py-2"
 							>
 								{draft ? (
 									<div className="flex items-center gap-2 font-medium">
@@ -770,12 +769,12 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 										Run a test to collect cluster evidence.
 									</p>
 								)}
-							</div>
+							</Alert>
 							{draftStale ? (
-								<p className="basis-full text-xs text-warning-foreground">
+								<Alert as="p" tone="warning" className="basis-full text-xs">
 									Evidence is stale because the target or observer policy
 									changed.
-								</p>
+								</Alert>
 							) : null}
 							<p className="font-mono text-xs text-muted-foreground">
 								{draft

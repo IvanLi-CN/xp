@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -197,20 +198,20 @@ export function LoginPage({
 									Token is not saved until verification succeeds.
 								</p>
 							) : (
-								<div className="xp-alert xp-alert-warning px-4 py-3">
+								<Alert tone="warning" className="px-4 py-3">
 									<p className="font-medium">No token set.</p>
 									<p className="mt-1 text-muted-foreground">
 										Ask an administrator for a token or a temporary login link.
 									</p>
-								</div>
+								</Alert>
 							)}
 
 							{bootstrapCompatibilityPending ? (
 								<LoginBootstrapCompatibilityPending />
 							) : serverError ? (
-								<div className="xp-alert xp-alert-error px-4 py-3">
+								<Alert tone="error" className="px-4 py-3">
 									{serverError}
-								</div>
+								</Alert>
 							) : null}
 
 							<div className="flex flex-wrap justify-end gap-2">

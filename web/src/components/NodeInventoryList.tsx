@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -9,7 +10,7 @@ import { buildNodePageHref } from "../utils/navigation";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { ResourceTable } from "./ResourceTable";
-import { alertClass, badgeClass } from "./ui-helpers";
+import { badgeClass } from "./ui-helpers";
 
 const BADGE_GAP_PX = 4;
 export const LIST_LAYOUT_BREAKPOINT_PX = 768;
@@ -368,14 +369,14 @@ export function NodeInventoryList({
 	return (
 		<div className="space-y-3">
 			{partial ? (
-				<div className={alertClass("warning")}>
+				<Alert tone="warning">
 					<span className="text-sm">
 						Partial result: unreachable node(s):{" "}
 						<span className="font-mono">
 							{unreachableNodes.join(", ") || "-"}
 						</span>
 					</span>
-				</div>
+				</Alert>
 			) : null}
 			<div className="flex items-center justify-between gap-3">
 				<p className="text-sm text-muted-foreground">
