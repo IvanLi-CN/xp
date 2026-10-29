@@ -54,7 +54,7 @@ export type SwitchResult = {
 };
 
 export type SwitchOptions = {
-	revalidate?: () => Promise<boolean>;
+	revalidate?: (candidate: BackendCandidate) => Promise<boolean>;
 };
 
 type StoredProfiles = {
@@ -880,7 +880,7 @@ export async function switchPrimaryBackend(
 	let revalidated = true;
 	if (options.revalidate) {
 		try {
-			revalidated = await options.revalidate();
+			revalidated = await options.revalidate(candidate);
 		} catch {
 			revalidated = false;
 		}

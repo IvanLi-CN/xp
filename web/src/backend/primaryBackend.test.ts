@@ -665,6 +665,42 @@ describe("primary backend transport", () => {
 		);
 	});
 
+	it("passes the selected candidate to revalidation", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		let revalidatedOrigin: string | undefined;
+
+		await switchPrimaryBackend(
+			{
+				origin: fixtureCatalog.url.secondaryApi(),
+				nodeId: fixtureCatalog.identifier.nodeSecondary(),
+				nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+				verifiedAt: Date.now(),
+				lastError: null,
+			},
+			{
+				revalidate: async (candidate) => {
+					revalidatedOrigin = candidate.origin;
+					return true;
+				},
+			},
+		);
+
+		expect(revalidatedOrigin).toBe(fixtureCatalog.url.secondaryApi());
+	});
+
 	it("drains mutations that start during candidate revalidation", async () => {
 		window.localStorage.clear();
 		resetPrimaryBackendTransportForTests();

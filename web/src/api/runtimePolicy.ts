@@ -85,15 +85,21 @@ export type RuntimePolicy = z.infer<typeof RuntimePolicySchema>;
 export async function fetchRuntimePolicy(
 	adminToken: string,
 	signal?: AbortSignal,
+	origin?: string,
 ): Promise<RuntimePolicy> {
-	const response = await fetch(RUNTIME_POLICY_PATH, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${adminToken}`,
+	const response = await fetch(
+		origin
+			? new URL(RUNTIME_POLICY_PATH, origin).toString()
+			: RUNTIME_POLICY_PATH,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
 		},
-		signal,
-	});
+	);
 	await throwIfNotOk(response);
 	return RuntimePolicySchema.parse(await response.json());
 }

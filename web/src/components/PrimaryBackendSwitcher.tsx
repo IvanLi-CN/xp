@@ -56,7 +56,7 @@ export function PrimaryBackendSwitcher(props: {
 	onOpened?: () => void;
 	onOpenChange?: (open: boolean) => void;
 	onSwitched?: () => void;
-	revalidateBeforeSwitch?: () => Promise<boolean>;
+	revalidateBeforeSwitch?: (candidate: BackendCandidate) => Promise<boolean>;
 	frontendVersion?: string | null;
 }) {
 	const backend = usePrimaryBackend();
