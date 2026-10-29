@@ -1,3 +1,4 @@
+import { clearAdminToken, writeAdminToken } from "@/components/auth";
 import { fixtureCatalog } from "@/fixture-policy/catalog";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -17,6 +18,48 @@ describe("primary backend pre-auth recovery", () => {
 	afterEach(() => {
 		resetPrimaryBackendTransportForTests();
 		vi.restoreAllMocks();
+	});
+	it("keeps only the verified target across a token change until inventory hydration", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		const clusterId = fixtureCatalog.cluster.fixture84();
+		const nodes = [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		];
+		hydratePrimaryBackendProfile(clusterId, nodes);
+		window.localStorage.setItem("xp_admin_token", "previous-token");
+		await selectPreAuthBackend(fixtureCatalog.url.secondaryApi());
+		const before = window.localStorage.getItem("xp-primary-backend-profiles");
+
+		writeAdminToken("verified-token", { retainVerifiedPreAuthTarget: true });
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			fixtureCatalog.url.secondaryApi(),
+		);
+		expect(getPrimaryBackendSnapshot().candidates).toHaveLength(1);
+		expect(window.localStorage.getItem("xp-primary-backend-profiles")).toBe(
+			before,
+		);
+
+		hydratePrimaryBackendProfile(clusterId, nodes);
+		expect(
+			JSON.parse(
+				window.localStorage.getItem("xp-primary-backend-profiles") ?? "{}",
+			).profiles[clusterId].primaryOrigin,
+		).toBe(fixtureCatalog.url.secondaryApi());
+		clearAdminToken();
+		expect(
+			window.localStorage.getItem("xp-primary-backend-profiles"),
+		).toBeNull();
+		expect(getPrimaryBackendSnapshot().candidates).toEqual([]);
 	});
 	it("blocks credentialed requests after reconnect until identity is rechecked", async () => {
 		const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));

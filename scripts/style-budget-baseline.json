@@ -721,10 +721,6 @@
     "long_line_count": 1,
     "max_line_length": 170
   },
-  "web/src/components/ui/popover.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 110
-  },
   "web/src/components/ui/scroll-area.stories.tsx": {
     "long_line_count": 1,
     "max_line_length": 185

@@ -12,6 +12,7 @@ export function createBackendProber(context: {
 	allowedOrigins: () => string[];
 	isPolicyExpired: () => boolean;
 	isStaticWebConsole: () => boolean;
+	getSessionEpoch: () => number;
 }) {
 	const { canonicalBackendOrigin } = context;
 	async function directJson(
@@ -157,6 +158,7 @@ export function createBackendProber(context: {
 		adminToken: string;
 		signal?: AbortSignal;
 	}): Promise<BackendCandidate> {
+		const sessionEpoch = context.getSessionEpoch();
 		const origin = canonicalBackendOrigin(args.origin);
 		if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
 		if (context.isStaticWebConsole()) {
@@ -175,6 +177,9 @@ export function createBackendProber(context: {
 				);
 		}
 		await probeBackendCandidate(args);
+		if (sessionEpoch !== context.getSessionEpoch()) {
+			throw new Error("Backend session changed during verification.");
+		}
 		const nodes = await directJson(
 			origin,
 			"/api/admin/nodes",
@@ -182,6 +187,7 @@ export function createBackendProber(context: {
 			args.signal,
 		);
 		if (
+			sessionEpoch !== context.getSessionEpoch() ||
 			!nodes ||
 			typeof nodes !== "object" ||
 			!Array.isArray((nodes as { items?: unknown }).items)
@@ -221,6 +227,7 @@ export function createBackendProber(context: {
 	}): Promise<unknown> {
 		const origin = canonicalBackendOrigin(args.origin);
 		const generation = context.getState().generation;
+		const sessionEpoch = context.getSessionEpoch();
 		if (
 			!origin ||
 			context.getState().state !== "switching" ||
@@ -235,6 +242,7 @@ export function createBackendProber(context: {
 		await probeBackendCandidate({ origin, clusterId: args.clusterId, signal });
 		if (
 			context.getState().state !== "switching" ||
+			context.getSessionEpoch() !== sessionEpoch ||
 			context.getState().clusterId !== args.clusterId ||
 			context.getState().generation !== generation ||
 			!context

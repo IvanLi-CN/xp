@@ -120,7 +120,9 @@ export function LoginPage({
 					);
 					return;
 				}
-				writeAdminToken(parsed.token);
+				writeAdminToken(parsed.token, {
+					retainVerifiedPreAuthTarget: !staticConsole,
+				});
 				setTokenLength(parsed.token.length);
 				form.reset({ token: parsed.token });
 				navigate({ href: redirectTarget });

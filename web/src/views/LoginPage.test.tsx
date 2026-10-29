@@ -51,6 +51,7 @@ vi.mock("../backend/primaryBackend", async () => {
 		...actual,
 		hydratePrimaryBackendProfile: vi.fn(),
 		isStaticWebConsole: mocks.isStaticWebConsole,
+		clearPrimaryBackendDirectory: vi.fn(),
 		probeBackendOrigin: mocks.probeBackendOrigin,
 		probeBackendCandidate: mocks.probeBackendCandidate,
 		selectPreAuthBackend: mocks.selectPreAuthBackend,

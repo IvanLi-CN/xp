@@ -3,8 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixtureCatalog } from "@/fixture-policy/catalog";
 
 import {
+	applyDirectoryResponse,
+	beginDirectoryRequest,
 	canonicalBackendOrigin,
 	currentWebReleaseVersion,
+	getDirectorySessionEpoch,
 	getPrimaryBackendSnapshot,
 	getStaticRuntimePolicyOrigins,
 	hydrateBackendVersions,
@@ -106,6 +109,106 @@ describe("primary backend transport", () => {
 				(candidate) => candidate.origin === fixtureCatalog.url.secondaryApi(),
 			),
 		).toBe(false);
+	});
+
+	it("keeps every registered row when a policy refresh omits an origin", () => {
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.nodeId.fixture17(),
+				node_name: fixtureCatalog.nodeName.fixture18(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.nodeId.fixture32(),
+				node_name: fixtureCatalog.nodeName.fixture33(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.nodeId.fixture36(),
+				node_name: fixtureCatalog.nodeName.fixture37(),
+				api_base_url: fixtureCatalog.url.origin443(),
+			},
+		]);
+		hydrateStaticRuntimePolicy(
+			fixtureCatalog.cluster.fixture84(),
+			[fixtureCatalog.url.primaryApi()],
+			{ policyId: "rcp-test" },
+		);
+		expect(
+			getPrimaryBackendSnapshot().candidates.map((row) => row.nodeId),
+		).toEqual(
+			expect.arrayContaining([
+				fixtureCatalog.nodeId.fixture17(),
+				fixtureCatalog.nodeId.fixture32(),
+				fixtureCatalog.nodeId.fixture36(),
+			]),
+		);
+	});
+
+	it("ignores an older directory response after a newer one was applied", () => {
+		const cluster = fixtureCatalog.cluster.fixture84();
+		hydratePrimaryBackendProfile(cluster);
+		const epoch = getDirectorySessionEpoch();
+		const older = beginDirectoryRequest();
+		const newer = beginDirectoryRequest();
+		const row = {
+			node_id: fixtureCatalog.nodeId.fixture17(),
+			node_name: fixtureCatalog.nodeName.fixture18(),
+			api_base_url: fixtureCatalog.url.primaryApi(),
+		};
+		expect(applyDirectoryResponse(cluster, epoch, newer, [])).toBe(true);
+		expect(applyDirectoryResponse(cluster, epoch, older, [row])).toBe(false);
+		expect(getPrimaryBackendSnapshot().candidates).toEqual([]);
+	});
+
+	it("does not apply a superseded response while a newer request is pending", () => {
+		const cluster = fixtureCatalog.cluster.fixture84();
+		const row = {
+			node_id: fixtureCatalog.nodeId.fixture17(),
+			node_name: fixtureCatalog.nodeName.fixture18(),
+			api_base_url: fixtureCatalog.url.primaryApi(),
+		};
+		hydratePrimaryBackendProfile(cluster, [row]);
+		const epoch = getDirectorySessionEpoch();
+		const older = beginDirectoryRequest();
+		const newer = beginDirectoryRequest();
+		expect(applyDirectoryResponse(cluster, epoch, older, [])).toBe(false);
+		expect(
+			getPrimaryBackendSnapshot().candidates.map((item) => item.nodeId),
+		).toEqual([row.node_id]);
+		expect(applyDirectoryResponse(cluster, epoch, newer, [])).toBe(true);
+		expect(getPrimaryBackendSnapshot().candidates).toEqual([]);
+	});
+
+	it("preserves node identities when switching to a shared origin", async () => {
+		const cluster = fixtureCatalog.cluster.fixture84();
+		hydratePrimaryBackendProfile(cluster, [
+			{
+				node_id: fixtureCatalog.nodeId.fixture17(),
+				node_name: fixtureCatalog.nodeName.fixture18(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.nodeId.fixture32(),
+				node_name: fixtureCatalog.nodeName.fixture33(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		const selected = getPrimaryBackendSnapshot().candidates.find(
+			(item) => item.nodeId === fixtureCatalog.nodeId.fixture32(),
+		);
+		if (!selected) throw new Error("selected node missing");
+		await switchPrimaryBackend({ ...selected, verifiedAt: Date.now() });
+		expect(
+			getPrimaryBackendSnapshot().candidates.map((item) => [
+				item.nodeId,
+				item.nodeName,
+			]),
+		).toEqual([
+			[fixtureCatalog.nodeId.fixture17(), fixtureCatalog.nodeName.fixture18()],
+			[fixtureCatalog.nodeId.fixture32(), fixtureCatalog.nodeName.fixture33()],
+		]);
+		window.localStorage.clear();
 	});
 
 	it("stages policy origins and preserves temporarily unavailable candidates", () => {
@@ -396,7 +499,7 @@ describe("primary backend transport", () => {
 		await transaction;
 
 		await expect(switchPromise).rejects.toThrow(
-			"Backend identity changed while waiting for a mutation.",
+			"Backend session changed during switching.",
 		);
 		expect(getPrimaryBackendSnapshot().clusterId).toBe(
 			fixtureCatalog.cluster.fixture95(),

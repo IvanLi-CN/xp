@@ -1,8 +1,16 @@
 # XP Product Glossary
 
-This glossary defines terms used by XP's Mihomo subscription and Web admin contexts.
+This glossary defines XP cluster terms and Mihomo subscription vocabulary.
 
 ## Language
+
+### Cluster Nodes
+
+**Registered Cluster Node**:
+A node recorded in the current XP cluster's node directory.
+_Avoid_: Available backend, subscription node
+
+### Subscription Nodes
 
 **Subscription Node**:
 A node with an endpoint membership in the current user's subscription.

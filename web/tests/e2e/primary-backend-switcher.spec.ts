@@ -43,6 +43,22 @@ async function injectDocumentCsp(page: Page, connectOrigin: string) {
 	});
 }
 
+test("signing out in another tab ends the active console session", async ({
+	page,
+}) => {
+	await setAdminToken(page);
+	await setupApiMocks(page);
+	await page.goto("/");
+	await expect(
+		page.getByRole("button", { name: "Open primary backend" }),
+	).toBeVisible();
+	const sibling = await page.context().newPage();
+	await sibling.goto("/login");
+	await sibling.evaluate(() => localStorage.removeItem("xp_admin_token"));
+	await expect(page).toHaveURL(/\/login/);
+	await sibling.close();
+});
+
 test("switches API and SSE traffic to a verified recovery origin", async ({
 	page,
 }) => {
