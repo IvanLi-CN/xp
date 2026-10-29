@@ -282,6 +282,7 @@ export function applyDirectoryResponse(
 	if (
 		epoch !== directorySessionEpoch ||
 		state.clusterId !== clusterId ||
+		serial !== directoryRequestSerial ||
 		serial < directoryAppliedSerial
 	)
 		return false;

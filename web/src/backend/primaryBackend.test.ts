@@ -292,6 +292,25 @@ describe("primary backend transport", () => {
 		expect(getPrimaryBackendSnapshot().candidates).toEqual([]);
 	});
 
+	it("does not apply a superseded response while a newer request is pending", () => {
+		const cluster = fixtureCatalog.cluster.fixture84();
+		const row = {
+			node_id: fixtureCatalog.nodeId.fixture17(),
+			node_name: fixtureCatalog.nodeName.fixture18(),
+			api_base_url: fixtureCatalog.url.primaryApi(),
+		};
+		hydratePrimaryBackendProfile(cluster, [row]);
+		const epoch = getDirectorySessionEpoch();
+		const older = beginDirectoryRequest();
+		const newer = beginDirectoryRequest();
+		expect(applyDirectoryResponse(cluster, epoch, older, [])).toBe(false);
+		expect(
+			getPrimaryBackendSnapshot().candidates.map((item) => item.nodeId),
+		).toEqual([row.node_id]);
+		expect(applyDirectoryResponse(cluster, epoch, newer, [])).toBe(true);
+		expect(getPrimaryBackendSnapshot().candidates).toEqual([]);
+	});
+
 	it("preserves node identities when switching to a shared origin", async () => {
 		const cluster = fixtureCatalog.cluster.fixture84();
 		hydratePrimaryBackendProfile(cluster, [

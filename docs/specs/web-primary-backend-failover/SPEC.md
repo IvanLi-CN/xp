@@ -77,7 +77,8 @@ ADR 0012 and does not alter this embedded-PWA contract.
   selector rows by node ID, including nodes sharing an origin or having invalid
   addresses. Policy refreshes, reachability, and version results MUST NOT add or
   remove inventory rows. Only a successful, identity-matched inventory response
-  may retire a node. If refresh fails or the console is offline, retain the last
+  that has not been superseded by a newer request may retire a node. If refresh
+  fails or the console is offline, retain the last
   successful inventory within the current authenticated session and display a
   single stale-data notice; if none exists, show an inventory error. Recovery
   clears the notice. Logout, cluster changes, and superseded asynchronous
