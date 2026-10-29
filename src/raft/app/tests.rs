@@ -289,8 +289,8 @@ async fn forwarded_client_write_failures_keep_safe_outcome_details() {
                     }
                 }
             }"#,
-            "remote_not_dispatched",
-            RaftWriteDispatchState::NotDispatched,
+            "remote_error_response",
+            RaftWriteDispatchState::DispatchedNoVerifiedResponse,
             Some(503),
         ),
     ] {

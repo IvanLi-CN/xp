@@ -551,7 +551,7 @@ export function useMihomoProfileDraft({
 			return;
 		}
 		if (dirty || isSaving) {
-			if (!isSaving) {
+			if (!isSaving && !isVerifying) {
 				setConflict({
 					server: cloneProfile(profile),
 					draftBaseline: cloneProfile(baseline),
@@ -579,6 +579,7 @@ export function useMihomoProfileDraft({
 		dirty,
 		incomingProfileKey,
 		isSaving,
+		isVerifying,
 		loadedUserId,
 		profile,
 		sessionIdentity,
@@ -738,6 +739,7 @@ export function useMihomoProfileDraft({
 			setBaseline(next);
 			setBaselineKnown(true);
 			setDraftState(next);
+			setConflict(null);
 			setLoadedUserId(targetUserId);
 			acceptedProfileKeyRef.current = profileKey(next);
 			lastSavedProfileKeyRef.current = profileKey(next);
@@ -765,7 +767,6 @@ export function useMihomoProfileDraft({
 				return false;
 			}
 			if (savePromiseRef.current) return savePromiseRef.current;
-
 			const targetUserId = userId;
 			const targetSession = userSessionRef.current;
 			const payload = cloneProfile(draft);
@@ -878,7 +879,6 @@ export function useMihomoProfileDraft({
 			userId,
 		],
 	);
-
 	const verify = useCallback(async (): Promise<boolean> => {
 		if (
 			!verifyProfile ||

@@ -22,40 +22,6 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 const CONDITIONAL_ENDPOINT_UPDATE_CAPABILITY: &str = "admin.endpoint-conditional-update";
 
-#[derive(Debug, Deserialize)]
-struct ForwardedApiErrorResponse {
-    error: ForwardedApiErrorBody,
-}
-
-#[derive(Debug, Deserialize)]
-struct ForwardedApiErrorBody {
-    code: String,
-    #[serde(default)]
-    details: serde_json::Map<String, serde_json::Value>,
-}
-
-fn response_proves_not_dispatched(
-    status: reqwest::StatusCode,
-    response: Result<ForwardedApiErrorResponse, reqwest::Error>,
-) -> bool {
-    status == reqwest::StatusCode::SERVICE_UNAVAILABLE
-        && response.is_ok_and(|response| {
-            response.error.code == "raft_write_not_dispatched"
-                && response
-                    .error
-                    .details
-                    .get("dispatch_state")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("not_dispatched")
-                && response
-                    .error
-                    .details
-                    .get("confidence")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("confirmed")
-        })
-}
-
 fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
     if let Some(msg) = payload.downcast_ref::<&str>() {
         return (*msg).to_string();
@@ -707,21 +673,6 @@ async fn forward_client_write(
     .map_err(anyhow::Error::new)?;
     if !response.status().is_success() {
         let status = response.status();
-        let proves_not_dispatched = if status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
-            response_proves_not_dispatched(status, response.json().await)
-        } else {
-            false
-        };
-        if proves_not_dispatched {
-            return Err(anyhow::Error::new(
-                RaftWriteError::not_dispatched(
-                    "remote_not_dispatched",
-                    Some(peer.node_id.clone()),
-                    support_id,
-                )
-                .with_remote_status(status.as_u16()),
-            ));
-        }
         return Err(anyhow::Error::new(
             RaftWriteError::outcome_unknown(
                 "remote_error_response",

@@ -301,6 +301,42 @@ describe("useMihomoProfileDraft", () => {
 		expect(result.current.draft).toEqual(submitted);
 	});
 
+	it("does not retain a conflict from a matching manual read-back", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "verified draft\n" };
+		let resolveVerify: ((profile: AdminUserMihomoProfile) => void) | undefined;
+		const verifyProfile = vi.fn(
+			() =>
+				new Promise<AdminUserMihomoProfile>((resolve) => {
+					resolveVerify = resolve;
+				}),
+		);
+		const { result, rerender } = renderHook(
+			({ profile }: { profile: AdminUserMihomoProfile }) =>
+				useMihomoProfileDraft({
+					userId: "user-a",
+					profile,
+					saveProfile: vi.fn(async (next) => next),
+					verifyProfile,
+				}),
+			{ initialProps: { profile: PROFILE_A } },
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", submitted.mixin_yaml));
+		let verifyPromise: Promise<boolean> | undefined;
+		act(() => {
+			verifyPromise = result.current.verify();
+		});
+		await waitFor(() => expect(result.current.isVerifying).toBe(true));
+		rerender({ profile: submitted });
+		act(() => resolveVerify?.(submitted));
+		if (!verifyPromise) throw new Error("verification request was not created");
+		await act(async () => expect(await verifyPromise).toBe(true));
+
+		expect(result.current.conflict).toBeNull();
+		expect(result.current.dirty).toBe(false);
+	});
+
 	it("ignores a stale verification rejection after the session changes", async () => {
 		let rejectVerify: ((error: unknown) => void) | undefined;
 		const verifyProfile = vi.fn(
