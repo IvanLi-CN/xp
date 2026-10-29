@@ -14,18 +14,19 @@ type BackendNode = {
 
 export function useAuthenticatedBackendProbe(args: {
 	staticConsole: boolean;
+	isOnline: boolean;
 	origin: string;
 	clusterId: string | null;
 }) {
-	const { clusterId, origin, staticConsole } = args;
+	const { clusterId, isOnline, origin, staticConsole } = args;
 	const [probeState, setProbeState] = useState({
 		clusterId,
 		origin,
-		ready: staticConsole,
+		ready: staticConsole || !isOnline,
 	});
 	const probe = useCallback(
 		async (signal?: AbortSignal): Promise<boolean> => {
-			if (staticConsole) {
+			if (staticConsole || !isOnline) {
 				setProbeState({ clusterId, origin, ready: true });
 				return true;
 			}
@@ -43,18 +44,20 @@ export function useAuthenticatedBackendProbe(args: {
 			setProbeState({ clusterId, origin, ready: true });
 			return true;
 		},
-		[clusterId, origin, staticConsole],
+		[clusterId, isOnline, origin, staticConsole],
 	);
 	const ready =
-		probeState.origin === origin &&
-		probeState.clusterId === clusterId &&
-		probeState.ready;
+		staticConsole ||
+		!isOnline ||
+		(probeState.origin === origin &&
+			probeState.clusterId === clusterId &&
+			probeState.ready);
 	useEffect(() => {
-		if (staticConsole) return;
+		if (staticConsole || !isOnline) return;
 		const controller = new AbortController();
 		void probe(controller.signal).catch(() => undefined);
 		return () => controller.abort();
-	}, [probe, staticConsole]);
+	}, [isOnline, probe, staticConsole]);
 	return { probe, ready };
 }
 

@@ -25,6 +25,8 @@ type AppResourceNavigationProps = {
 	compatibilityError: string | null;
 	compatibilityPending: boolean;
 	groups: AppNavigationGroup[];
+	backendOrigin?: string;
+	backendGeneration?: number;
 	localNodeId: string | null;
 	pathname: string;
 	onNavigate: (href: string) => void;
@@ -54,6 +56,8 @@ export function AppResourceNavigation({
 	compatibilityError,
 	compatibilityPending,
 	groups,
+	backendOrigin,
+	backendGeneration,
 	localNodeId,
 	pathname,
 	onNavigate,
@@ -75,8 +79,12 @@ export function AppResourceNavigation({
 	const nodesRequested = requestedResources.nodes || nodesActive;
 	const endpointsRequested = requestedResources.endpoints || endpointsActive;
 	const usersRequested = requestedResources.users || usersActive;
+	const adminNodesQueryKey =
+		backendOrigin !== undefined && backendGeneration !== undefined
+			? ["adminNodes", adminToken, backendOrigin, backendGeneration]
+			: ["adminNodes", adminToken];
 	const adminNodes = useQuery({
-		queryKey: ["adminNodes", adminToken],
+		queryKey: adminNodesQueryKey,
 		enabled:
 			adminToken.length > 0 && nodesCapability.available && nodesRequested,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
