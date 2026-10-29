@@ -86,5 +86,10 @@ describe("XMUX draft", () => {
 			{ mihomo_xmux: policy },
 		);
 		expect(updated?.meta.mihomo_xmux).toEqual(policy);
+		if (!updated) throw new Error("fixture patch rejected a valid policy");
+		const cleared = normalizeFixtureEndpointPatch(updated, {
+			mihomo_xmux: null,
+		});
+		expect(cleared?.meta).not.toHaveProperty("mihomo_xmux");
 	});
 });

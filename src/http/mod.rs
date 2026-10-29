@@ -2128,6 +2128,11 @@ async fn cluster_join(
     let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
         .lock_owned()
         .await;
+    state
+        .raft
+        .ensure_linearizable()
+        .await
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
     if !req.xmux_settings_v1
         && state
             .store

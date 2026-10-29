@@ -162,7 +162,7 @@ export type AdminEndpointPatchRequest = {
 	accepted_authorities?: string[] | null;
 	mihomo_smux?: MihomoSmuxConfig;
 	transport?: VlessRealityTransport;
-	mihomo_xmux?: MihomoXmuxConfig;
+	mihomo_xmux?: MihomoXmuxConfig | null;
 };
 
 export async function fetchAdminEndpoints(

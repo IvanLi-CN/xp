@@ -127,6 +127,11 @@ pub(super) async fn lock_xmux_settings_change(
             "cluster leadership changed; retry XMUX settings on the current leader",
         ));
     }
+    state
+        .raft
+        .ensure_linearizable()
+        .await
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
     if state
         .store
         .lock()

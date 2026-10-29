@@ -39,6 +39,8 @@ struct DeferredPromotionRaft {
 #[derive(Clone)]
 struct BlockingCatchUpRaft {
     inner: LocalRaft,
+    store: Arc<Mutex<JsonSnapshotStore>>,
+    pending_xmux_endpoint: Arc<Mutex<Option<crate::domain::Endpoint>>>,
     wait_calls: Arc<Mutex<usize>>,
     promotion_calls: Arc<Mutex<usize>>,
 }
@@ -46,6 +48,21 @@ struct BlockingCatchUpRaft {
 impl RaftFacade for BlockingCatchUpRaft {
     fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<u64, RaftNodeMeta>> {
         <LocalRaft as RaftFacade>::metrics(&self.inner)
+    }
+
+    fn ensure_linearizable(&self) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move {
+            <LocalRaft as RaftFacade>::ensure_linearizable(&self.inner).await?;
+            if let Some(endpoint) = self.pending_xmux_endpoint.lock().await.take() {
+                self.store
+                    .lock()
+                    .await
+                    .state_mut()
+                    .endpoints
+                    .insert(endpoint.endpoint_id.clone(), endpoint);
+            }
+            Ok(())
+        })
     }
 
     fn client_write(
@@ -432,6 +449,19 @@ fn app_with_blocking_catch_up(
     Arc<Mutex<usize>>,
     Arc<Mutex<usize>>,
 ) {
+    app_with_blocking_catch_up_and_pending_xmux(tmp, None)
+}
+
+#[allow(clippy::type_complexity)]
+fn app_with_blocking_catch_up_and_pending_xmux(
+    tmp: &TempDir,
+    pending_xmux_endpoint: Option<crate::domain::Endpoint>,
+) -> (
+    axum::Router,
+    Arc<Mutex<JsonSnapshotStore>>,
+    Arc<Mutex<usize>>,
+    Arc<Mutex<usize>>,
+) {
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
@@ -479,6 +509,8 @@ fn app_with_blocking_catch_up(
     let promotion_calls = Arc::new(Mutex::new(0));
     let raft: Arc<dyn RaftFacade> = Arc::new(BlockingCatchUpRaft {
         inner: LocalRaft::new(store.clone(), rx),
+        store: store.clone(),
+        pending_xmux_endpoint: Arc::new(Mutex::new(pending_xmux_endpoint)),
         wait_calls: wait_calls.clone(),
         promotion_calls: promotion_calls.clone(),
     });
@@ -527,17 +559,16 @@ fn app_with_blocking_catch_up(
 #[tokio::test]
 async fn cluster_join_requires_xmux_capability_when_custom_settings_exist() {
     let tmp = TempDir::new().unwrap();
-    let (app, store, _, _) = app_with_blocking_catch_up(&tmp);
-    store.lock().await.state_mut().endpoints.insert(
-        xp_test_fixtures::primary_endpoint_id().to_owned(),
-        crate::domain::Endpoint {
+    let (app, _store, _, _) = app_with_blocking_catch_up_and_pending_xmux(
+        &tmp,
+        Some(crate::domain::Endpoint {
             endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
             node_id: xp_test_fixtures::primary_node_id().to_owned(),
             tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
             kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
             port: 443,
             meta: json!({"mihomo_xmux": {"max_connections": "2"}}),
-        },
+        }),
     );
     let cluster = ClusterMetadata::load(tmp.path()).unwrap();
     let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();

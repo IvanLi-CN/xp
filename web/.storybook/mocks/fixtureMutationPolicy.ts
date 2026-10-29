@@ -428,12 +428,17 @@ export function normalizeFixtureEndpointPatch<T extends AdminEndpoint>(
 	}
 	if (payload.mihomo_xmux !== undefined) {
 		if (updated.kind !== fixtureCatalog.endpoint.vlessKind()) return undefined;
-		const parsed = MihomoXmuxSchema.safeParse(payload.mihomo_xmux);
-		if (!parsed.success) return undefined;
-		updated = {
-			...updated,
-			meta: { ...updated.meta, mihomo_xmux: parsed.data },
-		};
+		if (payload.mihomo_xmux === null) {
+			const { mihomo_xmux: _removed, ...meta } = updated.meta;
+			updated = { ...updated, meta };
+		} else {
+			const parsed = MihomoXmuxSchema.safeParse(payload.mihomo_xmux);
+			if (!parsed.success) return undefined;
+			updated = {
+				...updated,
+				meta: { ...updated.meta, mihomo_xmux: parsed.data },
+			};
+		}
 	}
 	if (payload.transport !== undefined) {
 		if (updated.kind !== fixtureCatalog.endpoint.vlessKind()) return undefined;
