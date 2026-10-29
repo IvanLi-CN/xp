@@ -169,6 +169,7 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<(), RepositoryRuntimeError> {
+        self.rebuild_if_stale(now_unix_seconds)?;
         let created = self.queue_local_history_backfill_batches(
             cluster_id,
             identity,
@@ -194,6 +195,20 @@ impl RepositoryReplicaRuntime {
             .local_history_backfill_inflight
             .as_ref()
             .is_some_and(|inflight| !inflight.segments.is_empty())
+    }
+
+    pub(super) fn legacy_local_history_backfill_owns_wire(&self, wire: &[u8]) -> bool {
+        let Some(inflight) = self.snapshot.local_history_backfill_inflight.as_ref() else {
+            return false;
+        };
+        if !inflight.segments.is_empty() {
+            return false;
+        }
+        let id = hex::encode(Sha256::digest(wire));
+        inflight
+            .segment_ids
+            .iter()
+            .any(|segment_id| segment_id == &id)
     }
 
     /// Apply the exact wire set persisted for a new-format page and clear its checkpoint in the

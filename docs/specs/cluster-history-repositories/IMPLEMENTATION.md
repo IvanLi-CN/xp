@@ -160,8 +160,11 @@
   signature, epoch, stream, sequence and chain state. Wire receive, record/tombstone import, stream
   state, page cursor and completion are committed together; failures restore the prior snapshot and
   leave unacknowledged wires available. New-format pages clear their in-flight wires only at the
-  durable receive/apply ACK boundary; legacy snapshots without embedded wires continue to replay the
-  exact source-journal rows until their real collector ACK commits. Coverage includes
+  durable receive/apply ACK boundary; legacy snapshots without embedded wires validate the current
+  local identity, apply the whole source-journal page atomically, and defer ordinary source ACK
+  deletion while that page owns the rows, then continue to replay the exact rows until their real
+  collector ACK commits. A durable local in-flight page is prioritized over Ready-peer catch-up,
+  and source collection keeps mesh, IP and endpoint history working sets bounded. Coverage includes
   separate-chain,
   epoch reuse, restart hash-chain continuation, exact-wire retry, commit rollback, tombstone
   protection and multi-segment page replay in `page_replay_tests.rs` and source-delivery tests.

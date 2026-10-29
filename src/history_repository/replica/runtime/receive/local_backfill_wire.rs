@@ -36,4 +36,22 @@ impl RepositoryReplicaRuntime {
             false,
         )
     }
+
+    pub(crate) fn receive_local_history_backfill_legacy_page(
+        &mut self,
+        cluster_id: &str,
+        segments: &[RepositoryReplicaSegment],
+        now_unix_seconds: u64,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+    ) -> Result<Vec<RepositorySyncReceipt>, RepositoryRuntimeError> {
+        self.receive_wire_batch_from_repository_with_gaps(
+            cluster_id,
+            segments,
+            &[],
+            now_unix_seconds,
+            ready_repositories,
+            local_repository_id,
+        )
+    }
 }

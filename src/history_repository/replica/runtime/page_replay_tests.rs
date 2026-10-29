@@ -861,3 +861,98 @@ fn predecessor_local_history_backfill_page_replays_source_journal_wire() {
         Some("history-page-legacy")
     );
 }
+
+#[test]
+fn legacy_local_history_backfill_page_applies_all_segments_atomically() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut runtime = load(temporary.path());
+    let first = runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            identity.clone(),
+            &key,
+            vec![record(b"legacy-page-1", false)],
+            1_000,
+        )
+        .expect("queue first legacy segment")
+        .expect("first legacy segment");
+    let mut second = runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            identity.clone(),
+            &key,
+            vec![record(b"legacy-page-2", false)],
+            1_001,
+        )
+        .expect("queue second legacy segment")
+        .expect("second legacy segment");
+    second.wire[0] ^= 1;
+
+    assert!(
+        runtime
+            .receive_local_history_backfill_legacy_page(
+                "cluster-a",
+                &[first, second],
+                1_002,
+                &["local".to_owned()],
+                "local",
+            )
+            .is_err()
+    );
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_record_count()
+            .expect("history count after failed page"),
+        0,
+        "a failed legacy page must not leave an earlier segment applied"
+    );
+}
+
+#[test]
+fn source_delivery_ack_defers_a_legacy_backfill_owned_wire() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut runtime = load(temporary.path());
+    let queued = runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            identity,
+            &key,
+            vec![record(b"legacy-owned", false)],
+            1_000,
+        )
+        .expect("queue legacy segment")
+        .expect("legacy segment");
+    let segment_id = hex::encode(Sha256::digest(&queued.wire));
+    let mut snapshot = serde_json::to_value(&runtime.snapshot).expect("serialize snapshot");
+    snapshot["local_history_backfill_inflight"] = serde_json::json!({
+        "page_cursor": "history-page-legacy",
+        "completed": false,
+        "segment_ids": [segment_id],
+    });
+    runtime
+        .storage
+        .write(
+            crate::state::history_storage::REPOSITORY_REPLICA_KEY,
+            &serde_json::to_vec(&snapshot).expect("serialize legacy snapshot"),
+        )
+        .expect("persist legacy snapshot");
+    let mut restored = load(temporary.path());
+
+    restored
+        .acknowledge_local_source_segment(&queued.wire)
+        .expect("defer source acknowledgement");
+    assert_eq!(
+        restored
+            .storage
+            .source_delivery_journal()
+            .expect("read source journal")
+            .len(),
+        1
+    );
+    assert_eq!(restored.local_source_pending_segments().len(), 1);
+}

@@ -107,6 +107,15 @@ pub(super) async fn local_repository_lifecycle(
         .unwrap_or(RepositoryLifecycle::Syncing))
 }
 
+pub(super) async fn local_history_backfill_inflight(state: &AppState) -> bool {
+    state
+        .repository_replica
+        .lock()
+        .await
+        .local_history_backfill_inflight_checkpoint()
+        .is_some()
+}
+
 pub(super) async fn repair_legacy_tombstone_metadata(
     state: &AppState,
     now_unix_seconds: u64,
@@ -120,18 +129,20 @@ pub(crate) fn should_fanout_tombstone_acknowledgements(lifecycle: RepositoryLife
     lifecycle == RepositoryLifecycle::Ready
 }
 
-pub(super) async fn receive_local_source_segment(
+pub(super) async fn receive_local_source_page(
     state: &AppState,
-    segment: &RepositoryReplicaSegment,
+    segments: &[RepositoryReplicaSegment],
     ready_repository_ids: &[String],
     now: u64,
 ) -> anyhow::Result<()> {
+    if segments.is_empty() {
+        return Ok(());
+    }
     let mut runtime = state.repository_replica.lock().await;
-    let receipt = super::repository_blocking(|| {
-        runtime.receive_local_history_backfill_wire(
+    let receipts = super::repository_blocking(|| {
+        runtime.receive_local_history_backfill_legacy_page(
             &state.cluster.cluster_id,
-            &segment.identity,
-            &segment.wire,
+            segments,
             now,
             ready_repository_ids,
             &state.cluster.node_id,
@@ -139,10 +150,15 @@ pub(super) async fn receive_local_source_segment(
     })?;
     drop(runtime);
     if should_fanout_tombstone_acknowledgements(local_repository_lifecycle(state).await?)
-        && !receipt.tombstone_acknowledgements().is_empty()
+        && receipts
+            .iter()
+            .any(|receipt| !receipt.tombstone_acknowledgements().is_empty())
     {
         tracing::debug!(
-            count = receipt.tombstone_acknowledgements().len(),
+            count = receipts
+                .iter()
+                .map(|receipt| receipt.tombstone_acknowledgements().len())
+                .sum::<usize>(),
             "history tombstone acknowledgement fanout deferred to replication worker"
         );
     }

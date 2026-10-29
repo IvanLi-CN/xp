@@ -71,8 +71,9 @@ use repair::remove_unavailable_repair_segment_ids;
 #[cfg(test)]
 pub(super) use source::should_fanout_tombstone_acknowledgements;
 use source::{
-    receive_local_source_segment, receive_local_source_segments, repair_legacy_tombstone_metadata,
-    source_record, source_record_with_key, source_record_with_key_for_subject,
+    local_history_backfill_inflight, receive_local_source_page, receive_local_source_segments,
+    repair_legacy_tombstone_metadata, source_record, source_record_with_key,
+    source_record_with_key_for_subject,
 };
 use source_records::{SourceRecordBatch, source_records, source_records_with_deletions};
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
@@ -608,15 +609,14 @@ async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyho
                 .collect::<Vec<_>>(),
         )
     };
+    let local_backfill_inflight = local_history_backfill_inflight(state).await;
     if lifecycle != RepositoryLifecycle::Syncing {
         return Ok(());
     }
-    // Catch-up validates a bounded point in time. Once it completes, continuously arriving
-    // source segments must not reset the five-minute stability window: a busy cluster otherwise
-    // has no instant at which it can be exactly equal to an actively writing repository.
+    // Catch-up validates a bounded point in time without resetting the stability window.
     let catch_up = if !should_run_initial_catch_up(catch_up_completed) {
         backfill::InitialBackfillProgress::Complete
-    } else if ready_repository_ids.is_empty() {
+    } else if local_backfill_inflight || ready_repository_ids.is_empty() {
         backfill_initial_repository_from_local_history(state, now).await?
     } else {
         catch_up_against_ready_repositories(state, now).await?

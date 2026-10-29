@@ -2,8 +2,8 @@ use super::source::MAX_SOURCE_PAYLOAD_BYTES;
 use super::*;
 
 const MAX_SOURCE_SUMMARY_ITEMS: usize = 64;
-const MAX_PATH_HEALTH_SOURCE_PEERS: usize = 16;
-const MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER: usize = 1;
+pub(super) const MAX_PATH_HEALTH_SOURCE_PEERS: usize = 16;
+pub(super) const MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER: usize = 1;
 
 pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::Result<()> {
     const MAX_PAGES_PER_CYCLE: usize = 16;

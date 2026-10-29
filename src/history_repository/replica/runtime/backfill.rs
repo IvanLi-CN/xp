@@ -442,93 +442,99 @@ impl RepositoryReplicaRuntime {
             return Err(RepositoryRuntimeError::WriteStopped(availability));
         }
         let previous_snapshot = self.snapshot.clone();
+        let rollback_snapshot = previous_snapshot.clone();
+        let previous_tombstones = self.tombstones.checkpoint();
         let mut mutation = PendingRepositoryMutation {
             target_repository_id: local_repository_id.to_owned(),
             progress_at_unix_seconds: Some(now_unix_seconds),
             ..PendingRepositoryMutation::default()
         };
-        for record in records {
-            let observed_at_unix_seconds = record.observed_at_unix_seconds;
-            let cursor = ReplicaCursor::new(
-                record.source_node_id.clone(),
-                record.source_epoch,
-                record.stream.clone(),
-                record.sequence,
-            )?;
-            let sync_record = SyncRecord::new(
-                record.subject_node_id,
-                record.observer_node_id,
-                record.schema_id,
-                record.schema_version,
-                record.record_key,
-                record.payload,
-                record.tombstone,
-            );
-            let replica_record = ReplicaRecord::new(
-                &cursor,
-                sync_record.subject_node_id(),
-                sync_record.observer_node_id(),
-                sync_record.schema().0,
-                sync_record.schema().1,
-                sync_record.record_key().to_vec(),
-                sync_record.payload_bytes().to_vec(),
-            )?;
-            let key = replica_record.key();
-            if sync_record.is_tombstone() {
-                let (schema_id, schema_version) = sync_record.schema();
-                let target_stream = source_stream_for_schema(schema_id).ok_or_else(|| {
-                    RepositoryRuntimeError::Storage(format!(
-                        "tombstone schema has no target stream: {schema_id}"
-                    ))
-                })?;
-                let target_stream =
-                    super::error::backfill_target_stream(cursor.stream(), target_stream)?;
-                let target_cursor = ReplicaCursor::new(
-                    cursor.source_node_id(),
-                    cursor.source_epoch(),
-                    &target_stream,
-                    cursor.sequence(),
+        let result = (|| {
+            for record in records {
+                let observed_at_unix_seconds = record.observed_at_unix_seconds;
+                let cursor = ReplicaCursor::new(
+                    record.source_node_id.clone(),
+                    record.source_epoch,
+                    record.stream.clone(),
+                    record.sequence,
                 )?;
-                let target_key = ReplicaRecord::new(
-                    &target_cursor,
+                let sync_record = SyncRecord::new(
+                    record.subject_node_id,
+                    record.observer_node_id,
+                    record.schema_id,
+                    record.schema_version,
+                    record.record_key,
+                    record.payload,
+                    record.tombstone,
+                );
+                let replica_record = ReplicaRecord::new(
+                    &cursor,
                     sync_record.subject_node_id(),
                     sync_record.observer_node_id(),
-                    schema_id,
-                    schema_version,
+                    sync_record.schema().0,
+                    sync_record.schema().1,
                     sync_record.record_key().to_vec(),
                     sync_record.payload_bytes().to_vec(),
-                )?
-                .key();
-                self.delete_records_for_tombstone(&target_key, &mut mutation)?;
-                self.tombstones
-                    .tombstone(key, now_unix_seconds, ready_repositories)?;
-                self.tombstones
-                    .acknowledge(replica_record.key(), local_repository_id)?;
-            } else if !self.tombstones.allows(&key) {
-                self.snapshot = previous_snapshot;
-                self.tombstones =
-                    TombstoneLedger::from_checkpoint(self.snapshot.tombstones.clone())?;
-                return Err(RepositoryRuntimeError::Protocol(
-                    ProtocolError::ResurrectionPrevented,
-                ));
-            }
-            let stored = StoredRecord::from_record(
-                observed_at_unix_seconds,
-                now_unix_seconds,
-                &cursor,
-                &sync_record,
-            );
-            if self.uses_sqlite_history() {
-                if !stored.tombstone {
-                    self.update_partition_summary_for_record(&stored)?;
+                )?;
+                let key = replica_record.key();
+                if sync_record.is_tombstone() {
+                    let (schema_id, schema_version) = sync_record.schema();
+                    let target_stream = source_stream_for_schema(schema_id).ok_or_else(|| {
+                        RepositoryRuntimeError::Storage(format!(
+                            "tombstone schema has no target stream: {schema_id}"
+                        ))
+                    })?;
+                    let target_stream =
+                        super::error::backfill_target_stream(cursor.stream(), target_stream)?;
+                    let target_cursor = ReplicaCursor::new(
+                        cursor.source_node_id(),
+                        cursor.source_epoch(),
+                        &target_stream,
+                        cursor.sequence(),
+                    )?;
+                    let target_key = ReplicaRecord::new(
+                        &target_cursor,
+                        sync_record.subject_node_id(),
+                        sync_record.observer_node_id(),
+                        schema_id,
+                        schema_version,
+                        sync_record.record_key().to_vec(),
+                        sync_record.payload_bytes().to_vec(),
+                    )?
+                    .key();
+                    self.delete_records_for_tombstone(&target_key, &mut mutation)?;
+                    self.tombstones
+                        .tombstone(key, now_unix_seconds, ready_repositories)?;
+                    self.tombstones
+                        .acknowledge(replica_record.key(), local_repository_id)?;
+                } else if !self.tombstones.allows(&key) {
+                    return Err(RepositoryRuntimeError::Protocol(
+                        ProtocolError::ResurrectionPrevented,
+                    ));
                 }
-                mutation.records.push(stored.sqlite_row()?);
-            } else {
-                self.snapshot.records.push(stored);
+                let stored = StoredRecord::from_record(
+                    observed_at_unix_seconds,
+                    now_unix_seconds,
+                    &cursor,
+                    &sync_record,
+                );
+                if self.uses_sqlite_history() {
+                    if !stored.tombstone {
+                        self.update_partition_summary_for_record(&stored)?;
+                    }
+                    mutation.records.push(stored.sqlite_row()?);
+                } else {
+                    self.snapshot.records.push(stored);
+                }
+                self.record_source_received_from_cursor(&cursor, now_unix_seconds);
             }
-            self.record_source_received_from_cursor(&cursor, now_unix_seconds);
+            self.persist_import_mutation(previous_snapshot, mutation)
+        })();
+        if result.is_err() {
+            self.snapshot = rollback_snapshot;
+            self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
         }
-        self.persist_import_mutation(previous_snapshot, mutation)
+        result
     }
 }
 

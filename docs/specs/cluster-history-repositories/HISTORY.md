@@ -8,6 +8,9 @@
   stream，tombstone 使用 `tombstone-backfill-<source_node_id>`；实时 source sequence/outbox
   不再被历史页占用。页 wire 在应用前持久化，恢复时重验身份、签名、归属、epoch、sequence 和
   hash-chain，记录导入、ACK 与 cursor 只在同一成功提交中完成，未确认原文保留到真实 ACK。
+- 旧格式 source-journal 页恢复要求当前本地派生 identity，整页接收失败时回滚已应用段；其拥有的
+  journal wire 不被普通 source ACK 提前删除。新格式本地页在 Ready peer catch-up 前优先恢复，历史
+  source 的 mesh、IP 与 endpoint 工作集保持有界。
 - 无条件排除本地 standby 会阻断 Ready US 的连续接收；保留 Ready 本地备用，失败后下一周期回到 primary，源 epoch 与未 ACK 原文不变。
 - 持续写入会让等待空页的摘要完成位饥饿；最后一页提交后即检查 dirty 集合并持久化完成，保留有界预算、旧 peer fallback 与永久 gap 语义。
 

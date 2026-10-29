@@ -37,6 +37,9 @@ pub(super) async fn resume_local_history_backfill_page(
             .await
             .local_history_backfill_inflight_segments()?;
         for segment in &segments {
+            if segment.identity != *identity {
+                anyhow::bail!("local history backfill segment identity is not current");
+            }
             if !super::super::super::identity_is_valid_for_history_replay(state, &segment.identity)
                 .await
                 .map_err(|_| anyhow::anyhow!("check local history backfill segment identity"))?
@@ -44,11 +47,14 @@ pub(super) async fn resume_local_history_backfill_page(
                 anyhow::bail!("local history backfill segment identity is not pinned");
             }
         }
-        for segment in &segments {
-            receive_local_source_segment(state, segment, ready_repository_ids, now_unix_seconds)
-                .await?;
-        }
         if !segments.is_empty() {
+            super::super::receive_local_source_page(
+                state,
+                &segments,
+                ready_repository_ids,
+                now_unix_seconds,
+            )
+            .await?;
             state
                 .repository_replica
                 .lock()

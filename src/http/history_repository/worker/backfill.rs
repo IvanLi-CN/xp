@@ -725,7 +725,11 @@ async fn historical_source_backfill_records(
         .unwrap_or_else(|| u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default());
     let mut records = HistoricalBackfillCollector::new(cursor.map(|cursor| cursor.after), limit)
         .with_snapshot_end(snapshot_end_unix_seconds);
-    if let Some(history) = state.node_history.snapshot(&state.cluster.node_id).await {
+    if let Some(history) = state
+        .node_history
+        .repository_snapshot(&state.cluster.node_id)
+        .await
+    {
         let history_node_id = history.node_id.clone();
         for traffic in history.daily_traffic {
             push_backfill_record(
@@ -789,7 +793,14 @@ async fn historical_source_backfill_records(
             }
         }
     }
-    let mesh = state.mesh_telemetry.snapshot().await;
+    let mesh = state
+        .mesh_telemetry
+        .history_source_snapshot(
+            super::source_records::MAX_PATH_HEALTH_SOURCE_PEERS,
+            super::source_records::MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER,
+            super::source::MAX_SOURCE_PAYLOAD_BYTES,
+        )
+        .await;
     for peer in mesh.peers {
         let peer_id = peer.peer_id.clone();
         for bucket in peer.buckets {
@@ -807,18 +818,11 @@ async fn historical_source_backfill_records(
             )?;
         }
     }
-    let (inbound_samples, connection_samples) = {
-        let store = state.store.lock().await;
-        (
-            store
-                .inbound_ip_usage()
-                .repository_samples_for_node(&state.cluster.node_id),
-            store
-                .tcp_connection_usage()
-                .repository_samples_for_node(&state.cluster.node_id),
-        )
-    };
-    for sample in inbound_samples {
+    let store = state.store.lock().await;
+    for sample in store
+        .inbound_ip_usage()
+        .repository_samples_for_node(&state.cluster.node_id)
+    {
         let minute = sample.minute.clone();
         push_backfill_record(
             &mut records,
@@ -832,7 +836,10 @@ async fn historical_source_backfill_records(
             serde_json::to_value(sample)?,
         )?;
     }
-    for endpoint in connection_samples {
+    for endpoint in store
+        .tcp_connection_usage()
+        .repository_samples_for_node_iter(&state.cluster.node_id)
+    {
         let endpoint_id = endpoint.endpoint_id.clone();
         for sample in endpoint.series {
             let minute = sample.minute.clone();
@@ -849,6 +856,7 @@ async fn historical_source_backfill_records(
             )?;
         }
     }
+    drop(store);
     // A node can be asked for its historical window while a deletion is still waiting for its
     // first repository acknowledgement. Include the independent tombstone stream in that same
     // bounded export so a joining repository never treats the old window as resurrectable.
