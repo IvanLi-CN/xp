@@ -1,8 +1,17 @@
-# XP Mihomo Subscription
+# XP Glossary
 
-This glossary defines XP Mihomo subscription, dynamic proxy-group, and external resource terms.
+This glossary defines XP cluster terms and Mihomo subscription vocabulary.
+It also covers dynamic proxy groups and external resources.
 
 ## Language
+
+### Cluster Nodes
+
+**Registered Cluster Node**:
+A node recorded in the current XP cluster's node directory.
+_Avoid_: Available backend, subscription node
+
+### Subscription Nodes
 
 **Subscription Node**:
 A node with an endpoint membership in the current user's subscription.
@@ -87,6 +96,18 @@ _Avoid_: Upstream origin, cluster primary
 **Mirrorable Resource**:
 An External Resource eligible for access through XP's Resource Mirror.
 _Avoid_: Any URL, proxied resource
+
+## DDNS
+
+**DDNS Family Synchronization**:
+Successful detection of a public address and synchronization of its DNS record.
+Both occur in the current reconciliation round.
+_Avoid_: Client reachability, historical address
+
+**DDNS Health**:
+The status of DDNS reconciliation.
+It is up when a family completes DDNS Family Synchronization in the current round.
+_Avoid_: Universal client availability
 
 ## Web Demo
 

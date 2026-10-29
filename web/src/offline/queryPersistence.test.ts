@@ -9,6 +9,11 @@ import {
 } from "./queryPersistence";
 
 describe("persisted query snapshot freshness", () => {
+	it("does not persist the authenticated selector directory", () => {
+		expect(shouldPersistQuery(["backendDirectory", 1, "test-token"])).toBe(
+			false,
+		);
+	});
 	it("accepts a current-build snapshot within the 24-hour window", () => {
 		expect(
 			isPersistedQuerySnapshotFresh(

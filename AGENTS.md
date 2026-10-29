@@ -307,6 +307,9 @@
   and the node-local `${XP_DATA_DIR}/mihomo-resource-policy.json` Web override; all policy
   inputs accept bare private IPs and canonicalize them to `/32` or `/128`; policy state is
   never stored in Raft.
+- DDNS is up when a family has a successful probe and DNS sync in the current round.
+  Other family errors remain visible and do not establish universal client reachability.
+  Uncertain observations interrupt the missing count and never authorize record deletion.
 - Backend checks: `cargo test`, `cargo fmt`, `cargo clippy -- -D warnings`
 - Install frontend deps: `cd web && bun install`
 - Run frontend dev server: `cd web && bun run dev` (binds `127.0.0.1:60080`)

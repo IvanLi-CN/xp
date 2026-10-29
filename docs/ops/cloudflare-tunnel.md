@@ -222,7 +222,8 @@ DDNS-specific checks:
 - `/etc/xp/cloudflare_ddns_api_token` exists, is readable by the `xp` service user, and is not empty.
 - `XP_CLOUDFLARE_DDNS_ENABLED=true` is present in `/etc/xp/xp.env`.
 - `XP_ACCESS_HOST` is a valid FQDN under the expected Cloudflare zone.
-- `/api/admin/nodes/<node>/runtime` shows a `ddns` component; `degraded` / `down` states will include the last error.
+- `/api/admin/nodes/<node>/runtime` shows a `ddns` component and its last error.
+  An `up` component may still report a failure for the other address family.
 - `${XP_DATA_DIR}/ddns_state.json` reflects the last synced IPv4 / IPv6 and any pending fast-mode window.
 
 ## Security notes

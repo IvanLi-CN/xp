@@ -31,7 +31,17 @@ Current support boundaries that operators must know:
   automatic restart is introduced. The existing alert stream additionally reports XP process PSS
   at fixed 28 MiB warning / 32 MiB critical thresholds after one minute; alerts never restart XP.
 - Feature delivery must not be container-only. Runtime contracts such as managed-default endpoint reconcile, VLESS HTTPS canary fallback, Mihomo relay URL generation, and upgrade-time auto-adoption must behave the same way once a node is running, regardless of whether the node is host-managed or container-managed.
-- Custom VLESS XMUX subscription settings require all Raft members to support `admin.endpoint-vless-xmux-settings-v1`. Complete a rolling upgrade and use the current leader before changing them; the change is rejected while membership work is active. Once any custom policy exists, an older XP cannot join or be restored into the cluster; a restore target must acknowledge the capability through its signed control-plane endpoint. Before downgrading to an unsupported XP, PATCH each configured VLESS endpoint with `mihomo_xmux: null` on the leader, confirm every endpoint no longer contains the field on every node, and refresh client subscriptions. A predecessor cannot preserve this metadata.
+- Custom VLESS XMUX subscription settings require every Raft member to support
+  `admin.endpoint-vless-xmux-settings-v1`.
+  Complete a rolling upgrade and use the current leader before changing them.
+  The change is rejected while membership work is active.
+  Once any custom policy exists, an older XP cannot join or be restored into the cluster.
+  A restore target must acknowledge the capability through its signed control-plane endpoint.
+  Before downgrading to an unsupported XP, PATCH each configured VLESS endpoint with
+  `mihomo_xmux: null` on the leader.
+  Confirm every endpoint no longer contains the field on every node.
+  Refresh client subscriptions.
+  A predecessor cannot preserve this metadata.
 - Managed-default endpoint ports are cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` only bootstrap a missing endpoint; changing or
   removing those env values does not reconfigure or delete an existing endpoint.
@@ -712,6 +722,10 @@ DDNS runtime notes:
 - `cloudflared` is only used as a heuristic fast-mode trigger (`down -> up` / `became available`), never as the source of truth for public IPs.
 - Probe timeouts or transient upstream errors do not delete records; only repeated hard evidence of a missing address family can remove `A` / `AAAA`.
 - Nodes with only IPv4 connectivity are healthy DDNS targets: IPv6 `network unreachable`, `no route`, unsupported address family, or local address assignment failures are treated as missing IPv6 candidates rather than runtime degradation.
+- DDNS is `up` when a family is detected and its DNS record is synchronized in the current round.
+  Errors for the other family remain visible; this status does not guarantee reachability for every client.
+  Probe-target family mismatches and uncertain observations reset the affected missing count.
+  They never authorize record deletion.
 
 Optional quota knobs:
 

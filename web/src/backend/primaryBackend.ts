@@ -1,104 +1,61 @@
 import { resolveApiCompatibility } from "@/api/apiCompatibility";
-import { RELEASE_INVENTORIES } from "@/api/releaseInventories";
 import { isDemoRuntime } from "../demo/runtimeMode";
+import {
+	type BackendCandidate,
+	type BackendProfile,
+	type PrimaryBackendSnapshot,
+	STATIC_BOOTSTRAP_ORIGIN,
+	STATIC_WEB_ORIGIN,
+	type StaticBackendRuntimeState,
+	type StaticRuntimePolicyGrant,
+	type SwitchOptions,
+	type SwitchResult,
+	canonicalBackendOrigin,
+	displayNodeName,
+	getPageOrigin,
+	isAbortError,
+	isApiUrl,
+	normalizeReleaseVersion,
+} from "./primaryBackendModel";
+import {
+	STORAGE_KEY,
+	readStoredProfiles,
+	writeStoredProfiles,
+} from "./primaryBackendStorage";
+
+export {
+	type BackendCandidate,
+	type BackendProfile,
+	type PrimaryBackendSnapshot,
+	type StaticBackendRuntimeState,
+	type StaticRuntimePolicyGrant,
+	type SwitchOptions,
+	type SwitchResult,
+	STATIC_BOOTSTRAP_ORIGIN,
+	STATIC_WEB_ORIGIN,
+	canonicalBackendOrigin,
+	currentWebReleaseVersion,
+	normalizeReleaseVersion,
+	recognizedReleaseVersion,
+} from "./primaryBackendModel";
 
 export const PRIMARY_BACKEND_SWITCH_TIMEOUT_MS = 60_000;
 
-export type StaticBackendRuntimeState =
-	| "active"
-	| "staged"
-	| "temporarily_unavailable";
-
-export type StaticRuntimePolicyGrant = {
-	policy_id: string;
-	cluster_id: string;
-	expires_at: string;
-	api_origins: string[];
-};
-
-export type BackendCandidate = {
-	origin: string;
-	nodeId: string;
-	nodeName: string;
-	verifiedAt: number | null;
-	lastError: string | null;
-	switchable?: boolean;
-	switchBlockedReason?: string;
-	serviceVersion?: string | null;
-	versionState?: "ready" | "unknown" | "unavailable";
-	runtimeState?: StaticBackendRuntimeState;
-	runtimePolicyId?: string;
-	runtimePolicyGrant?: StaticRuntimePolicyGrant;
-};
-
-export type BackendProfile = {
-	clusterId: string;
-	primaryOrigin: string;
-	candidates: BackendCandidate[];
-	updatedAt: number;
-};
-
-export type PrimaryBackendSnapshot = {
-	clusterId: string | null;
-	primaryOrigin: string;
-	candidates: BackendCandidate[];
-	generation: number;
-	state: "ready" | "switching" | "unreachable";
-	pendingMutations: number;
-	unknownMutationCount: number;
-	lastSwitchTimedOut: boolean;
-};
-
-export type SwitchResult = {
-	timedOut: boolean;
-};
-
-export type SwitchOptions = {
-	revalidate?: (candidate: BackendCandidate) => Promise<boolean>;
-};
-
-type StoredProfiles = {
-	activeClusterId?: string;
-	profiles?: Record<string, BackendProfile>;
-};
-
 type NativeFetch = typeof window.fetch;
 
-const STORAGE_KEY = "xp-primary-backend-profiles";
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-const RELEASE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
-export const STATIC_WEB_ORIGIN = "https://xp.ivanli.cc";
-export const STATIC_BOOTSTRAP_ORIGIN = "https://101-xp.ivanli.cc";
 const listeners = new Set<(snapshot: PrimaryBackendSnapshot) => void>();
 const mutationWaiters = new Set<(timedOut: boolean) => void>();
 
 let nativeFetch: NativeFetch | null = null;
 let installed = false;
 
-function getPageOrigin(): string {
-	return typeof window === "undefined" ? "" : window.location.origin;
-}
-
 export function isStaticWebConsole(): boolean {
 	return !isDemoRuntime() && getPageOrigin() === STATIC_WEB_ORIGIN;
 }
 
-function readStoredProfiles(): StoredProfiles {
-	if (isDemoRuntime()) return {};
-	if (isStaticWebConsole()) return {};
-	if (typeof window === "undefined") return {};
-	try {
-		const value = window.localStorage.getItem(STORAGE_KEY);
-		if (!value) return {};
-		const parsed = JSON.parse(value) as StoredProfiles;
-		return parsed && typeof parsed === "object" ? parsed : {};
-	} catch {
-		return {};
-	}
-}
-
 function readInitialState(): PrimaryBackendSnapshot {
-	const stored = readStoredProfiles();
+	const stored = readStoredProfiles(isStaticWebConsole());
 	const active = stored.activeClusterId
 		? stored.profiles?.[stored.activeClusterId]
 		: undefined;
@@ -123,73 +80,11 @@ function readInitialState(): PrimaryBackendSnapshot {
 let state: PrimaryBackendSnapshot = readInitialState();
 let staticAllowedOrigins = new Set<string>();
 let staticRuntimePolicyExpired = false;
-
-function displayNodeName(nodeName: string, origin: string): string {
-	if (nodeName.trim() && nodeName !== "Verified backend") return nodeName;
-	try {
-		return new URL(origin).host;
-	} catch {
-		return origin;
-	}
-}
-
-export function currentWebReleaseVersion(): string | null {
-	const releaseTag = RELEASE_INVENTORIES[0]?.releaseTag;
-	return recognizedReleaseVersion(releaseTag);
-}
-
-export function normalizeReleaseVersion(value: string): string {
-	return value.trim().replace(/^v/i, "");
-}
-
-export function recognizedReleaseVersion(
-	value: string | null | undefined,
-): string | null {
-	if (!value) return null;
-	const normalized = normalizeReleaseVersion(value);
-	return RELEASE_VERSION_PATTERN.test(normalized) ? normalized : null;
-}
-
-function writeStoredProfiles(value: StoredProfiles) {
-	if (isDemoRuntime()) return;
-	if (isStaticWebConsole() || typeof window === "undefined") return;
-	try {
-		window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
-	} catch {
-		// Private browsing and quota errors must not make the console unusable.
-	}
-}
-
-function isApiUrl(url: URL): boolean {
-	return url.pathname === "/api" || url.pathname.startsWith("/api/");
-}
-
-function isAbortError(error: unknown): boolean {
-	return (
-		(error instanceof DOMException && error.name === "AbortError") ||
-		(error instanceof Error && error.name === "AbortError")
-	);
-}
-
-export function canonicalBackendOrigin(value: string): string | null {
-	try {
-		const url = new URL(value);
-		if (
-			(url.protocol !== "https:" && url.origin !== getPageOrigin()) ||
-			(url.pathname !== "/" && url.pathname !== "") ||
-			url.search ||
-			url.hash ||
-			url.username ||
-			url.password ||
-			url.href.includes("@")
-		) {
-			return null;
-		}
-		return url.origin;
-	} catch {
-		return null;
-	}
-}
+let directoryLoaded = false;
+let directorySessionEpoch = 0;
+let directoryRequestSerial = 0;
+let directoryAppliedSerial = 0;
+let staticPolicyCandidates = new Map<string, BackendCandidate>();
 
 function notify() {
 	const snapshot = getPrimaryBackendSnapshot();
@@ -198,17 +93,20 @@ function notify() {
 
 function persistCurrentProfile() {
 	if (!state.clusterId) return;
-	const stored = readStoredProfiles();
+	const stored = readStoredProfiles(isStaticWebConsole());
 	const profile: BackendProfile = {
 		clusterId: state.clusterId,
 		primaryOrigin: state.primaryOrigin,
 		candidates: state.candidates,
 		updatedAt: Date.now(),
 	};
-	writeStoredProfiles({
-		activeClusterId: state.clusterId,
-		profiles: { ...(stored.profiles ?? {}), [state.clusterId]: profile },
-	});
+	writeStoredProfiles(
+		{
+			activeClusterId: state.clusterId,
+			profiles: { ...(stored.profiles ?? {}), [state.clusterId]: profile },
+		},
+		isStaticWebConsole(),
+	);
 }
 
 function updateState(patch: Partial<PrimaryBackendSnapshot>) {
@@ -319,6 +217,89 @@ export function resetPrimaryBackendTransportForTests() {
 		? new Set<string>([STATIC_BOOTSTRAP_ORIGIN])
 		: new Set<string>();
 	staticRuntimePolicyExpired = false;
+	directoryLoaded = false;
+	staticPolicyCandidates.clear();
+	directorySessionEpoch++;
+	directoryRequestSerial = 0;
+	directoryAppliedSerial = 0;
+}
+
+export function clearPrimaryBackendDirectory(
+	options: { clearProfiles?: boolean } = {},
+) {
+	directorySessionEpoch++;
+	directoryRequestSerial = 0;
+	directoryAppliedSerial = 0;
+	directoryLoaded = false;
+	staticPolicyCandidates.clear();
+	staticAllowedOrigins = new Set<string>();
+	staticRuntimePolicyExpired = false;
+	state = {
+		...state,
+		clusterId: null,
+		primaryOrigin: isStaticWebConsole()
+			? STATIC_BOOTSTRAP_ORIGIN
+			: getPageOrigin(),
+		candidates: [],
+		generation: state.generation + 1,
+		state: "ready",
+	};
+	if (options.clearProfiles && typeof window !== "undefined") {
+		try {
+			window.localStorage.removeItem(STORAGE_KEY);
+		} catch {
+			/* Storage may be unavailable. */
+		}
+	}
+	notify();
+}
+
+export function getDirectorySessionEpoch(): number {
+	return directorySessionEpoch;
+}
+
+export function hasDirectoryInventory(
+	clusterId: string,
+	epoch: number,
+): boolean {
+	return (
+		directoryLoaded &&
+		state.clusterId === clusterId &&
+		epoch === directorySessionEpoch
+	);
+}
+
+export function beginDirectoryRequest(): number {
+	return ++directoryRequestSerial;
+}
+
+export function canUseSupersededRevalidation(
+	serial: number,
+	failedSerial: number,
+): boolean {
+	return (
+		failedSerial === directoryRequestSerial &&
+		serial < failedSerial &&
+		directoryAppliedSerial < serial
+	);
+}
+
+export function applyDirectoryResponse(
+	clusterId: string,
+	epoch: number,
+	serial: number,
+	nodes: Array<{ node_id: string; node_name: string; api_base_url: string }>,
+): boolean {
+	if (
+		epoch !== directorySessionEpoch ||
+		state.clusterId !== clusterId ||
+		serial !== directoryRequestSerial ||
+		serial < directoryAppliedSerial
+	)
+		return false;
+	directoryAppliedSerial = serial;
+	hydratePrimaryBackendProfile(clusterId, nodes);
+	return true;
 }
 
 export function getPrimaryBackendSnapshot(): PrimaryBackendSnapshot {
@@ -346,13 +327,17 @@ export function hydratePrimaryBackendProfile(
 		api_base_url: string;
 	}>,
 ) {
+	if (state.clusterId && state.clusterId !== clusterId) {
+		clearPrimaryBackendDirectory();
+	}
+	if (nodes !== undefined) directoryLoaded = true;
 	if (isStaticWebConsole()) {
 		const candidatesByOrigin = new Map<string, BackendCandidate>();
 		const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
 		const previousCandidates = new Map(
 			state.candidates.map((candidate) => [candidate.origin, candidate]),
 		);
-		if (bootstrapOrigin) {
+		if (bootstrapOrigin && nodes === undefined && !directoryLoaded) {
 			const existing = previousCandidates.get(bootstrapOrigin);
 			candidatesByOrigin.set(bootstrapOrigin, {
 				...existing,
@@ -368,15 +353,20 @@ export function hydratePrimaryBackendProfile(
 		}
 		if (nodes === undefined) {
 			for (const candidate of state.candidates) {
-				candidatesByOrigin.set(candidate.origin, candidate);
+				candidatesByOrigin.set(candidate.nodeId, candidate);
 			}
 		}
 		for (const node of nodes ?? []) {
 			const rawOrigin = node.api_base_url.trim();
 			const origin = canonicalBackendOrigin(rawOrigin);
-			const candidateKey = origin ?? `invalid:${node.node_id}`;
-			const existing = previousCandidates.get(candidateKey);
-			const runtimeState = existing?.runtimeState;
+			const candidateKey = node.node_id;
+			const existing = state.candidates.find(
+				(candidate) =>
+					candidate.nodeId === node.node_id &&
+					candidate.origin === (origin ?? rawOrigin),
+			);
+			const policy = origin ? staticPolicyCandidates.get(origin) : undefined;
+			const runtimeState = policy?.runtimeState;
 			const switchable =
 				origin !== null &&
 				staticAllowedOrigins.has(origin) &&
@@ -400,13 +390,18 @@ export function hydratePrimaryBackendProfile(
 								: switchable
 									? undefined
 									: "This node is not available to the static console.",
+				runtimeState,
+				runtimePolicyId: policy?.runtimePolicyId,
+				runtimePolicyGrant: policy?.runtimePolicyGrant,
 			});
 		}
 		const currentOrigin = canonicalBackendOrigin(state.primaryOrigin);
 		const nextPrimary =
 			(currentOrigin &&
 			staticAllowedOrigins.has(currentOrigin) &&
-			candidatesByOrigin.has(currentOrigin)
+			[...candidatesByOrigin.values()].some(
+				(candidate) => candidate.origin === currentOrigin,
+			)
 				? currentOrigin
 				: bootstrapOrigin) ?? getPageOrigin();
 		const changed = state.clusterId !== clusterId;
@@ -423,13 +418,16 @@ export function hydratePrimaryBackendProfile(
 		notify();
 		return;
 	}
-	const stored = readStoredProfiles();
+	const stored = readStoredProfiles(isStaticWebConsole());
 	const storedProfile = stored.profiles?.[clusterId];
 	const candidatesByOrigin = new Map<string, BackendCandidate>();
 	if (nodes === undefined) {
-		for (const candidate of storedProfile?.candidates ?? []) {
-			if (canonicalBackendOrigin(candidate.origin)) {
-				candidatesByOrigin.set(candidate.origin, {
+		const existingRows = directoryLoaded
+			? state.candidates
+			: (storedProfile?.candidates ?? []);
+		for (const candidate of existingRows) {
+			if (directoryLoaded || canonicalBackendOrigin(candidate.origin)) {
+				candidatesByOrigin.set(candidate.nodeId, {
 					...candidate,
 					nodeName: displayNodeName(candidate.nodeName, candidate.origin),
 				});
@@ -439,9 +437,14 @@ export function hydratePrimaryBackendProfile(
 	for (const node of nodes ?? []) {
 		const rawOrigin = node.api_base_url.trim();
 		const origin = canonicalBackendOrigin(rawOrigin);
-		const candidateKey = origin ?? `invalid:${node.node_id}`;
-		const existing = candidatesByOrigin.get(candidateKey);
+		const candidateKey = node.node_id;
+		const existing = state.candidates.find(
+			(candidate) =>
+				candidate.nodeId === node.node_id &&
+				candidate.origin === (origin ?? rawOrigin),
+		);
 		candidatesByOrigin.set(candidateKey, {
+			...existing,
 			origin: origin ?? rawOrigin,
 			nodeId: node.node_id,
 			nodeName: displayNodeName(node.node_name, origin ?? rawOrigin),
@@ -453,8 +456,12 @@ export function hydratePrimaryBackendProfile(
 		});
 	}
 	const pageOrigin = getPageOrigin();
-	if (pageOrigin) {
-		if (!candidatesByOrigin.has(pageOrigin)) {
+	if (pageOrigin && nodes === undefined && !directoryLoaded) {
+		if (
+			![...candidatesByOrigin.values()].some(
+				(candidate) => candidate.origin === pageOrigin,
+			)
+		) {
 			candidatesByOrigin.set(pageOrigin, {
 				origin: pageOrigin,
 				nodeId: "current-page",
@@ -470,7 +477,10 @@ export function hydratePrimaryBackendProfile(
 	);
 	const nextPrimary =
 		persistedPrimary &&
-		(nodes === undefined || candidatesByOrigin.has(persistedPrimary))
+		(nodes === undefined ||
+			[...candidatesByOrigin.values()].some(
+				(candidate) => candidate.origin === persistedPrimary,
+			))
 			? persistedPrimary
 			: pageOrigin;
 	const changed =
@@ -501,6 +511,9 @@ export function hydrateStaticRuntimePolicy(
 		activate?: boolean;
 	} = {},
 ) {
+	if (state.clusterId && state.clusterId !== clusterId) {
+		clearPrimaryBackendDirectory();
+	}
 	const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
 	if (options.activate) {
 		staticRuntimePolicyExpired = false;
@@ -580,9 +593,30 @@ export function hydrateStaticRuntimePolicy(
 			staticAllowedOrigins.delete(origin);
 		}
 	}
+	staticPolicyCandidates = candidatesByOrigin;
+	const candidates =
+		directoryLoaded && state.clusterId === clusterId
+			? state.candidates.map((candidate) => {
+					const origin = canonicalBackendOrigin(candidate.origin);
+					const policy = origin ? candidatesByOrigin.get(origin) : undefined;
+					return {
+						...candidate,
+						runtimeState: policy?.runtimeState,
+						runtimePolicyId: policy?.runtimePolicyId,
+						runtimePolicyGrant: policy?.runtimePolicyGrant,
+						switchable: Boolean(policy?.switchable),
+						switchBlockedReason: policy?.switchable
+							? undefined
+							: (policy?.switchBlockedReason ??
+								(origin
+									? "This node is not available to the static console."
+									: "HTTPS is required for this node.")),
+					};
+				})
+			: [...candidatesByOrigin.values()];
 	const currentOrigin = canonicalBackendOrigin(state.primaryOrigin);
 	const currentCandidate = currentOrigin
-		? candidatesByOrigin.get(currentOrigin)
+		? candidates.find((candidate) => candidate.origin === currentOrigin)
 		: undefined;
 	const nextPrimary =
 		(currentOrigin &&
@@ -596,7 +630,7 @@ export function hydrateStaticRuntimePolicy(
 		...state,
 		clusterId,
 		primaryOrigin: nextPrimary,
-		candidates: [...candidatesByOrigin.values()],
+		candidates,
 		generation: changed ? state.generation + 1 : state.generation,
 		state: state.state === "switching" ? "switching" : "ready",
 	};
@@ -691,6 +725,7 @@ export async function verifyBackendCandidate(args: {
 	adminToken: string;
 	signal?: AbortSignal;
 }): Promise<BackendCandidate> {
+	const sessionEpoch = directorySessionEpoch;
 	const origin = canonicalBackendOrigin(args.origin);
 	if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
 	if (isStaticWebConsole()) {
@@ -782,6 +817,9 @@ export async function verifyBackendCandidate(args: {
 	if (compatibility.kind === "incompatible") {
 		throw new Error(compatibility.reason);
 	}
+	if (sessionEpoch !== directorySessionEpoch) {
+		throw new Error("Backend session changed during verification.");
+	}
 	const nodes = await directJson(
 		origin,
 		"/api/admin/nodes",
@@ -789,6 +827,7 @@ export async function verifyBackendCandidate(args: {
 		args.signal,
 	);
 	if (
+		sessionEpoch !== directorySessionEpoch ||
 		!nodes ||
 		typeof nodes !== "object" ||
 		!Array.isArray((nodes as { items?: unknown }).items)
@@ -846,6 +885,7 @@ export async function switchPrimaryBackend(
 	candidate: BackendCandidate,
 	options: SwitchOptions = {},
 ): Promise<SwitchResult> {
+	const sessionEpoch = directorySessionEpoch;
 	const origin = canonicalBackendOrigin(candidate.origin);
 	if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
 	if (!candidate.verifiedAt) {
@@ -870,6 +910,9 @@ export async function switchPrimaryBackend(
 	if (origin === state.primaryOrigin) return { timedOut: false };
 	updateState({ state: "switching", lastSwitchTimedOut: false });
 	const barrierTimedOut = await waitForMutations();
+	if (sessionEpoch !== directorySessionEpoch) {
+		throw new Error("Backend session changed during switching.");
+	}
 	if (barrierTimedOut) {
 		state = {
 			...state,
@@ -885,6 +928,9 @@ export async function switchPrimaryBackend(
 			revalidated = false;
 		}
 	}
+	if (sessionEpoch !== directorySessionEpoch) {
+		throw new Error("Backend session changed during switching.");
+	}
 	if (!revalidated) {
 		state = {
 			...state,
@@ -895,6 +941,9 @@ export async function switchPrimaryBackend(
 	}
 	if (options.revalidate && !barrierTimedOut && state.pendingMutations > 0) {
 		const revalidationBarrierTimedOut = await waitForMutations();
+		if (sessionEpoch !== directorySessionEpoch) {
+			throw new Error("Backend session changed during switching.");
+		}
 		if (revalidationBarrierTimedOut || state.pendingMutations > 0) {
 			state = {
 				...state,
@@ -908,11 +957,12 @@ export async function switchPrimaryBackend(
 		}
 	}
 	const currentCandidate = state.candidates.find(
-		(candidate) => candidate.origin === origin,
+		(item) => item.origin === origin && item.nodeId === candidate.nodeId,
 	);
 	const policyManaged =
 		isStaticWebConsole() || currentCandidate?.runtimePolicyId !== undefined;
 	if (
+		sessionEpoch !== directorySessionEpoch ||
 		!currentCandidate ||
 		currentCandidate.switchable === false ||
 		(policyManaged &&
@@ -931,7 +981,6 @@ export async function switchPrimaryBackend(
 				item.origin === origin
 					? {
 							...item,
-							...candidate,
 							verifiedAt: candidate.verifiedAt ?? Date.now(),
 							lastError: null,
 						}

@@ -34,7 +34,14 @@
 - Static Web directory queries wait for a matching, unexpired Runtime Policy. Service-version
   reads are enabled only while the selector is open, refresh once on open, and do not refetch on
   mount, reconnect, or window focus. Explicit refreshes are also blocked until that policy gate is
-  ready, and a successful inventory response replaces stale static rows.
+  ready, and a successful inventory response replaces stale static rows. Each open clears prior
+  version labels, and only results from that refresh can restore them.
+- Selector rows are keyed by registered node ID, independently of the origin-keyed runtime
+  policy. Policy updates annotate existing rows without retiring them. Within the authenticated
+  session a failed directory refresh retains the last successful rows and shows one stale notice;
+  a first failure shows an error. The selector uses a non-persisted query and a session epoch plus
+  request ordering to reject responses from a previous login, cluster or older request. A
+  successful empty inventory retires every previously registered row.
 - The selector keeps switching and full-page node opening as separate actions. Node opening uses
   the existing path/query/hash and login handoff, targets a new tab with `noopener noreferrer`, and
   uses a fragment-only handoff for selector links; the destination login route consumes and replaces
@@ -48,7 +55,10 @@
   a primary switch, and the selected candidate is revalidated against a fresh authenticated
   directory and, for Static Web, Runtime Policy before commit. Failed revalidation restores the
   ready state; cached data from an unsuccessful refetch never satisfies the check, and concurrent
-  switch attempts are rejected while one barrier is active. A mutation that starts during
+  switch attempts are rejected while one barrier is active. A candidate removed or made unavailable
+  by the refreshed policy receives no subsequent authenticated inventory request. When a newer
+  directory refresh fails, a successful candidate revalidation can still verify a node already in
+  the retained inventory without replacing that inventory. A mutation that starts during
   revalidation is drained before commit or rejects the switch when the initial barrier has not
   timed out; after the initial unknown timeout, manual switching remains available. Policy
   hydration preserves the active switching state until the commit path finishes.
