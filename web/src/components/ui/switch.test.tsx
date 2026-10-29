@@ -64,7 +64,7 @@ describe("<Switch />", () => {
 			/>,
 		);
 
-		const control = screen.getByRole("switch", { name: "Unknown feature" });
+		const control = screen.getByRole("button", { name: "Unknown feature" });
 		expect(control).not.toHaveAttribute("aria-checked");
 		const descriptionId = control.getAttribute("aria-describedby");
 		expect(descriptionId).toBeTruthy();

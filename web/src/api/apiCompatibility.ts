@@ -17,11 +17,11 @@ const ReleaseTagSchema = z.string().regex(/^v\d+\.\d+\.\d+$/);
 const CAPABILITIES_REQUIRING_EXPLICIT_PROBE = new Set([
 	"admin.mihomo-subscription-import",
 ]);
-// These capabilities are only emitted by the current additive contract. A
-// legacy v3.22 server may advertise admin.mesh, but its historical route set
-// intentionally does not include the Mesh write endpoint.
+// This capability is the server-declared Mesh configuration contract. The
+// telemetry capability below is intentionally not enough: a legacy v3.22
+// server may expose mesh_transport fields while still lacking the Mesh write
+// endpoint in its historical route set.
 const CURRENT_API_ROUTE_CONTRACT_CAPABILITIES = new Set([
-	"admin.mesh-transport-reuse",
 	"cluster.mesh-gate-v1",
 ]);
 const CapabilitiesResponseSchema = z
