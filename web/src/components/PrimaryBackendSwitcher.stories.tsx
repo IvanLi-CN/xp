@@ -1,4 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { expect, userEvent, within } from "@storybook/test";
+import { useState } from "react";
 
 import { PrimaryBackendProvider } from "@/backend/PrimaryBackendProvider";
 import {
@@ -19,7 +21,24 @@ const meta: Meta<typeof PrimaryBackendSwitcher> = {
 		clusterId: "cluster-demo",
 	},
 	decorators: [
-		(Story) => {
+		(Story, context) => {
+			const [target, setTarget] = useState<HTMLElement | null>(null);
+			if (context.parameters.portalEvidence) {
+				return (
+					<div
+						data-visual-evidence-surface
+						className="w-fit bg-background p-6 text-foreground"
+					>
+						<div
+							data-visual-evidence-target
+							ref={setTarget}
+							className="flex h-[360px] w-[344px] justify-end"
+						>
+							<Story args={{ ...context.args, portalContainer: target }} />
+						</div>
+					</div>
+				);
+			}
 			return (
 				<div
 					data-visual-evidence-surface
@@ -167,6 +186,41 @@ export const VersionMismatchAndLinks: Story = {
 		primaryOrigin: fixtureCatalog.url.primaryApi(),
 		candidates: versionedCandidates,
 		state: "ready",
+	}),
+};
+
+export const StaleDirectory: Story = {
+	args: { frontendVersion: "3.22.5", directoryStatus: "stale" },
+	parameters: { portalEvidence: true },
+	render: withSnapshot({
+		...getPrimaryBackendSnapshot(),
+		clusterId: "cluster-demo",
+		primaryOrigin: fixtureCatalog.url.primaryApi(),
+		candidates: versionedCandidates,
+		state: "ready",
+	}),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Open primary backend" }),
+		);
+		await expect(canvas.getByRole("status")).toHaveTextContent(
+			"Node list may be out of date.",
+		);
+		await expect(
+			canvas.getByText(fixtureCatalog.identifier.nodeNamePrimary()),
+		).toBeVisible();
+	},
+};
+
+export const DirectoryUnavailable: Story = {
+	args: { directoryStatus: "error" },
+	render: withSnapshot({
+		...getPrimaryBackendSnapshot(),
+		clusterId: "cluster-demo",
+		primaryOrigin: fixtureCatalog.url.primaryApi(),
+		candidates: [],
+		state: "unreachable",
 	}),
 };
 

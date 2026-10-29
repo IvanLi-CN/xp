@@ -3,8 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixtureCatalog } from "@/fixture-policy/catalog";
 
 import {
+	applyDirectoryResponse,
+	beginDirectoryRequest,
 	canonicalBackendOrigin,
+	clearPrimaryBackendDirectory,
 	currentWebReleaseVersion,
+	getDirectorySessionEpoch,
 	getPrimaryBackendSnapshot,
 	getStaticRuntimePolicyOrigins,
 	hydrateBackendVersions,
@@ -105,6 +109,42 @@ describe("primary backend transport", () => {
 		);
 	});
 
+	it("does not send a token if the session ends during public verification", async () => {
+		let finishCapabilities!: (response: Response) => void;
+		const requests: Request[] = [];
+		window.fetch = vi.fn((input, init) => {
+			const request = new Request(input, init);
+			requests.push(request);
+			if (request.url.endsWith("/api/health")) {
+				return Promise.resolve(new Response(JSON.stringify({ status: "ok" })));
+			}
+			if (request.url.endsWith("/api/cluster/info")) {
+				return Promise.resolve(
+					new Response(
+						JSON.stringify({ cluster_id: fixtureCatalog.cluster.fixture84() }),
+					),
+				);
+			}
+			return new Promise<Response>((resolve) => {
+				finishCapabilities = resolve;
+			});
+		}) as typeof window.fetch;
+		const pending = verifyBackendCandidate({
+			origin: fixtureCatalog.url.secondaryApi(),
+			clusterId: fixtureCatalog.cluster.fixture84(),
+			adminToken: "secret-token",
+		});
+		await vi.waitFor(() => expect(finishCapabilities).toBeDefined());
+		clearPrimaryBackendDirectory();
+		finishCapabilities(
+			new Response(JSON.stringify({ release_tag: "v3.22.0" })),
+		);
+		await expect(pending).rejects.toThrow("session changed");
+		expect(
+			requests.every((request) => !request.headers.has("Authorization")),
+		).toBe(true);
+	});
+
 	it("accepts a compatible registered candidate after authenticated inventory", async () => {
 		const requests: Array<{ url: string; authorization: string | null }> = [];
 		window.fetch = vi.fn((input, init) => {
@@ -200,6 +240,81 @@ describe("primary backend transport", () => {
 				(candidate) => candidate.origin === fixtureCatalog.url.secondaryApi(),
 			),
 		).toBe(false);
+	});
+
+	it("keeps every registered row when a policy refresh omits an origin", () => {
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: "node-a",
+				node_name: "Node A",
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: "node-b",
+				node_name: "Node B",
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: "node-invalid",
+				node_name: "Invalid",
+				api_base_url: "http://insecure.xp.example",
+			},
+		]);
+		hydrateStaticRuntimePolicy(
+			fixtureCatalog.cluster.fixture84(),
+			[fixtureCatalog.url.primaryApi()],
+			{ policyId: "rcp-test" },
+		);
+		expect(
+			getPrimaryBackendSnapshot().candidates.map((row) => row.nodeId),
+		).toEqual(expect.arrayContaining(["node-a", "node-b", "node-invalid"]));
+	});
+
+	it("ignores an older directory response after a newer one was applied", () => {
+		const cluster = fixtureCatalog.cluster.fixture84();
+		hydratePrimaryBackendProfile(cluster);
+		const epoch = getDirectorySessionEpoch();
+		const older = beginDirectoryRequest();
+		const newer = beginDirectoryRequest();
+		const row = {
+			node_id: "node-a",
+			node_name: "Node A",
+			api_base_url: fixtureCatalog.url.primaryApi(),
+		};
+		expect(applyDirectoryResponse(cluster, epoch, newer, [])).toBe(true);
+		expect(applyDirectoryResponse(cluster, epoch, older, [row])).toBe(false);
+		expect(getPrimaryBackendSnapshot().candidates).toEqual([]);
+	});
+
+	it("preserves node identities when switching to a shared origin", async () => {
+		const cluster = fixtureCatalog.cluster.fixture84();
+		hydratePrimaryBackendProfile(cluster, [
+			{
+				node_id: "a",
+				node_name: "A",
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+			{
+				node_id: "b",
+				node_name: "B",
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		const selected = getPrimaryBackendSnapshot().candidates.find(
+			(item) => item.nodeId === "b",
+		);
+		if (!selected) throw new Error("selected node missing");
+		await switchPrimaryBackend({ ...selected, verifiedAt: Date.now() });
+		expect(
+			getPrimaryBackendSnapshot().candidates.map((item) => [
+				item.nodeId,
+				item.nodeName,
+			]),
+		).toEqual([
+			["a", "A"],
+			["b", "B"],
+		]);
+		window.localStorage.clear();
 	});
 
 	it("stages policy origins and preserves temporarily unavailable candidates", () => {

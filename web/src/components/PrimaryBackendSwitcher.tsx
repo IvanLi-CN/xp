@@ -43,6 +43,7 @@ export function getCurrentReloadCandidate(
 	return (
 		candidates.find(
 			(candidate) =>
+				candidate.nodeId === pending.nodeId &&
 				candidate.origin === pending.origin &&
 				candidate.runtimeState === "staged" &&
 				candidate.runtimePolicyId === pending.runtimePolicyId,
@@ -58,6 +59,8 @@ export function PrimaryBackendSwitcher(props: {
 	onSwitched?: () => void;
 	revalidateBeforeSwitch?: (candidate: BackendCandidate) => Promise<boolean>;
 	frontendVersion?: string | null;
+	directoryStatus?: "loading" | "ready" | "stale" | "error";
+	portalContainer?: HTMLElement | null;
 }) {
 	const backend = usePrimaryBackend();
 	const [open, setOpen] = useState(false);
@@ -68,9 +71,14 @@ export function PrimaryBackendSwitcher(props: {
 	const candidates = useMemo(
 		() =>
 			[...backend.candidates].sort((left, right) => {
-				if (left.origin === backend.primaryOrigin) return -1;
-				if (right.origin === backend.primaryOrigin) return 1;
-				return hostLabel(left.origin).localeCompare(hostLabel(right.origin));
+				const leftCurrent = left.origin === backend.primaryOrigin;
+				const rightCurrent = right.origin === backend.primaryOrigin;
+				if (leftCurrent !== rightCurrent) return leftCurrent ? -1 : 1;
+				return (
+					hostLabel(left.origin).localeCompare(hostLabel(right.origin)) ||
+					left.nodeName.localeCompare(right.nodeName) ||
+					left.nodeId.localeCompare(right.nodeId)
+				);
 			}),
 		[backend.candidates, backend.primaryOrigin],
 	);
@@ -119,9 +127,12 @@ export function PrimaryBackendSwitcher(props: {
 				clusterId: props.clusterId,
 				adminToken: props.adminToken,
 			});
-			await switchPrimaryBackend(verified, {
-				revalidate: props.revalidateBeforeSwitch,
-			});
+			await switchPrimaryBackend(
+				{ ...verified, nodeId: candidate.nodeId, nodeName: candidate.nodeName },
+				{
+					revalidate: props.revalidateBeforeSwitch,
+				},
+			);
 			props.onSwitched?.();
 			setOpen(false);
 		} catch (reason) {
@@ -180,12 +191,30 @@ export function PrimaryBackendSwitcher(props: {
 					</span>
 				</Button>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="xp-menu-content">
+			<DropdownMenuContent
+				align="end"
+				className="xp-menu-content"
+				portalContainer={props.portalContainer}
+			>
 				<DropdownMenuLabel className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
 					Primary backend
 				</DropdownMenuLabel>
+				{props.directoryStatus === "stale" ? (
+					<output className="block px-2 pt-2 text-xs text-muted-foreground">
+						Node list may be out of date.
+					</output>
+				) : props.directoryStatus === "error" ? (
+					<p role="alert" className="px-2 pt-2 text-xs text-muted-foreground">
+						Unable to load node list.
+					</p>
+				) : null}
 				<div className="mt-2 space-y-1">
-					{candidates.length === 0 ? (
+					{props.directoryStatus === "loading" ? (
+						<p className="px-2 py-2 text-sm text-muted-foreground">
+							Loading nodes…
+						</p>
+					) : props.directoryStatus === "error" ? null : candidates.length ===
+						0 ? (
 						<p className="px-2 py-2 text-sm text-muted-foreground">
 							No registered backends found.
 						</p>
@@ -207,7 +236,7 @@ export function PrimaryBackendSwitcher(props: {
 									candidate.runtimeState !== "staged");
 							return (
 								<div
-									key={candidate.origin}
+									key={candidate.nodeId}
 									className={cn(
 										"grid grid-cols-[minmax(0,1fr)_auto] gap-1",
 										isCurrent &&

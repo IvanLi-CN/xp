@@ -35,6 +35,12 @@
   reads are enabled only while the selector is open, refresh once on open, and do not refetch on
   mount, reconnect, or window focus. Explicit refreshes are also blocked until that policy gate is
   ready, and a successful inventory response replaces stale static rows.
+- Selector rows are keyed by registered node ID, independently of the origin-keyed runtime
+  policy. Policy updates annotate existing rows without retiring them. Within the authenticated
+  session a failed directory refresh retains the last successful rows and shows one stale notice;
+  a first failure shows an error. The selector uses a non-persisted query and a session epoch plus
+  request ordering to reject responses from a previous login, cluster or older request. A
+  successful empty inventory retires every previously registered row.
 - The selector keeps switching and full-page node opening as separate actions. Node opening uses
   the existing path/query/hash and login handoff, targets a new tab with `noopener noreferrer`, and
   uses a fragment-only handoff for selector links; the destination login route consumes and replaces

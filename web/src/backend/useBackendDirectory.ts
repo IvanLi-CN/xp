@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchAdminNodeVersions } from "@/api/adminNodeVersions";
 import { type AdminNodesResponse, fetchAdminNodes } from "@/api/adminNodes";
@@ -8,6 +8,10 @@ import { fetchRuntimePolicy } from "@/api/runtimePolicy";
 import { readAppliedRuntimePolicyId } from "@/offline/runtimePolicySession";
 import {
 	STATIC_BOOTSTRAP_ORIGIN,
+	applyDirectoryResponse,
+	beginDirectoryRequest,
+	canonicalBackendOrigin,
+	getDirectorySessionEpoch,
 	hydrateBackendVersions,
 	hydratePrimaryBackendProfile,
 	hydrateStaticRuntimePolicy,
@@ -27,6 +31,14 @@ export function useBackendDirectory(args: {
 		isSuccess: boolean;
 	}>;
 }) {
+	const currentArgs = useRef(args);
+	currentArgs.current = args;
+	const sessionEpoch = getDirectorySessionEpoch();
+	const identity = `${sessionEpoch}:${args.clusterId ?? ""}:${args.adminToken}`;
+	const [loadedIdentity, setLoadedIdentity] = useState("");
+	const hasInventory = Boolean(
+		args.clusterId && args.adminToken && loadedIdentity === identity,
+	);
 	const enabled =
 		args.adminToken.length > 0 &&
 		Boolean(args.clusterId) &&
@@ -39,12 +51,16 @@ export function useBackendDirectory(args: {
 		args.clusterId,
 	] as const;
 	const backendNodes = useQuery({
-		queryKey: ["adminNodes", ...queryKeySuffix],
+		queryKey: ["backendDirectory", sessionEpoch, ...queryKeySuffix],
 		enabled,
-		queryFn: ({ signal }) => fetchAdminNodes(args.adminToken, signal),
+		queryFn: async ({ signal }) => {
+			const serial = beginDirectoryRequest();
+			const inventory = await fetchAdminNodes(args.adminToken, signal);
+			return { inventory, serial };
+		},
 	});
 	const nodeVersions = useQuery({
-		queryKey: ["adminNodeVersions", ...queryKeySuffix],
+		queryKey: ["adminNodeVersions", sessionEpoch, ...queryKeySuffix],
 		enabled: enabled && args.selectorOpen,
 		queryFn: ({ signal }) => fetchAdminNodeVersions(args.adminToken, signal),
 		staleTime: Number.POSITIVE_INFINITY,
@@ -53,20 +69,53 @@ export function useBackendDirectory(args: {
 		refetchOnReconnect: false,
 		refetchOnWindowFocus: false,
 	});
-	const backendNodeInventoryKey = backendNodes.data?.items
+	const backendNodeInventoryKey = backendNodes.data?.inventory.items
 		.map((node) => node.node_id)
 		.join(",");
 	const nodeVersionsUpdatedAt = nodeVersions.dataUpdatedAt;
 	useEffect(() => {
+		if (
+			args.adminToken &&
+			args.clusterId &&
+			args.clusterId !== args.primaryClusterId
+		) {
+			hydratePrimaryBackendProfile(args.clusterId);
+		}
+	}, [args.adminToken, args.clusterId, args.primaryClusterId]);
+	useEffect(() => {
 		const clusterId = args.clusterId;
-		if (!clusterId) return;
-		hydratePrimaryBackendProfile(
-			clusterId,
-			backendNodes.isSuccess ? backendNodes.data.items : undefined,
-		);
-	}, [args.clusterId, backendNodes.data?.items, backendNodes.isSuccess]);
+		if (
+			!clusterId ||
+			!enabled ||
+			!backendNodes.isSuccess ||
+			!backendNodes.isFetchedAfterMount ||
+			backendNodes.isFetching
+		)
+			return;
+		if (
+			applyDirectoryResponse(
+				clusterId,
+				sessionEpoch,
+				backendNodes.data.serial,
+				backendNodes.data.inventory.items,
+			)
+		) {
+			setLoadedIdentity(identity);
+		}
+	}, [
+		args.clusterId,
+		backendNodes.data,
+		backendNodes.isSuccess,
+		backendNodes.isFetchedAfterMount,
+		backendNodes.isFetching,
+		enabled,
+		identity,
+		sessionEpoch,
+	]);
 	useEffect(() => {
 		if (
+			!enabled ||
+			!hasInventory ||
 			!nodeVersions.isSuccess ||
 			!backendNodes.isSuccess ||
 			!backendNodeInventoryKey ||
@@ -76,16 +125,24 @@ export function useBackendDirectory(args: {
 		hydrateBackendVersions(nodeVersions.data.items);
 	}, [
 		backendNodeInventoryKey,
+		enabled,
+		hasInventory,
 		backendNodes.isSuccess,
 		nodeVersions.data?.items,
 		nodeVersionsUpdatedAt,
 		nodeVersions.isSuccess,
 	]);
 	const revalidateBackendCandidate = useCallback(
-		async (candidate: { origin: string }) => {
+		async (candidate: { origin: string; nodeId: string }) => {
 			if (!args.adminToken || !args.primaryClusterId || !args.clusterId) {
 				return false;
 			}
+			const isCurrent = () =>
+				getDirectorySessionEpoch() === sessionEpoch &&
+				currentArgs.current.adminToken === args.adminToken &&
+				currentArgs.current.clusterId === args.clusterId &&
+				currentArgs.current.primaryClusterId === args.primaryClusterId &&
+				currentArgs.current.primaryOrigin === args.primaryOrigin;
 			if (args.staticConsole) {
 				let policy: RuntimePolicy;
 				try {
@@ -98,6 +155,7 @@ export function useBackendDirectory(args: {
 					return false;
 				}
 				if (
+					!isCurrent() ||
 					policy.cluster_id !== args.clusterId ||
 					Date.parse(policy.expires_at) <= Date.now()
 				) {
@@ -121,6 +179,7 @@ export function useBackendDirectory(args: {
 				});
 			}
 			let inventory: AdminNodesResponse;
+			const serial = beginDirectoryRequest();
 			try {
 				inventory = await fetchAdminNodes(
 					args.adminToken,
@@ -130,14 +189,30 @@ export function useBackendDirectory(args: {
 			} catch {
 				return false;
 			}
-			hydratePrimaryBackendProfile(args.clusterId, inventory.items);
-			return true;
+			if (
+				!isCurrent() ||
+				!applyDirectoryResponse(
+					args.clusterId,
+					sessionEpoch,
+					serial,
+					inventory.items,
+				)
+			)
+				return false;
+			return inventory.items.some(
+				(node) =>
+					node.node_id === candidate.nodeId &&
+					canonicalBackendOrigin(node.api_base_url) ===
+						canonicalBackendOrigin(candidate.origin),
+			);
 		},
 		[
 			args.adminToken,
 			args.clusterId,
 			args.primaryClusterId,
 			args.staticConsole,
+			args.primaryOrigin,
+			sessionEpoch,
 		],
 	);
 	const refreshBackendCandidates = useCallback(() => {
@@ -162,5 +237,21 @@ export function useBackendDirectory(args: {
 		nodeVersions.refetch,
 	]);
 
-	return { nodeVersions, refreshBackendCandidates, revalidateBackendCandidate };
+	const unavailable =
+		!args.runtimeOnline ||
+		(args.staticConsole && !args.runtimePolicyReady) ||
+		backendNodes.isError;
+	const directoryStatus: "stale" | "error" | "ready" | "loading" = unavailable
+		? hasInventory
+			? "stale"
+			: "error"
+		: hasInventory
+			? "ready"
+			: "loading";
+	return {
+		nodeVersions,
+		refreshBackendCandidates,
+		revalidateBackendCandidate,
+		directoryStatus,
+	};
 }
