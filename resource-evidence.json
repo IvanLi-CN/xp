@@ -1,0 +1,21 @@
+{
+  "acknowledged_bytes": 34168163,
+  "acknowledged_segments": 10150,
+  "applied_bytes": 34154821,
+  "applied_segments": 10146,
+  "generated_bytes": 647547,
+  "generated_segments": 145,
+  "log_sha": "b94cb8cc1382e003b461929dc635ba2f13345b77a3089eec444fae512f38f3af",
+  "memory_limit_mib": 128,
+  "peak_generated_bytes": 646793,
+  "peak_generated_segments": 145,
+  "repository_apply_meets_ten_x_bytes": true,
+  "repository_apply_meets_ten_x_segments": true,
+  "sample_window_seconds": 300,
+  "schema": "xp-history-throughput-v2",
+  "source_ack_meets_ten_x_bytes": true,
+  "source_ack_meets_ten_x_segments": true,
+  "swap_limit_mib": 0,
+  "target_sha": "f29154701b4f4bf12ade1050839e26f931e998dc",
+  "window_seconds": 300
+}
