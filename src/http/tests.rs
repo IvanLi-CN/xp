@@ -142,7 +142,7 @@ impl crate::raft::app::RaftFacade for PanickingRaft {
     }
 }
 
-fn test_config(data_dir: PathBuf) -> Config {
+pub(super) fn test_config(data_dir: PathBuf) -> Config {
     let hash = test_admin_token_hash();
     Config {
         bind: xp_test_fixtures::address_loopback_port0().parse().unwrap(),
@@ -223,7 +223,7 @@ fn test_admin_token_hash() -> String {
         .to_string()
 }
 
-fn test_store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreInit {
+pub(super) fn test_store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreInit {
     StoreInit {
         data_dir: config.data_dir.clone(),
         bootstrap_node_id,
@@ -233,7 +233,7 @@ fn test_store_init(config: &Config, bootstrap_node_id: Option<String>) -> StoreI
     }
 }
 
-fn test_geo_db_update_handle(
+pub(super) fn test_geo_db_update_handle(
     config: &Config,
     store: Arc<Mutex<JsonSnapshotStore>>,
 ) -> crate::ip_geo_db::GeoDbUpdateHandle {
@@ -578,7 +578,7 @@ async fn version_check_uses_github_and_caches_and_compares() {
     }
 }
 
-fn leader_raft(
+pub(super) fn leader_raft(
     store: Arc<Mutex<JsonSnapshotStore>>,
     cluster: &ClusterMetadata,
 ) -> Arc<dyn crate::raft::app::RaftFacade> {

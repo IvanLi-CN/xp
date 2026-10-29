@@ -504,3 +504,6 @@ fn peer_backfill_rejects_keyset_version_downgrade() {
     };
     assert!(validate_peer_backfill_page(&page, Some(&previous), "cluster-a").is_err());
 }
+
+#[path = "tests/local_history.rs"]
+mod local_history;
