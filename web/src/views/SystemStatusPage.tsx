@@ -601,6 +601,9 @@ export function SystemStatusSurface({
 				}
 				actions={
 					<>
+						<Button asChild variant="ghost" size="sm">
+							<Link to="/service-config">Mesh settings</Link>
+						</Button>
 						<Button
 							className="w-28"
 							variant="secondary"

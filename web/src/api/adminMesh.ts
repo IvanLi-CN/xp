@@ -52,6 +52,16 @@ export const MeshEndpointTransportSchema = z.enum([
 export const NativeReverseRelayStateSchema = z.enum([
 	"disabled_pending_rework",
 ]);
+export const MeshPreflightFailureKindSchema = z.enum([
+	"invalid_target",
+	"transport",
+	"protocol",
+]);
+export const MeshPreflightFailureSchema = z.object({
+	sender_node_id: z.string(),
+	target_node_id: z.string(),
+	kind: MeshPreflightFailureKindSchema,
+});
 
 export const AdminMeshBucketSchema = z.object({
 	minute: z.string(),
@@ -196,6 +206,34 @@ export const AdminMeshStatusSchema = z.object({
 export type AdminMeshStatus = z.infer<typeof AdminMeshStatusSchema>;
 export type AdminMeshPeer = z.infer<typeof AdminMeshPeerSchema>;
 export type AdminMeshBucket = z.infer<typeof AdminMeshBucketSchema>;
+export type MeshPreflightFailure = z.infer<typeof MeshPreflightFailureSchema>;
+
+export function parseMeshPreflightFailures(
+	error: unknown,
+): MeshPreflightFailure[] {
+	if (
+		!error ||
+		typeof error !== "object" ||
+		!("status" in error) ||
+		(error as { status?: unknown }).status !== 409 ||
+		!("code" in error) ||
+		(error as { code?: unknown }).code !== "mesh_preflight_failed" ||
+		!("details" in error)
+	) {
+		return [];
+	}
+	const details = (error as { details?: unknown }).details;
+	if (!details || typeof details !== "object") return [];
+	const failures = (details as { failures?: unknown }).failures;
+	if (!Array.isArray(failures)) return [];
+	return failures
+		.map((failure) => MeshPreflightFailureSchema.safeParse(failure))
+		.filter(
+			(result): result is { success: true; data: MeshPreflightFailure } =>
+				result.success,
+		)
+		.map((result) => result.data);
+}
 
 export async function fetchAdminMeshStatus(
 	adminToken: string,
