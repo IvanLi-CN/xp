@@ -8,6 +8,7 @@ use crate::state::history_repository::{
     MAX_INITIAL_BACKFILL_PAGE_BYTES, MAX_INITIAL_BACKFILL_PAGE_RECORDS,
 };
 mod cursor;
+mod local_page;
 mod ready_peer;
 #[cfg(test)]
 mod tests;
@@ -287,28 +288,15 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
             .await
             .local_history_backfill_inflight_checkpoint();
         if let Some((page_cursor, completed)) = inflight {
-            // Keep the legacy durable page replay path for upgrades that already have a page
-            // queued by the predecessor. New pages never enter the source journal.
-            let segments = state
-                .repository_replica
-                .lock()
-                .await
-                .local_history_backfill_inflight_segments()?;
-            for segment in &segments {
-                receive_local_source_segment(state, segment, &[], &ready_repository_ids, _now)
-                    .await?;
-            }
-            if !segments.is_empty() {
-                state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .acknowledge_local_source_segments_and_checkpoint_backfill(
-                        &segments,
-                        page_cursor,
-                        completed,
-                    )?;
-            }
+            local_page::resume_local_history_backfill_page(
+                state,
+                &identity,
+                _now,
+                &ready_repository_ids,
+                page_cursor,
+                completed,
+            )
+            .await?;
             progress = progress.combine(if completed {
                 InitialBackfillProgress::Complete
             } else {

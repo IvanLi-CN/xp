@@ -1,5 +1,6 @@
 use super::tests::{identity, load, record, signing_key};
 use crate::history_sync::{ProtocolError, SignedSegment, SyncRecord};
+use sha2::{Digest as _, Sha256};
 
 fn stored_segments(runtime: &super::RepositoryReplicaRuntime) -> Vec<SignedSegment> {
     let ids = runtime
@@ -234,6 +235,86 @@ fn local_history_backfill_commit_failure_rolls_back_records_and_cursor() {
 }
 
 #[test]
+fn local_history_backfill_persists_exact_wire_before_apply_retry() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut runtime = load(temporary.path());
+    runtime
+        .queue_local_history_backfill_batches(
+            "cluster-a",
+            identity.clone(),
+            &key,
+            Some("history-page-1".to_owned()),
+            true,
+            vec![(vec![record(b"retry-wire", false)], 1_000)],
+        )
+        .expect("persist backfill wire");
+    let persisted = runtime
+        .local_history_backfill_inflight_segments()
+        .expect("read persisted wire");
+    assert_eq!(persisted.len(), 1);
+
+    runtime
+        .storage
+        .set_query_only_for_test(true)
+        .expect("enable SQLite write failure");
+    assert!(
+        runtime
+            .apply_local_history_backfill_inflight_page(
+                "cluster-a",
+                &identity,
+                1_001,
+                &["local".to_owned()],
+                "local",
+            )
+            .is_err()
+    );
+    let retry = runtime
+        .local_history_backfill_inflight_segments()
+        .expect("retain persisted wire after failure");
+    assert_eq!(retry[0].wire, persisted[0].wire);
+    assert_eq!(runtime.local_history_backfill_cursor(), None);
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_record_count()
+            .expect("history count after failed apply"),
+        0
+    );
+
+    runtime
+        .storage
+        .set_query_only_for_test(false)
+        .expect("disable SQLite write failure");
+    runtime
+        .apply_local_history_backfill_inflight_page(
+            "cluster-a",
+            &identity,
+            1_001,
+            &["local".to_owned()],
+            "local",
+        )
+        .expect("retry persisted backfill wire");
+    assert!(
+        runtime
+            .local_history_backfill_inflight_checkpoint()
+            .is_none()
+    );
+    assert_eq!(
+        runtime.local_history_backfill_cursor(),
+        Some("history-page-1")
+    );
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_record_count()
+            .expect("history count after retry"),
+        1
+    );
+}
+
+#[test]
 fn local_history_backfill_tombstone_protects_the_independent_record_stream() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
@@ -384,5 +465,67 @@ fn local_history_backfill_page_replays_all_segments_before_checkpoint() {
             .expect("history count"),
         2,
         "replaying a partially delivered page must not duplicate rows"
+    );
+}
+
+#[test]
+fn predecessor_local_history_backfill_page_replays_source_journal_wire() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut runtime = load(temporary.path());
+    let queued = runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            identity.clone(),
+            &key,
+            vec![record(b"predecessor-page", false)],
+            1_000,
+        )
+        .expect("queue predecessor page")
+        .expect("predecessor segment");
+    let segment_id = hex::encode(Sha256::digest(&queued.wire));
+    let mut snapshot = serde_json::to_value(&runtime.snapshot).expect("serialize snapshot");
+    snapshot["local_history_backfill_inflight"] = serde_json::json!({
+        "page_cursor": "history-page-legacy",
+        "completed": false,
+        "segment_ids": [segment_id],
+    });
+    runtime
+        .storage
+        .write(
+            crate::state::history_storage::REPOSITORY_REPLICA_KEY,
+            &serde_json::to_vec(&snapshot).expect("serialize predecessor snapshot"),
+        )
+        .expect("persist predecessor snapshot");
+    drop(runtime);
+
+    let mut restored = load(temporary.path());
+    let replay = restored
+        .local_history_backfill_inflight_segments()
+        .expect("load predecessor page");
+    assert_eq!(replay.len(), 1);
+    assert_eq!(replay[0].wire, queued.wire);
+    restored
+        .receive_wire("cluster-a", &replay[0].identity, &replay[0].wire, 1_001)
+        .expect("replay predecessor segment");
+    restored
+        .acknowledge_local_source_segments_and_checkpoint_backfill(
+            &replay,
+            Some("history-page-legacy".to_owned()),
+            false,
+        )
+        .expect("acknowledge predecessor page");
+
+    let restored = load(temporary.path());
+    assert!(restored.local_source_pending_segments().is_empty());
+    assert!(
+        restored
+            .local_history_backfill_inflight_checkpoint()
+            .is_none()
+    );
+    assert_eq!(
+        restored.local_history_backfill_cursor(),
+        Some("history-page-legacy")
     );
 }

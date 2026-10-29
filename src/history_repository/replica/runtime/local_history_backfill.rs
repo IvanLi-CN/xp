@@ -115,9 +115,10 @@ impl RepositoryReplicaRuntime {
         Ok((segments, epoch, previous_stream_state, stream_state))
     }
 
-    /// Build and atomically apply one local history page. The page uses a zero-based stream
+    /// Persist and atomically apply one local history page. The page uses a zero-based stream
     /// family separate from the live source streams, so pending source delivery cannot alter its
-    /// cursor chain and the source outbox remains untouched.
+    /// cursor chain and the source outbox remains untouched. The exact signed wire set is durable
+    /// before record application, allowing a retry to replay the same page after interruption.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_local_history_backfill_page(
         &mut self,
@@ -131,21 +132,69 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<(), RepositoryRuntimeError> {
-        let (segments, epoch, previous_stream_state, stream_state) =
-            self.build_segments(cluster_id, &identity, signing_key, &batches)?;
-        receive::receive_local_history_backfill_page(
-            self,
+        let created = self.queue_local_history_backfill_batches(
             cluster_id,
-            &identity,
-            &segments,
-            epoch,
-            previous_stream_state,
-            stream_state,
+            identity,
+            signing_key,
             page_cursor,
             completed,
+            batches,
+        )?;
+        if created.is_empty() {
+            return Ok(());
+        }
+        self.apply_local_history_backfill_inflight_page(
+            cluster_id,
+            &created[0].identity,
             now_unix_seconds,
             ready_repositories,
             local_repository_id,
+        )
+    }
+
+    pub(crate) fn local_history_backfill_inflight_is_persisted(&self) -> bool {
+        self.snapshot
+            .local_history_backfill_inflight
+            .as_ref()
+            .is_some_and(|inflight| !inflight.segments.is_empty())
+    }
+
+    /// Apply the exact wire set persisted for a new-format page and clear its checkpoint in the
+    /// same repository mutation as the imported records and page cursor.
+    pub(crate) fn apply_local_history_backfill_inflight_page(
+        &mut self,
+        cluster_id: &str,
+        source_identity: &RepositoryNodeIdentity,
+        now_unix_seconds: u64,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let Some(inflight) = self.snapshot.local_history_backfill_inflight.clone() else {
+            return Err(RepositoryRuntimeError::Storage(
+                "local history backfill has no in-flight page".to_owned(),
+            ));
+        };
+        if inflight.segments.is_empty() {
+            return Err(RepositoryRuntimeError::Storage(
+                "legacy local history backfill page requires source replay".to_owned(),
+            ));
+        }
+        let segments = self.local_history_backfill_inflight_segments()?;
+        let previous_stream_state = self.snapshot.local_history_backfill_stream_state.clone();
+        receive::receive_local_history_backfill_page(
+            self,
+            cluster_id,
+            source_identity,
+            &segments,
+            inflight.epoch,
+            previous_stream_state,
+            inflight.stream_state,
+            inflight.page_cursor,
+            inflight.completed,
+            now_unix_seconds,
+            ready_repositories,
+            local_repository_id,
+            true,
         )
     }
 

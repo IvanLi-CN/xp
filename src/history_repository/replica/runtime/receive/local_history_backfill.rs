@@ -14,8 +14,9 @@ pub(crate) fn receive_local_history_backfill_page(
     now_unix_seconds: u64,
     ready_repositories: &[String],
     local_repository_id: &str,
+    apply_persisted_page: bool,
 ) -> Result<(), RepositoryRuntimeError> {
-    if runtime.snapshot.local_history_backfill_inflight.is_some() {
+    if runtime.snapshot.local_history_backfill_inflight.is_some() && !apply_persisted_page {
         return Err(RepositoryRuntimeError::Storage(
             "legacy local history backfill page is still in flight".to_owned(),
         ));
@@ -122,6 +123,9 @@ pub(crate) fn receive_local_history_backfill_page(
     runtime.snapshot.local_history_backfill_stream_state = stream_state;
     runtime.snapshot.local_history_backfill_cursor = page_cursor;
     runtime.snapshot.local_history_backfill_completed = completed;
+    if apply_persisted_page {
+        runtime.snapshot.local_history_backfill_inflight = None;
+    }
     runtime.persist_or_restore_with_mutation(&previous_receiver, &previous_snapshot, mutation)?;
     if let Err(error) = runtime.prune_retention(now_unix_seconds) {
         runtime.storage_degraded = true;
