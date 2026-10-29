@@ -1,16 +1,33 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminConfig } from "../api/adminConfig";
+import { fetchAdminMeshStatus, updateAdminMeshConfig } from "../api/adminMesh";
+import { BackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
+import {
+	hydratePrimaryBackendProfile,
+	resetPrimaryBackendTransportForTests,
+} from "../backend/primaryBackend";
 import { ToastProvider } from "../components/Toast";
+import { demoMeshStatus } from "../demo/DemoSystemStatusPage";
 import { createQueryClient } from "../queryClient";
+import { clearAllMeshMutationLocksForTests } from "../utils/meshMutationLock";
 import { ServiceConfigPage } from "./ServiceConfigPage";
 
 vi.mock("../api/adminConfig");
+vi.mock("../api/adminMesh", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../api/adminMesh")>();
+	return {
+		...actual,
+		fetchAdminMeshStatus: vi.fn(),
+		updateAdminMeshConfig: vi.fn(),
+	};
+});
 vi.mock("../api/clusterInfo");
 vi.mock("../api/health");
 
@@ -38,6 +55,15 @@ function renderPage() {
 }
 
 function setupMocks() {
+	vi.stubGlobal("navigator", {
+		locks: {
+			request: async (
+				_name: string,
+				_options: LockOptions,
+				callback: (lock: Lock | null) => Promise<unknown>,
+			) => callback({ name: fixtureCatalog.cluster.fixture53() } as Lock),
+		},
+	});
 	vi.mocked(fetchHealth).mockResolvedValue({ status: "ok" });
 	vi.mocked(fetchClusterInfo).mockResolvedValue({
 		cluster_id: fixtureCatalog.cluster.fixture53(),
@@ -63,6 +89,11 @@ function setupMocks() {
 		admin_token_present: true,
 		admin_token_masked: "********",
 	});
+	vi.mocked(fetchAdminMeshStatus).mockResolvedValue({
+		...demoMeshStatus,
+		cluster_mesh_enabled: false,
+	});
+	vi.mocked(updateAdminMeshConfig).mockResolvedValue({ enabled: true });
 }
 
 describe("ServiceConfigPage", () => {
@@ -72,6 +103,9 @@ describe("ServiceConfigPage", () => {
 
 	afterEach(() => {
 		cleanup();
+		clearAllMeshMutationLocksForTests();
+		resetPrimaryBackendTransportForTests();
+		vi.unstubAllGlobals();
 		vi.clearAllMocks();
 	});
 
@@ -99,5 +133,356 @@ describe("ServiceConfigPage", () => {
 		expect(
 			screen.queryByText("Allow private Mihomo mirror targets"),
 		).toBeNull();
+	});
+
+	it("requires confirmation and refreshes the observed value after enabling Mesh", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const toggle = await screen.findByRole("switch", {
+			name: "Enable Reality Direct Mesh",
+		});
+		await user.click(toggle);
+		await screen.findByRole("alertdialog", {
+			name: "Enable Reality Direct Mesh?",
+		});
+		await user.click(screen.getByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(updateAdminMeshConfig).toHaveBeenCalledWith("admintoken", true),
+		);
+		expect(fetchAdminMeshStatus).toHaveBeenCalledTimes(4);
+		expect(screen.getByText("Mutation result unknown")).toBeInTheDocument();
+	});
+
+	it("does not submit when the confirmation refresh omits the Mesh value", async () => {
+		const user = userEvent.setup();
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus)
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockResolvedValueOnce({
+				...demoMeshStatus,
+				cluster_mesh_enabled: undefined,
+			});
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(
+				screen.getByText(
+					"No mutation was sent because the confirmation snapshot did not " +
+						"include a boolean Mesh setting.",
+				),
+			).toBeInTheDocument(),
+		);
+		expect(updateAdminMeshConfig).not.toHaveBeenCalled();
+		expect(
+			screen.queryByRole("alertdialog", {
+				name: "Enable Reality Direct Mesh?",
+			}),
+		).toBeNull();
+	});
+
+	it("retains the lock when the accepted observation changes cluster scope", async () => {
+		const user = userEvent.setup();
+		const observedValues = [false, false, false, true];
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus).mockImplementation(async () => ({
+			...demoMeshStatus,
+			cluster_mesh_enabled: observedValues.shift() ?? true,
+		}));
+		vi.mocked(updateAdminMeshConfig).mockImplementationOnce(async () => {
+			hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), []);
+			return { enabled: true };
+		});
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		expect(screen.getByText("Mutation result unknown")).toBeInTheDocument();
+		expect(updateAdminMeshConfig).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps an unknown observed setting labeled Unknown after acceptance", async () => {
+		const user = userEvent.setup();
+		const observedValues: Array<boolean | undefined> = [
+			false,
+			false,
+			false,
+			undefined,
+		];
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus).mockImplementation(async () => ({
+			...demoMeshStatus,
+			cluster_mesh_enabled: observedValues.shift(),
+		}));
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(screen.getByText("Observed: Unknown")).toBeInTheDocument(),
+		);
+		expect(screen.getByText("Mutation result unknown")).toBeInTheDocument();
+	});
+
+	it("shows directed preflight failures without exposing transport details", async () => {
+		const user = userEvent.setup();
+		vi.mocked(updateAdminMeshConfig).mockRejectedValueOnce(
+			new BackendApiError({
+				status: 409,
+				message: "mesh preflight failed",
+				code: "mesh_preflight_failed",
+				details: {
+					failures: [
+						{
+							sender_node_id: demoMeshStatus.local.node_id,
+							target_node_id:
+								demoMeshStatus.peers[0]?.node_id ?? "peer-unknown",
+							kind: "protocol",
+						},
+					],
+				},
+			}),
+		);
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(
+				screen.getByText(/Directed cluster path validation failed/),
+			).toBeInTheDocument(),
+		);
+		expect(screen.getByRole("alert")).not.toHaveTextContent(
+			/socket|certificate|https?:\/\//i,
+		);
+	});
+
+	it("keeps an unknown mutation locked across observation refresh", async () => {
+		const user = userEvent.setup();
+		vi.mocked(updateAdminMeshConfig).mockRejectedValueOnce(
+			new Error("connection interrupted"),
+		);
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		expect(
+			screen.getByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		).toBeDisabled();
+		await user.click(
+			screen.getByRole("button", { name: "Refresh observation" }),
+		);
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		expect(updateAdminMeshConfig).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps the lock when the accepted request has no follow-up observation", async () => {
+		const user = userEvent.setup();
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus)
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockRejectedValueOnce(new Error("observation unavailable"));
+		vi.mocked(updateAdminMeshConfig).mockResolvedValueOnce({ enabled: true });
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		expect(updateAdminMeshConfig).toHaveBeenCalledTimes(1);
+		expect(
+			screen.getByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		).toBeDisabled();
+	});
+
+	it("keeps an unknown mutation locked when observation reaches the target", async () => {
+		const user = userEvent.setup();
+		vi.mocked(updateAdminMeshConfig).mockRejectedValueOnce(
+			new Error("connection interrupted"),
+		);
+		const observedValues = [false, false, false, true];
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus).mockImplementation(async () => ({
+			...demoMeshStatus,
+			cluster_mesh_enabled: observedValues.shift() ?? true,
+		}));
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		await user.click(
+			screen.getByRole("button", { name: "Refresh observation" }),
+		);
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		expect(
+			screen.getByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		).toBeDisabled();
+	});
+
+	it("requires explicit verification before clearing an unknown lock", async () => {
+		const user = userEvent.setup();
+		vi.mocked(updateAdminMeshConfig).mockRejectedValueOnce(
+			new Error("connection interrupted"),
+		);
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+
+		await user.click(screen.getByRole("button", { name: "Verify and unlock" }));
+		await screen.findByRole("alertdialog", {
+			name: "Unlock the local Mesh safety lock?",
+		});
+		await user.click(
+			screen.getByRole("button", {
+				name: "I verified termination and convergence",
+			}),
+		);
+
+		await waitFor(() =>
+			expect(screen.queryByText("Mutation result unknown")).toBeNull(),
+		);
+		expect(updateAdminMeshConfig).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not submit after canceling the confirmation refresh", async () => {
+		const user = userEvent.setup();
+		let resolveRefresh!: (value: typeof demoMeshStatus) => void;
+		const pendingRefresh = new Promise<typeof demoMeshStatus>((resolve) => {
+			resolveRefresh = resolve;
+		});
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus)
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockImplementationOnce(() => pendingRefresh);
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+		resolveRefresh({ ...demoMeshStatus, cluster_mesh_enabled: false });
+
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("alertdialog", {
+					name: "Enable Reality Direct Mesh?",
+				}),
+			).toBeNull(),
+		);
+		expect(updateAdminMeshConfig).not.toHaveBeenCalled();
+	});
+
+	it("does not submit after canceling while acquiring the mutation lock", async () => {
+		const user = userEvent.setup();
+		let lockRequested!: () => void;
+		let releaseLock!: () => void;
+		const lockRequestStarted = new Promise<void>((resolve) => {
+			lockRequested = resolve;
+		});
+		const lockRelease = new Promise<void>((resolve) => {
+			releaseLock = resolve;
+		});
+		vi.stubGlobal("navigator", {
+			locks: {
+				request: async (
+					_name: string,
+					_options: LockOptions,
+					callback: (lock: Lock | null) => Promise<unknown>,
+				) => {
+					lockRequested();
+					await lockRelease;
+					return callback({ name: fixtureCatalog.cluster.fixture53() } as Lock);
+				},
+			},
+		});
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+		await lockRequestStarted;
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+		releaseLock();
+
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("alertdialog", {
+					name: "Enable Reality Direct Mesh?",
+				}),
+			).toBeNull(),
+		);
+		expect(updateAdminMeshConfig).not.toHaveBeenCalled();
 	});
 });

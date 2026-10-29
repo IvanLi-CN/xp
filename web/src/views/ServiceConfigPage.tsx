@@ -1,13 +1,31 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { fetchAdminConfig } from "../api/adminConfig";
+import {
+	fetchAdminMeshStatus,
+	parseMeshPreflightFailures,
+	updateAdminMeshConfig,
+} from "../api/adminMesh";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
-import { useApiCapability } from "../api/useApiCompatibility";
+import {
+	useApiCapability,
+	useApiRouteCapability,
+} from "../api/useApiCompatibility";
+import { usePrimaryBackend } from "../backend/PrimaryBackendProvider";
+import {
+	getPrimaryBackendSnapshot,
+	withPrimaryBackendMutation,
+} from "../backend/primaryBackend";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
+import {
+	MeshClusterSetting,
+	type MeshMutationIssue,
+	type MeshMutationPhase,
+} from "../components/MeshClusterSetting";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
@@ -20,6 +38,15 @@ import {
 	latestQueryDataUpdatedAt,
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
+import { useQueryWithOfflineFallback } from "../offline/useQueryWithOfflineFallback";
+import {
+	clearMeshMutationLock,
+	readMeshMutationLock,
+	readMeshMutationLocks,
+	withMeshMutationLock,
+} from "../utils/meshMutationLock";
+
+const MESH_STATUS_FRESHNESS_MS = 30_000;
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -47,6 +74,25 @@ function formatTimestamp(value: number): string {
 function shortId(value: string, prefixLength = 3): string {
 	if (value.length <= prefixLength) return value;
 	return `${value.slice(0, prefixLength)}...`;
+}
+
+function isAmbiguousMeshMutationError(error: unknown): boolean {
+	return !isBackendApiError(error) || error.status >= 500;
+}
+
+function knownMeshMutationErrorMessage(error: unknown): string {
+	if (!isBackendApiError(error))
+		return "The cluster setting request was rejected.";
+	if (error.status === 409 && error.code === "mesh_preflight_failed") {
+		return "Directed cluster path validation failed. No setting change was confirmed.";
+	}
+	return error.code
+		? `The cluster setting request was rejected (${error.code}).`
+		: `The cluster setting request was rejected (${error.status}).`;
+}
+
+function meshSettingValueLabel(value: boolean | undefined): string {
+	return value === true ? "Enabled" : value === false ? "Disabled" : "Unknown";
 }
 
 type SummaryChipProps = {
@@ -114,7 +160,34 @@ export function ServiceConfigPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const toast = useToast();
 	const runtime = useAppRuntime();
+	const primaryBackend = usePrimaryBackend();
 	const configCapability = useApiCapability("admin.config");
+	const meshCapability = useApiCapability("admin.mesh");
+	const meshConfigCapability = useApiRouteCapability(
+		"admin.mesh",
+		"PUT /api/admin/mesh/config",
+	);
+	const meshDialogGeneration = useRef(0);
+	const meshMutationPhaseRef = useRef<MeshMutationPhase>("idle");
+	const [meshMutationPhase, setMeshMutationPhaseState] =
+		useState<MeshMutationPhase>("idle");
+	const [meshPendingTarget, setMeshPendingTarget] = useState<boolean | null>(
+		null,
+	);
+	const [meshConfirmationValue, setMeshConfirmationValue] = useState<
+		boolean | undefined
+	>();
+	const [meshMutationIssue, setMeshMutationIssue] =
+		useState<MeshMutationIssue | null>(null);
+	const [meshPreflightFailures, setMeshPreflightFailures] = useState<
+		ReturnType<typeof parseMeshPreflightFailures>
+	>([]);
+	const [, setMeshLockRevision] = useState(0);
+	const [meshFreshnessTick, setMeshFreshnessTick] = useState(0);
+	const setMeshMutationPhase = (phase: MeshMutationPhase) => {
+		meshMutationPhaseRef.current = phase;
+		setMeshMutationPhaseState(phase);
+	};
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -131,6 +204,297 @@ export function ServiceConfigPage() {
 		enabled: adminToken.length > 0 && configCapability.available,
 		queryFn: ({ signal }) => fetchAdminConfig(adminToken, signal),
 	});
+
+	const meshQuery = useQuery({
+		queryKey: [
+			"adminMeshStatus",
+			adminToken,
+			primaryBackend.primaryOrigin,
+			primaryBackend.generation,
+		],
+		enabled: adminToken.length > 0 && meshCapability.available,
+		queryFn: ({ signal }) => fetchAdminMeshStatus(adminToken, signal),
+		refetchOnMount: runtime.isOnline,
+		refetchOnWindowFocus: false,
+		retry: false,
+	});
+	const meshState = useQueryWithOfflineFallback(
+		["adminMeshStatus", adminToken, primaryBackend.primaryOrigin],
+		meshQuery,
+	);
+	const meshData = meshCapability.available ? meshState.data : undefined;
+	const meshClusterId = meshData?.local.cluster_id ?? null;
+	const meshLocks = readMeshMutationLocks();
+	const meshLock = readMeshMutationLock(meshClusterId);
+	const meshStatusUnavailableLock =
+		!meshClusterId && meshLocks.length === 1 ? (meshLocks[0] ?? null) : null;
+	const meshStatusFresh =
+		meshQuery.isSuccess &&
+		!meshQuery.isError &&
+		meshQuery.data !== undefined &&
+		meshQuery.dataUpdatedAt > 0 &&
+		Date.now() - meshQuery.dataUpdatedAt <= MESH_STATUS_FRESHNESS_MS &&
+		meshFreshnessTick >= 0;
+
+	useEffect(() => {
+		if (!meshQuery.dataUpdatedAt) return;
+		const interval = window.setInterval(
+			() => setMeshFreshnessTick((tick) => tick + 1),
+			1_000,
+		);
+		return () => window.clearInterval(interval);
+	}, [meshQuery.dataUpdatedAt]);
+
+	const closeMeshDialog = (force = false) => {
+		if (!force && meshMutationPhaseRef.current === "submitting") return;
+		meshDialogGeneration.current += 1;
+		setMeshPendingTarget(null);
+		setMeshConfirmationValue(undefined);
+		setMeshMutationPhase("idle");
+	};
+
+	const refreshMeshStatus = async () => {
+		const result = await meshQuery.refetch();
+		return result;
+	};
+
+	const openMeshChangeConfirmation = (enabled: boolean) => {
+		if (
+			!meshStatusFresh ||
+			!meshData ||
+			meshLock ||
+			meshStatusUnavailableLock ||
+			!meshConfigCapability.available
+		)
+			return;
+		const generation = ++meshDialogGeneration.current;
+		setMeshMutationIssue(null);
+		setMeshPreflightFailures([]);
+		setMeshPendingTarget(enabled);
+		setMeshConfirmationValue(undefined);
+		setMeshMutationPhase("refreshing");
+		const expectedClusterId = meshData.local.cluster_id;
+		const expectedOrigin = primaryBackend.primaryOrigin;
+		const expectedGeneration = primaryBackend.generation;
+		void meshQuery.refetch().then((result) => {
+			if (generation !== meshDialogGeneration.current) return;
+			const currentBackend = getPrimaryBackendSnapshot();
+			if (
+				result.isError ||
+				!result.data ||
+				result.dataUpdatedAt <= 0 ||
+				Date.now() - result.dataUpdatedAt > MESH_STATUS_FRESHNESS_MS ||
+				currentBackend.primaryOrigin !== expectedOrigin ||
+				currentBackend.generation !== expectedGeneration ||
+				result.data.local.cluster_id !== expectedClusterId
+			) {
+				setMeshMutationIssue({
+					kind: "rejected",
+					message:
+						"The current backend or cluster state changed while refreshing. " +
+						"Review the latest observation before trying again.",
+				});
+				closeMeshDialog();
+				return;
+			}
+			setMeshConfirmationValue(result.data.cluster_mesh_enabled);
+			setMeshMutationPhase("confirming");
+		});
+	};
+
+	const confirmMeshChange = () => {
+		if (meshPendingTarget === null || !meshData) return;
+		const target = meshPendingTarget;
+		const generation = meshDialogGeneration.current;
+		const expectedClusterId = meshData.local.cluster_id;
+		const expectedOrigin = primaryBackend.primaryOrigin;
+		const expectedGeneration = primaryBackend.generation;
+		setMeshMutationPhase("refreshing");
+		void meshQuery.refetch().then(async (result) => {
+			if (generation !== meshDialogGeneration.current) return;
+			const currentBackend = getPrimaryBackendSnapshot();
+			if (
+				result.isError ||
+				!result.data ||
+				result.dataUpdatedAt <= 0 ||
+				Date.now() - result.dataUpdatedAt > MESH_STATUS_FRESHNESS_MS ||
+				currentBackend.primaryOrigin !== expectedOrigin ||
+				currentBackend.generation !== expectedGeneration ||
+				result.data.local.cluster_id !== expectedClusterId
+			) {
+				setMeshMutationIssue({
+					kind: "rejected",
+					message:
+						"The current backend or cluster state changed. No mutation was sent; " +
+						"review the latest observation.",
+				});
+				closeMeshDialog();
+				return;
+			}
+			const observedMeshValue = result.data.cluster_mesh_enabled;
+			if (typeof observedMeshValue !== "boolean") {
+				setMeshMutationIssue({
+					kind: "rejected",
+					message:
+						"No mutation was sent because the confirmation snapshot did not " +
+						"include a boolean Mesh setting.",
+				});
+				closeMeshDialog();
+				return;
+			}
+			if (observedMeshValue === target) {
+				setMeshConfirmationValue(target);
+				setMeshMutationPhase("confirming");
+				return;
+			}
+
+			const lock = {
+				clusterId: expectedClusterId,
+				targetEnabled: target,
+				createdAt: Date.now(),
+			};
+			try {
+				const lockResult = await withMeshMutationLock(
+					lock,
+					async ({ clear }) => {
+						if (generation !== meshDialogGeneration.current) {
+							if (!clear()) {
+								setMeshMutationIssue({
+									kind: "persistence",
+									message:
+										"The confirmation was canceled, but the local safety lock could not be cleared.",
+								});
+							}
+							return;
+						}
+						const currentBackend = getPrimaryBackendSnapshot();
+						if (
+							currentBackend.primaryOrigin !== expectedOrigin ||
+							currentBackend.generation !== expectedGeneration
+						) {
+							const cleared = clear();
+							setMeshLockRevision((revision) => revision + 1);
+							setMeshMutationIssue({
+								kind: cleared ? "rejected" : "persistence",
+								message: cleared
+									? "The selected backend changed before the mutation started. " +
+										"No cluster mutation was sent."
+									: "The selected backend changed before the mutation started, " +
+										"but the local safety lock could not be cleared.",
+							});
+							return;
+						}
+						setMeshLockRevision((revision) => revision + 1);
+						setMeshMutationPhase("submitting");
+						try {
+							const refreshed = await withPrimaryBackendMutation(async () => {
+								await updateAdminMeshConfig(adminToken, target);
+								return meshQuery.refetch();
+							});
+							const refreshedBackend = getPrimaryBackendSnapshot();
+							const sameObservationScope =
+								refreshedBackend.primaryOrigin === expectedOrigin &&
+								refreshedBackend.generation === expectedGeneration &&
+								refreshed.data?.local.cluster_id === expectedClusterId;
+							if (!sameObservationScope) {
+								setMeshMutationIssue({
+									kind: "success_unconfirmed",
+									message:
+										"The server accepted the request, but the follow-up observation " +
+										"did not come from the confirmed backend and cluster.",
+								});
+							} else if (!refreshed.data || refreshed.isError) {
+								setMeshMutationIssue({
+									kind: "success_unconfirmed",
+									message:
+										"The server accepted the setting, but the latest cluster state could not be confirmed.",
+								});
+							} else if (refreshed.data.cluster_mesh_enabled !== target) {
+								const observedValue = meshSettingValueLabel(
+									refreshed.data.cluster_mesh_enabled,
+								);
+								setMeshMutationIssue({
+									kind: "success_unconfirmed",
+									message: [
+										"The server accepted the request, but this observer currently reports",
+										`${observedValue}.`,
+										"Another administrator or replication delay may be involved.",
+									].join(" "),
+								});
+							} else {
+								const cleared = clear();
+								setMeshLockRevision((revision) => revision + 1);
+								setMeshMutationIssue(
+									cleared
+										? null
+										: {
+												kind: "persistence",
+												message:
+													"The setting was accepted, but the local safety lock could not be " +
+													"cleared. Verify the cluster before unlocking it.",
+											},
+								);
+							}
+						} catch (error) {
+							if (isAmbiguousMeshMutationError(error)) {
+								setMeshMutationIssue({
+									kind: "unknown",
+									message:
+										"The mutation result is unknown. Refreshing or switching backend " +
+										"cannot prove whether it was applied.",
+								});
+							} else {
+								clear();
+								setMeshLockRevision((revision) => revision + 1);
+								const failures = parseMeshPreflightFailures(error);
+								setMeshPreflightFailures(failures);
+								setMeshMutationIssue({
+									kind: failures.length > 0 ? "preflight" : "rejected",
+									message: knownMeshMutationErrorMessage(error),
+								});
+								await meshQuery.refetch();
+							}
+						}
+					},
+				);
+				if (!lockResult.acquired) {
+					setMeshMutationIssue({
+						kind: "persistence",
+						message:
+							lockResult.reason === "held"
+								? "Another browser tab is already changing this cluster. No mutation was sent."
+								: "The local safety lock could not be persisted. No cluster mutation was sent.",
+					});
+				}
+			} catch {
+				setMeshMutationIssue({
+					kind: "unknown",
+					message:
+						"The mutation result is unknown. Refreshing or switching backend " +
+						"cannot prove whether it was applied.",
+				});
+			}
+			closeMeshDialog(true);
+		});
+	};
+
+	const unlockMeshMutation = () => {
+		const clusterId =
+			meshLock?.clusterId ?? meshStatusUnavailableLock?.clusterId;
+		if (!clusterId) return;
+		void clearMeshMutationLock(clusterId).then((cleared) => {
+			if (cleared) {
+				setMeshLockRevision((revision) => revision + 1);
+				setMeshMutationIssue(null);
+				return;
+			}
+			setMeshMutationIssue({
+				kind: "persistence",
+				message:
+					"The local safety lock could not be cleared. Keep it locked until storage is available.",
+			});
+		});
+	};
 
 	const headerActions = (
 		<>
@@ -294,6 +658,31 @@ export function ServiceConfigPage() {
 							</p>
 						</div>
 					</div>
+					<MeshClusterSetting
+						status={meshData}
+						statusUpdatedAt={meshState.dataUpdatedAt || null}
+						statusFresh={meshStatusFresh}
+						statusRefreshing={meshQuery.isFetching}
+						statusRefreshFailed={meshQuery.isError}
+						observerBackend={primaryBackend.primaryOrigin}
+						adminTokenPresent={adminToken.length > 0}
+						capabilityAvailable={meshConfigCapability.available}
+						capabilityReason={meshConfigCapability.reason}
+						isOnline={runtime.isOnline}
+						isReadOnly={runtime.isReadOnly}
+						mutationPhase={meshMutationPhase}
+						pendingTarget={meshPendingTarget}
+						currentConfirmationValue={meshConfirmationValue}
+						mutationIssue={meshMutationIssue}
+						preflightFailures={meshPreflightFailures}
+						unknownLock={meshLock}
+						statusUnavailableLock={meshStatusUnavailableLock}
+						onRequestChange={openMeshChangeConfirmation}
+						onConfirm={confirmMeshChange}
+						onCancel={closeMeshDialog}
+						onRefresh={() => void refreshMeshStatus()}
+						onUnlock={unlockMeshMutation}
+					/>
 				</section>
 
 				<section aria-labelledby="node-settings-heading" className="space-y-3">

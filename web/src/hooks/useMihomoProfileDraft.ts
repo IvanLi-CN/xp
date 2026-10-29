@@ -418,7 +418,6 @@ export function useMihomoProfileDraft({
 	saveFeedbackRef.current = saveFeedback;
 	isLoadedRef.current = isLoaded;
 	const restoredSessionRef = useRef<string | null>(null);
-
 	const dirty = useMemo(
 		() =>
 			MIHOMO_PROFILE_DOCUMENTS.some(
@@ -426,7 +425,6 @@ export function useMihomoProfileDraft({
 			),
 		[draft, baseline],
 	);
-
 	useEffect(() => {
 		if (typeof window === "undefined") return;
 		const claimKey = mihomoTabClaimStorageKey(tabId);
@@ -657,13 +655,35 @@ export function useMihomoProfileDraft({
 	const setField = useCallback(
 		(documentId: MihomoProfileDocumentId, value: string) => {
 			if (readOnly || isSaving || isVerifying || !isLoaded) return;
-			setDraftState((current) => ({ ...current, [documentId]: value }));
+			const nextDraft = { ...draftRef.current, [documentId]: value };
+			draftRef.current = nextDraft;
+			setDraftState(nextDraft);
 			setError(null);
 			setSaveFeedback((current) =>
 				current?.verification === "matches" ? null : current,
 			);
+			if (restoredSessionRef.current === sessionIdentity) {
+				const nextBaseline = baselineRef.current;
+				const nextDirty = MIHOMO_PROFILE_DOCUMENTS.some(
+					(nextDocumentId) =>
+						nextDraft[nextDocumentId] !== nextBaseline[nextDocumentId],
+				);
+				setStorageError(
+					nextDirty
+						? writeStoredDraft(clusterId, userId, nextDraft, nextBaseline)
+						: clearStoredDraft(clusterId, userId),
+				);
+			}
 		},
-		[isLoaded, isSaving, isVerifying, readOnly],
+		[
+			clusterId,
+			isLoaded,
+			isSaving,
+			isVerifying,
+			readOnly,
+			sessionIdentity,
+			userId,
+		],
 	);
 
 	const discard = useCallback(() => {
