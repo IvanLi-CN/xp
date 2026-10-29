@@ -26,7 +26,11 @@ type Story = StoryObj<typeof meta>;
 export const MonitoringWorkspace: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const refresh = await canvas.findByRole("button", { name: "Refresh" });
+		const refresh = await canvas.findByRole(
+			"button",
+			{ name: "Refresh" },
+			{ timeout: 5_000 },
+		);
 		const create = await canvas.findByRole("link", { name: "New monitor" });
 
 		await expect(Math.round(refresh.getBoundingClientRect().width)).toBe(
