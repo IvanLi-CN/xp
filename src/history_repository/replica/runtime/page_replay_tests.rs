@@ -117,6 +117,59 @@ fn local_history_backfill_starts_a_separate_chain_without_touching_live_source_s
 }
 
 #[test]
+fn local_history_backfill_reuses_the_durable_live_epoch_after_source_queue_rollback() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut runtime = load(temporary.path());
+    runtime.set_local_source_epoch(0, "");
+    let initial_epoch = super::source_epoch("cluster-a", identity.node_id().as_str());
+    runtime
+        .storage
+        .allocate_repository_source_epoch("cluster-a", identity.node_id().as_str(), initial_epoch)
+        .expect("persist source epoch allocation");
+
+    runtime
+        .apply_local_history_backfill_page(
+            "cluster-a",
+            identity.clone(),
+            &key,
+            Some("history-page-1".to_owned()),
+            true,
+            vec![(vec![record(b"historical-after-rollback", false)], 1_000)],
+            1_001,
+            &["local".to_owned()],
+            "local",
+        )
+        .expect("apply local backfill page");
+
+    let backfill = stored_segments(&runtime);
+    assert_eq!(backfill.len(), 1);
+    assert_eq!(
+        backfill[0].canonical().first_cursor().source_epoch(),
+        initial_epoch + 1
+    );
+    let live = runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            identity,
+            &key,
+            vec![record(b"live-after-backfill", false)],
+            1_002,
+        )
+        .expect("queue live source segment")
+        .expect("live source segment");
+    assert_eq!(
+        SignedSegment::from_wire(&live.wire)
+            .expect("signed live segment")
+            .canonical()
+            .first_cursor()
+            .source_epoch(),
+        initial_epoch + 1
+    );
+}
+
+#[test]
 fn local_history_backfill_restart_continues_its_persisted_hash_chain() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();

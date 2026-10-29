@@ -82,6 +82,11 @@ struct LocalSourceGap {
     end_unix_seconds: u64,
 }
 impl RepositoryReplicaRuntime {
+    pub(crate) fn set_local_source_epoch(&mut self, epoch: u64, node_id: &str) {
+        self.snapshot.local_source.epoch = epoch;
+        self.snapshot.local_source.node_id = node_id.to_owned();
+    }
+
     pub(crate) fn history_truncated(&self) -> bool {
         self.snapshot.history_truncated
     }

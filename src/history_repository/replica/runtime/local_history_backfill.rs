@@ -54,6 +54,43 @@ impl RepositoryReplicaRuntime {
         })
     }
 
+    fn ensure_live_source_epoch_for_backfill(
+        &mut self,
+        cluster_id: &str,
+        source_node_id: &str,
+    ) -> Result<(), RepositoryRuntimeError> {
+        if let Some(existing_node_id) = self.snapshot.local_source.node_id()
+            && existing_node_id != source_node_id
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                "local history backfill identity does not match the live source".to_owned(),
+            ));
+        }
+        if self.snapshot.local_source.epoch() != 0 {
+            return Ok(());
+        }
+
+        let previous_snapshot = self.snapshot.clone();
+        let epoch = if self.snapshot.local_history_backfill_epoch != 0 {
+            // A predecessor-format page may already have pinned the backfill chain before the
+            // live source snapshot was written. Preserve that chain across the repair.
+            self.snapshot.local_history_backfill_epoch
+        } else {
+            let result = self.storage.allocate_repository_source_epoch(
+                cluster_id,
+                source_node_id,
+                source_epoch(cluster_id, source_node_id),
+            );
+            self.finish_storage_write(result)?
+        };
+        self.set_local_source_epoch(epoch, source_node_id);
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     fn build_segments(
         &self,
         cluster_id: &str,
@@ -232,6 +269,9 @@ impl RepositoryReplicaRuntime {
             return Err(RepositoryRuntimeError::Storage(
                 "local history backfill already has an in-flight page".to_owned(),
             ));
+        }
+        if batches.iter().any(|(records, _)| !records.is_empty()) {
+            self.ensure_live_source_epoch_for_backfill(cluster_id, identity.node_id().as_str())?;
         }
         let (created, epoch, _, stream_state) =
             self.build_segments(cluster_id, &identity, signing_key, &batches)?;
