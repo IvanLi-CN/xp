@@ -107,11 +107,16 @@ ADR 0012 and does not alter this embedded-PWA contract.
   recovery choice. If that public probe proves a different cluster identity,
   the client MUST discard the stale in-memory candidates, bind the current
   tab to the probed cluster, and defer persistence until authenticated node
-  inventory hydration.
+  inventory hydration. If an already authenticated session proves that its
+  restored target belongs to a different cluster, the client MUST clear the
+  token, reset transport to the page or bootstrap recovery origin, and return
+  to Login before sending a credentialed request to that cluster.
 - **REQ-PREAUTH-PERSIST**: A pre-auth choice MUST remain session-local until
   token verification succeeds. The selected origin MAY become the durable
   primary backend only after successful authentication and normal cluster
-  profile hydration.
+  profile hydration. A verification response MUST be accepted only if the
+  origin, cluster, and backend generation are unchanged since the request
+  started.
 - **REQ-TOKEN-CONSISTENCY**: Nodes in one cluster MUST continue to use the
   cluster admin-token contract. A token accepted by one healthy member but
   rejected by another same-cluster member is an operator/deployment

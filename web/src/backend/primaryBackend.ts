@@ -412,6 +412,42 @@ export function hydrateStaticRuntimePolicy(
 	notify();
 }
 
+export function resetPrimaryBackendSelection() {
+	const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
+	const pageOrigin = canonicalBackendOrigin(getPageOrigin());
+	const nextOrigin = isStaticWebConsole()
+		? (bootstrapOrigin ?? getPageOrigin())
+		: (pageOrigin ?? state.primaryOrigin);
+	if (isStaticWebConsole()) {
+		staticAllowedOrigins = bootstrapOrigin
+			? new Set<string>([bootstrapOrigin])
+			: new Set<string>();
+	}
+	const candidates = isStaticWebConsole()
+		? bootstrapOrigin
+			? [
+					{
+						origin: bootstrapOrigin,
+						nodeId: "bootstrap",
+						nodeName: "Bootstrap backend",
+						verifiedAt: Date.now(),
+						lastError: null,
+					},
+				]
+			: []
+		: state.candidates;
+	const changed = state.primaryOrigin !== nextOrigin;
+	state = {
+		...state,
+		primaryOrigin: nextOrigin,
+		candidates,
+		generation: changed ? state.generation + 1 : state.generation,
+		state: "ready",
+		lastSwitchTimedOut: false,
+	};
+	notify();
+}
+
 function directFetch(input: RequestInfo | URL, init?: RequestInit) {
 	const fetcher =
 		nativeFetch ??

@@ -34,3 +34,11 @@
   compatibility 请求；inventory query 按 cluster 隔离，过期 probe 不能污染新 profile。
 - 补齐认证请求门禁：旧 cluster-info 缓存不能反向恢复 stale profile，inventory 与 compatibility
   请求共同等待当前 origin 的公开 identity readiness，登录页探测在卸载或切换 epoch 后失效。
+
+## 2026-10-29
+
+- 收口跨集群认证边界：已认证公开探测发现 cluster identity 变化时，清除 token、恢复页面或
+  static bootstrap transport 并回到登录页，禁止向新集群发送旧 Bearer token。
+- 切换 primary backend 时取消并清理查询缓存；登录验证响应绑定 origin、cluster 和 generation，
+  selector 在验证期间锁定；登出会清除 static runtime-policy transport。
+- 补齐 Storybook 的冷启动 identity 夹具隔离与公共探测无 Authorization 的浏览器断言。

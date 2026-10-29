@@ -195,6 +195,16 @@ test("uses selected recovery origin and persists after inventory hydration", asy
 	});
 	await installLoginMocks(page, 200);
 	await page.goto("/login", { waitUntil: "networkidle" });
+	const preAuthProbeRequests = apiRequests.filter((request) =>
+		["/api/health", "/api/cluster/info", "/api/capabilities"].includes(
+			new URL(request.url).pathname,
+		),
+	);
+	expect(preAuthProbeRequests.length).toBeGreaterThan(0);
+	expect(
+		preAuthProbeRequests.every((request) => request.authorization === null),
+	).toBe(true);
+	apiRequests.length = 0;
 
 	await page.getByRole("button", { name: "Select service node" }).click();
 	await page
@@ -218,7 +228,6 @@ test("uses selected recovery origin and persists after inventory hydration", asy
 			),
 		)
 		.toBe(recoveryOrigin);
-
 	const authRequest = apiRequests.find((request) =>
 		request.url.startsWith(`${recoveryOrigin}/api/admin/alerts`),
 	);

@@ -8,6 +8,7 @@ import { verifyAdminToken } from "../api/adminAuth";
 import { isBackendApiError } from "../api/backendError";
 import { usePrimaryBackend } from "../backend/PrimaryBackendProvider";
 import {
+	getPrimaryBackendSnapshot,
 	hydratePrimaryBackendProfile,
 	isStaticWebConsole,
 	probeBackendOrigin,
@@ -101,8 +102,20 @@ export function LoginPage({
 			setIsVerifying(true);
 			setServerError(null);
 			setBootstrapCompatibilityPending(false);
+			const verificationTarget = getPrimaryBackendSnapshot();
 			try {
 				await verifyAdminToken(parsed.token);
+				const currentTarget = getPrimaryBackendSnapshot();
+				if (
+					currentTarget.primaryOrigin !== verificationTarget.primaryOrigin ||
+					currentTarget.clusterId !== verificationTarget.clusterId ||
+					currentTarget.generation !== verificationTarget.generation
+				) {
+					setServerError(
+						"Service node changed while the token was being verified. Try again.",
+					);
+					return;
+				}
 				writeAdminToken(parsed.token);
 				setTokenLength(parsed.token.length);
 				form.reset({ token: parsed.token });
@@ -133,13 +146,27 @@ export function LoginPage({
 		window.history.replaceState(null, "", nextUrl);
 
 		form.reset({ token: loginToken });
+		let active = true;
 		void (async () => {
 			try {
+				const initialTarget = getPrimaryBackendSnapshot();
 				if (!staticConsole) {
 					const probeResult = await probeBackendOrigin({
 						origin: window.location.origin,
 					});
-					if (probeResult.clusterId !== backend.clusterId) {
+					if (!active) return;
+					const currentTarget = getPrimaryBackendSnapshot();
+					if (
+						currentTarget.primaryOrigin !== initialTarget.primaryOrigin ||
+						currentTarget.clusterId !== initialTarget.clusterId ||
+						currentTarget.generation !== initialTarget.generation
+					) {
+						setServerError(
+							"Service node selection changed. Review the selected node and retry.",
+						);
+						return;
+					}
+					if (probeResult.clusterId !== currentTarget.clusterId) {
 						hydratePrimaryBackendProfile(probeResult.clusterId);
 					}
 					const selectionResult = await selectPreAuthBackend(
@@ -161,7 +188,10 @@ export function LoginPage({
 				);
 			}
 		})();
-	}, [backend.clusterId, form, staticConsole, submitToken]);
+		return () => {
+			active = false;
+		};
+	}, [form, staticConsole, submitToken]);
 
 	const handleFormSubmit = form.handleSubmit((values) => {
 		if (!staticConsole && backend.state === "switching") {
@@ -195,6 +225,7 @@ export function LoginPage({
 					</div>
 
 					<LoginBackendSelector
+						disabled={isVerifying}
 						staticConsole={staticConsole}
 						onProbeStateChange={setPreAuthTargetReady}
 					/>

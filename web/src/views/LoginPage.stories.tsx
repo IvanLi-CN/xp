@@ -6,6 +6,7 @@ import { PrimaryBackendProvider } from "../backend/PrimaryBackendProvider";
 import {
 	type PrimaryBackendSnapshot,
 	getPrimaryBackendSnapshot,
+	resetPrimaryBackendTransportForTests,
 } from "../backend/primaryBackend";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import { LoginPage } from "./LoginPage";
@@ -74,6 +75,28 @@ function LoginPageSurface({
 		>
 			<div data-visual-evidence-target className="h-full overflow-hidden">
 				<PrimaryBackendProvider snapshot={snapshot}>
+					<LoginPage />
+				</PrimaryBackendProvider>
+			</div>
+		</div>
+	);
+}
+
+function ZeroCandidatesSurface() {
+	useEffect(() => {
+		window.localStorage.removeItem("xp-primary-backend-profiles");
+		resetPrimaryBackendTransportForTests();
+	}, []);
+	return (
+		<div
+			data-visual-evidence-surface
+			className={[
+				"box-border h-[calc(100vh-2rem)] overflow-hidden bg-background",
+				"p-[18px] text-foreground sm:p-8",
+			].join(" ")}
+		>
+			<div data-visual-evidence-target className="h-full overflow-hidden">
+				<PrimaryBackendProvider>
 					<LoginPage />
 				</PrimaryBackendProvider>
 			</div>
@@ -185,15 +208,7 @@ export const PreAuthBackendRecovery: Story = {
 };
 
 export const ZeroCandidates: Story = {
-	render: () => (
-		<LoginPageSurface
-			snapshot={preAuthSnapshot({
-				clusterId: null,
-				primaryOrigin: window.location.origin,
-				candidates: [],
-			})}
-		/>
-	),
+	render: () => <ZeroCandidatesSurface />,
 	parameters: {
 		mockApi: {
 			adminToken: null,

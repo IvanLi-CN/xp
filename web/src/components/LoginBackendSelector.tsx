@@ -25,6 +25,7 @@ import {
 type ProbeStatus = "checking" | "ready" | "error";
 
 type LoginBackendSelectorProps = {
+	disabled?: boolean;
 	onProbeStateChange?: (ready: boolean) => void;
 	staticConsole?: boolean;
 };
@@ -58,6 +59,7 @@ function currentPageCandidate(): BackendCandidate | null {
 }
 
 export function LoginBackendSelector({
+	disabled = false,
 	onProbeStateChange,
 	staticConsole: staticConsoleProp = false,
 }: LoginBackendSelectorProps) {
@@ -176,6 +178,7 @@ export function LoginBackendSelector({
 	}, [currentTargetReady, onProbeStateChange]);
 
 	const handleSelect = async (candidate: BackendCandidate) => {
+		if (disabled) return;
 		const status = probeStatus[candidate.origin];
 		if (status === "error") {
 			void runProbe(candidate);
@@ -224,7 +227,11 @@ export function LoginBackendSelector({
 						variant="outline"
 						className="w-full justify-between"
 						aria-label="Select service node"
-						disabled={backend.state === "switching" || candidates.length === 0}
+						disabled={
+							disabled ||
+							backend.state === "switching" ||
+							candidates.length === 0
+						}
 						loading={backend.state === "switching"}
 					>
 						<span className="flex min-w-0 items-center gap-2">
@@ -264,7 +271,8 @@ export function LoginBackendSelector({
 										disabled={
 											(isCurrent && !isError) ||
 											isChecking ||
-											Boolean(selectingOrigin)
+											Boolean(selectingOrigin) ||
+											disabled
 										}
 										onSelect={(event) => {
 											event.preventDefault();

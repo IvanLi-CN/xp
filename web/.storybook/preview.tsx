@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 
 import { PrimaryBackendProvider } from "../src/backend/PrimaryBackendProvider";
+import { resetPrimaryBackendTransportForTests } from "../src/backend/primaryBackend";
 import { AppLayout } from "../src/components/AppLayout";
 import { PwaStatusPrompt } from "../src/components/PwaStatusPrompt";
 import { ToastProvider } from "../src/components/Toast";
@@ -154,6 +155,8 @@ const preview: Preview = {
 			const density =
 				context.globals.density === "compact" ? "compact" : "comfortable";
 
+			safeLocalStorageRemove("xp-primary-backend-profiles");
+			resetPrimaryBackendTransportForTests();
 			configureStorybookApiMock(context.id, mockParams);
 
 			safeLocalStorageSet(UI_THEME_STORAGE_KEY, theme);
