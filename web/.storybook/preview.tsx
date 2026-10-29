@@ -9,6 +9,7 @@ import {
 	createRouter,
 } from "@tanstack/react-router";
 
+import { PrimaryBackendProvider } from "../src/backend/PrimaryBackendProvider";
 import { AppLayout } from "../src/components/AppLayout";
 import { PwaStatusPrompt } from "../src/components/PwaStatusPrompt";
 import { ToastProvider } from "../src/components/Toast";
@@ -352,7 +353,9 @@ const preview: Preview = {
 							initialIsOnline={appRuntimeParams?.initialIsOnline}
 						>
 							<ToastProvider>
-								<RouterProvider router={router} />
+								<PrimaryBackendProvider>
+									<RouterProvider router={router} />
+								</PrimaryBackendProvider>
 								<PwaStatusPrompt />
 							</ToastProvider>
 						</AppRuntimeProvider>

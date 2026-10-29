@@ -103,7 +103,9 @@ export function ApiCompatibilityProvider(props: {
 export function useApiCompatibility(
 	adminToken: string,
 	isOnline: boolean,
-	beforeAuthenticatedRequest?: (signal: AbortSignal) => Promise<void>,
+	beforeAuthenticatedRequest?: (
+		signal: AbortSignal,
+	) => Promise<boolean | undefined>,
 	cacheIdentity?: string | null,
 ) {
 	return useQuery({
@@ -113,7 +115,8 @@ export function useApiCompatibility(
 			cacheIdentity ?? "unknown",
 		],
 		queryFn: async ({ signal }) => {
-			await beforeAuthenticatedRequest?.(signal);
+			const ready = await beforeAuthenticatedRequest?.(signal);
+			if (ready === false) return null;
 			const compatibility = await fetchApiCompatibility({
 				adminToken: adminToken || undefined,
 				signal,

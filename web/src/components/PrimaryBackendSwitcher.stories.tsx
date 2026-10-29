@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { type ComponentProps, useEffect } from "react";
 
 import { PrimaryBackendProvider } from "@/backend/PrimaryBackendProvider";
 import {
@@ -64,7 +65,11 @@ function withSnapshot(snapshot: PrimaryBackendSnapshot): Story["render"] {
 }
 
 export const Default: Story = {
-	render: (args) => {
+	render: (args) => <DefaultStory {...args} />,
+};
+
+function DefaultStory(args: ComponentProps<typeof PrimaryBackendSwitcher>) {
+	useEffect(() => {
 		hydratePrimaryBackendProfile("cluster-demo", [
 			{
 				node_id: fixtureCatalog.identifier.nodePrimary(),
@@ -77,13 +82,14 @@ export const Default: Story = {
 				api_base_url: fixtureCatalog.url.secondaryApi(),
 			},
 		]);
-		return (
-			<PrimaryBackendProvider>
-				<PrimaryBackendSwitcher {...args} />
-			</PrimaryBackendProvider>
-		);
-	},
-};
+	}, []);
+
+	return (
+		<PrimaryBackendProvider>
+			<PrimaryBackendSwitcher {...args} />
+		</PrimaryBackendProvider>
+	);
+}
 
 export const SignedOut: Story = {
 	args: { adminToken: "", clusterId: null },

@@ -267,6 +267,11 @@ test("keeps the login page and selected origin after a recovery 401", async ({
 		page.getByText(/401 unauthorized: invalid admin token/),
 	).toBeVisible();
 	await expect(page).toHaveURL(/\/login$/);
+	const selector = page.getByRole("button", { name: "Select service node" });
+	await expect(selector).toContainText(new URL(recoveryOrigin).host);
+	await selector.press("Enter");
+	await expect(page.getByRole("menu")).toBeVisible();
+	await page.keyboard.press("Escape");
 	expect(
 		await page.evaluate(() => localStorage.getItem("xp_admin_token")),
 	).toBeNull();
@@ -292,8 +297,10 @@ test("keeps login selector focus and controls inside the mobile viewport", async
 	await page.goto("/login", { waitUntil: "networkidle" });
 
 	const selector = page.getByRole("button", { name: "Select service node" });
-	await selector.click();
+	await selector.press("Enter");
 	await expect(page.getByRole("menu")).toBeVisible();
+	await page.keyboard.press("ArrowDown");
+	await expect(page.locator('[role="menuitem"]:focus')).toBeVisible();
 	await page.keyboard.press("Escape");
 	await expect(selector).toBeFocused();
 

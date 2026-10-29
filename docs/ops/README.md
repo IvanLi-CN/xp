@@ -75,6 +75,16 @@ capability disables only the affected UI feature; an endpoint or schema failure 
 is an API regression and must be investigated as such. PWA build IDs and API release profiles are
 independent and must not be manually aligned.
 
+Before authentication, `/login` provides a service-node selector containing the current page origin
+and only the candidates recorded in the active cluster profile. Each candidate must pass public
+health, cluster identity, and compatibility probes before it can be selected; these probes never
+send the admin token. The selection is limited to the current tab and does not update the durable
+profile. A `login_token` link probes the current page origin first, and a rejected token keeps the
+login page, selected node, and unverified token available for correction without saving the token.
+After authentication succeeds, the authenticated node inventory is the persistence gate for a new
+Primary Backend target. If the selector is unavailable, operators should use the current page
+origin or an already recorded active-profile candidate rather than entering an arbitrary URL.
+
 ### Independent static Web console
 
 The independent console is published at `https://xp.ivanli.cc` from the exact `web/dist` artifact

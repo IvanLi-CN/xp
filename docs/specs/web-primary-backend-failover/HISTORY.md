@@ -32,3 +32,5 @@
   丢弃旧集群候选并延迟到 authenticated inventory 后再持久化。
 - 收口认证启动边界：AppShell 先完成当前挂载的公开 cluster identity，再启动带 token 的
   compatibility 请求；inventory query 按 cluster 隔离，过期 probe 不能污染新 profile。
+- 补齐认证请求门禁：旧 cluster-info 缓存不能反向恢复 stale profile，inventory 与 compatibility
+  请求共同等待当前 origin 的公开 identity readiness，登录页探测在卸载或切换 epoch 后失效。
