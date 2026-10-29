@@ -48,8 +48,15 @@
 - An authenticated public probe that proves a different cluster is treated as a credential
   boundary: the token is cleared, the current transport is reset to its page/bootstrap recovery
   origin, and the UI returns to Login before any credentialed request is sent to the new cluster.
-  Backend generation changes cancel and remove cached queries, and logout resets static policy
-  transport so a later login cannot reuse a stale target.
+  Backend generation changes cancel and remove in-memory and persisted offline query caches, and
+  logout resets static policy transport so a later login cannot reuse a stale target.
+- The authenticated Home dashboard binds admin-token verification to the starting origin, cluster,
+  and backend generation; a node switch during verification cannot persist the token.
+- App resource-navigation queries are gated on public backend readiness and include the selected
+  origin and generation in their identity, so stale protected navigation cannot start across a
+  backend identity boundary.
+- A mutation-barrier switch rechecks the cluster identity and backend generation before committing;
+  a target verified for an obsolete identity is rejected instead of becoming primary.
 - Login-page probe completions are epoch-bound so a probe from a discarded cluster cannot mark a
   candidate ready after a stale-profile rebind.
 - Login verification responses are bound to the starting origin, cluster identity, and backend
