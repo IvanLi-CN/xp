@@ -107,11 +107,15 @@ test("shows the registered node list from the AppShell switcher", async ({
 			exact: true,
 		}),
 	).toBeVisible();
-	const currentItem = page.getByRole("menuitem", { name: /Current page/ });
-	await expect(currentItem).not.toBeDisabled();
-	await expect(currentItem).toHaveAttribute("aria-current", "true");
-	const currentRow = currentItem.locator("..");
-	await expect(currentRow).toHaveClass(/bg-primary\/10/);
+	await expect(
+		page.getByRole("menuitem", { name: /Current page/ }),
+	).toHaveCount(0);
+	await expect(
+		page.getByRole("menuitem", {
+			name: fixtureCatalog.identifier.nodeNamePrimary(),
+			exact: true,
+		}),
+	).toBeVisible();
 });
 
 test("shows version differences and separate frontend links", async ({
@@ -278,7 +282,8 @@ test("keeps AppShell overlays inside mobile viewports and restores focus", async
 		}
 
 		const versionTrigger = page.locator("header button.xp-badge");
-		await versionTrigger.click();
+		await versionTrigger.focus();
+		await page.keyboard.press("Enter");
 		const versionOverlay = page
 			.locator("[data-radix-popper-content-wrapper]:visible")
 			.last();
