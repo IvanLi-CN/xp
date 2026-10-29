@@ -25,6 +25,7 @@ vi.mock("../api/adminAuth", () => ({
 
 vi.mock("../backend/primaryBackend", () => ({
 	isStaticWebConsole: mocks.isStaticWebConsole,
+	clearPrimaryBackendDirectory: vi.fn(),
 }));
 
 describe("<LoginPage />", () => {
