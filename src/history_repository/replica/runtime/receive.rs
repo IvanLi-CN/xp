@@ -1,6 +1,8 @@
 use super::*;
 
 mod batch;
+#[path = "receive/local_backfill_wire.rs"]
+mod local_backfill_wire;
 #[path = "receive/local_history_backfill.rs"]
 mod local_history_backfill;
 mod types;
@@ -257,10 +259,11 @@ impl RepositoryReplicaRuntime {
         }
     }
 
-    fn receive_wire_from_repository_inner(
+    fn receive_wire_from_repository_inner_without_rebuild(
         &mut self,
         request: RepositoryWireRequest<'_>,
         mutation_sink: Option<&mut PendingRepositoryMutation>,
+        rebuild_if_stale: bool,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
         let RepositoryWireRequest {
             cluster_id,
@@ -275,7 +278,9 @@ impl RepositoryReplicaRuntime {
             allow_retained_sequence_gap,
             retained_anchor_checkpoint,
         } = request;
-        self.rebuild_if_stale(now_unix_seconds)?;
+        if rebuild_if_stale {
+            self.rebuild_if_stale(now_unix_seconds)?;
+        }
         self.refresh_capacity()?;
         let availability = self.snapshot.capacity.history_write_availability();
         if !availability.allows_history_writes() {

@@ -123,17 +123,15 @@ pub(crate) fn should_fanout_tombstone_acknowledgements(lifecycle: RepositoryLife
 pub(super) async fn receive_local_source_segment(
     state: &AppState,
     segment: &RepositoryReplicaSegment,
-    gaps: &[RepositoryReplicaGap],
     ready_repository_ids: &[String],
     now: u64,
 ) -> anyhow::Result<()> {
     let mut runtime = state.repository_replica.lock().await;
     let receipt = super::repository_blocking(|| {
-        runtime.receive_wire_from_repository_with_gaps(
+        runtime.receive_local_history_backfill_wire(
             &state.cluster.cluster_id,
             &segment.identity,
             &segment.wire,
-            gaps,
             now,
             ready_repository_ids,
             &state.cluster.node_id,

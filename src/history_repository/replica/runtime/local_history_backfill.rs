@@ -353,28 +353,11 @@ impl RepositoryReplicaRuntime {
                 "local history backfill acknowledgement was not pending".to_owned(),
             ));
         }
+        self.snapshot.local_history_backfill_inflight = None;
         self.snapshot.local_history_backfill_cursor = page_cursor;
         self.snapshot.local_history_backfill_completed = completed;
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
-            return Err(error);
-        }
-        if self.storage.is_sqlite() {
-            if let Err(error) = self
-                .storage
-                .acknowledge_source_delivery_journal(
-                    &[hex::encode(Sha256::digest(delivered_wire))],
-                    None,
-                    None,
-                )
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-            {
-                self.snapshot = previous_snapshot;
-                return Err(error);
-            }
-            self.hydrate_source_delivery_journal()?;
-        }
-        Ok(())
+        let ids = [hex::encode(Sha256::digest(delivered_wire))];
+        self.commit_legacy_local_history_backfill_ack(previous_snapshot, &ids)
     }
 
     pub(crate) fn local_history_backfill_inflight_checkpoint(
@@ -457,6 +440,41 @@ impl RepositoryReplicaRuntime {
             .collect()
     }
 
+    fn commit_legacy_local_history_backfill_ack(
+        &mut self,
+        previous_snapshot: RepositoryReplicaSnapshot,
+        ids: &[String],
+    ) -> Result<(), RepositoryRuntimeError> {
+        if self.storage.is_sqlite() {
+            self.snapshot.tombstones = self.tombstones.checkpoint();
+            let control_payload = serde_json::to_vec(&self.snapshot_for_persistence())
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            if control_payload.len() > super::MAX_RUNTIME_STATE_BYTES {
+                self.snapshot = previous_snapshot;
+                return Err(RepositoryRuntimeError::StateLimitExceeded);
+            }
+            if let Err(error) = self
+                .storage
+                .acknowledge_source_delivery_journal_with_cursor_and_control(
+                    ids,
+                    None,
+                    None,
+                    None,
+                    &control_payload,
+                )
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+            {
+                self.snapshot = previous_snapshot;
+                return Err(error);
+            }
+            self.hydrate_source_delivery_journal()?;
+        } else if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub(crate) fn acknowledge_local_source_segments_and_checkpoint_backfill(
         &mut self,
         delivered_segments: &[RepositoryReplicaSegment],
@@ -523,25 +541,10 @@ impl RepositoryReplicaRuntime {
         }
         self.snapshot.local_history_backfill_cursor = page_cursor;
         self.snapshot.local_history_backfill_completed = completed;
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
-            return Err(error);
-        }
-        if self.storage.is_sqlite() {
-            let ids = delivered_segments
-                .iter()
-                .map(|segment| hex::encode(Sha256::digest(&segment.wire)))
-                .collect::<Vec<_>>();
-            if let Err(error) = self
-                .storage
-                .acknowledge_source_delivery_journal(&ids, None, None)
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-            {
-                self.snapshot = previous_snapshot;
-                return Err(error);
-            }
-            self.hydrate_source_delivery_journal()?;
-        }
-        Ok(())
+        let ids = delivered_segments
+            .iter()
+            .map(|segment| hex::encode(Sha256::digest(&segment.wire)))
+            .collect::<Vec<_>>();
+        self.commit_legacy_local_history_backfill_ack(previous_snapshot, &ids)
     }
 }

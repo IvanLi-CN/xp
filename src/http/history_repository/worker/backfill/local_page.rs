@@ -8,6 +8,9 @@ pub(super) async fn resume_local_history_backfill_page(
     page_cursor: Option<String>,
     completed: bool,
 ) -> anyhow::Result<()> {
+    if let Some(cursor) = page_cursor.as_deref() {
+        super::HistoricalBackfillPageCursor::decode(cursor)?;
+    }
     let persisted_page = state
         .repository_replica
         .lock()
@@ -34,14 +37,16 @@ pub(super) async fn resume_local_history_backfill_page(
             .await
             .local_history_backfill_inflight_segments()?;
         for segment in &segments {
-            receive_local_source_segment(
-                state,
-                segment,
-                &[],
-                ready_repository_ids,
-                now_unix_seconds,
-            )
-            .await?;
+            if !super::super::super::identity_is_valid_for_history_replay(state, &segment.identity)
+                .await
+                .map_err(|_| anyhow::anyhow!("check local history backfill segment identity"))?
+            {
+                anyhow::bail!("local history backfill segment identity is not pinned");
+            }
+        }
+        for segment in &segments {
+            receive_local_source_segment(state, segment, ready_repository_ids, now_unix_seconds)
+                .await?;
         }
         if !segments.is_empty() {
             state
@@ -53,6 +58,8 @@ pub(super) async fn resume_local_history_backfill_page(
                     page_cursor,
                     completed,
                 )?;
+        } else {
+            anyhow::bail!("legacy local history backfill page has no source segments");
         }
     }
     Ok(())

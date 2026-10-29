@@ -21,7 +21,14 @@ pub(crate) fn receive_local_history_backfill_page(
             "legacy local history backfill page is still in flight".to_owned(),
         ));
     }
-    runtime.rebuild_if_stale(now_unix_seconds)?;
+    if page_cursor
+        .as_ref()
+        .is_some_and(|cursor| cursor.is_empty() || cursor.len() > 1_024)
+    {
+        return Err(RepositoryRuntimeError::Storage(
+            "local history backfill cursor is outside the bounded format".to_owned(),
+        ));
+    }
     runtime.refresh_capacity()?;
     let availability = runtime.snapshot.capacity.history_write_availability();
     if !availability.allows_history_writes() {
@@ -55,15 +62,26 @@ pub(crate) fn receive_local_history_backfill_page(
                 ProtocolError::CursorIdentityMismatch,
             ));
         }
-        let expected_sequence = observed_stream_state
+        super::error::validate_backfill_stream(
+            first.stream(),
+            source_identity.node_id().as_str(),
+            signed.canonical().records(),
+        )?;
+        let (expected_sequence, expected_hash) = observed_stream_state
             .get(first.stream())
-            .map_or(0, |(sequence, _)| *sequence);
+            .copied()
+            .unwrap_or((0, None));
         if first.sequence() != expected_sequence {
             return Err(RepositoryRuntimeError::Protocol(
                 ProtocolError::SequenceGap {
                     expected: expected_sequence,
                     actual: first.sequence(),
                 },
+            ));
+        }
+        if signed.canonical().previous_segment_hash() != expected_hash {
+            return Err(RepositoryRuntimeError::Protocol(
+                ProtocolError::HashChainMismatch,
             ));
         }
         let next_sequence = signed
@@ -98,7 +116,7 @@ pub(crate) fn receive_local_history_backfill_page(
         ..PendingRepositoryMutation::default()
     };
     for segment in segments {
-        if let Err(error) = runtime.receive_wire_from_repository_inner(
+        if let Err(error) = runtime.receive_wire_from_repository_inner_without_rebuild(
             RepositoryWireRequest {
                 cluster_id,
                 identity: &segment.identity,
@@ -113,6 +131,7 @@ pub(crate) fn receive_local_history_backfill_page(
                 retained_anchor_checkpoint: None,
             },
             Some(&mut mutation),
+            false,
         ) {
             runtime.restore(&previous_receiver, previous_snapshot.clone())?;
             runtime.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;

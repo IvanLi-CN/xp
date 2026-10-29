@@ -941,9 +941,12 @@ Notes:
   retention cannot remove the pending repair anchor during the handoff. No lease is extended by
   finalization; normal retention resumes after all bounded leases expire.
   Live source delivery, ordinary anti-entropy, and later repair pages still reject unobserved
-  sequence gaps; the one exception is a `history_truncated=true` response that proves the exact
-  non-permanent gap already recorded by a consumed recovery checkpoint. Do not bypass either
-  boundary by editing the checkpoint.
+  sequence gaps. A `history_truncated=true` response may prove the exact non-permanent gap already
+  recorded by a consumed recovery checkpoint. If no transient gap was recorded before a delayed
+  retry, continuation is allowed only when the authenticated response carries a matching
+  `retained_stream_boundaries` content digest and its first segment equals the source-declared
+  minimum retained sequence. Missing or changed boundary evidence remains blocked. Do not bypass
+  either boundary by editing the checkpoint.
   A stale retained-anchor marker is recovered in place through the signed local command during the
   approved maintenance window:
 

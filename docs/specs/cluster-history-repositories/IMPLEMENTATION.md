@@ -154,7 +154,7 @@
   complete before the member can enter the readiness window.
 - Wave 1 local baseline backfill now persists an exact in-flight wire page before applying it. The
   backfill uses independent `<stream>-backfill-<source_node_id>` sequence/hash chains for schema
-  records, keeps tombstones in their protocol stream with separate backfill stream state, and does
+  records and uses `tombstone-backfill-<source_node_id>` for tombstones, and does
   not consume the live source outbox or allocate live source sequences. Restart resumes the stored
   wires only after rechecking cluster binding, derived repository identity, segment ownership,
   signature, epoch, stream, sequence and chain state. Wire receive, record/tombstone import, stream

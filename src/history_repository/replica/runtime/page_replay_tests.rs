@@ -305,6 +305,98 @@ fn local_history_backfill_restart_continues_its_persisted_hash_chain() {
 }
 
 #[test]
+fn local_history_backfill_rejects_a_predecessor_hash_conflict_before_apply() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut runtime = load(temporary.path());
+    runtime
+        .apply_local_history_backfill_page(
+            "cluster-a",
+            identity.clone(),
+            &key,
+            Some("history-page-1".to_owned()),
+            false,
+            vec![(vec![record(b"historical-1", false)], 1_000)],
+            1_001,
+            &["local".to_owned()],
+            "local",
+        )
+        .expect("apply first page");
+    runtime
+        .queue_local_history_backfill_segments(
+            "cluster-a",
+            identity.clone(),
+            &key,
+            vec![record(b"historical-2", false)],
+            1_002,
+        )
+        .expect("queue second page");
+    runtime
+        .snapshot
+        .local_history_backfill_stream_state
+        .insert("runtime-backfill-node-a".to_owned(), (1, Some([7; 32])));
+
+    let error = runtime
+        .apply_local_history_backfill_inflight_page(
+            "cluster-a",
+            &identity,
+            1_003,
+            &["local".to_owned()],
+            "local",
+        )
+        .expect_err("predecessor hash conflict must fail closed");
+    assert!(matches!(
+        error,
+        super::RepositoryRuntimeError::Protocol(ProtocolError::HashChainMismatch)
+    ));
+    assert!(
+        runtime
+            .local_history_backfill_inflight_checkpoint()
+            .is_some()
+    );
+    assert_eq!(
+        runtime.local_history_backfill_cursor(),
+        Some("history-page-1")
+    );
+}
+
+#[test]
+fn local_history_backfill_recovery_does_not_rebuild_away_persisted_wires() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut runtime = load(temporary.path());
+    runtime
+        .queue_local_history_backfill_segments(
+            "cluster-a",
+            identity.clone(),
+            &key,
+            vec![record(b"stale-recovery", false)],
+            1_000,
+        )
+        .expect("queue persisted page");
+    runtime.snapshot.last_verified_unix_seconds = Some(1);
+
+    runtime
+        .apply_local_history_backfill_inflight_page(
+            "cluster-a",
+            &identity,
+            1 + super::TOMBSTONE_HORIZON_SECONDS + 1,
+            &["local".to_owned()],
+            "local",
+        )
+        .expect("replay persisted page without rebuilding it away");
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_record_count()
+            .expect("history count"),
+        1
+    );
+}
+
+#[test]
 fn local_history_backfill_commit_failure_rolls_back_records_and_cursor() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
@@ -718,6 +810,37 @@ fn predecessor_local_history_backfill_page_replays_source_journal_wire() {
     restored
         .receive_wire("cluster-a", &replay[0].identity, &replay[0].wire, 1_001)
         .expect("replay predecessor segment");
+    restored
+        .storage
+        .set_query_only_for_test(true)
+        .expect("enable acknowledgement failure");
+    assert!(
+        restored
+            .acknowledge_local_source_segments_and_checkpoint_backfill(
+                &replay,
+                Some("history-page-legacy".to_owned()),
+                false,
+            )
+            .is_err()
+    );
+    assert!(
+        restored
+            .local_history_backfill_inflight_checkpoint()
+            .is_some()
+    );
+    assert_eq!(restored.local_history_backfill_cursor(), None);
+    assert_eq!(
+        restored
+            .storage
+            .source_delivery_journal()
+            .expect("journal after failed acknowledgement")
+            .len(),
+        1
+    );
+    restored
+        .storage
+        .set_query_only_for_test(false)
+        .expect("disable acknowledgement failure");
     restored
         .acknowledge_local_source_segments_and_checkpoint_backfill(
             &replay,

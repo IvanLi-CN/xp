@@ -823,6 +823,7 @@ impl HistoryStorage {
             .transpose()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn acknowledge_source_delivery_journal(
         &self,
         ids: &[String],
