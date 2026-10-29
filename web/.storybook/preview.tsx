@@ -1,4 +1,5 @@
 import type { Preview } from "@storybook/react";
+import { configure } from "@storybook/test";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
 	Outlet,
@@ -60,6 +61,8 @@ type StorybookAppRuntimeParameters = {
 	initialIsOnline?: boolean;
 };
 
+// Page stories wait for public backend readiness and authenticated hydration.
+configure({ asyncUtilTimeout: 5_000 });
 installStorybookFetchMock();
 
 function safeLocalStorageSet(key: string, value: string) {

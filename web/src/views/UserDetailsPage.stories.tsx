@@ -113,10 +113,6 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-function findPageTab(canvasElement: HTMLElement, name: string) {
-	return within(canvasElement).findByRole("tab", { name }, { timeout: 5_000 });
-}
-
 export const User1: Story = {};
 
 export const UserAndMihomoSections: Story = {
@@ -187,7 +183,7 @@ export const User2: Story = {
 export const AccessTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Access"));
+		await userEvent.click(await canvas.findByRole("tab", { name: "Access" }));
 		await expect(
 			await canvas.findByText("Selected endpoints: 2", {}, { timeout: 5_000 }),
 		).toBeInTheDocument();
@@ -203,7 +199,9 @@ export const AccessTab: Story = {
 export const QuotaStatusTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Quota status"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Quota status" }),
+		);
 		await expect(
 			(await canvas.findAllByText(/Remaining:/)).length,
 		).toBeGreaterThan(0);
@@ -213,9 +211,9 @@ export const QuotaStatusTab: Story = {
 export const TrafficTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Traffic"));
+		await userEvent.click(await canvas.findByRole("tab", { name: "Traffic" }));
 		await expect(
-			await findPageTab(canvasElement, "Traffic"),
+			await canvas.findByRole("tab", { name: "Traffic" }),
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByRole("combobox", { name: "Traffic nodes" }),
@@ -229,7 +227,9 @@ export const TrafficTab: Story = {
 export const UsageDetailsTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Usage details"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Usage details" }),
+		);
 		await expect(
 			await canvas.findByRole("tab", {
 				name: fixtureCatalog.identifier.nodeNamePrimary(),
@@ -283,7 +283,9 @@ export const UsageDetailsDuplicateNames: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Usage details"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Usage details" }),
+		);
 		await expect(
 			await canvas.findByRole("tab", {
 				name: `fixture-duplicate · ${fixtureCatalog.host.primary()}`,
@@ -300,7 +302,9 @@ export const UsageDetailsDuplicateNames: Story = {
 export const UsageDetailsTab7d: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Usage details"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Usage details" }),
+		);
 		await userEvent.click(
 			await canvas.findByRole("tab", {
 				name: fixtureCatalog.identifier.nodeNamePrimary(),
@@ -326,11 +330,7 @@ export const UsageDetailsTab7d: Story = {
 export const MihomoProviderPreview: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const subscriptionFormat = await canvas.findByTestId(
-			"subscription-format",
-			{},
-			{ timeout: 5_000 },
-		);
+		const subscriptionFormat = await canvas.findByTestId("subscription-format");
 		subscriptionFormat.querySelectorAll("label")[2]?.click();
 		await userEvent.click(await canvas.findByRole("button", { name: "Fetch" }));
 		await expect(

@@ -426,15 +426,11 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-function findPageTab(canvasElement: HTMLElement, name: string) {
-	return within(canvasElement).findByRole("tab", { name }, { timeout: 5_000 });
-}
-
 export const Default: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			await findPageTab(canvasElement, "Service runtime"),
+			await canvas.findByRole("tab", { name: "Service runtime" }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByText(/^key events$/i)).toBeInTheDocument();
 	},
@@ -443,7 +439,7 @@ export const Default: Story = {
 export const IpUsageTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "IP usage"));
+		await userEvent.click(await canvas.findByRole("tab", { name: "IP usage" }));
 		await expect(
 			await canvas.findByRole("button", {
 				name: fixtureCatalog.address.secondaryIpv4(),
@@ -455,7 +451,7 @@ export const IpUsageTab: Story = {
 export const IpUsageTab7d: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "IP usage"));
+		await userEvent.click(await canvas.findByRole("tab", { name: "IP usage" }));
 		await userEvent.click(await canvas.findByRole("button", { name: "7d" }));
 		await expect(
 			await canvas.findByRole("button", { name: "7d" }),
@@ -471,7 +467,9 @@ export const IpUsageTab7d: Story = {
 export const TcpConnectionsTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "TCP connections"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "TCP connections" }),
+		);
 		await expect(
 			await canvas.findByText(
 				/Per-minute ESTABLISHED inbound TCP connections/i,
@@ -495,7 +493,9 @@ export const ResourcesTab: Story = {
 	tags: ["resource-monitoring"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Resources"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Resources" }),
+		);
 		await expect(
 			await canvas.findByText("Root filesystem use history"),
 		).toBeInTheDocument();
@@ -514,7 +514,9 @@ export const ResourcesRuntimeDetail: Story = {
 	tags: ["resource-monitoring"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Resources"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Resources" }),
+		);
 		for (const role of ["xp", "xray", "cloudflared", "canary"]) {
 			await expect(
 				await canvas.findByRole("button", {
@@ -559,9 +561,9 @@ export const ResourcesRuntimeDetail: Story = {
 export const TrafficTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Traffic"));
+		await userEvent.click(await canvas.findByRole("tab", { name: "Traffic" }));
 		await expect(
-			await findPageTab(canvasElement, "Traffic"),
+			await canvas.findByRole("tab", { name: "Traffic" }),
 		).toBeInTheDocument();
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Last 31 days" }),
@@ -575,7 +577,9 @@ export const TrafficTab: Story = {
 export const MetadataEgressProbe: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Node metadata"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Node metadata" }),
+		);
 		await expect(
 			await canvas.findByText("Node egress probe"),
 		).toBeInTheDocument();
@@ -589,7 +593,9 @@ export const MetadataEgressProbe: Story = {
 export const NodeSettings: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Node settings"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Node settings" }),
+		);
 		await expect(
 			await canvas.findByRole("heading", { name: "Mihomo resources" }),
 		).toBeInTheDocument();
@@ -616,7 +622,9 @@ export const NodeSettingsMobile: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Node settings"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Node settings" }),
+		);
 		await expect(
 			await canvas.findByRole("heading", { name: "Mihomo resources" }),
 		).toBeInTheDocument();
@@ -769,7 +777,9 @@ export const DeleteWithEndpointCleanup: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Node settings"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Node settings" }),
+		);
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Delete node" }),
 		);
@@ -804,7 +814,9 @@ export const DeletePending: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Node settings"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Node settings" }),
+		);
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Delete node" }),
 		);
@@ -834,7 +846,9 @@ export const DeleteBlocked: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await findPageTab(canvasElement, "Node settings"));
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Node settings" }),
+		);
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Delete node" }),
 		);
