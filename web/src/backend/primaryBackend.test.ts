@@ -245,19 +245,19 @@ describe("primary backend transport", () => {
 	it("keeps every registered row when a policy refresh omits an origin", () => {
 		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
 			{
-				node_id: "node-a",
-				node_name: "Node A",
+				node_id: fixtureCatalog.nodeId.fixture17(),
+				node_name: fixtureCatalog.nodeName.fixture18(),
 				api_base_url: fixtureCatalog.url.primaryApi(),
 			},
 			{
-				node_id: "node-b",
-				node_name: "Node B",
+				node_id: fixtureCatalog.nodeId.fixture32(),
+				node_name: fixtureCatalog.nodeName.fixture33(),
 				api_base_url: fixtureCatalog.url.primaryApi(),
 			},
 			{
-				node_id: "node-invalid",
-				node_name: "Invalid",
-				api_base_url: "http://insecure.xp.example",
+				node_id: fixtureCatalog.nodeId.fixture36(),
+				node_name: fixtureCatalog.nodeName.fixture37(),
+				api_base_url: fixtureCatalog.url.origin443(),
 			},
 		]);
 		hydrateStaticRuntimePolicy(
@@ -267,7 +267,13 @@ describe("primary backend transport", () => {
 		);
 		expect(
 			getPrimaryBackendSnapshot().candidates.map((row) => row.nodeId),
-		).toEqual(expect.arrayContaining(["node-a", "node-b", "node-invalid"]));
+		).toEqual(
+			expect.arrayContaining([
+				fixtureCatalog.nodeId.fixture17(),
+				fixtureCatalog.nodeId.fixture32(),
+				fixtureCatalog.nodeId.fixture36(),
+			]),
+		);
 	});
 
 	it("ignores an older directory response after a newer one was applied", () => {
@@ -277,8 +283,8 @@ describe("primary backend transport", () => {
 		const older = beginDirectoryRequest();
 		const newer = beginDirectoryRequest();
 		const row = {
-			node_id: "node-a",
-			node_name: "Node A",
+			node_id: fixtureCatalog.nodeId.fixture17(),
+			node_name: fixtureCatalog.nodeName.fixture18(),
 			api_base_url: fixtureCatalog.url.primaryApi(),
 		};
 		expect(applyDirectoryResponse(cluster, epoch, newer, [])).toBe(true);
@@ -290,18 +296,18 @@ describe("primary backend transport", () => {
 		const cluster = fixtureCatalog.cluster.fixture84();
 		hydratePrimaryBackendProfile(cluster, [
 			{
-				node_id: "a",
-				node_name: "A",
+				node_id: fixtureCatalog.nodeId.fixture17(),
+				node_name: fixtureCatalog.nodeName.fixture18(),
 				api_base_url: fixtureCatalog.url.secondaryApi(),
 			},
 			{
-				node_id: "b",
-				node_name: "B",
+				node_id: fixtureCatalog.nodeId.fixture32(),
+				node_name: fixtureCatalog.nodeName.fixture33(),
 				api_base_url: fixtureCatalog.url.secondaryApi(),
 			},
 		]);
 		const selected = getPrimaryBackendSnapshot().candidates.find(
-			(item) => item.nodeId === "b",
+			(item) => item.nodeId === fixtureCatalog.nodeId.fixture32(),
 		);
 		if (!selected) throw new Error("selected node missing");
 		await switchPrimaryBackend({ ...selected, verifiedAt: Date.now() });
@@ -311,8 +317,8 @@ describe("primary backend transport", () => {
 				item.nodeName,
 			]),
 		).toEqual([
-			["a", "A"],
-			["b", "B"],
+			[fixtureCatalog.nodeId.fixture17(), fixtureCatalog.nodeName.fixture18()],
+			[fixtureCatalog.nodeId.fixture32(), fixtureCatalog.nodeName.fixture33()],
 		]);
 		window.localStorage.clear();
 	});

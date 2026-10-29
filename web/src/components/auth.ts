@@ -4,8 +4,16 @@ import {
 	readDemoAuthentication,
 	setDemoAuthentication,
 } from "../demo/runtimeMode";
+import { clearAppliedRuntimePolicyId } from "../offline/runtimePolicySession";
+import { clearServiceWorkerRuntimePolicy } from "../offline/serviceWorkerPolicy";
 
 export const ADMIN_TOKEN_STORAGE_KEY = "xp_admin_token";
+
+function clearSessionState(): void {
+	clearPrimaryBackendDirectory({ clearProfiles: true });
+	clearAppliedRuntimePolicyId();
+	clearServiceWorkerRuntimePolicy();
+}
 
 if (typeof window !== "undefined") {
 	window.addEventListener("storage", (event) => {
@@ -14,7 +22,7 @@ if (typeof window !== "undefined") {
 			(event.key === ADMIN_TOKEN_STORAGE_KEY &&
 				event.oldValue !== event.newValue)
 		) {
-			clearPrimaryBackendDirectory({ clearProfiles: true });
+			clearSessionState();
 		}
 	});
 }
@@ -29,8 +37,7 @@ export function readAdminToken(): string {
 }
 
 export function writeAdminToken(token: string): void {
-	if (readAdminToken() !== token)
-		clearPrimaryBackendDirectory({ clearProfiles: true });
+	if (readAdminToken() !== token) clearSessionState();
 	if (isDemoRuntime()) {
 		setDemoAuthentication(token.length > 0);
 		return;
@@ -43,7 +50,7 @@ export function writeAdminToken(token: string): void {
 }
 
 export function clearAdminToken(): void {
-	clearPrimaryBackendDirectory({ clearProfiles: true });
+	clearSessionState();
 	if (isDemoRuntime()) {
 		setDemoAuthentication(false);
 		return;

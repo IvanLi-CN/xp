@@ -71,8 +71,6 @@ import {
 } from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
 import { useAppRuntime } from "../offline/appRuntime";
-import { clearAppliedRuntimePolicyId } from "../offline/runtimePolicySession";
-import { clearServiceWorkerRuntimePolicy } from "../offline/serviceWorkerPolicy";
 import { requestServiceWorkerUpdateCheck } from "../offline/serviceWorkerUpdates";
 import { classifyUpgradeStartError } from "../offline/upgradeObservation";
 import { shouldRefreshAfterUpgradeTransition } from "../offline/upgradeRefreshPolicy";
@@ -919,8 +917,6 @@ export function AppShell({
 											className="text-destructive focus:text-destructive"
 											onSelect={() => {
 												requestNavigation(() => {
-													clearServiceWorkerRuntimePolicy();
-													clearAppliedRuntimePolicyId();
 													clearAdminToken();
 													void navigate({ to: "/login" });
 												});
