@@ -92,8 +92,9 @@ import { ReadStateIndicator } from "./ReadStateIndicator";
 import { useUiPrefs } from "./UiPrefs";
 import { VersionIndicator } from "./VersionIndicator";
 import { XpBrandLogo } from "./XpBrandLogo";
-import { clearAdminToken, readAdminToken } from "./auth";
+import { clearAdminToken } from "./auth";
 import { inputClass } from "./ui-helpers";
+import { useActiveAdminSession } from "./useActiveAdminSession";
 import {
 	type VersionCheckUiState,
 	readVersionCheckLastAtMs,
@@ -149,10 +150,9 @@ export function AppShell({
 	const prefs = useUiPrefs();
 	const primaryBackend = usePrimaryBackend();
 	const staticConsole = isStaticWebConsole();
-	const [adminToken] = useState(() => readAdminToken());
+	const adminToken = useActiveAdminSession();
 	const sessionEpoch = getDirectorySessionEpoch();
-	const activeAdminSession =
-		adminToken.length > 0 && readAdminToken() === adminToken;
+	const activeAdminSession = adminToken.length > 0;
 	const apiCompatibility = useApiCompatibility(
 		adminToken,
 		runtime.isOnline,
