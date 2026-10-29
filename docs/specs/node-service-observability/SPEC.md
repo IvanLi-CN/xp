@@ -193,6 +193,13 @@ covers: REQ-NODE-TAB-URL, REQ-NODE-TAB-CONTINUITY, REQ-NODE-TAB-ORDER
   - evidence_note: `NodeDetailsPage` 的 metadata 页会展示节点主动探测得到的出口 IP、Geo 与订阅地区，并提供手动刷新按钮。
     ![Node details egress probe summary](./assets/node-details-egress-probe-story.png)
 
+- source_type=storybook_canvas · target_program=mock-only · capture_scope=element
+  - state: `Pages/NodeDetailsPage/ServiceRuntimeKeyEvents`
+  - evidence_note: `Key events` 使用主题滚动区域承载多条有意义的运行时事件，
+    滚动条与页面深色 UI 保持一致。
+    ![runtime events scrollbar](./assets/node-details-runtime-events-scrollbar.png)
+    ![scrolled](./assets/node-details-runtime-events-scrollbar-scrolled.png)
+
 ## 计划资产（Plan assets）
 
 - Directory: `docs/specs/node-service-observability/assets/`
