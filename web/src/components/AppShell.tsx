@@ -65,7 +65,6 @@ import {
 } from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
 import {
-	primaryClusterInfoQueryKey,
 	usePrimaryClusterInfo,
 	useRefreshBackendCandidates,
 } from "../hooks/usePrimaryBackendQueries";
@@ -92,6 +91,7 @@ import {
 	useObjectNavigationBrowserBlocker,
 	useObjectNavigationGuard,
 } from "./ObjectNavigationGuard";
+import { PageState } from "./PageState";
 import { PrimaryBackendSwitcher } from "./PrimaryBackendSwitcher";
 import { ReadStateIndicator } from "./ReadStateIndicator";
 import { useUiPrefs } from "./UiPrefs";
@@ -159,6 +159,7 @@ export function AppShell({
 	useObjectNavigationBrowserBlocker();
 	const publicBackend = useAuthenticatedBackendProbe({
 		clusterId: primaryBackend.clusterId,
+		isOnline: runtime.isOnline,
 		origin: primaryBackend.primaryOrigin,
 		staticConsole,
 	});
@@ -202,10 +203,7 @@ export function AppShell({
 		queryKey: ["health"],
 		queryFn: ({ signal }) => fetchHealth(signal),
 	});
-	const clusterInfo = usePrimaryClusterInfo(
-		primaryBackend.primaryOrigin,
-		primaryBackend.generation,
-	);
+	const clusterInfo = usePrimaryClusterInfo();
 	const runtimePolicy = useQuery({
 		queryKey: ["runtimePolicy", adminToken, primaryBackend.clusterId],
 		enabled:
@@ -231,7 +229,12 @@ export function AppShell({
 					? "API compatibility is unavailable while offline."
 					: null;
 	const backendNodes = useQuery({
-		queryKey: ["adminNodes", adminToken, primaryBackend.clusterId],
+		queryKey: [
+			"adminNodes",
+			adminToken,
+			primaryBackend.primaryOrigin,
+			primaryBackend.generation,
+		],
 		enabled:
 			!staticConsole &&
 			adminToken.length > 0 &&
@@ -275,6 +278,7 @@ export function AppShell({
 		previousBackendGeneration.current = primaryBackend.generation;
 		void (async () => {
 			await queryClient.cancelQueries();
+			queryClient.removeQueries({ queryKey: ["clusterInfo"] });
 			await queryClient.invalidateQueries();
 		})();
 	}, [primaryBackend.generation, queryClient]);
@@ -355,11 +359,9 @@ export function AppShell({
 				force ||
 				shouldAutoCheckVersion({ nowMs, lastAtMs: versionCheckLastAtMs });
 			if (!canRun) return;
-
 			writeVersionCheckLastAtMs(nowMs);
 			setVersionCheckLastAtMs(nowMs);
 			dispatchVersionCheck({ type: "start" });
-
 			try {
 				const data = await fetchVersionCheck({
 					refresh: force,
@@ -390,7 +392,6 @@ export function AppShell({
 			setStatusStream({ connected: false, lastEventAtMs: null, error: null });
 			return;
 		}
-
 		const statusEventsAvailable =
 			runtime.isOnline &&
 			compatibility?.kind === "compatible" &&
@@ -406,7 +407,6 @@ export function AppShell({
 			});
 			return;
 		}
-
 		const handle = startAdminStatusEvents({
 			adminToken,
 			onOpen: () => {
@@ -430,17 +430,10 @@ export function AppShell({
 					}));
 					return;
 				}
-
 				if (message.type === "snapshot") {
 					const lastEventAtMs = Date.parse(message.data.emitted_at);
 					queryClient.setQueryData(["health"], message.data.health);
-					queryClient.setQueryData(
-						primaryClusterInfoQueryKey(
-							primaryBackend.primaryOrigin,
-							primaryBackend.generation,
-						),
-						message.data.cluster_info,
-					);
+					queryClient.setQueryData(["clusterInfo"], message.data.cluster_info);
 					queryClient.setQueryData(
 						["adminAlerts", adminToken],
 						message.data.alerts,
@@ -474,7 +467,6 @@ export function AppShell({
 		adminToken,
 		compatibility,
 		primaryBackend.generation,
-		primaryBackend.primaryOrigin,
 		queryClient,
 		runtime.isOnline,
 	]);
@@ -482,12 +474,10 @@ export function AppShell({
 		const onFocus = () => {
 			void runVersionCheck();
 		};
-
 		window.addEventListener("focus", onFocus);
 		if (typeof document.hasFocus === "function" && document.hasFocus()) {
 			onFocus();
 		}
-
 		return () => window.removeEventListener("focus", onFocus);
 	}, [runVersionCheck]);
 	useEffect(() => {
@@ -497,7 +487,6 @@ export function AppShell({
 		if (!shouldRefreshAfterUpgradeTransition(prevState, nextState)) {
 			return;
 		}
-
 		void clusterInfo.refetch();
 		void health.refetch();
 		void runVersionCheck({ force: true });
@@ -520,16 +509,13 @@ export function AppShell({
 					},
 				]
 			: []);
-
 	function navigateLink(href: string) {
 		setMobileNavOpen(false);
 		void navigate({ to: href as never });
 	}
-
 	function navigateResource(href: string) {
 		requestNavigation(() => navigateLink(href));
 	}
-
 	const navEntries = useMemo(
 		() =>
 			effectiveNavGroups.flatMap((group) =>
@@ -556,7 +542,6 @@ export function AppShell({
 				<span className="opacity-80">{healthOk ? "OK" : "error"}</span>
 			</Badge>,
 		);
-
 		if (clusterInfo.isSuccess) {
 			const leaderHost = safeHostFromUrl(clusterInfo.data.leader_api_base_url);
 			const leaderValue =
@@ -588,7 +573,6 @@ export function AppShell({
 				</Badge>,
 			);
 		}
-
 		if (adminAlerts.isSuccess) {
 			const count = adminAlerts.data.items.length;
 			const unreachable = adminAlerts.data.unreachable_nodes.length;
@@ -729,6 +713,8 @@ export function AppShell({
 					!runtimePolicy.isError)
 			}
 			groups={effectiveNavGroups}
+			backendOrigin={primaryBackend.primaryOrigin}
+			backendGeneration={primaryBackend.generation}
 			localNodeId={clusterInfo.data?.node_id ?? null}
 			pathname={pathname}
 			onNavigate={navigateResource}
@@ -945,7 +931,21 @@ export function AppShell({
 						<aside className="hidden lg:block">{navContent}</aside>
 						<main className="xp-panel p-[var(--xp-page-padding)]">
 							<ApiCompatibilityProvider value={compatibility}>
-								{children ?? <Outlet />}
+								{!staticConsole &&
+								runtime.isOnline &&
+								adminToken.length > 0 &&
+								!publicBackend.ready ? (
+									<PageState
+										variant="loading"
+										title="Verifying backend identity"
+										description={
+											"Public health and cluster checks must complete before " +
+											"authenticated requests are sent."
+										}
+									/>
+								) : (
+									(children ?? <Outlet />)
+								)}
 							</ApiCompatibilityProvider>
 						</main>
 					</div>

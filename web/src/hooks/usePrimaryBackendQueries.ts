@@ -3,13 +3,9 @@ import { useCallback } from "react";
 
 import { fetchClusterInfo } from "../api/clusterInfo";
 
-export function primaryClusterInfoQueryKey(origin: string, generation: number) {
-	return ["clusterInfo", origin, generation] as const;
-}
-
-export function usePrimaryClusterInfo(origin: string, generation: number) {
+export function usePrimaryClusterInfo() {
 	return useQuery({
-		queryKey: primaryClusterInfoQueryKey(origin, generation),
+		queryKey: ["clusterInfo"],
 		queryFn: ({ signal }) => fetchClusterInfo(signal),
 	});
 }

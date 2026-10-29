@@ -160,6 +160,13 @@ export function LoginBackendSelector({
 			if (probeEpoch.current === epoch) probeEpoch.current += 1;
 		};
 	}, [candidates, runProbe, staticConsole]);
+	useEffect(() => {
+		if (backend.lastSwitchTimedOut) {
+			setSelectionError(
+				"The previous write result is unknown. Verify the service node before retrying.",
+			);
+		}
+	}, [backend.lastSwitchTimedOut]);
 
 	const currentTargetReady =
 		staticConsole || probeStatus[backend.primaryOrigin] === "ready";
