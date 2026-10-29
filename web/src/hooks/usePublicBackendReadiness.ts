@@ -1,6 +1,7 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
+	getPrimaryBackendSnapshot,
 	hydratePrimaryBackendProfile,
 	probeBackendOrigin,
 } from "../backend/primaryBackend";
@@ -17,16 +18,38 @@ export function useAuthenticatedBackendProbe(args: {
 	clusterId: string | null;
 }) {
 	const { clusterId, origin, staticConsole } = args;
-	return useCallback(
-		async (signal?: AbortSignal) => {
-			if (staticConsole) return;
+	const [probeState, setProbeState] = useState({
+		clusterId,
+		origin,
+		ready: staticConsole,
+	});
+	const probe = useCallback(
+		async (signal?: AbortSignal): Promise<boolean> => {
+			if (staticConsole) {
+				setProbeState({ clusterId, origin, ready: true });
+				return true;
+			}
+			setProbeState({ clusterId, origin, ready: false });
 			const result = await probeBackendOrigin({ origin, signal });
+			if (signal?.aborted) return false;
+			const current = getPrimaryBackendSnapshot();
+			if (current.primaryOrigin !== origin || current.clusterId !== clusterId) {
+				return false;
+			}
 			if (result.clusterId !== clusterId) {
 				hydratePrimaryBackendProfile(result.clusterId);
+				return false;
 			}
+			setProbeState({ clusterId, origin, ready: true });
+			return true;
 		},
 		[clusterId, origin, staticConsole],
 	);
+	const ready =
+		probeState.origin === origin &&
+		probeState.clusterId === clusterId &&
+		probeState.ready;
+	return { probe, ready };
 }
 
 export function useHydratePrimaryBackendProfile(args: {
@@ -37,9 +60,7 @@ export function useHydratePrimaryBackendProfile(args: {
 }) {
 	const { clusterId, nodes, nodesReady, primaryClusterId } = args;
 	useEffect(() => {
-		if (!clusterId) return;
-		const inventory =
-			clusterId === primaryClusterId && nodesReady ? nodes : undefined;
-		hydratePrimaryBackendProfile(clusterId, inventory);
+		if (!clusterId || clusterId !== primaryClusterId) return;
+		hydratePrimaryBackendProfile(clusterId, nodesReady ? nodes : undefined);
 	}, [clusterId, nodes, nodesReady, primaryClusterId]);
 }

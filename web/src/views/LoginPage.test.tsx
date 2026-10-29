@@ -171,10 +171,12 @@ describe("<LoginPage />", () => {
 		);
 
 		await waitFor(() => {
-			expect(mocks.probeBackendCandidate).toHaveBeenCalledWith({
-				origin: secondary,
-				clusterId: "cluster-84",
-			});
+			expect(mocks.probeBackendCandidate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					origin: secondary,
+					clusterId: "cluster-84",
+				}),
+			);
 		});
 		const user = userEvent.setup();
 		await user.click(
@@ -234,6 +236,9 @@ describe("<LoginPage />", () => {
 
 		await waitFor(() => {
 			expect(mocks.probeBackendCandidate).toHaveBeenCalledTimes(2);
+			expect(
+				screen.getByRole("menuitem", { name: /Secondary node/ }),
+			).toHaveTextContent("Ready");
 		});
 		expect(mocks.backend.candidates).toHaveLength(1);
 	});

@@ -90,9 +90,14 @@ export function LoginBackendSelector({
 		typeof window === "undefined" ? "" : window.location.origin;
 
 	const runProbe = useCallback(
-		async (candidate: BackendCandidate, epoch = probeEpoch.current) => {
+		async (
+			candidate: BackendCandidate,
+			epoch = probeEpoch.current,
+			signal?: AbortSignal,
+		) => {
 			const origin = candidate.origin;
 			const isCurrentEpoch = () => epoch === probeEpoch.current;
+			if (signal?.aborted || !isCurrentEpoch()) return;
 			if (!backend.clusterId && origin !== pageOrigin) {
 				if (!isCurrentEpoch()) return;
 				setProbeStatus((current) => ({ ...current, [origin]: "error" }));
@@ -110,8 +115,8 @@ export function LoginBackendSelector({
 			});
 			try {
 				if (origin === pageOrigin) {
-					const result = await probeBackendOrigin({ origin });
-					if (!isCurrentEpoch()) return;
+					const result = await probeBackendOrigin({ origin, signal });
+					if (signal?.aborted || !isCurrentEpoch()) return;
 					if (result.clusterId !== backend.clusterId) {
 						probeEpoch.current += 1;
 						hydratePrimaryBackendProfile(result.clusterId);
@@ -121,14 +126,15 @@ export function LoginBackendSelector({
 					await probeBackendCandidate({
 						origin,
 						clusterId: backend.clusterId,
+						signal,
 					});
 				} else {
-					await probeBackendOrigin({ origin });
+					await probeBackendOrigin({ origin, signal });
 				}
-				if (!isCurrentEpoch()) return;
+				if (signal?.aborted || !isCurrentEpoch()) return;
 				setProbeStatus((current) => ({ ...current, [origin]: "ready" }));
 			} catch (error) {
-				if (!isCurrentEpoch()) return;
+				if (signal?.aborted || !isCurrentEpoch()) return;
 				setProbeStatus((current) => ({ ...current, [origin]: "error" }));
 				setProbeErrors((current) => ({
 					...current,
@@ -143,10 +149,16 @@ export function LoginBackendSelector({
 	useEffect(() => {
 		if (staticConsole) return;
 		const epoch = ++probeEpoch.current;
+		const controller = new AbortController();
 		setSelectionError(null);
 		setProbeStatus({});
 		setProbeErrors({});
-		for (const candidate of candidates) void runProbe(candidate, epoch);
+		for (const candidate of candidates)
+			void runProbe(candidate, epoch, controller.signal);
+		return () => {
+			controller.abort();
+			if (probeEpoch.current === epoch) probeEpoch.current += 1;
+		};
 	}, [candidates, runProbe, staticConsole]);
 
 	const currentTargetReady =

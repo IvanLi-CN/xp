@@ -43,7 +43,8 @@
   profile remains non-durable until authenticated inventory hydration.
 - The authenticated AppShell waits for a current-mount public cluster identity before sending
   token-bearing compatibility traffic; its inventory query is cluster-keyed and only matching
-  inventory can hydrate or persist the active profile.
+  inventory can hydrate or persist the active profile. All token-bearing inventory requests also
+  require that same origin-and-cluster public-readiness gate.
 - Login-page probe completions are epoch-bound so a probe from a discarded cluster cannot mark a
   candidate ready after a stale-profile rebind.
 - Successful authenticated node-inventory hydration is the persistence gate for a new primary;

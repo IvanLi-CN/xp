@@ -153,7 +153,7 @@ export function AppShell({
 	const [adminToken] = useState(() => readAdminToken());
 	const { requestNavigation } = useObjectNavigationGuard();
 	useObjectNavigationBrowserBlocker();
-	const publicBackendProbe = useAuthenticatedBackendProbe({
+	const publicBackend = useAuthenticatedBackendProbe({
 		clusterId: primaryBackend.clusterId,
 		origin: primaryBackend.primaryOrigin,
 		staticConsole,
@@ -161,8 +161,8 @@ export function AppShell({
 	const apiCompatibility = useApiCompatibility(
 		adminToken,
 		runtime.isOnline,
-		publicBackendProbe,
-		primaryBackend.clusterId,
+		publicBackend.probe,
+		`${primaryBackend.primaryOrigin}:${primaryBackend.generation}`,
 	);
 	const compatibility = apiCompatibility.data ?? null;
 	const alertsCapabilityAvailable =
@@ -230,6 +230,7 @@ export function AppShell({
 		enabled:
 			!staticConsole &&
 			adminToken.length > 0 &&
+			publicBackend.ready &&
 			Boolean(clusterInfo.data?.cluster_id) &&
 			clusterInfo.data?.cluster_id === primaryBackend.clusterId,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
@@ -256,7 +257,6 @@ export function AppShell({
 		clusterId: clusterInfo.data?.cluster_id,
 		policy: runtimePolicy.data,
 	});
-
 	useRuntimePolicyExpiry({
 		enabled: staticConsole && Boolean(runtimePolicy.data),
 		clusterId: clusterInfo.data?.cluster_id,
