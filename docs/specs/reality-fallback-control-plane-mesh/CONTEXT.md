@@ -2,6 +2,17 @@
 
 This glossary defines the routing and failure terms for the Reality fallback control plane.
 
+**Cluster Mesh Setting**:
+The durable cluster-wide routing intent that permits or disables Direct Mesh attempts.
+It does not describe the path currently used by any particular peer.
+_Avoid_: peer route, Direct-Path Validation, current connection
+
+**Observed Peer Path**:
+The path most recently observed from one member toward a peer.
+It is a local, time-sensitive observation rather than the Cluster Mesh Setting or proof of
+every cluster direction.
+_Avoid_: cluster-wide routing coverage, preflight result
+
 **Direct Mesh**:
 A signed HTTP/2 control-plane request from one XP member to another member's eligible
 managed-default Reality endpoint. It is neither a user VLESS session nor Native Reverse.

@@ -288,9 +288,22 @@ describe("useMihomoProfileDraft", () => {
 			}),
 		);
 		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
-		act(() =>
-			first.result.current.setField("mixin_yaml", "draft after reload\n"),
-		);
+		act(() => {
+			first.result.current.setField("mixin_yaml", "draft after reload\n");
+			first.result.current.setField(
+				"extra_proxies_yaml",
+				"- name: same-turn-edit\n",
+			);
+		});
+		expect(
+			window.sessionStorage.getItem(
+				"xp-mihomo-draft:v1:cluster-recovery:user-recovery:mihomo-profile",
+			),
+		).toContain("draft after reload");
+		expect(first.result.current.draft).toMatchObject({
+			mixin_yaml: "draft after reload\n",
+			extra_proxies_yaml: "- name: same-turn-edit\n",
+		});
 		await waitFor(() => expect(first.result.current.dirty).toBe(true));
 		first.unmount();
 

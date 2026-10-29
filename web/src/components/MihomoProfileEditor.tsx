@@ -399,7 +399,10 @@ export function MihomoProfileEditor({
 	return (
 		<>
 			{conflictNotice}
-			<div className="flex items-center justify-between gap-3">
+			<div
+				className="flex items-center justify-between gap-3"
+				data-mihomo-profile-loaded={isLoaded ? "true" : "false"}
+			>
 				<div className="min-w-0">
 					<div className="font-medium text-sm">
 						Mihomo mixin config (per user)

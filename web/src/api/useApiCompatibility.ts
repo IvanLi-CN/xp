@@ -173,7 +173,39 @@ export function getApiCapabilityState(
 	};
 }
 
+export function getApiRouteState(
+	compatibility: ApiCompatibilityResult | null | undefined,
+	capability: ApiCapability,
+	route: string,
+) {
+	const capabilityState = getApiCapabilityState(compatibility, capability);
+	const routeUnavailable =
+		compatibility?.kind === "compatible" &&
+		!(
+			compatibility.usesCurrentApiRoutes
+				? compatibility.profile.apiRoutes
+				: (compatibility.profile.serverApiRoutes ??
+					compatibility.profile.apiRoutes)
+		).includes(route);
+	return {
+		...capabilityState,
+		available: capabilityState.available && !routeUnavailable,
+		unavailable: capabilityState.unavailable || routeUnavailable,
+		reason: routeUnavailable
+			? `API route is unavailable for this server: ${route}`
+			: capabilityState.reason,
+	};
+}
+
 export function useApiCapability(capability: ApiCapability) {
 	const compatibility = useContext(ApiCompatibilityContext);
 	return getApiCapabilityState(compatibility, capability);
+}
+
+export function useApiRouteCapability(
+	capability: ApiCapability,
+	route: string,
+) {
+	const compatibility = useContext(ApiCompatibilityContext);
+	return getApiRouteState(compatibility, capability, route);
 }
