@@ -1,20 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-	Link,
-	Outlet,
-	useNavigate,
-	useRouterState,
-} from "@tanstack/react-router";
-import type { ReactNode } from "react";
-import {
-	useCallback,
-	useEffect,
-	useMemo,
-	useReducer,
-	useRef,
-	useState,
-} from "react";
-
 import { fetchAdminNodes } from "@/api/adminNodes";
 import { startAdminStatusEvents } from "@/api/adminStatusEvents";
 import { fetchRuntimePolicy } from "@/api/runtimePolicy";
@@ -55,6 +38,22 @@ import {
 	SheetHeader,
 	SheetTitle,
 } from "@/components/ui/sheet";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	Link,
+	Outlet,
+	useNavigate,
+	useRouterState,
+} from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useReducer,
+	useRef,
+	useState,
+} from "react";
 import { fetchAdminAlerts } from "../api/adminAlerts";
 import {
 	fetchAdminUpgradeStatus,
@@ -129,7 +128,6 @@ function safeHostFromUrl(value: string): string | null {
 		return null;
 	}
 }
-
 function formatApiError(err: unknown): string {
 	if (isBackendApiError(err)) {
 		return err.code
@@ -239,8 +237,8 @@ export function AppShell({
 		queryKey: [
 			"adminNodes",
 			adminToken,
+			primaryBackend.clusterId,
 			primaryBackend.primaryOrigin,
-			primaryBackend.generation,
 		],
 		enabled:
 			!staticConsole &&
@@ -718,7 +716,7 @@ export function AppShell({
 			}
 			groups={effectiveNavGroups}
 			backendOrigin={primaryBackend.primaryOrigin}
-			backendGeneration={primaryBackend.generation}
+			backendClusterId={primaryBackend.clusterId}
 			localNodeId={clusterInfo.data?.node_id ?? null}
 			pathname={pathname}
 			onNavigate={navigateResource}
@@ -907,6 +905,7 @@ export function AppShell({
 													queryClient.removeQueries({
 														queryKey: ["runtimePolicy"],
 													});
+													queryClient.removeQueries();
 													resetPrimaryBackendSelection();
 													clearAdminToken();
 													setAdminToken("");
@@ -921,6 +920,7 @@ export function AppShell({
 								</DropdownMenu>
 								<PrimaryBackendSwitcher
 									adminToken={adminToken}
+									disabled={!publicBackend.ready}
 									clusterId={
 										clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
 									}

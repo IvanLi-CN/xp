@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
 	getPrimaryBackendSnapshot,
@@ -25,6 +25,12 @@ export function useAuthenticatedBackendProbe(args: {
 		ready: staticConsole || !isOnline,
 		clusterMismatch: false,
 	});
+	const previousOnline = useRef(isOnline);
+	const probeStateRef = useRef(probeState);
+	const returningOnlineRef = useRef(false);
+	const returningOnline = isOnline && !previousOnline.current;
+	probeStateRef.current = probeState;
+	returningOnlineRef.current = returningOnline;
 	const probe = useCallback(
 		async (signal?: AbortSignal): Promise<boolean> => {
 			if (staticConsole || !isOnline) {
@@ -36,12 +42,18 @@ export function useAuthenticatedBackendProbe(args: {
 				});
 				return true;
 			}
-			setProbeState({
+			const preserveReady =
+				!returningOnlineRef.current &&
+				probeStateRef.current.origin === origin &&
+				probeStateRef.current.clusterId === clusterId &&
+				probeStateRef.current.ready;
+			setProbeState((current) => ({
+				...current,
 				clusterId,
 				origin,
-				ready: false,
+				ready: preserveReady,
 				clusterMismatch: false,
-			});
+			}));
 			const result = await probeBackendOrigin({ origin, signal });
 			if (signal?.aborted) return false;
 			const current = getPrimaryBackendSnapshot();
@@ -72,9 +84,13 @@ export function useAuthenticatedBackendProbe(args: {
 	const ready =
 		staticConsole ||
 		!isOnline ||
-		(probeState.origin === origin &&
+		(!returningOnline &&
+			probeState.origin === origin &&
 			probeState.clusterId === clusterId &&
 			probeState.ready);
+	useEffect(() => {
+		previousOnline.current = isOnline;
+	}, [isOnline]);
 	useEffect(() => {
 		if (staticConsole || !isOnline) return;
 		const controller = new AbortController();

@@ -698,7 +698,10 @@ export async function selectPreAuthBackend(
 }
 
 async function waitForMutations(): Promise<boolean> {
-	if (state.pendingMutations === 0) return false;
+	if (state.pendingMutations === 0) {
+		await Promise.resolve();
+		if (state.pendingMutations === 0) return false;
+	}
 	return new Promise((resolve) => {
 		let settled = false;
 		const settle = (timedOut: boolean) => {

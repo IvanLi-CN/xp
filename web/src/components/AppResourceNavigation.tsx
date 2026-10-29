@@ -26,7 +26,7 @@ type AppResourceNavigationProps = {
 	compatibilityPending: boolean;
 	groups: AppNavigationGroup[];
 	backendOrigin?: string;
-	backendGeneration?: number;
+	backendClusterId?: string | null;
 	localNodeId: string | null;
 	pathname: string;
 	onNavigate: (href: string) => void;
@@ -57,7 +57,7 @@ export function AppResourceNavigation({
 	compatibilityPending,
 	groups,
 	backendOrigin,
-	backendGeneration,
+	backendClusterId,
 	localNodeId,
 	pathname,
 	onNavigate,
@@ -79,9 +79,13 @@ export function AppResourceNavigation({
 	const nodesRequested = requestedResources.nodes || nodesActive;
 	const endpointsRequested = requestedResources.endpoints || endpointsActive;
 	const usersRequested = requestedResources.users || usersActive;
+	const backendIdentity =
+		backendOrigin !== undefined && backendClusterId
+			? [backendClusterId, backendOrigin]
+			: [];
 	const adminNodesQueryKey =
-		backendOrigin !== undefined && backendGeneration !== undefined
-			? ["adminNodes", adminToken, backendOrigin, backendGeneration]
+		backendIdentity.length > 0
+			? ["adminNodes", adminToken, ...backendIdentity]
 			: ["adminNodes", adminToken];
 	const adminNodes = useQuery({
 		queryKey: adminNodesQueryKey,
@@ -93,13 +97,7 @@ export function AppResourceNavigation({
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 	const adminEndpoints = useQuery({
-		queryKey: [
-			"adminEndpoints",
-			adminToken,
-			...(backendOrigin !== undefined && backendGeneration !== undefined
-				? [backendOrigin, backendGeneration]
-				: []),
-		],
+		queryKey: ["adminEndpoints", adminToken, ...backendIdentity],
 		enabled:
 			!compatibilityPending &&
 			adminToken.length > 0 &&
@@ -108,13 +106,7 @@ export function AppResourceNavigation({
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 	const adminUsers = useQuery({
-		queryKey: [
-			"adminUsers",
-			adminToken,
-			...(backendOrigin !== undefined && backendGeneration !== undefined
-				? [backendOrigin, backendGeneration]
-				: []),
-		],
+		queryKey: ["adminUsers", adminToken, ...backendIdentity],
 		enabled:
 			!compatibilityPending &&
 			adminToken.length > 0 &&
