@@ -286,16 +286,34 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
             .lock()
             .await
             .local_history_backfill_inflight_checkpoint();
-        let (segments, page_cursor, completed) = if let Some((page_cursor, completed)) = inflight {
-            (
+        if let Some((page_cursor, completed)) = inflight {
+            // Keep the legacy durable page replay path for upgrades that already have a page
+            // queued by the predecessor. New pages never enter the source journal.
+            let segments = state
+                .repository_replica
+                .lock()
+                .await
+                .local_history_backfill_inflight_segments()?;
+            for segment in &segments {
+                receive_local_source_segment(state, segment, &[], &ready_repository_ids, _now)
+                    .await?;
+            }
+            if !segments.is_empty() {
                 state
                     .repository_replica
                     .lock()
                     .await
-                    .local_history_backfill_inflight_segments()?,
-                page_cursor,
-                completed,
-            )
+                    .acknowledge_local_source_segments_and_checkpoint_backfill(
+                        &segments,
+                        page_cursor,
+                        completed,
+                    )?;
+            }
+            progress = progress.combine(if completed {
+                InitialBackfillProgress::Complete
+            } else {
+                InitialBackfillProgress::InProgress
+            });
         } else {
             let local_cursor = state
                 .repository_replica
@@ -313,49 +331,34 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
             let completed = page_cursor.is_none();
             let batches = historical_record_batches(collected.into_records())?;
             if batches.iter().any(|(_, records)| !records.is_empty()) {
-                let segments = state
+                state
                     .repository_replica
                     .lock()
                     .await
-                    .queue_local_history_backfill_batches(
+                    .apply_local_history_backfill_page(
                         &state.cluster.cluster_id,
                         identity.clone(),
                         &signing_key,
                         page_cursor.clone(),
                         completed,
                         queued_history_backfill_batches(batches),
+                        _now,
+                        &ready_repository_ids,
+                        &state.cluster.node_id,
                     )?;
-                (segments, page_cursor, completed)
             } else {
                 state
                     .repository_replica
                     .lock()
                     .await
                     .checkpoint_local_history_backfill(page_cursor.clone(), completed)?;
-                (Vec::new(), page_cursor, completed)
             }
-        };
-        for segment in &segments {
-            receive_local_source_segment(state, segment, &[], &ready_repository_ids, _now).await?;
+            progress = progress.combine(if completed {
+                InitialBackfillProgress::Complete
+            } else {
+                InitialBackfillProgress::InProgress
+            });
         }
-        if !segments.is_empty() {
-            state
-                .repository_replica
-                .lock()
-                .await
-                .acknowledge_local_source_segments_and_checkpoint_backfill(
-                    &segments,
-                    page_cursor,
-                    completed,
-                )?;
-        }
-        progress = progress.combine(if completed {
-            InitialBackfillProgress::Complete
-        } else {
-            InitialBackfillProgress::InProgress
-        });
-        // Peer availability must not replay local pages on every retry. The source outbox has
-        // already durably acknowledged every local segment at this point.
     }
     for peer in initial_history_source_peers(state).await {
         progress =
