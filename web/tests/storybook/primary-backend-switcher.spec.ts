@@ -234,6 +234,7 @@ test("keeps AppShell desktop header controls in one non-overlapping row", async 
 	await page.goto(storyUrl("components-appshell--default"), {
 		waitUntil: "networkidle",
 	});
+	await expect(page.getByRole("button", { name: "Open status" })).toBeVisible();
 
 	const layout = await appShellLayout(page);
 	expect(layout.header?.height).toBeLessThan(90);
