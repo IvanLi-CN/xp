@@ -6,7 +6,6 @@ import { PrimaryBackendProvider } from "@/backend/PrimaryBackendProvider";
 import {
 	type PrimaryBackendSnapshot,
 	getPrimaryBackendSnapshot,
-	hydratePrimaryBackendProfile,
 } from "@/backend/primaryBackend";
 import { fixtureCatalog } from "@/fixture-policy/catalog";
 
@@ -126,25 +125,12 @@ function withSnapshot(snapshot: PrimaryBackendSnapshot): Story["render"] {
 }
 
 export const Default: Story = {
-	render: (args) => {
-		hydratePrimaryBackendProfile("cluster-demo", [
-			{
-				node_id: fixtureCatalog.identifier.nodePrimary(),
-				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
-				api_base_url: fixtureCatalog.url.primaryApi(),
-			},
-			{
-				node_id: fixtureCatalog.identifier.nodeSecondary(),
-				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
-				api_base_url: fixtureCatalog.url.secondaryApi(),
-			},
-		]);
-		return (
-			<PrimaryBackendProvider>
-				<PrimaryBackendSwitcher {...args} />
-			</PrimaryBackendProvider>
-		);
-	},
+	render: withSnapshot({
+		...getPrimaryBackendSnapshot(),
+		clusterId: "cluster-demo",
+		primaryOrigin: window.location.origin,
+		candidates,
+	}),
 };
 
 export const SignedOut: Story = {
