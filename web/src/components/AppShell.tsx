@@ -75,6 +75,7 @@ import {
 	useHydratePrimaryBackendProfile,
 } from "../hooks/usePublicBackendReadiness";
 import { useAppRuntime } from "../offline/appRuntime";
+import { clearBackendQueryCache } from "../offline/queryPersistence";
 import { clearAppliedRuntimePolicyId } from "../offline/runtimePolicySession";
 import { clearServiceWorkerRuntimePolicy } from "../offline/serviceWorkerPolicy";
 import { requestServiceWorkerUpdateCheck } from "../offline/serviceWorkerUpdates";
@@ -164,10 +165,11 @@ export function AppShell({
 	useEffect(() => {
 		if (!publicBackend.clusterMismatch) return;
 		clearAdminToken();
+		clearBackendQueryCache(queryClient);
 		setAdminToken("");
 		resetPrimaryBackendSelection();
 		void navigate({ to: "/login" });
-	}, [navigate, publicBackend.clusterMismatch]);
+	}, [navigate, publicBackend.clusterMismatch, queryClient]);
 	const apiCompatibility = useApiCompatibility(
 		adminToken,
 		runtime.isOnline,
@@ -902,10 +904,7 @@ export function AppShell({
 												requestNavigation(() => {
 													clearServiceWorkerRuntimePolicy();
 													clearAppliedRuntimePolicyId();
-													queryClient.removeQueries({
-														queryKey: ["runtimePolicy"],
-													});
-													queryClient.removeQueries();
+													clearBackendQueryCache(queryClient);
 													resetPrimaryBackendSelection();
 													clearAdminToken();
 													setAdminToken("");
@@ -920,7 +919,6 @@ export function AppShell({
 								</DropdownMenu>
 								<PrimaryBackendSwitcher
 									adminToken={adminToken}
-									disabled={!publicBackend.ready}
 									clusterId={
 										clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
 									}
@@ -936,7 +934,8 @@ export function AppShell({
 								{!staticConsole &&
 								runtime.isOnline &&
 								adminToken.length > 0 &&
-								!publicBackend.ready ? (
+								!publicBackend.ready &&
+								!publicBackend.revalidating ? (
 									<PageState
 										variant="loading"
 										title="Verifying backend identity"

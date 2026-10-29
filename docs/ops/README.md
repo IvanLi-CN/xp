@@ -75,12 +75,15 @@ capability disables only the affected UI feature; an endpoint or schema failure 
 is an API regression and must be investigated as such. PWA build IDs and API release profiles are
 independent and must not be manually aligned.
 
-Before authentication, `/login` provides a service-node selector containing the current page origin
-and only the candidates recorded in the active cluster profile. Each candidate must pass public
-health, cluster identity, and compatibility probes before it can be selected; these probes never
-send the admin token. The selection is limited to the current tab and does not update the durable
-profile. A `login_token` link probes the current page origin first, and a rejected token keeps the
-login page, selected node, and unverified token available for correction without saving the token.
+Before authentication, the embedded PWA `/login` page provides a service-node selector containing
+the current page origin and only the candidates recorded in the active cluster profile. Each
+candidate must pass public health, cluster identity, and compatibility probes before it can be
+selected; these probes never send the admin token. The selection is limited to the current tab and
+does not update the durable profile. The independent static console does not expose this selector:
+its login link keeps the bootstrap/runtime-policy path. A `login_token` link in the embedded PWA
+probes the current page origin first, while the static console retains its bootstrap behavior. A
+rejected token keeps the login page, selected node, and unverified token available for correction
+without saving the token.
 After authentication succeeds, the authenticated node inventory is the persistence gate for a new
 Primary Backend target. If the selector is unavailable, operators should use the current page
 origin or an already recorded active-profile candidate rather than entering an arbitrary URL.

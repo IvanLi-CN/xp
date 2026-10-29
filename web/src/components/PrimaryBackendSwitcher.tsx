@@ -30,7 +30,6 @@ function hostLabel(origin: string) {
 export function PrimaryBackendSwitcher(props: {
 	adminToken: string;
 	clusterId: string | null;
-	disabled?: boolean;
 	onOpened?: () => void;
 	onSwitched?: () => void;
 }) {
@@ -49,7 +48,6 @@ export function PrimaryBackendSwitcher(props: {
 	);
 
 	const handleSelect = async (candidate: BackendCandidate) => {
-		if (props.disabled) return;
 		if (!props.clusterId || !props.adminToken) {
 			setError("Sign in to verify a backend.");
 			return;
@@ -99,7 +97,7 @@ export function PrimaryBackendSwitcher(props: {
 					size="sm"
 					aria-label="Open primary backend"
 					title={label}
-					disabled={props.disabled || backend.state === "switching"}
+					disabled={backend.state === "switching"}
 					loading={backend.state === "switching"}
 				>
 					<Icon name="tabler:route" ariaLabel="Primary backend" />

@@ -63,9 +63,10 @@
   backend identity boundary.
 - A mutation-barrier switch rechecks the cluster identity and backend generation before committing;
   a target verified for an obsolete identity is rejected instead of becoming primary.
-- The authenticated backend switcher is disabled while public identity readiness is unresolved, and
-  login-link verification locks the selector, token form, and clear action against concurrent manual
-  submissions.
+- The authenticated backend switcher remains available while public identity readiness is unresolved
+  so a healthy recorded backend can recover the session; each candidate still passes a public probe
+  before token-bearing inventory verification, and login-link verification locks the selector, token
+  form, and clear action against concurrent manual submissions.
 - Login-page probe completions are epoch-bound so a probe from a discarded cluster cannot mark a
   candidate ready after a stale-profile rebind.
 - Login verification responses are bound to the starting origin, cluster identity, and backend

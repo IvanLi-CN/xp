@@ -50,6 +50,23 @@ const mutationWaiters = new Set<(timedOut: boolean) => void>();
 let nativeFetch: NativeFetch | null = null;
 let installed = false;
 
+type AuthenticatedBackendReadiness = {
+	origin: string;
+	clusterId: string | null;
+	ready: boolean;
+};
+
+let authenticatedBackendReadiness: AuthenticatedBackendReadiness | null = null;
+
+function invalidateAuthenticatedBackendReadiness() {
+	if (authenticatedBackendReadiness) {
+		authenticatedBackendReadiness = {
+			...authenticatedBackendReadiness,
+			ready: false,
+		};
+	}
+}
+
 function getPageOrigin(): string {
 	return typeof window === "undefined" ? "" : window.location.origin;
 }
@@ -102,6 +119,16 @@ function readInitialState(): PrimaryBackendSnapshot {
 
 let state: PrimaryBackendSnapshot = readInitialState();
 let staticAllowedOrigins = new Set<string>();
+
+export function setAuthenticatedBackendReadiness(
+	readiness: AuthenticatedBackendReadiness | null,
+) {
+	authenticatedBackendReadiness = readiness;
+}
+
+export function clearAuthenticatedBackendReadiness() {
+	authenticatedBackendReadiness = null;
+}
 
 function writeStoredProfiles(value: StoredProfiles) {
 	if (isDemoRuntime()) return;
@@ -233,6 +260,8 @@ export async function withPrimaryBackendMutation<T>(
 export function installPrimaryBackendTransport() {
 	if (installed || typeof window === "undefined") return;
 	installed = true;
+	window.addEventListener("online", invalidateAuthenticatedBackendReadiness);
+	window.addEventListener("offline", invalidateAuthenticatedBackendReadiness);
 	nativeFetch = window.fetch.bind(window);
 	window.fetch = async (input, init) => {
 		const normalizedInput =
@@ -241,6 +270,20 @@ export function installPrimaryBackendTransport() {
 				: input;
 		const request = new Request(normalizedInput, init);
 		const isApiRequest = isApiUrl(new URL(request.url, getPageOrigin()));
+		if (
+			isApiRequest &&
+			request.headers.has("Authorization") &&
+			authenticatedBackendReadiness &&
+			(!authenticatedBackendReadiness.ready ||
+				authenticatedBackendReadiness.origin !== state.primaryOrigin ||
+				authenticatedBackendReadiness.clusterId !== state.clusterId)
+		) {
+			const error = new Error(
+				"Backend identity verification is still in progress.",
+			);
+			Object.assign(error, { code: "backend_identity_pending" });
+			throw error;
+		}
 		const isMutation =
 			isApiRequest && MUTATING_METHODS.has(request.method.toUpperCase());
 		const release = isMutation ? beginMutation() : null;
@@ -263,9 +306,15 @@ export function resetPrimaryBackendTransportForTests() {
 		window.fetch = nativeFetch;
 	}
 	installed = false;
+	window.removeEventListener("online", invalidateAuthenticatedBackendReadiness);
+	window.removeEventListener(
+		"offline",
+		invalidateAuthenticatedBackendReadiness,
+	);
 	nativeFetch = null;
 	listeners.clear();
 	mutationWaiters.clear();
+	clearAuthenticatedBackendReadiness();
 	state = readInitialState();
 	staticAllowedOrigins = isStaticWebConsole()
 		? new Set<string>([STATIC_BOOTSTRAP_ORIGIN])
@@ -332,12 +381,13 @@ export function hydratePrimaryBackendProfile(
 	}
 	const pageOrigin = getPageOrigin();
 	if (pageOrigin) {
+		const existingPageCandidate = candidatesByOrigin.get(pageOrigin);
 		candidatesByOrigin.set(pageOrigin, {
 			origin: pageOrigin,
-			nodeId: "current-page",
-			nodeName: "Current page",
-			verifiedAt: Date.now(),
-			lastError: null,
+			nodeId: existingPageCandidate?.nodeId ?? "current-page",
+			nodeName: existingPageCandidate?.nodeName ?? "Current page",
+			verifiedAt: existingPageCandidate?.verifiedAt ?? Date.now(),
+			lastError: existingPageCandidate?.lastError ?? null,
 		});
 	}
 	const persistedPrimary = canonicalBackendOrigin(

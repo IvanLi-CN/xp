@@ -10,6 +10,7 @@ import {
 	probeBackendCandidate,
 	resetPrimaryBackendTransportForTests,
 	selectPreAuthBackend,
+	setAuthenticatedBackendReadiness,
 	switchPrimaryBackend,
 	verifyBackendCandidate,
 	withPrimaryBackendMutation,
@@ -50,6 +51,53 @@ describe("primary backend transport", () => {
 		resolveRequest?.(new Response("{}", { status: 200 }));
 		await request;
 		expect(getPrimaryBackendSnapshot().pendingMutations).toBe(0);
+	});
+
+	it("blocks credentialed requests after reconnect until identity is rechecked", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));
+		window.fetch = fetchMock as typeof window.fetch;
+		installPrimaryBackendTransport();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84());
+		const snapshot = getPrimaryBackendSnapshot();
+		setAuthenticatedBackendReadiness({
+			origin: snapshot.primaryOrigin,
+			clusterId: snapshot.clusterId,
+			ready: true,
+		});
+		window.dispatchEvent(new Event("offline"));
+		window.dispatchEvent(new Event("online"));
+		await expect(
+			window.fetch("/api/admin/nodes", {
+				headers: { Authorization: "Bearer test-token" },
+			}),
+		).rejects.toThrow("identity verification");
+		expect(fetchMock).not.toHaveBeenCalled();
+		setAuthenticatedBackendReadiness({
+			origin: snapshot.primaryOrigin,
+			clusterId: snapshot.clusterId,
+			ready: true,
+		});
+		await window.fetch("/api/admin/nodes", {
+			headers: { Authorization: "Bearer test-token" },
+		});
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("preserves the registered name for the current page", () => {
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: window.location.origin,
+			},
+		]);
+		expect(getPrimaryBackendSnapshot().candidates).toContainEqual(
+			expect.objectContaining({
+				origin: window.location.origin,
+				nodeId: fixtureCatalog.identifier.nodePrimary(),
+				nodeName: fixtureCatalog.identifier.nodeNamePrimary(),
+			}),
+		);
 	});
 
 	it("does not mark the backend unavailable for static resource failures", async () => {

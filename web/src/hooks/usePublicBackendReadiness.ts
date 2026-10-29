@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 
 import {
+	clearAuthenticatedBackendReadiness,
 	getPrimaryBackendSnapshot,
 	hydratePrimaryBackendProfile,
 	probeBackendOrigin,
+	setAuthenticatedBackendReadiness,
 } from "../backend/primaryBackend";
 
 type BackendNode = {
@@ -24,6 +32,7 @@ export function useAuthenticatedBackendProbe(args: {
 		origin,
 		ready: staticConsole || !isOnline,
 		clusterMismatch: false,
+		revalidating: false,
 	});
 	const previousOnline = useRef(isOnline);
 	const probeStateRef = useRef(probeState);
@@ -31,28 +40,51 @@ export function useAuthenticatedBackendProbe(args: {
 	const returningOnline = isOnline && !previousOnline.current;
 	probeStateRef.current = probeState;
 	returningOnlineRef.current = returningOnline;
+	const requestReady =
+		staticConsole ||
+		!isOnline ||
+		(!returningOnline &&
+			probeState.origin === origin &&
+			probeState.clusterId === clusterId &&
+			probeState.ready);
+	useLayoutEffect(() => {
+		setAuthenticatedBackendReadiness({
+			origin,
+			clusterId,
+			ready: staticConsole || (isOnline && requestReady),
+		});
+		return clearAuthenticatedBackendReadiness;
+	}, [origin, clusterId, staticConsole, isOnline, requestReady]);
 	const probe = useCallback(
 		async (signal?: AbortSignal): Promise<boolean> => {
 			if (staticConsole || !isOnline) {
+				setAuthenticatedBackendReadiness({
+					origin,
+					clusterId,
+					ready: staticConsole,
+				});
 				setProbeState({
 					clusterId,
 					origin,
 					ready: true,
 					clusterMismatch: false,
+					revalidating: false,
 				});
 				return true;
 			}
-			const preserveReady =
+			const revalidating =
 				!returningOnlineRef.current &&
 				probeStateRef.current.origin === origin &&
 				probeStateRef.current.clusterId === clusterId &&
 				probeStateRef.current.ready;
+			setAuthenticatedBackendReadiness({ origin, clusterId, ready: false });
 			setProbeState((current) => ({
 				...current,
 				clusterId,
 				origin,
-				ready: preserveReady,
+				ready: false,
 				clusterMismatch: false,
+				revalidating,
 			}));
 			const result = await probeBackendOrigin({ origin, signal });
 			if (signal?.aborted) return false;
@@ -60,34 +92,30 @@ export function useAuthenticatedBackendProbe(args: {
 			if (current.primaryOrigin !== origin || current.clusterId !== clusterId) {
 				return false;
 			}
-			if (result.clusterId !== clusterId) {
+			if (clusterId === null || result.clusterId !== clusterId) {
 				hydratePrimaryBackendProfile(result.clusterId);
-				const clusterMismatch = clusterId !== null;
 				setProbeState({
 					clusterId,
 					origin,
 					ready: false,
-					clusterMismatch,
+					clusterMismatch: true,
+					revalidating: false,
 				});
 				return false;
 			}
+			setAuthenticatedBackendReadiness({ origin, clusterId, ready: true });
 			setProbeState({
 				clusterId,
 				origin,
 				ready: true,
 				clusterMismatch: false,
+				revalidating: false,
 			});
 			return true;
 		},
 		[clusterId, isOnline, origin, staticConsole],
 	);
-	const ready =
-		staticConsole ||
-		!isOnline ||
-		(!returningOnline &&
-			probeState.origin === origin &&
-			probeState.clusterId === clusterId &&
-			probeState.ready);
+	const ready = requestReady;
 	useEffect(() => {
 		previousOnline.current = isOnline;
 	}, [isOnline]);
@@ -97,7 +125,12 @@ export function useAuthenticatedBackendProbe(args: {
 		void probe(controller.signal).catch(() => undefined);
 		return () => controller.abort();
 	}, [isOnline, probe, staticConsole]);
-	return { probe, ready, clusterMismatch: probeState.clusterMismatch };
+	return {
+		probe,
+		ready,
+		clusterMismatch: probeState.clusterMismatch,
+		revalidating: probeState.revalidating,
+	};
 }
 
 export function useHydratePrimaryBackendProfile(args: {
