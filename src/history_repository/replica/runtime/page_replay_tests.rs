@@ -362,12 +362,12 @@ fn local_history_backfill_rejects_a_predecessor_hash_conflict_before_apply() {
 }
 
 #[test]
-fn local_history_backfill_recovery_does_not_rebuild_away_persisted_wires() {
+fn stale_local_history_backfill_preserves_wire_without_claiming_recovery() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
     let identity = identity(&key);
     let mut runtime = load(temporary.path());
-    runtime
+    let queued = runtime
         .queue_local_history_backfill_segments(
             "cluster-a",
             identity.clone(),
@@ -377,8 +377,11 @@ fn local_history_backfill_recovery_does_not_rebuild_away_persisted_wires() {
         )
         .expect("queue persisted page");
     runtime.snapshot.last_verified_unix_seconds = Some(1);
-
     runtime
+        .persist_control_state()
+        .expect("persist stale state");
+
+    let error = runtime
         .apply_local_history_backfill_inflight_page(
             "cluster-a",
             &identity,
@@ -386,13 +389,29 @@ fn local_history_backfill_recovery_does_not_rebuild_away_persisted_wires() {
             &["local".to_owned()],
             "local",
         )
-        .expect("replay persisted page without rebuilding it away");
+        .expect_err("persisted wire alone cannot establish tombstone-safe freshness");
+    assert!(error.to_string().contains("tombstone-safe rebuild"));
+    assert_eq!(runtime.snapshot.last_verified_unix_seconds, Some(1));
+    assert!(
+        runtime
+            .local_history_backfill_inflight_checkpoint()
+            .is_some()
+    );
+    let restored = load(temporary.path());
+    assert_eq!(
+        restored
+            .local_history_backfill_inflight_segments()
+            .expect("pending wire")[0]
+            .wire,
+        queued[0].wire
+    );
+    assert_eq!(restored.snapshot.last_verified_unix_seconds, Some(1));
     assert_eq!(
         runtime
             .storage
             .repository_history_record_count()
             .expect("history count"),
-        1
+        0
     );
 }
 

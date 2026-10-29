@@ -166,7 +166,10 @@
   collector ACK commits. A durable local in-flight page is prioritized over Ready-peer catch-up,
   stale repository rebuilds happen before reading the next local cursor and fail closed while an
   unacknowledged local page exists. A collected page is discarded if its repository state changes
-  before apply. Source collection keeps mesh, IP and endpoint history working sets bounded.
+  before apply. Replay after tombstone freshness expires also fails closed; no automatic repair is
+  supported for that combined condition. Mesh history traverses every retained bucket through the
+  bounded page collector instead of reusing the rotating real-time sample window. Source collection
+  keeps mesh, IP and endpoint history working sets bounded.
   Coverage includes separate-chain,
   epoch reuse, restart hash-chain continuation, exact-wire retry, commit rollback, tombstone
   protection and multi-segment page replay in `page_replay_tests.rs` and source-delivery tests.

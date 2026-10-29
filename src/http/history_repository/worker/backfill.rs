@@ -9,6 +9,7 @@ use crate::state::history_repository::{
 };
 mod cursor;
 mod local_page;
+mod mesh;
 mod ready_peer;
 #[cfg(test)]
 mod tests;
@@ -787,31 +788,7 @@ async fn historical_source_backfill_records(
             }
         }
     }
-    let mesh = state
-        .mesh_telemetry
-        .history_source_snapshot(
-            super::source_records::MAX_PATH_HEALTH_SOURCE_PEERS,
-            super::source_records::MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER,
-            super::source::MAX_SOURCE_PAYLOAD_BYTES,
-        )
-        .await;
-    for peer in mesh.peers {
-        let peer_id = peer.peer_id.clone();
-        for bucket in peer.buckets {
-            let minute = bucket.minute.clone();
-            push_backfill_record(
-                &mut records,
-                "path_health.v1",
-                &state.cluster.node_id,
-                &minute,
-                format!(
-                    "node-history:node:{}:mesh:{peer_id}:{minute}",
-                    state.cluster.node_id
-                ),
-                serde_json::to_value(bucket)?,
-            )?;
-        }
-    }
+    mesh::collect_mesh_history(&state.mesh_telemetry, &state.cluster.node_id, &mut records).await?;
     let store = state.store.lock().await;
     for sample in store
         .inbound_ip_usage()

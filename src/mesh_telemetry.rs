@@ -26,6 +26,7 @@ const MAX_HISTORY_SOURCE_STRING_BYTES: usize = 48;
 const MAX_HISTORY_SOURCE_LATENCY_SAMPLES: usize = 64;
 const SAMPLE_PERSIST_INTERVAL: StdDuration = StdDuration::from_secs(5);
 
+mod history;
 mod persistence;
 mod reverse;
 mod transport;

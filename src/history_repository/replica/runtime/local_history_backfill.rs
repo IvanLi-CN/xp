@@ -28,6 +28,32 @@ impl RepositoryReplicaRuntime {
         Ok(())
     }
 
+    /// Replaying a pending page cannot establish freshness after deletion evidence expires.
+    /// Keep the signed chain and its checkpoint intact until a tombstone-safe rebuild can be
+    /// proved; applying at an old timestamp or accepting a new retained anchor is not recovery.
+    pub(super) fn ensure_local_history_backfill_is_fresh(
+        &self,
+        now_unix_seconds: u64,
+    ) -> Result<(), RepositoryRuntimeError> {
+        if self
+            .snapshot
+            .last_verified_unix_seconds
+            .is_some_and(|last_verified| {
+                ReplicaFreshness::new(last_verified, TOMBSTONE_HORIZON_SECONDS)
+                    .requires_rebuild(now_unix_seconds)
+            })
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                concat!(
+                    "stale local history backfill requires a tombstone-safe rebuild; ",
+                    "pending signed wire and chain checkpoints must be preserved"
+                )
+                .to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     fn stream_for_record(
         record: &SyncRecord,
         source_node_id: &str,
@@ -181,6 +207,7 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<(), RepositoryRuntimeError> {
+        self.ensure_local_history_backfill_is_fresh(now_unix_seconds)?;
         let created = self.queue_local_history_backfill_batches(
             cluster_id,
             identity,
@@ -264,6 +291,7 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<(), RepositoryRuntimeError> {
+        self.ensure_local_history_backfill_is_fresh(now_unix_seconds)?;
         let Some(inflight) = self.snapshot.local_history_backfill_inflight.clone() else {
             return Err(RepositoryRuntimeError::Storage(
                 "local history backfill has no in-flight page".to_owned(),

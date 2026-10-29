@@ -18,6 +18,8 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
+        // Skipping destructive rebuild must not let expired pending wire establish freshness.
+        self.ensure_local_history_backfill_is_fresh(now_unix_seconds)?;
         self.receive_wire_from_repository_inner_without_rebuild(
             RepositoryWireRequest {
                 cluster_id,

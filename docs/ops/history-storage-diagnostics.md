@@ -54,6 +54,14 @@ page pending; it must not advance the cursor or delete an original wire. New-for
 clear only at the durable receive/apply ACK boundary; predecessor source-journal rows require a real
 collector ACK for the exact segment.
 
+If the repository is older than the tombstone freshness horizon and a local page is still pending,
+XP blocks the rebuild and replay to preserve the signed page and avoid accepting expired deletion
+evidence. The error reports a stale rebuild blocked by an unacknowledged page, or a required
+tombstone-safe rebuild. There is currently
+no supported automatic or operator repair for this combined condition. Preserve the database, WAL,
+source journal and signed page; collect diagnostics for investigation rather than deleting the page,
+forcing freshness, or marking catch-up complete.
+
 For a read-only US4 field sample, record the candidate SHA, node ID and `XP_DATA_DIR`, then capture
 `GET /api/admin/history-repositories` with the already-authorized admin credential on every
 configured
