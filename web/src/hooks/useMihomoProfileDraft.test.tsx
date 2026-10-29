@@ -291,6 +291,11 @@ describe("useMihomoProfileDraft", () => {
 		act(() =>
 			first.result.current.setField("mixin_yaml", "draft after reload\n"),
 		);
+		expect(
+			window.sessionStorage.getItem(
+				"xp-mihomo-draft:v1:cluster-recovery:user-recovery:mihomo-profile",
+			),
+		).toContain("draft after reload");
 		await waitFor(() => expect(first.result.current.dirty).toBe(true));
 		first.unmount();
 

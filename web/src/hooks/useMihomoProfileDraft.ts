@@ -261,10 +261,31 @@ export function useMihomoProfileDraft({
 	const setField = useCallback(
 		(documentId: MihomoProfileDocumentId, value: string) => {
 			if (readOnly || isSaving || !isLoaded) return;
-			setDraftState((current) => ({ ...current, [documentId]: value }));
+			const nextDraft = { ...draft, [documentId]: value };
+			setDraftState(nextDraft);
 			setError(null);
+			if (restoredSessionRef.current === sessionIdentity) {
+				const nextDirty = MIHOMO_PROFILE_DOCUMENTS.some(
+					(nextDocumentId) =>
+						nextDraft[nextDocumentId] !== baseline[nextDocumentId],
+				);
+				setStorageError(
+					nextDirty
+						? writeStoredDraft(clusterId, userId, nextDraft, baseline)
+						: clearStoredDraft(clusterId, userId),
+				);
+			}
 		},
-		[isLoaded, isSaving, readOnly],
+		[
+			baseline,
+			clusterId,
+			draft,
+			isLoaded,
+			isSaving,
+			readOnly,
+			sessionIdentity,
+			userId,
+		],
 	);
 
 	const discard = useCallback(() => {
