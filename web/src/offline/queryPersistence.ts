@@ -141,6 +141,19 @@ export function createPersistOptions(): PersistQueryClientProviderProps["persist
 	};
 }
 
+export async function clearPersistedQueryCache(): Promise<void> {
+	try {
+		await basePersister.removeClient();
+	} catch {
+		// Offline persistence is an enhancement, not a hard dependency.
+	}
+	try {
+		await offlineSnapshotStorage.clear();
+	} catch {
+		// Offline persistence is an enhancement, not a hard dependency.
+	}
+}
+
 type PersistedQuerySnapshot = {
 	buildId?: string;
 	storedAt?: number;

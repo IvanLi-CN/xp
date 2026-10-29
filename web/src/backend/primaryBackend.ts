@@ -436,12 +436,11 @@ export function resetPrimaryBackendSelection() {
 				]
 			: []
 		: state.candidates;
-	const changed = state.primaryOrigin !== nextOrigin;
 	state = {
 		...state,
 		primaryOrigin: nextOrigin,
 		candidates,
-		generation: changed ? state.generation + 1 : state.generation,
+		generation: state.generation + 1,
 		state: "ready",
 		lastSwitchTimedOut: false,
 	};
@@ -726,6 +725,8 @@ export async function switchPrimaryBackend(
 		throw new Error("Backend must be verified before switching.");
 	}
 	if (origin === state.primaryOrigin) return { timedOut: false };
+	const startingClusterId = state.clusterId;
+	const startingGeneration = state.generation;
 	updateState({ state: "switching", lastSwitchTimedOut: false });
 	const timedOut = await waitForMutations();
 	if (timedOut) {
@@ -734,6 +735,13 @@ export async function switchPrimaryBackend(
 			unknownMutationCount: state.unknownMutationCount + 1,
 			lastSwitchTimedOut: true,
 		};
+	}
+	if (
+		state.clusterId !== startingClusterId ||
+		state.generation !== startingGeneration
+	) {
+		updateState({ state: "ready" });
+		throw new Error("Backend identity changed while waiting for a mutation.");
 	}
 	const candidates = state.candidates.some((item) => item.origin === origin)
 		? state.candidates.map((item) =>

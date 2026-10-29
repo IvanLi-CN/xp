@@ -41,4 +41,7 @@
   static bootstrap transport 并回到登录页，禁止向新集群发送旧 Bearer token。
 - 切换 primary backend 时取消并清理查询缓存；登录验证响应绑定 origin、cluster 和 generation，
   selector 在验证期间锁定；登出会清除 static runtime-policy transport。
+- 补齐身份边界：mutation barrier 结束后重新校验 cluster/generation，资源导航等待公开 identity
+  readiness，登出和 backend generation 变化清理内存及持久化离线查询缓存；认证 token 校验期间
+  若节点切换则不保存 token。
 - 补齐 Storybook 的冷启动 identity 夹具隔离与公共探测无 Authorization 的浏览器断言。

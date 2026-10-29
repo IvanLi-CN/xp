@@ -86,21 +86,40 @@ export function AppResourceNavigation({
 	const adminNodes = useQuery({
 		queryKey: adminNodesQueryKey,
 		enabled:
-			adminToken.length > 0 && nodesCapability.available && nodesRequested,
+			!compatibilityPending &&
+			adminToken.length > 0 &&
+			nodesCapability.available &&
+			nodesRequested,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 	const adminEndpoints = useQuery({
-		queryKey: ["adminEndpoints", adminToken],
+		queryKey: [
+			"adminEndpoints",
+			adminToken,
+			...(backendOrigin !== undefined && backendGeneration !== undefined
+				? [backendOrigin, backendGeneration]
+				: []),
+		],
 		enabled:
+			!compatibilityPending &&
 			adminToken.length > 0 &&
 			endpointsCapability.available &&
 			endpointsRequested,
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 	const adminUsers = useQuery({
-		queryKey: ["adminUsers", adminToken],
+		queryKey: [
+			"adminUsers",
+			adminToken,
+			...(backendOrigin !== undefined && backendGeneration !== undefined
+				? [backendOrigin, backendGeneration]
+				: []),
+		],
 		enabled:
-			adminToken.length > 0 && usersCapability.available && usersRequested,
+			!compatibilityPending &&
+			adminToken.length > 0 &&
+			usersCapability.available &&
+			usersRequested,
 		queryFn: ({ signal }) => fetchAdminUsers(adminToken, signal),
 	});
 

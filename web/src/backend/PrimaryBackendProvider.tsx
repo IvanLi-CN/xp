@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 
+import { clearPersistedQueryCache } from "../offline/queryPersistence";
 import {
 	type PrimaryBackendSnapshot,
 	getPrimaryBackendSnapshot,
@@ -30,7 +31,10 @@ export function PrimaryBackendProvider({
 	useEffect(() => {
 		if (previousGeneration.current === snapshot.generation) return;
 		previousGeneration.current = snapshot.generation;
-		void queryClient.cancelQueries().then(() => queryClient.removeQueries());
+		void queryClient.cancelQueries().then(async () => {
+			queryClient.removeQueries();
+			await clearPersistedQueryCache();
+		});
 	}, [queryClient, snapshot.generation]);
 
 	return (

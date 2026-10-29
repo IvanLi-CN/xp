@@ -10,6 +10,7 @@ import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { useApiCapability } from "../api/useApiCompatibility";
+import { getPrimaryBackendSnapshot } from "../backend/primaryBackend";
 import { AuthRecoveryAction } from "../components/AuthRecoveryAction";
 import { Button } from "../components/Button";
 import { NodeInventoryList } from "../components/NodeInventoryList";
@@ -251,7 +252,19 @@ export function HomePage() {
 								setIsSavingAdminToken(true);
 								setAdminTokenError(null);
 								try {
+									const verificationTarget = getPrimaryBackendSnapshot();
 									await verifyAdminToken(parsed.token);
+									const currentTarget = getPrimaryBackendSnapshot();
+									if (
+										currentTarget.primaryOrigin !==
+											verificationTarget.primaryOrigin ||
+										currentTarget.clusterId !== verificationTarget.clusterId ||
+										currentTarget.generation !== verificationTarget.generation
+									) {
+										throw new Error(
+											"Service node selection changed. Review the selected node and retry.",
+										);
+									}
 									writeAdminToken(parsed.token);
 									setAdminToken(parsed.token);
 									setAdminTokenDraft(parsed.token);

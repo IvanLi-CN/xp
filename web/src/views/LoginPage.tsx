@@ -156,11 +156,7 @@ export function LoginPage({
 					});
 					if (!active) return;
 					const currentTarget = getPrimaryBackendSnapshot();
-					if (
-						currentTarget.primaryOrigin !== initialTarget.primaryOrigin ||
-						currentTarget.clusterId !== initialTarget.clusterId ||
-						currentTarget.generation !== initialTarget.generation
-					) {
+					if (currentTarget.primaryOrigin !== initialTarget.primaryOrigin) {
 						setServerError(
 							"Service node selection changed. Review the selected node and retry.",
 						);
@@ -179,6 +175,7 @@ export function LoginPage({
 						return;
 					}
 				}
+				if (!active) return;
 				await submitToken(loginToken);
 			} catch (error) {
 				setServerError(
