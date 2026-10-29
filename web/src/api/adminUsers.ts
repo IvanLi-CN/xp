@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { MihomoSaveOutcomeUnknownError } from "../utils/mihomoSaveOutcome";
 import { throwIfNotOk } from "./backendError";
 import { type UserQuotaReset, UserQuotaResetSchema } from "./quotaReset";
 import { fetchJsonWithTimeout } from "./request";
@@ -273,8 +274,12 @@ export async function putAdminUserMihomoProfile(
 
 	await throwIfNotOk(res);
 
-	const json: unknown = await res.json();
-	return AdminUserMihomoProfileSchema.parse(json);
+	try {
+		const json: unknown = await res.json();
+		return AdminUserMihomoProfileSchema.parse(json);
+	} catch (error) {
+		throw new MihomoSaveOutcomeUnknownError(error, payload);
+	}
 }
 
 export async function previewAdminUserMihomoImport(

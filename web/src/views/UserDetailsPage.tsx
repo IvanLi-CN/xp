@@ -90,6 +90,11 @@ import {
 	latestQueryDataUpdatedAt,
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
+import {
+	MihomoSaveOutcomeUnknownError,
+	formatMihomoSaveError,
+	isMihomoWriteOutcomeUnknown,
+} from "../utils/mihomoSaveOutcome";
 import * as mihomoSaveQueue from "../utils/mihomoSaveQueue";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
@@ -368,7 +373,6 @@ export function UserDetailsPage() {
 			return usageGroups[0]?.node.node_id ?? null;
 		});
 	}, [usageGroups]);
-
 	const subscriptionToken = user?.subscription_token ?? "";
 	const subscriptionUrl = useMemo(() => {
 		return buildSubscriptionUrl({
@@ -401,9 +405,12 @@ export function UserDetailsPage() {
 		}
 		setUserSaveError(null);
 	}, [user]);
-
 	const saveMihomoProfileRequest = useCallback(
-		async (draft: AdminUserMihomoProfile, baseline: AdminUserMihomoProfile) => {
+		async (
+			draft: AdminUserMihomoProfile,
+			baseline: AdminUserMihomoProfile,
+			allowOverwrite = false,
+		) => {
 			if (!adminToken || !userId)
 				throw new Error("Admin session is unavailable.");
 			const saveKey = `${adminToken}\u0000${userId}`;
@@ -415,10 +422,22 @@ export function UserDetailsPage() {
 					baseline,
 					() => fetchAdminUserMihomoProfile(adminToken, userId),
 					(latestProfile) => queryClient.setQueryData(queryKey, latestProfile),
+					allowOverwrite,
 				);
+				const submit = async (payload: AdminUserMihomoProfile) => {
+					try {
+						return await putAdminUserMihomoProfile(adminToken, userId, payload);
+					} catch (error) {
+						if (isMihomoWriteOutcomeUnknown(error)) {
+							if (error instanceof MihomoSaveOutcomeUnknownError) throw error;
+							throw new MihomoSaveOutcomeUnknownError(error, payload);
+						}
+						throw error;
+					}
+				};
 				let saved: AdminUserMihomoProfile;
 				try {
-					saved = await putAdminUserMihomoProfile(adminToken, userId, draft);
+					saved = await submit(draft);
 				} catch (error) {
 					if (
 						!isBackendApiError(error) ||
@@ -429,11 +448,7 @@ export function UserDetailsPage() {
 					}
 					const migratedDraft = normalizeMihomoProfileDraftForSave(draft);
 					if (migratedDraft === draft) throw error;
-					saved = await putAdminUserMihomoProfile(
-						adminToken,
-						userId,
-						migratedDraft,
-					);
+					saved = await submit(migratedDraft);
 				}
 				if (
 					mihomoActiveIdentityRef.current !== saveKey ||
@@ -451,14 +466,33 @@ export function UserDetailsPage() {
 		},
 		[adminToken, pushToast, queryClient, userId],
 	);
+	const verifyMihomoProfile = useCallback(
+		async (_submitted: AdminUserMihomoProfile) => {
+			if (!adminToken || !userId)
+				throw new Error("Admin session is unavailable.");
+			const latest = await fetchAdminUserMihomoProfile(adminToken, userId);
+			queryClient.setQueryData<AdminUserMihomoProfile>(
+				["adminUserMihomoProfile", adminToken, userId],
+				latest,
+			);
+			return latest;
+		},
+		[adminToken, queryClient, userId],
+	);
 	const mihomoDraft = useMihomoProfileDraft({
-		clusterId: primaryBackend.clusterId ?? undefined,
+		clusterId: primaryBackend.clusterId ?? primaryBackend.primaryOrigin,
 		userId,
 		sessionKey: adminToken,
 		profile: mihomoProfileQuery.data,
 		readOnly: runtime.isReadOnly,
 		saveProfile: saveMihomoProfileRequest,
-		formatError,
+		verifyProfile: verifyMihomoProfile,
+		formatError: (error) => {
+			if (isMihomoWriteOutcomeUnknown(error)) {
+				return formatMihomoSaveError(error);
+			}
+			return formatError(error);
+		},
 	});
 	const mihomoSavingRef = useRef(false);
 	mihomoSavingRef.current = mihomoDraft.isSaving;
@@ -1332,8 +1366,10 @@ export function UserDetailsPage() {
 									draft={mihomoDraft.draft}
 									dirty={mihomoDraft.dirty}
 									isSaving={mihomoDraft.isSaving}
+									isVerifying={mihomoDraft.isVerifying}
 									readOnly={runtime.isReadOnly}
 									error={mihomoDraft.error}
+									saveFeedback={mihomoDraft.saveFeedback}
 									storageError={mihomoDraft.storageError}
 									conflict={mihomoDraft.conflict}
 									isLoaded={mihomoDraft.isLoaded}
@@ -1341,6 +1377,7 @@ export function UserDetailsPage() {
 									importAvailable={enabledFor(mihomoImportCapability)}
 									onChange={mihomoDraft.setField}
 									onSave={mihomoDraft.save}
+									onVerify={mihomoDraft.verify}
 									onContinueDraft={mihomoDraft.continueDraft}
 									onUseServer={mihomoDraft.useServer}
 								/>

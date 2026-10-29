@@ -1,10 +1,22 @@
 use std::{path::Path, sync::Arc};
 
+use axum::{
+    Router,
+    body::Bytes,
+    extract::State,
+    http::{HeaderMap, Method, StatusCode, Uri},
+    response::Response,
+    routing::any,
+};
 use serde_json::json;
-use tokio::sync::{Mutex, watch};
+use tokio::{
+    sync::{Mutex, watch},
+    task::JoinHandle,
+};
 
 use super::*;
 use crate::{
+    control_plane_mesh::MeshRequestError,
     domain::{Endpoint, EndpointKind},
     state::{JsonSnapshotStore, StoreInit, membership_key},
 };
@@ -17,6 +29,68 @@ fn test_store_init(tmp_dir: &Path) -> StoreInit {
         bootstrap_access_host: xp_test_fixtures::label_empty().to_owned(),
         bootstrap_api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
     }
+}
+
+#[derive(Clone)]
+struct ForwardResponseState {
+    ca_key_pem: String,
+    ca_cert_pem: String,
+    cluster_id: String,
+    sender_id: String,
+    target_id: String,
+    status: StatusCode,
+    body: String,
+}
+
+async fn forward_response(
+    State(state): State<ForwardResponseState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let verified = crate::internal_auth::verify_request_v2(
+        &state.ca_key_pem,
+        &state.ca_cert_pem,
+        &method,
+        &uri,
+        &headers,
+        &body,
+        &state.cluster_id,
+        &state.target_id,
+    )
+    .expect("forwarded write request is signed");
+    assert_eq!(verified.context.sender_id, state.sender_id);
+    let acknowledgement = crate::internal_auth::sign_ack_v2(
+        &state.ca_key_pem,
+        &state.ca_cert_pem,
+        &verified,
+        &state.target_id,
+        state.status.as_u16(),
+    )
+    .expect("forwarded write acknowledgement");
+    Response::builder()
+        .status(state.status)
+        .header(crate::internal_auth::INTERNAL_ACK_HEADER, acknowledgement)
+        .body(axum::body::Body::from(state.body))
+        .expect("forwarded write response")
+}
+
+async fn spawn_forward_response(state: ForwardResponseState) -> (String, JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("forward response listener");
+    let address = listener.local_addr().expect("forward response address");
+    let task = tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            Router::new()
+                .fallback(any(forward_response))
+                .with_state(state),
+        )
+        .await;
+    });
+    (format!("http://{address}"), task)
 }
 
 #[tokio::test]
@@ -141,4 +215,117 @@ fn conditional_endpoint_update_requires_the_new_capability() {
     assert!(!capabilities_support_conditional_endpoint_update(&[
         "admin.endpoints".to_string(),
     ]));
+}
+
+#[test]
+fn raft_forwarding_error_classification_is_conservative() {
+    assert_eq!(
+        crate::raft::write_error::dispatch_state(&MeshRequestError::InvalidTarget(
+            "bad".to_string(),
+        )),
+        RaftWriteDispatchState::NotDispatched
+    );
+    assert_eq!(
+        crate::raft::write_error::dispatch_state(&MeshRequestError::PreDispatchTimeout),
+        RaftWriteDispatchState::NotDispatched
+    );
+    assert_eq!(
+        crate::raft::write_error::dispatch_state(&MeshRequestError::TransportTimeout),
+        RaftWriteDispatchState::DispatchedNoVerifiedResponse
+    );
+    assert_eq!(
+        crate::raft::write_error::dispatch_state(&MeshRequestError::OutcomeUnknown),
+        RaftWriteDispatchState::Unknown
+    );
+    assert_eq!(
+        crate::raft::write_error::dispatch_state(&MeshRequestError::CircuitOpen {
+            path: "Public",
+            dispatched: true,
+        }),
+        RaftWriteDispatchState::Unknown
+    );
+}
+
+#[tokio::test]
+async fn forwarded_client_write_failures_keep_safe_outcome_details() {
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let target_id = xp_test_fixtures::primary_node_id().to_owned();
+    let sender_id = xp_test_fixtures::tertiary_node_id().to_owned();
+    let command = DesiredStateCommand::SetMeshEnabled { enabled: false };
+    let node = crate::domain::Node {
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        access_host: xp_test_fixtures::primary_host().to_owned(),
+        api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+        quota_limit_bytes: 0,
+        quota_reset: Default::default(),
+    };
+
+    for (status, body, cause, dispatch_state, remote_status) in [
+        (
+            StatusCode::BAD_GATEWAY,
+            r#"{}"#,
+            "remote_error_response",
+            RaftWriteDispatchState::DispatchedNoVerifiedResponse,
+            Some(502),
+        ),
+        (
+            StatusCode::OK,
+            "not-json",
+            "response_decode",
+            RaftWriteDispatchState::DispatchedNoVerifiedResponse,
+            None,
+        ),
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            r#"{
+                "error": {
+                    "code": "raft_write_not_dispatched",
+                    "message": "write was not sent to the leader",
+                    "details": {
+                        "dispatch_state": "not_dispatched",
+                        "confidence": "confirmed"
+                    }
+                }
+            }"#,
+            "remote_error_response",
+            RaftWriteDispatchState::DispatchedNoVerifiedResponse,
+            Some(503),
+        ),
+    ] {
+        let (public_base_url, task) = spawn_forward_response(ForwardResponseState {
+            ca_key_pem: ca.key_pem.clone(),
+            ca_cert_pem: ca.cert_pem.clone(),
+            cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+            sender_id: sender_id.clone(),
+            target_id: target_id.clone(),
+            status,
+            body: body.to_owned(),
+        })
+        .await;
+        let mut peer = peer_target_from_node(&node, &[]);
+        peer.public_base_url = public_base_url;
+        let error = forward_client_write(
+            &MeshAwareHttpClient::new(reqwest::Client::new()),
+            &ForwardingAuth {
+                cluster_ca_key_pem: &ca.key_pem,
+                cluster_ca_pem: &ca.cert_pem,
+                cluster_id: xp_test_fixtures::cluster_fixture53(),
+                sender_id: &sender_id,
+            },
+            &peer,
+            &command,
+            "support-forwarded-write",
+        )
+        .await
+        .expect_err("forwarded write failure should be typed");
+        let typed = error
+            .downcast_ref::<RaftWriteError>()
+            .expect("forwarded write error should remain typed");
+        assert_eq!(typed.cause(), cause);
+        assert_eq!(typed.dispatch_state(), dispatch_state);
+        assert_eq!(typed.remote_status(), remote_status);
+        task.abort();
+    }
 }

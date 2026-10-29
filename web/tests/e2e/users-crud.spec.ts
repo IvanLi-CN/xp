@@ -177,6 +177,12 @@ test("persists all three Mihomo documents through the production save path", asy
 
 	await page.goto(`/users/${fixtureCatalog.identifier.userPrimary()}`);
 	await waitForMihomoProfile(page);
+	await expect(
+		page.locator('[data-mihomo-editor-loaded="true"]'),
+	).toBeVisible();
+	await expect(
+		page.locator('[data-mihomo-document="mixin_yaml"] .cm-content'),
+	).toHaveAttribute("contenteditable", "true");
 	const values = {
 		mixin_yaml: "port: 7890\n",
 		extra_proxies_yaml: "- name: e2e-proxy\n  type: ss\n",
@@ -186,9 +192,8 @@ test("persists all three Mihomo documents through the production save path", asy
 		const editor = page.locator(
 			`[data-mihomo-document="${documentId}"] .cm-content`,
 		);
-		await editor.click();
-		await page.keyboard.press("ControlOrMeta+A");
-		await page.keyboard.insertText(value);
+		await editor.fill(value);
+		await expect(editor).toContainText(value.trim().split("\n")[0]);
 	}
 	const saveButton = page
 		.getByRole("button", { name: "Save configuration" })

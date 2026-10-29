@@ -1,5 +1,9 @@
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
 import { withPrimaryBackendMutation } from "../backend/primaryBackend";
+import {
+	MihomoSavePreflightError,
+	isMihomoWriteOutcomeUnknown,
+} from "./mihomoSaveOutcome";
 
 const mihomoSaveQueues = new Map<string, Promise<void>>();
 const mihomoSaveGenerations = new Map<string, number>();
@@ -70,13 +74,22 @@ export async function ensureMihomoProfileBaseline(
 	baseline: AdminUserMihomoProfile,
 	fetchProfile: () => Promise<AdminUserMihomoProfile>,
 	onConflict: (latestProfile: AdminUserMihomoProfile) => void,
+	allowOverwrite = false,
 ): Promise<void> {
-	const latestProfile = await fetchProfile();
-	if (mihomoProfilesEqual(latestProfile, baseline)) return;
-	onConflict(latestProfile);
-	throw new Error(
-		"Mihomo profile changed elsewhere. Refresh the profile and review your draft before retrying.",
-	);
+	try {
+		const latestProfile = await fetchProfile();
+		if (mihomoProfilesEqual(latestProfile, baseline)) return;
+		onConflict(latestProfile);
+		if (allowOverwrite) return;
+		throw new Error(
+			"Mihomo profile changed elsewhere. Refresh the profile and review your draft before retrying.",
+		);
+	} catch (error) {
+		if (isMihomoWriteOutcomeUnknown(error)) {
+			throw new MihomoSavePreflightError(error);
+		}
+		throw error;
+	}
 }
 
 export function enqueueMihomoSave<T>(

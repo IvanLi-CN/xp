@@ -987,7 +987,7 @@ pub(super) async fn admin_internal_raft_client_write(
         .raft
         .client_write(cmd)
         .await
-        .map_err(|error| ApiError::internal(error.to_string()))?;
+        .map_err(super::map_raft_write_error)?;
     if let Some((request_id, request)) = idempotency_request {
         state
             .internal_idempotency

@@ -1,8 +1,16 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminUserMihomoProfile } from "../api/adminUsers";
-import { useMihomoProfileDraft } from "./useMihomoProfileDraft";
+import {
+	MihomoSaveOutcomeUnknownError,
+	MihomoSavePreflightError,
+} from "../utils/mihomoSaveOutcome";
+import {
+	MIHOMO_DRAFT_PERSISTENCE_WARNING,
+	MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX,
+	useMihomoProfileDraft,
+} from "./useMihomoProfileDraft";
 
 const PROFILE_A: AdminUserMihomoProfile = {
 	mixin_yaml: "port: 0\n",
@@ -17,6 +25,10 @@ const PROFILE_B: AdminUserMihomoProfile = {
 };
 
 describe("useMihomoProfileDraft", () => {
+	beforeEach(() => {
+		window.localStorage.clear();
+	});
+
 	it("keeps an unloaded profile read-only until its data arrives", async () => {
 		const saveProfile = vi.fn(
 			async (profile: AdminUserMihomoProfile) => profile,
@@ -86,6 +98,548 @@ describe("useMihomoProfileDraft", () => {
 		expect(saveProfile).toHaveBeenCalledTimes(2);
 		expect(result.current.dirty).toBe(false);
 		expect(result.current.error).toBeNull();
+	});
+
+	it("does not read back when the save preflight failed", async () => {
+		const verifyProfile = vi.fn(async () => PROFILE_A);
+		const saveProfile = vi.fn(async () => {
+			throw new MihomoSavePreflightError(new TypeError("offline"));
+		});
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+				verifyProfile,
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "preflight draft\n"));
+		await act(async () => expect(await result.current.save()).toBe(false));
+
+		expect(verifyProfile).not.toHaveBeenCalled();
+		expect(result.current.saveFeedback).toBeNull();
+		expect(result.current.error).toContain("Nothing was sent");
+		expect(result.current.draft.mixin_yaml).toBe("preflight draft\n");
+	});
+
+	it("reports when browser storage cannot retain the draft", async () => {
+		const setItem = vi
+			.spyOn(Storage.prototype, "setItem")
+			.mockImplementation(() => {
+				throw new Error("quota exceeded");
+			});
+		const { result, unmount } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile: vi.fn(async (profile) => profile),
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "memory-only draft\n"));
+		await waitFor(() =>
+			expect(result.current.error).toBe(MIHOMO_DRAFT_PERSISTENCE_WARNING),
+		);
+		setItem.mockRestore();
+		unmount();
+	});
+
+	it("checks an unknown write once and accepts a matching read-back", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "unknown write\n" };
+		const saveProfile = vi
+			.fn<
+				(
+					profile: AdminUserMihomoProfile,
+					baseline: AdminUserMihomoProfile,
+				) => Promise<AdminUserMihomoProfile>
+			>()
+			.mockRejectedValueOnce(
+				new MihomoSaveOutcomeUnknownError(
+					new TypeError("Failed to fetch"),
+					submitted,
+				),
+			);
+		const verifyProfile = vi.fn(async () => submitted);
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+				verifyProfile,
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", submitted.mixin_yaml));
+		await act(async () => expect(await result.current.save()).toBe(true));
+
+		expect(saveProfile).toHaveBeenCalledTimes(1);
+		expect(verifyProfile).toHaveBeenCalledTimes(1);
+		expect(result.current.dirty).toBe(false);
+		expect(result.current.saveFeedback?.verification).toBe("matches");
+		expect(result.current.error).toBeNull();
+
+		act(() =>
+			result.current.setField("mixin_yaml", "edited after read-back\n"),
+		);
+		expect(result.current.dirty).toBe(true);
+		expect(result.current.saveFeedback).toBeNull();
+	});
+
+	it("allows an explicitly confirmed retry after a different read-back", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "unknown write\n" };
+		const saveProfile = vi
+			.fn<
+				(
+					profile: AdminUserMihomoProfile,
+					baseline: AdminUserMihomoProfile,
+					allowOverwrite?: boolean,
+				) => Promise<AdminUserMihomoProfile>
+			>()
+			.mockRejectedValueOnce(
+				new MihomoSaveOutcomeUnknownError(
+					new TypeError("Failed to fetch"),
+					submitted,
+				),
+			)
+			.mockResolvedValueOnce(submitted);
+		const verifyProfile = vi.fn(async () => PROFILE_A);
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+				verifyProfile,
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", submitted.mixin_yaml));
+		await act(async () => expect(await result.current.save()).toBe(false));
+		expect(result.current.saveFeedback?.verification).toBe("different");
+		await act(async () => expect(await result.current.save(true)).toBe(true));
+		expect(saveProfile).toHaveBeenLastCalledWith(submitted, PROFILE_A, true);
+	});
+
+	it("keeps the draft and permits a manual check after a different read-back", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "unknown write\n" };
+		const saveProfile = vi.fn(async () => {
+			throw new MihomoSaveOutcomeUnknownError(
+				new TypeError("Failed to fetch"),
+				submitted,
+			);
+		});
+		const verifyProfile = vi
+			.fn<
+				(profile: AdminUserMihomoProfile) => Promise<AdminUserMihomoProfile>
+			>()
+			.mockResolvedValueOnce(PROFILE_A)
+			.mockResolvedValueOnce(submitted);
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+				verifyProfile,
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", submitted.mixin_yaml));
+		await act(async () => expect(await result.current.save()).toBe(false));
+		expect(result.current.draft).toEqual(submitted);
+		expect(result.current.dirty).toBe(true);
+		expect(result.current.saveFeedback?.verification).toBe("different");
+		expect(verifyProfile).toHaveBeenCalledTimes(1);
+
+		await act(async () => expect(await result.current.verify()).toBe(true));
+		expect(verifyProfile).toHaveBeenCalledTimes(2);
+		expect(result.current.dirty).toBe(false);
+		expect(result.current.saveFeedback?.verification).toBe("matches");
+
+		verifyProfile.mockRejectedValueOnce(new Error("read-back unavailable"));
+		await act(async () => expect(await result.current.verify()).toBe(false));
+		expect(result.current.saveFeedback?.verification).toBe("unavailable");
+	});
+
+	it("blocks edits while a manual check is pending", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "unknown write\n" };
+		let resolveVerify: ((profile: AdminUserMihomoProfile) => void) | undefined;
+		const verifyProfile = vi.fn(
+			() =>
+				new Promise<AdminUserMihomoProfile>((resolve) => {
+					resolveVerify = resolve;
+				}),
+		);
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile: vi.fn(async (profile) => profile),
+				verifyProfile,
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", submitted.mixin_yaml));
+		let verifyPromise: Promise<boolean> | undefined;
+		act(() => {
+			verifyPromise = result.current.verify();
+		});
+		await waitFor(() => expect(result.current.isVerifying).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "edited while checking\n"));
+		act(() => result.current.discard());
+		expect(result.current.draft).toEqual(submitted);
+		expect(await result.current.save()).toBe(false);
+
+		act(() => resolveVerify?.(submitted));
+		if (!verifyPromise) throw new Error("verification request was not created");
+		await act(async () => expect(await verifyPromise).toBe(true));
+		expect(result.current.draft).toEqual(submitted);
+	});
+
+	it("does not retain a conflict from a matching manual read-back", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "verified draft\n" };
+		let resolveVerify: ((profile: AdminUserMihomoProfile) => void) | undefined;
+		const verifyProfile = vi.fn(
+			() =>
+				new Promise<AdminUserMihomoProfile>((resolve) => {
+					resolveVerify = resolve;
+				}),
+		);
+		const { result, rerender } = renderHook(
+			({ profile }: { profile: AdminUserMihomoProfile }) =>
+				useMihomoProfileDraft({
+					userId: "user-a",
+					profile,
+					saveProfile: vi.fn(async (next) => next),
+					verifyProfile,
+				}),
+			{ initialProps: { profile: PROFILE_A } },
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", submitted.mixin_yaml));
+		let verifyPromise: Promise<boolean> | undefined;
+		act(() => {
+			verifyPromise = result.current.verify();
+		});
+		await waitFor(() => expect(result.current.isVerifying).toBe(true));
+		rerender({ profile: submitted });
+		act(() => resolveVerify?.(submitted));
+		if (!verifyPromise) throw new Error("verification request was not created");
+		await act(async () => expect(await verifyPromise).toBe(true));
+
+		expect(result.current.conflict).toBeNull();
+		expect(result.current.dirty).toBe(false);
+	});
+
+	it("ignores a stale verification rejection after the session changes", async () => {
+		let rejectVerify: ((error: unknown) => void) | undefined;
+		const verifyProfile = vi.fn(
+			() =>
+				new Promise<AdminUserMihomoProfile>((_, reject) => {
+					rejectVerify = reject;
+				}),
+		);
+		const { result, rerender } = renderHook(
+			({ sessionKey }: { sessionKey: string }) =>
+				useMihomoProfileDraft({
+					userId: "user-a",
+					sessionKey,
+					profile: PROFILE_A,
+					saveProfile: vi.fn(async (profile) => profile),
+					verifyProfile,
+				}),
+			{ initialProps: { sessionKey: "session-a" } },
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		let verifyPromise: Promise<boolean> | undefined;
+		act(() => {
+			verifyPromise = result.current.verify();
+		});
+		await waitFor(() => expect(result.current.isVerifying).toBe(true));
+
+		rerender({ sessionKey: "session-b" });
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => rejectVerify?.(new Error("stale read-back failure")));
+		if (!verifyPromise) throw new Error("verification request was not created");
+		await act(async () => expect(await verifyPromise).toBe(false));
+
+		expect(result.current.error).toBeNull();
+		expect(result.current.saveFeedback).toBeNull();
+		expect(result.current.isVerifying).toBe(false);
+	});
+
+	it("keeps an unavailable unknown result after remounting", async () => {
+		const submitted = { ...PROFILE_A, mixin_yaml: "persisted unknown\n" };
+		const saveProfile = vi.fn(async () => {
+			throw new MihomoSaveOutcomeUnknownError(
+				new TypeError("Failed to fetch"),
+				submitted,
+			);
+		});
+		const verifyProfile = vi.fn(async () => {
+			throw new Error("read-back unavailable");
+		});
+		const first = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+				verifyProfile,
+			}),
+		);
+
+		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
+		act(() =>
+			first.result.current.setField("mixin_yaml", submitted.mixin_yaml),
+		);
+		await act(async () =>
+			expect(await first.result.current.save()).toBe(false),
+		);
+		expect(first.result.current.saveFeedback?.verification).toBe("unavailable");
+		first.unmount();
+
+		const second = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+				verifyProfile,
+			}),
+		);
+		await waitFor(() => expect(second.result.current.isLoaded).toBe(true));
+		expect(second.result.current.draft).toEqual(submitted);
+		expect(second.result.current.dirty).toBe(true);
+		expect(second.result.current.saveFeedback?.verification).toBe(
+			"unavailable",
+		);
+	});
+
+	it("restores the original baseline with a persisted draft", async () => {
+		const first = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile: vi.fn(async (profile) => profile),
+			}),
+		);
+		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
+		act(() => first.result.current.setField("mixin_yaml", "stored draft\n"));
+		await waitFor(() => {
+			const key = Object.keys(window.localStorage).find((candidate) =>
+				candidate.startsWith(MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX),
+			);
+			expect(key).toBeDefined();
+			const persisted = JSON.parse(
+				window.localStorage.getItem(key ?? "") ?? "{}",
+			);
+			expect(persisted.baseline).toEqual(PROFILE_A);
+		});
+		first.unmount();
+
+		const saveProfile = vi.fn(async (profile) => profile);
+		const second = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_B,
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(second.result.current.isLoaded).toBe(true));
+		expect(second.result.current.draft.mixin_yaml).toBe("stored draft\n");
+		expect(second.result.current.baseline).toEqual(PROFILE_A);
+
+		await act(async () =>
+			expect(await second.result.current.save()).toBe(true),
+		);
+		expect(saveProfile).toHaveBeenCalledWith(
+			expect.objectContaining({ mixin_yaml: "stored draft\n" }),
+			PROFILE_A,
+			false,
+		);
+	});
+
+	it("does not restore a same-user draft from another cluster", async () => {
+		const first = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-a",
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile: vi.fn(async (profile) => profile),
+			}),
+		);
+		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
+		act(() => first.result.current.setField("mixin_yaml", "cluster-a draft\n"));
+		await waitFor(() => expect(first.result.current.dirty).toBe(true));
+		first.unmount();
+
+		const second = renderHook(() =>
+			useMihomoProfileDraft({
+				clusterId: "cluster-b",
+				userId: "user-a",
+				profile: PROFILE_B,
+				saveProfile: vi.fn(async (profile) => profile),
+			}),
+		);
+		await waitFor(() => expect(second.result.current.isLoaded).toBe(true));
+		expect(second.result.current.draft).toEqual(PROFILE_B);
+		expect(second.result.current.dirty).toBe(false);
+	});
+
+	it("blocks legacy drafts that have no persisted baseline", async () => {
+		const tabStorageKey = "xp.mihomo-profile.tab-id.v1";
+		const tabId =
+			window.sessionStorage.getItem(tabStorageKey) ?? "legacy-test-tab";
+		window.sessionStorage.setItem(tabStorageKey, tabId);
+		const storageKey = `${MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX}${encodeURIComponent(
+			"user-a",
+		)}:${encodeURIComponent(tabId)}`;
+		window.localStorage.setItem(
+			storageKey,
+			JSON.stringify({
+				draft: { ...PROFILE_A, mixin_yaml: "legacy draft\n" },
+				saveFeedback: null,
+			}),
+		);
+		const saveProfile = vi.fn(async (profile) => profile);
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		await act(async () => expect(await result.current.save()).toBe(false));
+		expect(saveProfile).not.toHaveBeenCalled();
+		expect(result.current.error).toContain("original profile is unavailable");
+	});
+
+	it("separates a duplicated tab claim before retaining its draft", async () => {
+		const tabStorageKey = "xp.mihomo-profile.tab-id.v1";
+		const originalTabId = window.sessionStorage.getItem(tabStorageKey);
+		const { result, unmount } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile: vi.fn(async (profile) => profile),
+			}),
+		);
+
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		act(() => result.current.setField("mixin_yaml", "duplicated draft\n"));
+		const claimKey = await waitFor(() => {
+			const key = Object.keys(window.localStorage).find((candidate) =>
+				candidate.startsWith("xp.mihomo-profile.tab-claim.v1:"),
+			);
+			expect(key).toBeDefined();
+			return key as string;
+		});
+		const foreignClaim = JSON.stringify({ instanceId: "foreign-tab" });
+		act(() => {
+			window.localStorage.setItem(claimKey, foreignClaim);
+			window.dispatchEvent(
+				new StorageEvent("storage", {
+					key: claimKey,
+					newValue: foreignClaim,
+					storageArea: window.localStorage,
+				}),
+			);
+		});
+
+		await waitFor(() =>
+			expect(window.sessionStorage.getItem(tabStorageKey)).not.toBe(
+				originalTabId,
+			),
+		);
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		expect(result.current.draft.mixin_yaml).toBe("duplicated draft\n");
+		unmount();
+		if (originalTabId) {
+			window.sessionStorage.setItem(tabStorageKey, originalTabId);
+		}
+	});
+
+	it("adopts a clean draft written by another tab", async () => {
+		const { result } = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile: vi.fn(async (profile) => profile),
+			}),
+		);
+		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		const next = { ...PROFILE_A, mixin_yaml: "from another tab\n" };
+		const key = Object.keys(window.localStorage).find((candidate) =>
+			candidate.includes("xp.mihomo-profile-draft.v1"),
+		);
+		const storageKey =
+			key ??
+			`${MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX}${encodeURIComponent("user-a")}:other-tab`;
+		window.localStorage.setItem(
+			storageKey,
+			JSON.stringify({
+				draft: next,
+				saveFeedback: null,
+			}),
+		);
+		act(() => {
+			window.dispatchEvent(
+				new StorageEvent("storage", {
+					key: storageKey,
+					newValue: window.localStorage.getItem(storageKey),
+				}),
+			);
+		});
+		await waitFor(() => expect(result.current.draft).toEqual(next));
+		expect(result.current.dirty).toBe(true);
+	});
+
+	it("keeps another tab's draft when this tab saves", async () => {
+		const saveProfile = vi.fn(async (profile) => profile);
+		const first = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(first.result.current.isLoaded).toBe(true));
+		act(() => first.result.current.setField("mixin_yaml", "this tab\n"));
+
+		const otherTabDraft = { ...PROFILE_A, mixin_yaml: "other tab\n" };
+		const otherTabKey = [
+			MIHOMO_PROFILE_DRAFT_STORAGE_KEY_PREFIX,
+			encodeURIComponent("user-a"),
+			":other-tab",
+		].join("");
+		window.localStorage.setItem(
+			otherTabKey,
+			JSON.stringify({
+				draft: otherTabDraft,
+				saveFeedback: null,
+			}),
+		);
+		await act(async () => expect(await first.result.current.save()).toBe(true));
+		first.unmount();
+
+		const second = renderHook(() =>
+			useMihomoProfileDraft({
+				userId: "user-a",
+				profile: PROFILE_A,
+				saveProfile,
+			}),
+		);
+		await waitFor(() => expect(second.result.current.isLoaded).toBe(true));
+		expect(second.result.current.draft).toEqual(otherTabDraft);
+		expect(second.result.current.dirty).toBe(true);
 	});
 
 	it("keeps dirty drafts across refreshes and accepts a complete save response", async () => {
@@ -218,11 +772,16 @@ describe("useMihomoProfileDraft", () => {
 
 		rerender({ sessionKey: "token-b", profile: PROFILE_B });
 		await waitFor(() => expect(result.current.isLoaded).toBe(true));
+		expect(result.current.draft.mixin_yaml).toBe("pending\n");
+		expect(result.current.baseline).toEqual(PROFILE_A);
 		act(() => resolveSave?.({ ...PROFILE_A, mixin_yaml: "stale\n" }));
 		if (!savePromise) throw new Error("save request was not created");
 		expect(await savePromise).toBe(false);
-		expect(result.current.draft).toEqual(PROFILE_B);
-		expect(result.current.baseline).toEqual(PROFILE_B);
+		expect(result.current.draft).toEqual({
+			...PROFILE_A,
+			mixin_yaml: "pending\n",
+		});
+		expect(result.current.baseline).toEqual(PROFILE_A);
 	});
 
 	it("ignores an old response after returning to the same user", async () => {
