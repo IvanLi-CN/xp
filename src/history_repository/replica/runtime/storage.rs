@@ -890,7 +890,8 @@ impl StoredRecord {
 
     pub(crate) fn matches_tombstone_key(&self, key: &ReplicaRecordKey, prefix: bool) -> bool {
         let (schema_id, schema_version) = key.schema();
-        (prefix || self.stream == key.stream())
+        let backfill_stream = format!("{}-backfill-{}", key.stream(), key.source_node_id());
+        (prefix || self.stream == key.stream() || self.stream == backfill_stream)
             && self.subject_node_id == key.subject_node_id()
             && self.observer_node_id == key.observer_node_id()
             && self.schema_id == schema_id

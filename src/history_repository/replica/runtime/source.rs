@@ -1,5 +1,5 @@
 use sha2::{Digest as _, Sha256};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::state::{
     history_repository::replica::RepositoryReplicaGap, history_storage::SourceDeliveryJournalRow,
@@ -54,6 +54,13 @@ impl LocalSourceState {
             stream.pending.clear();
         }
     }
+
+    pub(super) fn pending_segment_by_id(&self, segment_id: &str) -> Option<&StoredSegment> {
+        self.streams
+            .values()
+            .flat_map(|stream| stream.pending.iter())
+            .find(|segment| segment.id == segment_id)
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct LocalSourceStreamState {
@@ -75,6 +82,11 @@ struct LocalSourceGap {
     end_unix_seconds: u64,
 }
 impl RepositoryReplicaRuntime {
+    pub(crate) fn set_local_source_epoch(&mut self, epoch: u64, node_id: &str) {
+        self.snapshot.local_source.epoch = epoch;
+        self.snapshot.local_source.node_id = node_id.to_owned();
+    }
+
     pub(crate) fn history_truncated(&self) -> bool {
         self.snapshot.history_truncated
     }
@@ -141,7 +153,6 @@ impl RepositoryReplicaRuntime {
             end_unix_seconds: segment.canonical().opened_at_unix_seconds(),
         }))
     }
-    const MAX_HISTORY_BACKFILL_PENDING_SEGMENTS_PER_STREAM: usize = 128;
     pub(crate) fn queue_local_source_segments(
         &mut self,
         cluster_id: &str,
@@ -158,185 +169,6 @@ impl RepositoryReplicaRuntime {
             now_unix_seconds,
             &["local".to_owned()],
         )
-    }
-    /// Queue one historical backfill page without returning unrelated live outbox fronts. The
-    /// caller can atomically acknowledge these exact segments with the page checkpoint.
-    pub(crate) fn queue_local_history_backfill_segments(
-        &mut self,
-        cluster_id: &str,
-        identity: RepositoryNodeIdentity,
-        signing_key: &ed25519_dalek::SigningKey,
-        records: Vec<SyncRecord>,
-        now_unix_seconds: u64,
-    ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
-        // A page checkpoint is all-or-nothing. Reject before queuing if any target stream has a
-        // pending segment: its predecessor must be delivered first, and appending a backfill
-        // segment behind it could not be atomically acknowledged with this page's checkpoint.
-        for record in &records {
-            let stream = if record.is_tombstone() {
-                "tombstone"
-            } else {
-                stream_for_schema(record.schema().0).ok_or_else(|| {
-                    RepositoryRuntimeError::Storage(format!(
-                        "history source schema has no independent stream: {}",
-                        record.schema().0
-                    ))
-                })?
-            };
-            if self
-                .snapshot
-                .local_source
-                .streams
-                .get(stream)
-                .is_some_and(|state| !state.pending.is_empty())
-            {
-                return Err(RepositoryRuntimeError::StateLimitExceeded);
-            }
-        }
-        let requires_segment = !records.is_empty();
-        let pending_before = self
-            .snapshot
-            .local_source
-            .streams
-            .values()
-            .flat_map(|stream| stream.pending.iter().map(|segment| segment.id.clone()))
-            .collect::<BTreeSet<_>>();
-        self.queue_local_source_segments(
-            cluster_id,
-            identity,
-            signing_key,
-            &records,
-            now_unix_seconds,
-        )?;
-        let created = self
-            .snapshot
-            .local_source
-            .streams
-            .values()
-            .flat_map(|stream| stream.pending.iter())
-            .filter(|segment| !pending_before.contains(&segment.id))
-            .map(|segment| RepositoryReplicaSegment {
-                identity: segment.identity.clone(),
-                wire: segment.wire.clone(),
-            })
-            .collect::<Vec<_>>();
-        if requires_segment && created.is_empty() {
-            return Err(RepositoryRuntimeError::StateLimitExceeded);
-        }
-        Ok(created)
-    }
-
-    pub(crate) fn queue_local_history_backfill_batches(
-        &mut self,
-        cluster_id: &str,
-        identity: RepositoryNodeIdentity,
-        signing_key: &ed25519_dalek::SigningKey,
-        page_cursor: Option<String>,
-        completed: bool,
-        batches: Vec<(Vec<SyncRecord>, u64)>,
-    ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
-        for (records, _) in &batches {
-            for record in records {
-                let stream = if record.is_tombstone() {
-                    "tombstone"
-                } else {
-                    stream_for_schema(record.schema().0).ok_or_else(|| {
-                        RepositoryRuntimeError::Storage(format!(
-                            "history source schema has no independent stream: {}",
-                            record.schema().0
-                        ))
-                    })?
-                };
-                if self
-                    .snapshot
-                    .local_source
-                    .streams
-                    .get(stream)
-                    .is_some_and(|state| !state.pending.is_empty())
-                {
-                    return Err(RepositoryRuntimeError::StateLimitExceeded);
-                }
-            }
-        }
-        let previous_snapshot = self.snapshot.clone();
-        let previous_tombstones = self.tombstones.checkpoint();
-        let mut created = Vec::new();
-        for (records, observed_at) in batches {
-            let pending_before = self
-                .snapshot
-                .local_source
-                .streams
-                .values()
-                .flat_map(|stream| stream.pending.iter().map(|segment| segment.id.clone()))
-                .collect::<BTreeSet<_>>();
-            if let Err(error) = self.queue_local_source_segments_for_repositories_with_limit(
-                cluster_id,
-                identity.clone(),
-                signing_key,
-                records.iter().cloned(),
-                observed_at,
-                LocalSourceQueueOptions {
-                    ready_repositories: &["local".to_owned()],
-                    _max_pending_segments_per_stream:
-                        Self::MAX_HISTORY_BACKFILL_PENDING_SEGMENTS_PER_STREAM,
-                    persist: false,
-                    defer_journal: true,
-                },
-            ) {
-                self.snapshot = previous_snapshot;
-                self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
-                return Err(error);
-            }
-            let new_segments = self
-                .snapshot
-                .local_source
-                .streams
-                .values()
-                .flat_map(|stream| stream.pending.iter())
-                .filter(|segment| !pending_before.contains(&segment.id))
-                .map(|segment| RepositoryReplicaSegment {
-                    identity: segment.identity.clone(),
-                    wire: segment.wire.clone(),
-                })
-                .collect::<Vec<_>>();
-            if !records.is_empty() && new_segments.is_empty() {
-                self.snapshot = previous_snapshot;
-                self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
-                return Err(RepositoryRuntimeError::StateLimitExceeded);
-            }
-            created.extend(new_segments);
-        }
-        self.snapshot.local_history_backfill_inflight = Some(LocalHistoryBackfillInFlight {
-            page_cursor,
-            completed,
-            segment_ids: created
-                .iter()
-                .map(|segment| hex::encode(Sha256::digest(&segment.wire)))
-                .collect(),
-        });
-        let persist_result = if self.storage.is_sqlite() {
-            let journal_rows = created
-                .iter()
-                .map(|segment| SourceDeliveryJournalRow {
-                    id: hex::encode(Sha256::digest(&segment.wire)),
-                    stream: stream_for_wire(&segment.wire),
-                    closed_at_unix_seconds: SignedSegment::from_wire(&segment.wire)
-                        .map(|signed| signed.canonical().closed_at_unix_seconds())
-                        .unwrap_or_default(),
-                    identity: segment.identity.clone(),
-                    wire: segment.wire.clone(),
-                })
-                .collect::<Vec<_>>();
-            self.persist_control_state_with_journal(&journal_rows, &[])
-        } else {
-            self.persist_control_state()
-        };
-        if let Err(error) = persist_result {
-            self.snapshot = previous_snapshot;
-            self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
-            return Err(error);
-        }
-        Ok(created)
     }
     pub(crate) fn queue_local_source_segments_for_repositories(
         &mut self,
@@ -580,143 +412,6 @@ impl RepositoryReplicaRuntime {
             )?
             .into_iter()
             .next())
-    }
-
-    /// Persist acknowledgement and the local historical-export cursor together. Replaying an
-    /// already accepted segment is safe after a crash; moving only one of these checkpoints is
-    /// not, because a new source sequence would otherwise be assigned to the same history row.
-    pub(crate) fn acknowledge_local_source_segment_and_checkpoint_backfill(
-        &mut self,
-        delivered_wire: &[u8],
-        page_cursor: Option<String>,
-        completed: bool,
-    ) -> Result<(), RepositoryRuntimeError> {
-        let previous_snapshot = self.snapshot.clone();
-        if !self.remove_local_source_pending_segment(delivered_wire)? {
-            return Err(RepositoryRuntimeError::Storage(
-                "local history backfill acknowledgement was not pending".to_owned(),
-            ));
-        }
-        self.snapshot.local_history_backfill_cursor = page_cursor;
-        self.snapshot.local_history_backfill_completed = completed;
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
-            return Err(error);
-        }
-        if self.storage.is_sqlite() {
-            if let Err(error) = self
-                .storage
-                .acknowledge_source_delivery_journal(
-                    &[hex::encode(Sha256::digest(delivered_wire))],
-                    None,
-                    None,
-                )
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-            {
-                self.snapshot = previous_snapshot;
-                return Err(error);
-            }
-            self.hydrate_source_delivery_journal()?;
-        }
-        Ok(())
-    }
-    pub(crate) fn local_history_backfill_inflight_checkpoint(
-        &self,
-    ) -> Option<(Option<String>, bool)> {
-        self.snapshot
-            .local_history_backfill_inflight
-            .as_ref()
-            .map(|inflight| (inflight.page_cursor.clone(), inflight.completed))
-    }
-
-    pub(crate) fn local_history_backfill_inflight_segments(
-        &self,
-    ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
-        let Some(inflight) = &self.snapshot.local_history_backfill_inflight else {
-            return Ok(Vec::new());
-        };
-        inflight
-            .segment_ids
-            .iter()
-            .map(|segment_id| {
-                self.snapshot
-                    .local_source
-                    .streams
-                    .values()
-                    .flat_map(|stream| stream.pending.iter())
-                    .find(|segment| &segment.id == segment_id)
-                    .map(|segment| RepositoryReplicaSegment {
-                        identity: segment.identity.clone(),
-                        wire: segment.wire.clone(),
-                    })
-                    .ok_or_else(|| {
-                        RepositoryRuntimeError::Storage(
-                            "local history backfill segment is missing".to_owned(),
-                        )
-                    })
-            })
-            .collect()
-    }
-
-    pub(crate) fn acknowledge_local_source_segments_and_checkpoint_backfill(
-        &mut self,
-        delivered_segments: &[RepositoryReplicaSegment],
-        page_cursor: Option<String>,
-        completed: bool,
-    ) -> Result<(), RepositoryRuntimeError> {
-        let previous_snapshot = self.snapshot.clone();
-        let Some(inflight) = self.snapshot.local_history_backfill_inflight.take() else {
-            return Err(RepositoryRuntimeError::Storage(
-                "local history backfill acknowledgement has no inflight page".to_owned(),
-            ));
-        };
-        let delivered_ids = delivered_segments
-            .iter()
-            .map(|segment| hex::encode(Sha256::digest(&segment.wire)))
-            .collect::<Vec<_>>();
-        if delivered_ids != inflight.segment_ids {
-            self.snapshot = previous_snapshot;
-            return Err(RepositoryRuntimeError::Storage(
-                "local history backfill acknowledgement page is incomplete".to_owned(),
-            ));
-        }
-        for segment in delivered_segments {
-            match self.remove_local_source_pending_segment(&segment.wire) {
-                Ok(true) => {}
-                Ok(false) => {
-                    self.snapshot = previous_snapshot;
-                    return Err(RepositoryRuntimeError::Storage(
-                        "local history backfill acknowledgement was not pending".to_owned(),
-                    ));
-                }
-                Err(error) => {
-                    self.snapshot = previous_snapshot;
-                    return Err(error);
-                }
-            }
-        }
-        self.snapshot.local_history_backfill_cursor = page_cursor;
-        self.snapshot.local_history_backfill_completed = completed;
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
-            return Err(error);
-        }
-        if self.storage.is_sqlite() {
-            let ids = delivered_segments
-                .iter()
-                .map(|segment| hex::encode(Sha256::digest(&segment.wire)))
-                .collect::<Vec<_>>();
-            if let Err(error) = self
-                .storage
-                .acknowledge_source_delivery_journal(&ids, None, None)
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-            {
-                self.snapshot = previous_snapshot;
-                return Err(error);
-            }
-            self.hydrate_source_delivery_journal()?;
-        }
-        Ok(())
     }
 
     pub(super) fn remove_local_source_pending_segment(

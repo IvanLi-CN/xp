@@ -790,16 +790,12 @@ fn delete_repository_history_for_tombstone(
     } else {
         "record_key = ?6"
     };
-    let stream_predicate = if tombstone.prefix {
-        "1 = 1"
-    } else {
-        "stream = ?1"
-    };
+    let backfill_stream = format!("{}-backfill-{}", tombstone.stream, tombstone.source_node_id);
     connection
         .execute(
             &format!(
                 "DELETE FROM repository_history_records
-                 WHERE {stream_predicate}
+                 WHERE (?8 OR stream = ?1 OR stream = ?7)
                    AND subject_node_id = ?2 AND observer_node_id = ?3
                    AND schema_id = ?4 AND schema_version = ?5 AND {key_predicate}
                    AND is_tombstone = 0"
@@ -811,6 +807,8 @@ fn delete_repository_history_for_tombstone(
                 tombstone.schema_id,
                 i64::from(tombstone.schema_version),
                 tombstone.record_key,
+                backfill_stream,
+                tombstone.prefix,
             ],
         )
         .map_err(sqlite_error)

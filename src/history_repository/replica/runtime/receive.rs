@@ -1,7 +1,10 @@
 use super::*;
 
 mod batch;
+#[path = "receive/local_history_backfill.rs"]
+mod local_history_backfill;
 mod types;
+pub(super) use local_history_backfill::receive_local_history_backfill_page;
 pub(crate) use types::PendingRepositoryMutation;
 use types::RepositoryWireRequest;
 

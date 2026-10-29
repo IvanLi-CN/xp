@@ -33,6 +33,7 @@ use super::{
     ReplicaCursor, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey, TombstoneLedger,
     TombstoneLedgerCheckpoint,
 };
+use local_history_backfill::LocalHistoryBackfillInFlight;
 use paths::PeerDirectPathState;
 use source::LocalSourceState;
 
@@ -79,6 +80,7 @@ const KNOWN_SCHEMAS: [(&str, u32); 8] = [
     (crate::resource_monitoring::RESOURCE_HISTORY_SCHEMA, 1),
     ("tombstone.v1", 1),
 ];
+type LocalHistoryBackfillStreamState = BTreeMap<String, (u64, Option<[u8; 32]>)>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositorySyncReceipt {
@@ -275,6 +277,10 @@ pub(crate) struct RepositoryReplicaSnapshot {
     #[serde(default)]
     local_history_backfill_cursor: Option<String>,
     #[serde(default)]
+    local_history_backfill_epoch: u64,
+    #[serde(default)]
+    local_history_backfill_stream_state: LocalHistoryBackfillStreamState,
+    #[serde(default)]
     local_history_backfill_inflight: Option<LocalHistoryBackfillInFlight>,
     #[serde(default)]
     legacy_segment_cursor_index_after_id: Option<String>,
@@ -337,6 +343,8 @@ impl Default for RepositoryReplicaSnapshot {
             deep_verified_peer_ids: BTreeSet::new(),
             local_history_backfill_completed: false,
             local_history_backfill_cursor: None,
+            local_history_backfill_epoch: 0,
+            local_history_backfill_stream_state: BTreeMap::new(),
             local_history_backfill_inflight: None,
             legacy_segment_cursor_index_after_id: None,
             legacy_segment_cursor_index_complete: false,
@@ -354,13 +362,6 @@ impl Default for RepositoryReplicaSnapshot {
             sequence_summary_migration_complete: false,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LocalHistoryBackfillInFlight {
-    page_cursor: Option<String>,
-    completed: bool,
-    segment_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -923,6 +924,7 @@ mod legacy_cursor_tests;
 #[cfg(test)]
 #[path = "runtime/legacy_relay_tests.rs"]
 mod legacy_relay_tests;
+mod local_history_backfill;
 mod paths;
 mod query;
 mod receive;
