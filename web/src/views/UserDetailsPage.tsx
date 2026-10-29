@@ -232,6 +232,7 @@ export function UserDetailsPage() {
 	const mihomoProfileQuery = useQuery({
 		queryKey: ["adminUserMihomoProfile", adminToken, userId],
 		enabled: enabledFor(usersCapability),
+		staleTime: 0,
 		refetchOnMount: "always",
 		queryFn: ({ signal }) =>
 			mihomoSaveQueue.fetchMihomoProfileWithSaveSnapshot(
@@ -390,7 +391,6 @@ export function UserDetailsPage() {
 		subscriptionToken,
 		useExternalResourceMirror,
 	]);
-
 	useEffect(() => {
 		if (!user) return;
 		setDisplayName(user.display_name);
@@ -460,11 +460,10 @@ export function UserDetailsPage() {
 				}
 				mihomoSaveQueue.recordMihomoProfileSave(saveKey, saved);
 				queryClient.setQueryData<AdminUserMihomoProfile>(queryKey, saved);
-				pushToast({ variant: "success", message: "Mihomo profile updated" });
 				return saved;
 			});
 		},
-		[adminToken, pushToast, queryClient, userId],
+		[adminToken, queryClient, userId],
 	);
 	const verifyMihomoProfile = useCallback(
 		async (_submitted: AdminUserMihomoProfile) => {
@@ -486,6 +485,8 @@ export function UserDetailsPage() {
 		profile: mihomoProfileQuery.data,
 		readOnly: runtime.isReadOnly,
 		saveProfile: saveMihomoProfileRequest,
+		onSaveSuccess: () =>
+			pushToast({ variant: "success", message: "Mihomo profile updated" }),
 		verifyProfile: verifyMihomoProfile,
 		formatError: (error) => {
 			if (isMihomoWriteOutcomeUnknown(error)) {
@@ -496,10 +497,8 @@ export function UserDetailsPage() {
 	});
 	const mihomoSavingRef = useRef(false);
 	mihomoSavingRef.current = mihomoDraft.isSaving;
-
 	const endpoints = endpointsQuery.data?.items ?? [];
 	const access = accessQuery.data?.items ?? [];
-
 	const endpointById = useMemo(() => {
 		const map = new Map<string, (typeof endpoints)[number]>();
 		for (const endpoint of endpoints) {
@@ -507,7 +506,6 @@ export function UserDetailsPage() {
 		}
 		return map;
 	}, [endpoints]);
-
 	const optionsByCell = useMemo(() => {
 		const map = new Map<
 			string,
@@ -526,7 +524,6 @@ export function UserDetailsPage() {
 		}
 		return map;
 	}, [endpoints]);
-
 	useEffect(() => {
 		if (!userId || accessInitForUserId === userId) return;
 		if (endpointsQuery.isError || accessQuery.isError) return;
@@ -603,7 +600,6 @@ export function UserDetailsPage() {
 		}
 		return byNode;
 	}, [nodesQuery.data?.items, optionsByCell, selectedByCell]);
-
 	function toggleCell(nodeId: string, protocolId: SupportedProtocolId) {
 		const key = buildCellKey(nodeId, protocolId);
 		const allEndpointIds = (optionsByCell.get(key) ?? []).map(
@@ -1372,7 +1368,11 @@ export function UserDetailsPage() {
 									saveFeedback={mihomoDraft.saveFeedback}
 									storageError={mihomoDraft.storageError}
 									conflict={mihomoDraft.conflict}
-									isLoaded={mihomoDraft.isLoaded}
+									isLoaded={
+										mihomoDraft.isLoaded &&
+										mihomoProfileQuery.isFetchedAfterMount &&
+										!mihomoProfileQuery.isFetching
+									}
 									adminToken={adminToken}
 									importAvailable={enabledFor(mihomoImportCapability)}
 									onChange={mihomoDraft.setField}

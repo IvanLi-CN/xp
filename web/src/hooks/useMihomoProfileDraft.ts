@@ -35,6 +35,7 @@ type UseMihomoProfileDraftProps = {
 		baseline: AdminUserMihomoProfile,
 		allowOverwrite?: boolean,
 	) => Promise<AdminUserMihomoProfile>;
+	onSaveSuccess?: (profile: AdminUserMihomoProfile) => void;
 	verifyProfile?: (
 		profile: AdminUserMihomoProfile,
 	) => Promise<AdminUserMihomoProfile>;
@@ -53,11 +54,9 @@ type StoredMihomoDraft = {
 	baseline: AdminUserMihomoProfile;
 };
 const MIHOMO_DRAFT_SCHEMA_VERSION = 1;
-
 function sessionDraftKey(clusterId: string, userId: string): string {
 	return `xp-mihomo-draft:v${MIHOMO_DRAFT_SCHEMA_VERSION}:${clusterId}:${userId}:mihomo-profile`;
 }
-
 function readStoredDraft(
 	clusterId: string | undefined,
 	userId: string,
@@ -140,7 +139,6 @@ const MIHOMO_PROFILE_TAB_ID_STORAGE_KEY = "xp.mihomo-profile.tab-id.v1";
 const MIHOMO_PROFILE_TAB_CLAIM_STORAGE_KEY_PREFIX =
 	"xp.mihomo-profile.tab-claim.v1:";
 let mihomoBrowserTabInstanceId: string | null = null;
-
 function randomBrowserIdentifier(): string {
 	return typeof crypto !== "undefined" && "randomUUID" in crypto
 		? crypto.randomUUID()
@@ -357,6 +355,7 @@ export function useMihomoProfileDraft({
 	profile,
 	readOnly = false,
 	saveProfile,
+	onSaveSuccess,
 	verifyProfile,
 	formatError = (error) =>
 		error instanceof Error ? error.message : String(error),
@@ -780,6 +779,7 @@ export function useMihomoProfileDraft({
 					)
 						return false;
 					acceptProfile(saved, targetUserId);
+					onSaveSuccess?.(saved);
 					setSaveFeedback(null);
 					setStorageError(clearStoredDraft(clusterId, targetUserId));
 					clearPersistedMihomoDraft(storageKey);
@@ -871,6 +871,7 @@ export function useMihomoProfileDraft({
 			saveProfile,
 			baselineKnown,
 			isVerifying,
+			onSaveSuccess,
 			verifyProfile,
 			sessionIdentity,
 			baseline,
