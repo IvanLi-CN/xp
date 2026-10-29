@@ -393,10 +393,24 @@ impl RepositoryReplicaRuntime {
             return Ok(Vec::new());
         };
         if !inflight.segments.is_empty() {
+            if inflight.segment_ids.is_empty()
+                || inflight.segment_ids.len() != inflight.segments.len()
+            {
+                return Err(RepositoryRuntimeError::Storage(
+                    "local history backfill in-flight segment index is incomplete".to_owned(),
+                ));
+            }
+            let mut seen_ids = BTreeSet::new();
             return inflight
                 .segment_ids
                 .iter()
                 .map(|segment_id| {
+                    if !seen_ids.insert(segment_id) {
+                        return Err(RepositoryRuntimeError::Storage(
+                            "local history backfill in-flight segment index is duplicated"
+                                .to_owned(),
+                        ));
+                    }
                     inflight
                         .segments
                         .iter()
@@ -409,6 +423,16 @@ impl RepositoryReplicaRuntime {
                             RepositoryRuntimeError::Storage(
                                 "local history backfill segment is missing".to_owned(),
                             )
+                        })
+                        .and_then(|segment| {
+                            let digest = hex::encode(Sha256::digest(&segment.wire));
+                            if digest != *segment_id {
+                                return Err(RepositoryRuntimeError::Storage(
+                                    "local history backfill segment digest does not match its ID"
+                                        .to_owned(),
+                                ));
+                            }
+                            Ok(segment)
                         })
                 })
                 .collect();

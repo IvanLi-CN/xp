@@ -481,10 +481,12 @@ impl RepositoryReplicaRuntime {
                         "tombstone schema has no target stream: {schema_id}"
                     ))
                 })?;
+                let target_stream =
+                    super::error::backfill_target_stream(cursor.stream(), target_stream)?;
                 let target_cursor = ReplicaCursor::new(
                     cursor.source_node_id(),
                     cursor.source_epoch(),
-                    target_stream,
+                    &target_stream,
                     cursor.sequence(),
                 )?;
                 let target_key = ReplicaRecord::new(

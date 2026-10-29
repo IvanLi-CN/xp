@@ -879,10 +879,11 @@ Notes:
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
 - The first local history baseline uses a separate signed backfill stream family: schema records use
-  `<stream>-backfill-<source_node_id>` and tombstones keep the protocol tombstone stream
-  with separate
-  backfill state. This page never consumes the already-advanced live source sequence, outbox or hash
-  chain. A persisted page is resumed only after XP rechecks cluster binding, the derived repository
+  `<stream>-backfill-<source_node_id>` and tombstones use
+  `tombstone-backfill-<source_node_id>` with separate backfill state. This page never consumes or
+  advances the live source sequence, outbox or hash chain. If the live source epoch is unset, the
+  first backfill page durably initializes that identity epoch before creating its independent
+  sequence chain. A persisted page is resumed only after XP rechecks cluster binding, the derived repository
   identity, segment ownership, signature, source/epoch/stream, sequence continuity and predecessor
   hash. Wire receive, record/tombstone import, ACK and page cursor commit
   atomically; a failure leaves the exact unacknowledged wires for retry.
@@ -1059,6 +1060,12 @@ for the same known subject/window: it must be `complete`, not `partial` or `loca
 top-level response must have no unreachable repository member. A non-zero `gap_count` is an explicit
 gap finding; it may be an accepted `ready` state only when the gap is documented as permanent, while
 the corresponding history remains `partial` and `replica_converged=false`.
+
+The status response does not expose the local backfill page cursor or completion marker. Therefore
+these samples establish repository/API health and live-source drain only; they cannot by themselves
+prove that the backfill reached its terminal page. Pair them with exact-current-SHA backfill test
+evidence or a separately authorized local checkpoint diagnostic. Without that evidence, the field
+acceptance remains incomplete.
 
 Do not call the work complete from `ready` alone, one status sample, a zero pending count observed
 only once, a stable record count without page-cursor evidence, or a successful process restart

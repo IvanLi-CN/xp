@@ -611,7 +611,7 @@ pub(crate) fn peer_backfill_stream_for_record(
     peer_node_id: &str,
 ) -> anyhow::Result<String> {
     if record.is_tombstone() {
-        Ok("tombstone".to_owned())
+        Ok(format!("tombstone-backfill-{peer_node_id}"))
     } else {
         peer_backfill_stream_for_schema(record.schema().0, peer_node_id)
     }

@@ -20,12 +20,12 @@ fn stored_segments(runtime: &super::RepositoryReplicaRuntime) -> Vec<SignedSegme
 fn live_source_queue_keeps_live_stream_and_ack_path_intact() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
-    let identity = identity(&key);
+    let repository_identity = identity(&key);
     let mut runtime = load(temporary.path());
     let segment = runtime
         .queue_local_source_segment(
             "cluster-a",
-            identity.clone(),
+            repository_identity.clone(),
             &key,
             vec![record(b"live-source", false)],
             900,
@@ -45,7 +45,7 @@ fn live_source_queue_keeps_live_stream_and_ack_path_intact() {
     );
 
     runtime
-        .receive_wire("cluster-a", &identity, &segment.wire, 901)
+        .receive_wire("cluster-a", &repository_identity, &segment.wire, 901)
         .expect("receive live source segment");
     runtime
         .acknowledge_local_source_segment(&segment.wire)
@@ -64,27 +64,38 @@ fn live_source_queue_keeps_live_stream_and_ack_path_intact() {
 fn local_history_backfill_starts_a_separate_chain_without_touching_live_source_state() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
-    let identity = identity(&key);
+    let repository_identity = identity(&key);
     let mut runtime = load(temporary.path());
     let live = runtime
         .queue_local_source_segment(
             "cluster-a",
-            identity.clone(),
+            repository_identity.clone(),
             &key,
             vec![record(b"live", false)],
             900,
         )
         .expect("queue live source segment")
         .expect("live source segment");
+    runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            repository_identity.clone(),
+            &key,
+            vec![record(b"live-tail", false)],
+            901,
+        )
+        .expect("queue live tail segment")
+        .expect("live tail segment");
     let source_journal_before = runtime
         .storage
         .source_delivery_journal()
         .expect("source journal before backfill");
+    let live_tail_wire = source_journal_before[1].wire.clone();
 
     runtime
         .apply_local_history_backfill_page(
             "cluster-a",
-            identity,
+            repository_identity,
             &key,
             Some("history-page-1".to_owned()),
             false,
@@ -102,8 +113,22 @@ fn local_history_backfill_starts_a_separate_chain_without_touching_live_source_s
         backfill[0].canonical().first_cursor().stream(),
         "runtime-backfill-node-a"
     );
-    assert_eq!(runtime.local_source_next_sequence("runtime"), Some(1));
-    assert_eq!(runtime.local_source_pending_segments()[0].wire, live.wire);
+    assert_eq!(runtime.local_source_next_sequence("runtime"), Some(2));
+    assert_eq!(
+        SignedSegment::from_wire(&live_tail_wire)
+            .expect("signed live tail segment")
+            .canonical()
+            .first_cursor()
+            .sequence(),
+        1
+    );
+    let pending_journal = runtime
+        .storage
+        .source_delivery_journal()
+        .expect("source journal pending after backfill");
+    assert_eq!(pending_journal.len(), 2);
+    assert_eq!(pending_journal[0].wire, live.wire);
+    assert_eq!(pending_journal[1].wire, live_tail_wire);
     let source_journal_after = runtime
         .storage
         .source_delivery_journal()
@@ -114,6 +139,64 @@ fn local_history_backfill_starts_a_separate_chain_without_touching_live_source_s
         runtime.local_history_backfill_cursor(),
         Some("history-page-1")
     );
+
+    runtime
+        .receive_wire("cluster-a", &identity(&key), &live.wire, 1_002)
+        .expect("receive non-zero live source segment");
+    runtime
+        .acknowledge_local_source_segment(&live.wire)
+        .expect("acknowledge non-zero live source segment");
+    runtime
+        .receive_wire("cluster-a", &identity(&key), &live_tail_wire, 1_003)
+        .expect("receive live tail segment");
+    runtime
+        .acknowledge_local_source_segment(&live_tail_wire)
+        .expect("acknowledge live tail segment");
+    assert!(runtime.local_source_pending_segments().is_empty());
+    assert!(
+        runtime
+            .storage
+            .source_delivery_journal()
+            .expect("source journal after live replay")
+            .is_empty()
+    );
+}
+
+#[test]
+fn malformed_local_history_backfill_inflight_index_cannot_advance_checkpoint() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let repository_identity = identity(&key);
+    let mut runtime = load(temporary.path());
+    runtime
+        .queue_local_history_backfill_segments(
+            "cluster-a",
+            repository_identity.clone(),
+            &key,
+            vec![record(b"malformed-inflight", false)],
+            1_000,
+        )
+        .expect("queue local backfill segment");
+    let mut snapshot = serde_json::to_value(&runtime.snapshot).expect("serialize snapshot");
+    snapshot["local_history_backfill_inflight"]["segment_ids"] = serde_json::json!([]);
+    runtime.snapshot = serde_json::from_value(snapshot).expect("restore malformed snapshot");
+
+    let error = runtime
+        .apply_local_history_backfill_inflight_page(
+            "cluster-a",
+            &repository_identity,
+            1_001,
+            &["local".to_owned()],
+            "local",
+        )
+        .expect_err("malformed in-flight index must fail closed");
+    assert!(matches!(
+        error,
+        super::RepositoryRuntimeError::Storage(message)
+            if message.contains("in-flight segment index")
+    ));
+    assert!(runtime.snapshot.local_history_backfill_inflight.is_some());
+    assert_eq!(runtime.local_history_backfill_cursor(), None);
 }
 
 #[test]

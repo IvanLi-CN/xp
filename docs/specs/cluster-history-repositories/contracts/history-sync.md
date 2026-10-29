@@ -48,12 +48,11 @@ forward progress, and stable snapshot/export state before persisting the next
 checkpoint. Malformed, regressing, or cycling cursors remain retryable failures.
 
 The first repository baseline uses a separate signed backfill chain. Schema records use a stable
-`<stream>-backfill-<source_node_id>` stream family; tombstones retain the protocol tombstone stream
-name but use the backfill page's independent stream state. Backfill does not consume or rewrite the
-live source outbox, live sequence head, or live hash-chain state. The backfill epoch may be pinned
-to the current live source epoch as an identity boundary, but it is persisted separately and cannot
-advance
-the live source.
+`<stream>-backfill-<source_node_id>` stream family; tombstones use the matching
+`tombstone-backfill-<source_node_id>` stream and the backfill page's independent stream state.
+Backfill does not consume or advance the live source outbox, live sequence head, or live hash-chain
+state. If the live source epoch is unset, the first non-empty page may durably initialize that
+identity epoch before creating its independent sequence chain; this is not a live sequence advance.
 
 Before applying a persisted local page, the receiver reloads the exact signed wires and checks the
 current cluster binding, derived repository identity, segment ownership, signature, source node,
@@ -180,10 +179,12 @@ ready status, but it keeps replica convergence false and every affected query
 partial.
 
 For field acceptance, `ready` alone is not completion evidence. The operator must observe the
-bounded backfill checkpoint advance to its terminal page, zero recoverable pending work, and a
-stable
-repository status sample; any permanent gap, `history_truncated`, missing peer runtime, or query
-quality of `partial`/`local_only` remains an explicit incomplete-history result.
+bounded backfill checkpoint advance to its terminal page through exact-current-SHA test evidence or
+an authorized local checkpoint diagnostic, together with zero recoverable pending work and a stable
+repository status sample. The public status endpoint does not serialize the local backfill cursor;
+status samples alone cannot prove that checkpoint. Any permanent gap, `history_truncated`, missing
+peer runtime, or query quality of `partial`/`local_only` remains an explicit incomplete-history
+result.
 
 After a declared permanent gap, the first segment after the missing range is
 accepted as a new hash-chain head because the skipped segment hash is unknown;

@@ -43,8 +43,9 @@ generation, delete source outbox rows, increase quota, create a second database,
 ## Initial baseline backfill and US4 sampling
 
 The first repository baseline is not ordinary live source delivery. Schema records use a separate
-signed `<stream>-backfill-<source_node_id>` chain, while tombstones retain their protocol stream
-name but use backfill page state. A local page persists its exact signed wires, IDs, backfill epoch,
+signed `<stream>-backfill-<source_node_id>` chain, while tombstones use the matching
+`tombstone-backfill-<source_node_id>` stream and backfill page state. A local page persists its
+exact signed wires, IDs, backfill epoch,
 stream state, page cursor and completion flag before import. On restart, XP must recheck the current
 cluster binding, derived repository identity, segment ownership, signature, source/epoch/stream,
 sequence continuity and predecessor hash before applying any record. A failed check or storage write
@@ -71,10 +72,12 @@ degraded storage, `history_truncated`, a non-zero unexplained gap, or a changed 
 fails the
 complete-history claim.
 
-The status endpoint cannot by itself prove that a process restart replayed an interrupted page. Mark
-that part of US4 as unverified unless the evidence includes the controlled exact-wire replay check
-(or
-the corresponding current-SHA test evidence). Never infer completion from a stable record count,
+The status endpoint does not expose the local backfill page cursor or completion marker, so it
+cannot
+by itself prove terminal backfill progress or that a process restart replayed an interrupted page.
+Mark those parts of US4 as unverified unless the evidence includes the controlled exact-wire replay
+check (or the corresponding current-SHA test evidence). Never infer completion from a stable record
+count,
 `ready` alone, one zero-pending observation, or a UI screenshot.
 
 ## Delivery throughput

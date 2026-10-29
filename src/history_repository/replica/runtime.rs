@@ -959,6 +959,12 @@ mod duplicate_gap_tests;
 #[path = "runtime/repair_selection_tests.rs"]
 mod repair_selection_tests;
 #[cfg(test)]
+#[path = "runtime/retention_integrity_tests.rs"]
+mod retention_integrity_tests;
+#[cfg(test)]
+#[path = "runtime/retention_tests.rs"]
+mod retention_tests;
+#[cfg(test)]
 #[path = "runtime/sqlite_order_tests.rs"]
 mod sqlite_order_tests;
 #[path = "runtime/sync_page.rs"]
@@ -974,23 +980,17 @@ mod sync_tests;
 mod tests;
 
 #[cfg(test)]
-#[path = "runtime/retention_tests.rs"]
-mod retention_tests;
-
+#[path = "runtime/page_replay_tests.rs"]
+mod page_replay_tests;
 #[cfg(test)]
-#[path = "runtime/retention_integrity_tests.rs"]
-mod retention_integrity_tests;
-
+#[path = "runtime/peer_backfill_tests.rs"]
+mod peer_backfill_tests;
 #[cfg(test)]
 #[path = "runtime/repair_batch_tests.rs"]
 mod repair_batch_tests;
 #[cfg(test)]
 #[path = "runtime/repair_tests.rs"]
 mod repair_tests;
-
-#[cfg(test)]
-#[path = "runtime/page_replay_tests.rs"]
-mod page_replay_tests;
 
 #[cfg(test)]
 #[path = "runtime/query_budget_tests.rs"]

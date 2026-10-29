@@ -87,10 +87,11 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   必须分别校验两种 opaque cursor 的长度、格式、单调前进和稳定 snapshot/export 状态；非法、回退
   或循环 cursor 不得写入 durable checkpoint。
 - 首个历史仓库基线回填必须使用独立的 backfill 签名流：普通 schema 流使用稳定的
-  `<stream>-backfill-<source_node_id>` 流名，tombstone 继续使用协议规定的 tombstone 流，但由
-  backfill 自己的 stream state 维护。它不得复用已经推进的实时 source sequence、实时 pending
-  outbox 或实时 hash-chain head；backfill epoch 可沿用当前 live source epoch 作为身份边界，但必须
-  在 backfill checkpoint 中固定，不能借此推进 live source。
+  `<stream>-backfill-<source_node_id>` 流名，tombstone 使用对应的
+  `tombstone-backfill-<source_node_id>` 流名，并由 backfill 自己的 stream state 维护。它不得
+  复用已经推进的实时 source sequence、实时 pending outbox 或实时 hash-chain head；若 live
+  source epoch 尚未建立，首个非空 backfill 页可以在同一 durable 初始化步骤建立该身份 epoch，
+  但不得推进 live sequence、outbox 或 hash-chain。
 - 本地 backfill 页必须在导入前持久化完整的签名 wire 集、segment IDs、backfill epoch、每条流的下一个
   sequence/hash、page cursor 和 completed 标志。重启只能重放该精确 wire 集；重放前必须重新检查
   cluster 归属、当前派生 repository identity、签名、source node、backfill epoch、流名、sequence
@@ -300,8 +301,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 首个仓库的本地历史与从其他节点导入的历史都先建立 backfill 专用的签名 segment 链，再进入
 普通 receiver。backfill stream state 与 live source state 分离；实时采集可以继续推进自己的
-sequence，不能改变已经排队的历史页。tombstone 仍先于受影响记录，并在 backfill 自己的页状态中
-保持顺序。
+sequence，不能改变已经排队的历史页。tombstone 使用对应的 backfill stream，仍先于受影响记录，
+并在 backfill 自己的页状态中保持顺序。
 
 恢复旧页时，worker 只能读取 durable checkpoint 中的 exact wire、segment ID、页游标、completed
 标志和 stream state。receiver 先验证当前 cluster 与派生 repository identity，再验证签名、source

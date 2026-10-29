@@ -423,7 +423,7 @@ fn peer_backfill_tombstones_use_the_independent_tombstone_stream() {
     .expect("tombstone");
     assert_eq!(
         super::peer_backfill_stream_for_record(&tombstone, "node-a").expect("backfill stream"),
-        "tombstone"
+        "tombstone-backfill-node-a"
     );
 }
 
