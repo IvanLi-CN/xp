@@ -160,6 +160,10 @@ export function useMihomoProfileDraft({
 	const acceptedProfileKeyRef = useRef(profileKey(profile));
 	const lastSavedProfileKeyRef = useRef<string | null>(null);
 	const restoredSessionRef = useRef<string | null>(null);
+	const draftRef = useRef(draft);
+	const baselineRef = useRef(baseline);
+	draftRef.current = draft;
+	baselineRef.current = baseline;
 
 	const dirty = useMemo(
 		() =>
@@ -261,31 +265,24 @@ export function useMihomoProfileDraft({
 	const setField = useCallback(
 		(documentId: MihomoProfileDocumentId, value: string) => {
 			if (readOnly || isSaving || !isLoaded) return;
-			const nextDraft = { ...draft, [documentId]: value };
+			const nextDraft = { ...draftRef.current, [documentId]: value };
+			draftRef.current = nextDraft;
 			setDraftState(nextDraft);
 			setError(null);
 			if (restoredSessionRef.current === sessionIdentity) {
+				const nextBaseline = baselineRef.current;
 				const nextDirty = MIHOMO_PROFILE_DOCUMENTS.some(
 					(nextDocumentId) =>
-						nextDraft[nextDocumentId] !== baseline[nextDocumentId],
+						nextDraft[nextDocumentId] !== nextBaseline[nextDocumentId],
 				);
 				setStorageError(
 					nextDirty
-						? writeStoredDraft(clusterId, userId, nextDraft, baseline)
+						? writeStoredDraft(clusterId, userId, nextDraft, nextBaseline)
 						: clearStoredDraft(clusterId, userId),
 				);
 			}
 		},
-		[
-			baseline,
-			clusterId,
-			draft,
-			isLoaded,
-			isSaving,
-			readOnly,
-			sessionIdentity,
-			userId,
-		],
+		[clusterId, isLoaded, isSaving, readOnly, sessionIdentity, userId],
 	);
 
 	const discard = useCallback(() => {
