@@ -359,26 +359,25 @@ function buildRuntimeComponents(node: AdminNode): NodeRuntimeComponent[] {
 }
 
 function buildRuntimeEvents(node: AdminNode): NodeRuntimeEvent[] {
-	return [
-		{
-			event_id: `evt-${node.node_id}-1`,
-			occurred_at: fixtureCatalog.timestamp.t20240101T001500(),
-			component: "xray",
-			kind: "status_changed",
-			message: "xray status changed: up -> down",
-			from_status: "up",
-			to_status: "down",
-		},
-		{
-			event_id: `evt-${node.node_id}-2`,
-			occurred_at: fixtureCatalog.timestamp.t20240101T001600(),
-			component: "cloudflared",
-			kind: "restart_failed",
-			message: "cloudflared restart request failed",
-			from_status: null,
-			to_status: "down",
-		},
-	];
+	const messages = [
+		"xray status changed: unknown -> up",
+		"xray restart requested by runtime reconciler",
+		"xray restart succeeded",
+		"cloudflared status changed: unknown -> up",
+		"cloudflared restart requested by runtime reconciler",
+		"cloudflared restart succeeded",
+		"xray status changed: up -> degraded",
+		"xray status changed: degraded -> up",
+	] as const;
+	return messages.map((message, index) => ({
+		event_id: `evt-${node.node_id}-${index + 1}`,
+		occurred_at: fixtureCatalog.timestamp.t20240101T000700(),
+		component: message.split(" ")[0] as NodeRuntimeEvent["component"],
+		kind: ["status_changed", "restart_requested", "restart_succeeded"][
+			index % 3
+		] as NodeRuntimeEvent["kind"],
+		message,
+	}));
 }
 
 function buildNodeRuntimeListItem(node: AdminNode): AdminNodeRuntimeListItem {
