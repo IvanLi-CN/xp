@@ -439,7 +439,7 @@ export function MihomoProfileEditor({
 				<div className="flex items-center gap-2">
 					<Button
 						loading={isSaving}
-						disabled={readOnly || !dirty || !isLoaded}
+						disabled={readOnly || !dirty || !isLoaded || Boolean(conflict)}
 						iconLeft={<Icon name="tabler:device-floppy" />}
 						onClick={() => void onSave()}
 					>

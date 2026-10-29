@@ -284,6 +284,7 @@ export function useMihomoProfileDraft({
 		if (!conflict || isSaving) return;
 		const nextBaseline = cloneProfile(conflict.server);
 		setBaseline(nextBaseline);
+		acceptedProfileKeyRef.current = profileKey(nextBaseline);
 		setConflict(null);
 		setStorageError(writeStoredDraft(clusterId, userId, draft, nextBaseline));
 	}, [clusterId, conflict, draft, isSaving, userId]);
@@ -305,6 +306,7 @@ export function useMihomoProfileDraft({
 			readOnly ||
 			!isLoaded ||
 			!dirty ||
+			conflict ||
 			currentUserIdRef.current !== userId ||
 			currentSessionIdentityRef.current !== sessionIdentity
 		) {
@@ -360,6 +362,7 @@ export function useMihomoProfileDraft({
 		dirty,
 		draft,
 		formatError,
+		conflict,
 		isLoaded,
 		readOnly,
 		saveProfile,

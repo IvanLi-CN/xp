@@ -349,6 +349,23 @@ export function hydratePrimaryBackendProfile(
 	if (isStaticWebConsole()) {
 		const candidatesByOrigin = new Map<string, BackendCandidate>();
 		const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
+		const previousCandidates = new Map(
+			state.candidates.map((candidate) => [candidate.origin, candidate]),
+		);
+		if (bootstrapOrigin) {
+			const existing = previousCandidates.get(bootstrapOrigin);
+			candidatesByOrigin.set(bootstrapOrigin, {
+				...existing,
+				origin: bootstrapOrigin,
+				nodeId: existing?.nodeId ?? "bootstrap",
+				nodeName: existing?.nodeName ?? "Bootstrap backend",
+				verifiedAt: existing?.verifiedAt ?? null,
+				lastError: existing?.lastError ?? null,
+				runtimeState: "active",
+				switchable: true,
+				switchBlockedReason: undefined,
+			});
+		}
 		if (nodes === undefined) {
 			for (const candidate of state.candidates) {
 				candidatesByOrigin.set(candidate.origin, candidate);
@@ -358,8 +375,13 @@ export function hydratePrimaryBackendProfile(
 			const rawOrigin = node.api_base_url.trim();
 			const origin = canonicalBackendOrigin(rawOrigin);
 			const candidateKey = origin ?? `invalid:${node.node_id}`;
-			const existing = candidatesByOrigin.get(candidateKey);
-			const switchable = origin !== null && staticAllowedOrigins.has(origin);
+			const existing = previousCandidates.get(candidateKey);
+			const runtimeState = existing?.runtimeState;
+			const switchable =
+				origin !== null &&
+				staticAllowedOrigins.has(origin) &&
+				runtimeState !== "staged" &&
+				runtimeState !== "temporarily_unavailable";
 			candidatesByOrigin.set(candidateKey, {
 				...existing,
 				origin: origin ?? rawOrigin,
@@ -371,9 +393,13 @@ export function hydratePrimaryBackendProfile(
 				switchBlockedReason:
 					origin === null
 						? "HTTPS is required for this node."
-						: switchable
-							? undefined
-							: "This node is not available to the static console.",
+						: runtimeState === "staged"
+							? "This node requires a confirmed reload."
+							: runtimeState === "temporarily_unavailable"
+								? "This node is temporarily unavailable."
+								: switchable
+									? undefined
+									: "This node is not available to the static console.",
 			});
 		}
 		const currentOrigin = canonicalBackendOrigin(state.primaryOrigin);
