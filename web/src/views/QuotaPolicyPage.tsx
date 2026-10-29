@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
@@ -1883,7 +1884,7 @@ export function QuotaPolicyPage() {
 									<p className="text-sm text-destructive">{globalRatioError}</p>
 								) : null}
 								{globalFailedRows.length > 0 ? (
-									<div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-3 space-y-2">
+									<Alert tone="error" className="flex-col rounded-2xl p-3">
 										<p className="text-sm font-medium text-destructive">
 											Failed rows ({globalFailedRows.length})
 										</p>
@@ -1895,7 +1896,7 @@ export function QuotaPolicyPage() {
 												</li>
 											))}
 										</ul>
-									</div>
+									</Alert>
 								) : null}
 
 								<div className="flex flex-wrap items-center gap-2">
@@ -2557,7 +2558,7 @@ export function QuotaPolicyPage() {
 									<p className="text-sm text-destructive">{ratioError}</p>
 								) : null}
 								{failedRows.length > 0 ? (
-									<div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-3 space-y-2">
+									<Alert tone="error" className="flex-col rounded-2xl p-3">
 										<p className="text-sm font-medium text-destructive">
 											Failed rows ({failedRows.length})
 										</p>
@@ -2569,7 +2570,7 @@ export function QuotaPolicyPage() {
 												</li>
 											))}
 										</ul>
-									</div>
+									</Alert>
 								) : null}
 
 								<div className="flex flex-wrap items-center gap-2">

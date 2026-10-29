@@ -100,18 +100,20 @@ test("shows the registered node list from the AppShell switcher", async ({
 	});
 	await page.getByRole("button", { name: "Open primary backend" }).click();
 
-	await expect(page.getByRole("menu")).toBeVisible();
 	await expect(
-		page.getByRole("menuitem", {
+		page.getByRole("dialog", { name: "Primary backend" }),
+	).toBeVisible();
+	await expect(
+		page.getByRole("button", {
 			name: fixtureCatalog.identifier.nodeNameSecondary(),
 			exact: true,
 		}),
 	).toBeVisible();
+	await expect(page.getByRole("button", { name: /Current page/ })).toHaveCount(
+		0,
+	);
 	await expect(
-		page.getByRole("menuitem", { name: /Current page/ }),
-	).toHaveCount(0);
-	await expect(
-		page.getByRole("menuitem", {
+		page.getByRole("button", {
 			name: fixtureCatalog.identifier.nodeNamePrimary(),
 			exact: true,
 		}),
@@ -127,7 +129,7 @@ test("shows version differences and separate frontend links", async ({
 	);
 	await page.getByRole("button", { name: "Open primary backend" }).click();
 
-	const menu = page.getByRole("menu");
+	const menu = page.getByRole("dialog", { name: "Primary backend" });
 	const menuBox = await menu.boundingBox();
 	if (!menuBox) throw new Error("Primary backend menu has no bounding box");
 	expect(menuBox.width).toBeLessThanOrEqual(336);
@@ -150,7 +152,7 @@ test("shows version differences and separate frontend links", async ({
 	);
 
 	await expect(
-		page.getByRole("menuitem", {
+		page.getByRole("button", {
 			name: /Open on node unavailable: API base URL must use HTTPS/,
 		}),
 	).toBeDisabled();
@@ -179,7 +181,7 @@ test("keeps the switcher menu inside a narrow viewport", async ({ page }) => {
 		});
 		await page.getByRole("button", { name: "Open primary backend" }).click();
 
-		const menu = page.getByRole("menu");
+		const menu = page.getByRole("dialog", { name: "Primary backend" });
 		await expect(menu).toBeVisible();
 		const box = await menu.boundingBox();
 		if (!box) throw new Error("Primary backend menu has no bounding box");

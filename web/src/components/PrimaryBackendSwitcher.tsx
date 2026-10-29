@@ -9,6 +9,7 @@ import {
 	switchPrimaryBackend,
 	verifyBackendCandidate,
 } from "@/backend/primaryBackend";
+import { Alert } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { writeAppliedRuntimePolicyId } from "@/offline/runtimePolicySession";
 import { setServiceWorkerRuntimePolicy } from "@/offline/serviceWorkerPolicy";
@@ -17,14 +18,7 @@ import { buildNodePageHref } from "@/utils/navigation";
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 function hostLabel(origin: string) {
 	try {
@@ -168,7 +162,7 @@ export function PrimaryBackendSwitcher(props: {
 			: `Primary backend: ${hostLabel(backend.primaryOrigin)}`;
 
 	return (
-		<DropdownMenu
+		<Popover
 			open={open}
 			onOpenChange={(nextOpen) => {
 				setOpen(nextOpen);
@@ -176,7 +170,7 @@ export function PrimaryBackendSwitcher(props: {
 				if (nextOpen) props.onOpened?.();
 			}}
 		>
-			<DropdownMenuTrigger asChild>
+			<PopoverTrigger asChild>
 				<Button
 					variant="secondary"
 					size="sm"
@@ -190,15 +184,19 @@ export function PrimaryBackendSwitcher(props: {
 						{hostLabel(backend.primaryOrigin)}
 					</span>
 				</Button>
-			</DropdownMenuTrigger>
-			<DropdownMenuContent
+			</PopoverTrigger>
+			<PopoverContent
 				align="end"
-				className="xp-menu-content"
+				aria-label="Primary backend"
+				className={
+					"xp-menu-content max-h-[var(--radix-popover-content-available-height)] " +
+					"overflow-y-auto"
+				}
 				portalContainer={props.portalContainer}
 			>
-				<DropdownMenuLabel className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+				<p className="px-1 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
 					Primary backend
-				</DropdownMenuLabel>
+				</p>
 				{props.directoryStatus === "stale" ? (
 					<output className="block px-2 pt-2 text-xs text-muted-foreground">
 						Node list may be out of date.
@@ -243,14 +241,21 @@ export function PrimaryBackendSwitcher(props: {
 											"rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15",
 									)}
 								>
-									<DropdownMenuItem
+									<button
+										type="button"
 										disabled={isCurrent || switchDisabled}
 										aria-current={isCurrent ? "true" : undefined}
-										onSelect={(event) => {
-											event.preventDefault();
+										onClick={() => {
 											void handleSelect(candidate);
 										}}
-										className="items-start py-2"
+										className={cn(
+											"flex min-w-0 items-start gap-2 rounded-lg px-2 py-2 " +
+												"text-left text-sm outline-none focus-visible:ring-2 " +
+												"focus-visible:ring-ring hover:bg-accent",
+											isCurrent
+												? "disabled:opacity-100"
+												: "disabled:opacity-50",
+										)}
 										aria-label={
 											isCurrent
 												? `${candidate.nodeName}, current backend`
@@ -284,7 +289,7 @@ export function PrimaryBackendSwitcher(props: {
 											</span>
 										) : null}
 										{candidate.runtimeState === "staged" ? (
-											<span className="text-xs text-warning-foreground">
+											<span className="text-xs text-foreground">
 												Reload required
 											</span>
 										) : null}
@@ -293,34 +298,35 @@ export function PrimaryBackendSwitcher(props: {
 												Unavailable
 											</span>
 										) : null}
-									</DropdownMenuItem>
+									</button>
 									{resolved.disabled ? (
-										<DropdownMenuItem
+										<button
+											type="button"
 											disabled
-											title={resolved.reason}
 											aria-label={resolved.reason}
-											className="px-2"
+											className="px-2 opacity-50"
 										>
 											<Icon
 												name="tabler:external-link-off"
 												ariaLabel="Open node unavailable"
 											/>
-										</DropdownMenuItem>
+										</button>
 									) : (
-										<DropdownMenuItem asChild className="px-2">
-											<a
-												href={resolved.href}
-												target="_blank"
-												rel="noopener noreferrer"
-												title={`Open ${candidate.nodeName} frontend in a new tab`}
-												aria-label={`Open ${candidate.nodeName} frontend in a new tab`}
-											>
-												<Icon
-													name="tabler:external-link"
-													ariaLabel="Open node frontend"
-												/>
-											</a>
-										</DropdownMenuItem>
+										<a
+											href={resolved.href}
+											target="_blank"
+											rel="noopener noreferrer"
+											aria-label={`Open ${candidate.nodeName} frontend in a new tab`}
+											className={
+												"flex items-center rounded-lg px-2 outline-none hover:bg-accent " +
+												"focus-visible:ring-2 focus-visible:ring-ring"
+											}
+										>
+											<Icon
+												name="tabler:external-link"
+												ariaLabel="Open node frontend"
+											/>
+										</a>
 									)}
 								</div>
 							);
@@ -333,17 +339,17 @@ export function PrimaryBackendSwitcher(props: {
 					</p>
 				) : null}
 				{backend.lastSwitchTimedOut ? (
-					<p className="mt-2 rounded-md bg-warning/15 px-2 py-1.5 text-xs text-warning-foreground">
+					<Alert as="p" tone="warning" className="mt-2 px-2 py-1.5 text-xs">
 						The previous change result is unknown.
-					</p>
+					</Alert>
 				) : null}
 				{currentReloadCandidate ? (
-					<div className="mt-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs">
-						<p role="alert" className="text-warning-foreground">
+					<Alert tone="warning" className="mt-2 flex-col p-2 text-xs">
+						<output>
 							{hostLabel(currentReloadCandidate.origin)} is not in this page's
-							active policy. Confirm one reload to activate it; your current
-							page stays intact if you cancel.
-						</p>
+							active policy. Reload to allow this backend to be checked; you
+							must select it again after reloading. Unsaved changes may be lost.
+						</output>
 						<div className="mt-2 flex justify-end gap-2">
 							<Button
 								variant="ghost"
@@ -375,17 +381,22 @@ export function PrimaryBackendSwitcher(props: {
 								Reload once
 							</Button>
 						</div>
-					</div>
+					</Alert>
 				) : null}
 				{error ? (
 					<>
-						<DropdownMenuSeparator />
-						<p role="alert" className="px-1 text-sm text-destructive">
+						<div className="my-1 h-px bg-border" />
+						<Alert
+							as="p"
+							tone="error"
+							role="alert"
+							className="mt-2 px-2 text-sm"
+						>
 							{error}
-						</p>
+						</Alert>
 					</>
 				) : null}
-			</DropdownMenuContent>
-		</DropdownMenu>
+			</PopoverContent>
+		</Popover>
 	);
 }

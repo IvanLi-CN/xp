@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import type { CustomSeriesRenderItem, EChartsOption } from "echarts";
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import type { EChartsReactProps } from "echarts-for-react/lib/types";
@@ -1812,7 +1813,10 @@ export function IpUsageView({
 				<IpGeoSourceNotice geoSource={geoSource} />
 
 				{blockingWarning && empty ? (
-					<div className="xp-alert xp-alert-warning flex-col items-center rounded-2xl px-4 py-10 text-center">
+					<Alert
+						tone="warning"
+						className="flex-col items-center rounded-2xl px-4 py-10 text-center"
+					>
 						<p className="text-base font-semibold">
 							Online snapshots are unavailable
 						</p>
@@ -1820,7 +1824,7 @@ export function IpUsageView({
 							This node is not exposing `statsUserOnline`, so xp cannot collect
 							per-minute inbound IP occupancy.
 						</p>
-					</div>
+					</Alert>
 				) : empty && !isWindowPending ? (
 					<div className="rounded-2xl border border-dashed border-border/70 px-4 py-10 text-center">
 						<p className="text-base font-semibold">{emptyTitle}</p>

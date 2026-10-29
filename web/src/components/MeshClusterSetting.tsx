@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { type ReactNode, useState } from "react";
 
 import type { AdminMeshStatus, MeshPreflightFailure } from "@/api/adminMesh";
@@ -286,8 +287,8 @@ export function MeshClusterSetting({
 						</p>
 					) : null}
 					{lock ? (
-						<div className="mt-4 rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm">
-							<p className="font-medium text-warning-foreground">
+						<Alert tone="warning" className="mt-4 flex-col p-3 text-sm">
+							<p className="font-medium text-foreground">
 								Mutation result unknown
 							</p>
 							<p className="mt-1 text-muted-foreground">
@@ -312,16 +313,13 @@ export function MeshClusterSetting({
 									Verify and unlock
 								</Button>
 							</div>
-						</div>
+						</Alert>
 					) : null}
 					{mutationIssue && !isLocked ? (
-						<div
+						<Alert
+							tone={issueTone(mutationIssue.kind)}
 							role="alert"
-							className={`mt-4 rounded-xl border p-3 text-sm ${
-								issueTone(mutationIssue.kind) === "warning"
-									? "border-warning/40 bg-warning/10"
-									: "border-destructive/40 bg-destructive/10"
-							}`}
+							className="mt-4 flex-col p-3 text-sm"
 						>
 							<p className="font-medium">{mutationIssue.message}</p>
 							{preflightFailures.length > 0 ? (
@@ -362,7 +360,7 @@ export function MeshClusterSetting({
 									</Button>
 								) : null}
 							</div>
-						</div>
+						</Alert>
 					) : null}
 				</div>
 

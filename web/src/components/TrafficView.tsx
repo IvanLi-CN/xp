@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import type { EChartsOption } from "echarts";
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import { LineChart } from "echarts/charts";
@@ -27,7 +28,6 @@ import {
 	escapeEChartsHtml,
 	useEChartsThemePalette,
 } from "./echarts-theme";
-import { alertClass } from "./ui-helpers";
 
 echarts.use([
 	GridComponent,
@@ -350,9 +350,9 @@ export function TrafficView({
 				</span>
 			</div>
 			{report.partial ? (
-				<div className={alertClass("warning", "py-2")}>
+				<Alert tone="warning" className={"py-2"}>
 					Traffic data is partial. Missing samples remain gaps in the chart.
-				</div>
+				</Alert>
 			) : null}
 			{report.warnings.length > 0 ? (
 				<div className="text-xs text-muted-foreground">
