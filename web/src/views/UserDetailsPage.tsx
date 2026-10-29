@@ -480,7 +480,7 @@ export function UserDetailsPage() {
 		[adminToken, queryClient, userId],
 	);
 	const mihomoDraft = useMihomoProfileDraft({
-		clusterId: primaryBackend.clusterId ?? undefined,
+		clusterId: primaryBackend.clusterId ?? primaryBackend.primaryOrigin,
 		userId,
 		sessionKey: adminToken,
 		profile: mihomoProfileQuery.data,
