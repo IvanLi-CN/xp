@@ -111,6 +111,28 @@ pub(super) async fn require_xmux_settings_on_members(state: &AppState) -> Result
     .await
 }
 
+pub(super) async fn require_xmux_settings_on_node(
+    state: &AppState,
+    node: &Node,
+) -> Result<(), ApiError> {
+    if public_capability_supports(
+        state,
+        node,
+        "admin.endpoint-vless-xmux-settings-v1",
+        Instant::now(),
+    )
+    .await
+    {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            "coordinated_upgrade_required",
+            StatusCode::CONFLICT,
+            "restore target must support XMUX settings while custom policies exist",
+        ))
+    }
+}
+
 pub(super) async fn lock_xmux_settings_change(
     state: &AppState,
 ) -> Result<Option<tokio::sync::OwnedMutexGuard<()>>, ApiError> {

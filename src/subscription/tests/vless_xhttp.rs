@@ -210,8 +210,8 @@ fn custom_xmux_is_used_in_yaml_and_raw_uri() {
     endpoint.meta["mihomo_xmux"] = serde_json::json!({
         "max_connections": "0",
         "max_concurrency": "16-32",
-        "c_max_reuse_times": "10-20",
-        "h_max_reusable_secs": "60-120",
+        "c_max_reuse_times": "0-20",
+        "h_max_reusable_secs": "0-120",
         "h_keep_alive_period": 45
     });
     let membership = membership("n1", "e1");
@@ -253,8 +253,8 @@ fn custom_xmux_is_used_in_yaml_and_raw_uri() {
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
     let reuse = &proxies(&root)[0]["xhttp-opts"]["reuse-settings"];
     assert_eq!(reuse["max-concurrency"].as_str(), Some("16-32"));
-    assert_eq!(reuse["c-max-reuse-times"].as_str(), Some("10-20"));
-    assert_eq!(reuse["h-max-reusable-secs"].as_str(), Some("60-120"));
+    assert_eq!(reuse["c-max-reuse-times"].as_str(), Some("0-20"));
+    assert_eq!(reuse["h-max-reusable-secs"].as_str(), Some("0-120"));
     assert_eq!(reuse["h-keep-alive-period"].as_i64(), Some(45));
     let profile = profile();
     let main_yaml = build_mihomo_yaml(

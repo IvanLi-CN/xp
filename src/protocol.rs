@@ -134,13 +134,15 @@ impl MihomoXmuxConfig {
                 Some(last) => parse(last)?,
                 None => first,
             };
-            (parts.next().is_none() && first <= last && (first != 0 || value == "0"))
-                .then_some((first, last))
+            (parts.next().is_none() && first <= last).then_some((first, last))
         }
 
         let connections = range(&self.max_connections).ok_or("invalid max_connections")?;
         let concurrency = range(&self.max_concurrency).ok_or("invalid max_concurrency")?;
-        if (connections.0 > 0) == (concurrency.0 > 0) {
+        if (connections.0 > 0) == (concurrency.0 > 0)
+            || (connections.0 == 0 && self.max_connections != "0")
+            || (concurrency.0 == 0 && self.max_concurrency != "0")
+        {
             return Err("exactly one XMUX connection strategy must be enabled");
         }
         range(&self.c_max_reuse_times).ok_or("invalid c_max_reuse_times")?;
@@ -164,6 +166,9 @@ mod xmux_tests {
         config.max_concurrency = "16-32".into();
         config.c_max_reuse_times = "20-40".into();
         config.h_max_reusable_secs = "120-240".into();
+        assert!(config.validate().is_ok());
+        config.c_max_reuse_times = "0-2".into();
+        config.h_max_reusable_secs = "0-60".into();
         assert!(config.validate().is_ok());
         for invalid in ["", "-1", "32-16", "0-2", "1-2-3", "2147483648"] {
             config.max_concurrency = invalid.into();

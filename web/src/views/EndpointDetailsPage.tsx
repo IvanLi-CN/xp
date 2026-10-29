@@ -71,7 +71,7 @@ import {
 	canaryUpstreamSuggestionsFromAuthorities,
 } from "../utils/managedVlessForm";
 import { changedMihomoSmuxConfig } from "../utils/mihomoSmux";
-import { xmuxFromDraft } from "../utils/mihomoXmux";
+import { DEFAULT_XMUX_DRAFT, xmuxFromDraft } from "../utils/mihomoXmux";
 import {
 	normalizeRealityServerName,
 	realityServerNameSuggestionFromDest,
@@ -188,8 +188,20 @@ export function EndpointDetailsPage() {
 			}
 			if (endpoint.kind === "vless_reality_vision_tcp") {
 				if (transportChanged) payload.transport = endpointDraft.vlessTransport;
-				if (xmuxCapability.available && endpointDraft.xmuxChanged)
-					payload.mihomo_xmux = xmuxFromDraft(endpointDraft.xmux);
+				if (
+					xmuxCapability.available &&
+					(endpointDraft.xmuxChanged || endpoint.meta.mihomo_xmux != null)
+				) {
+					const xmux = xmuxFromDraft(endpointDraft.xmux);
+					if (
+						JSON.stringify(xmux) ===
+						JSON.stringify(xmuxFromDraft(DEFAULT_XMUX_DRAFT))
+					) {
+						payload.mihomo_xmux = null;
+					} else if (endpointDraft.xmuxChanged) {
+						payload.mihomo_xmux = xmux;
+					}
+				}
 				const metaSnapshot = parseVlessMeta(endpoint.meta);
 				if (!metaSnapshot.managedDefault) {
 					const fingerprintValue = realityFingerprint.trim() || "chrome";

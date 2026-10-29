@@ -30,12 +30,7 @@ function validRange(value: string, positive: boolean): boolean {
 	const values = value.split("-").map(Number);
 	const first = values[0];
 	const last = values[1] ?? first;
-	return (
-		first <= last &&
-		last <= 2147483647 &&
-		(!positive || first > 0) &&
-		(first !== 0 || value === "0")
-	);
+	return first <= last && last <= 2147483647 && (!positive || first > 0);
 }
 
 export function xmuxFromDraft(draft: MihomoXmuxDraft): MihomoXmuxConfig {

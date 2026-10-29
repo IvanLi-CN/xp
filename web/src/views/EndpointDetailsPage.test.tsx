@@ -276,6 +276,41 @@ describe("EndpointDetailsPage", () => {
 		);
 	});
 
+	it("clears a custom XMUX policy when the defaults are restored", async () => {
+		vi.mocked(fetchAdminEndpoint).mockResolvedValue({
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port53844(),
+			meta: {
+				reality: fixtureCatalog.endpoint.reality(),
+				transport: "xhttp",
+				managed_default: false,
+				mihomo_xmux: {
+					max_connections: "3",
+					max_concurrency: "0",
+					c_max_reuse_times: "0",
+					h_max_reusable_secs: "0",
+					h_keep_alive_period: -1,
+				},
+			},
+		});
+		renderPage();
+		fireEvent.click(await screen.findByText("Advanced: VLESS transport"));
+		fireEvent.change(screen.getByLabelText("Maximum connections"), {
+			target: { value: "1" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(patchAdminEndpoint).toHaveBeenCalledWith(
+				"admintoken",
+				fixtureCatalog.endpointId.fixture172(),
+				expect.objectContaining({ mihomo_xmux: null }),
+			),
+		);
+	});
+
 	it("falls back missing legacy transport metadata and patches an XHTTP switch", async () => {
 		vi.mocked(fetchAdminEndpoint).mockResolvedValue({
 			endpoint_id: fixtureCatalog.endpointId.fixture172(),

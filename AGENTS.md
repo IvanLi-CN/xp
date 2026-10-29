@@ -149,6 +149,8 @@
   Custom settings require every Raft member to advertise `admin.endpoint-vless-xmux-settings-v1`.
   Changes must be made on the current leader and cannot run during a membership operation.
   While any custom policy exists, joining XP must declare `xmux_settings_v1`.
+  Restore also requires signed verification of the target's XMUX capability
+  before registration or promotion.
   Before downgrading to unsupported XP, clear every custom policy with `mihomo_xmux: null`.
   Verify cluster convergence before proceeding.
 - Managed-default endpoint ports become cluster-owned after creation or auto-adoption.

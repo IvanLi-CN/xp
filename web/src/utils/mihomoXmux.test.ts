@@ -28,6 +28,9 @@ describe("XMUX draft", () => {
 		expect(config.max_connections).toBe("0");
 		expect(config.max_concurrency).toBe("16-32");
 		expect(xmuxDraftFromValue(config)).toEqual(draft);
+		expect(
+			xmuxFromDraft({ ...draft, reuseTimes: "0-2", reusableSecs: "0-60" }),
+		).toMatchObject({ c_max_reuse_times: "0-2", h_max_reusable_secs: "0-60" });
 	});
 	it("rejects malformed ranges and invalid keepalive", () => {
 		for (const value of ["", "-1", "8-2", "0-1", "01", "2147483648"]) {
