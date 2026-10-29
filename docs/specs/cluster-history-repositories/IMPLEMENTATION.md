@@ -152,6 +152,19 @@
   work to the next replication tick. Deep partition mismatches after a segment repair drains mark
   the checkpoint for the single-authority tiered import. A fresh summary verification pass must
   complete before the member can enter the readiness window.
+- Wave 1 local baseline backfill now persists an exact in-flight wire page before applying it. The
+  backfill uses independent `<stream>-backfill-<source_node_id>` sequence/hash chains for schema
+  records, keeps tombstones in their protocol stream with separate backfill stream state, and does
+  not consume the live source outbox or allocate live source sequences. Restart resumes the stored
+  wires only after rechecking cluster binding, derived repository identity, segment ownership,
+  signature, epoch, stream, sequence and chain state. Wire receive, record/tombstone import, stream
+  state, page cursor and completion are committed together; failures restore the prior snapshot and
+  leave unacknowledged wires available. New-format pages clear their in-flight wires only at the
+  durable receive/apply ACK boundary; legacy snapshots without embedded wires continue to replay the
+  exact source-journal rows until their real collector ACK commits. Coverage includes
+  separate-chain,
+  epoch reuse, restart hash-chain continuation, exact-wire retry, commit rollback, tombstone
+  protection and multi-segment page replay in `page_replay_tests.rs` and source-delivery tests.
 - Ready repository metadata is resolved independently for each member. A stale Ready member with
   no node metadata is retained in the aggregate and keeps catch-up incomplete, while available
   Ready peers continue their bounded pages; source delivery and history queries use the available

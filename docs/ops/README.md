@@ -878,6 +878,16 @@ Notes:
   Malformed or regressing pages remain retryable failures and are never checkpointed.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
+- The first local history baseline uses a separate signed backfill stream family: schema records use
+  `<stream>-backfill-<source_node_id>` and tombstones keep the protocol tombstone stream
+  with separate
+  backfill state. This page never consumes the already-advanced live source sequence, outbox or hash
+  chain. A persisted page is resumed only after XP rechecks cluster binding, the derived repository
+  identity, segment ownership, signature, source/epoch/stream, sequence continuity and predecessor
+  hash. Wire receive, record/tombstone import, ACK and page cursor commit
+  atomically; a failure leaves the exact unacknowledged wires for retry.
+  New-format in-flight wires clear only at the durable receive/apply ACK boundary; an old
+  source-journal row is deleted only after a real ACK removes that exact segment.
   For ready peers, one 5-second source cycle drains up to sixteen consecutive summary, repair, or
   tiered export pages per peer within a shared 15-second maintenance budget. The remaining budget is
   split among peers in stable order so a slow peer cannot starve later peers. The summary cursor and
@@ -1031,6 +1041,32 @@ Notes:
   Tombstones accepted during `syncing` are persisted locally but their acknowledgement fanout is
   deferred until the member is Raft-`ready`, after which the existing durable acknowledgement page
   retries delivery to all cluster nodes.
+
+### US4 field acceptance: initial history backfill
+
+Use read-only, authenticated samples from the exact candidate release. Record the candidate SHA,
+node ID, configured `XP_DATA_DIR`, and collection time. Capture
+`GET /api/admin/history-repositories`
+on every configured repository node at the start and again after at least one five-minute interval;
+if a node is still `syncing`, continue at the normal lifecycle interval until it reaches a terminal
+observation. Preserve the response bodies as evidence rather than relying on a UI screenshot.
+
+For each `items[]` entry, verify that `runtime` is present, `storage_mode` is healthy SQLite,
+`source_delivery.pending_segments` is zero, every `summary_repairs[*].pending_count` is zero, and
+`history_truncated` is false before claiming a complete baseline. Cross-check a bounded history
+query
+for the same known subject/window: it must be `complete`, not `partial` or `local_only`, and the
+top-level response must have no unreachable repository member. A non-zero `gap_count` is an explicit
+gap finding; it may be an accepted `ready` state only when the gap is documented as permanent, while
+the corresponding history remains `partial` and `replica_converged=false`.
+
+Do not call the work complete from `ready` alone, one status sample, a zero pending count observed
+only once, a stable record count without page-cursor evidence, or a successful process restart
+without proving exact-wire replay. Missing runtime, `partial`, `local_only`, `history_truncated`,
+pending repair/backlog, degraded or unavailable storage, changed candidate SHA, or an unexplained
+permanent
+gap all fail the complete-history claim and must remain in the acceptance report.
+
 - Upgrades repair the legacy zero-time tombstone ledger in place on startup when its mutable
   metadata matches the fixed horizon. This changes only the control snapshot's ledger expiry; it
   does not rewrite signed history, cursors or hashes. Do not remove `history.sqlite3`, replace

@@ -40,6 +40,43 @@ SQLite database, WAL and diagnostic file before any restart. Do not re-apply a c
 generation, delete source outbox rows, increase quota, create a second database, or run full
 `VACUUM` as a diagnostic shortcut.
 
+## Initial baseline backfill and US4 sampling
+
+The first repository baseline is not ordinary live source delivery. Schema records use a separate
+signed `<stream>-backfill-<source_node_id>` chain, while tombstones retain their protocol stream
+name but use backfill page state. A local page persists its exact signed wires, IDs, backfill epoch,
+stream state, page cursor and completion flag before import. On restart, XP must recheck the current
+cluster binding, derived repository identity, segment ownership, signature, source/epoch/stream,
+sequence continuity and predecessor hash before applying any record. A failed check or storage write
+leaves the
+page pending; it must not advance the cursor or delete an original wire. New-format in-flight wires
+clear only at the durable receive/apply ACK boundary; predecessor source-journal rows require a real
+collector ACK for the exact segment.
+
+For a read-only US4 field sample, record the candidate SHA, node ID and `XP_DATA_DIR`, then capture
+`GET /api/admin/history-repositories` with the already-authorized admin credential on every
+configured
+repository node at `t0` and again after at least five minutes. Preserve both JSON responses and the
+collection times. If a member remains `syncing`, continue sampling at the normal lifecycle interval;
+one sample cannot establish a completed baseline.
+
+At each sample, check every configured member's `runtime`: healthy `storage_mode`, zero
+`source_delivery.pending_segments`, zero `summary_repairs[*].pending_count`, no unexplained
+`history_truncated`, and advancing verification/checkpoint evidence. Then run one bounded
+known-window
+history query and retain its `complete`/`partial`/`local_only`, coverage, watermark and gap fields.
+`ready` is only a lifecycle state: a permanent gap may coexist with it, but the affected query must
+remain `partial` and `replica_converged=false`. Missing runtime, unreachable members, pending work,
+degraded storage, `history_truncated`, a non-zero unexplained gap, or a changed candidate SHA
+fails the
+complete-history claim.
+
+The status endpoint cannot by itself prove that a process restart replayed an interrupted page. Mark
+that part of US4 as unverified unless the evidence includes the controlled exact-wire replay check
+(or
+the corresponding current-SHA test evidence). Never infer completion from a stable record count,
+`ready` alone, one zero-pending observation, or a UI screenshot.
+
 ## Delivery throughput
 
 The read-only repository status also exposes durable `delivery_metrics`. The counters are cumulative
