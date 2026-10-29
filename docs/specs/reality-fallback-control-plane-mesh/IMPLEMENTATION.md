@@ -17,8 +17,10 @@
   indeterminate switch and stale or unsampled peer observations are labeled explicitly. The
   shared localStorage lock map is serialized across cluster ids, and the selected backend is
   rechecked after lock acquisition before any write begins. The lock remains held until a
-  successful observation confirms the accepted target, cancellation during lock acquisition is
-  fail-closed, and unreadable lock storage blocks writes. Missing observer data renders as
+  successful observation confirms the accepted target. The accepted follow-up observation stays
+  inside the backend mutation barrier and must match the confirmed backend generation and cluster
+  id before the lock can be cleared. Cancellation during lock acquisition is fail-closed, and
+  unreadable lock storage blocks writes. Missing observer data renders as
   unknown rather than zero-valued path counts. System Status remains diagnostic and links to
   Service config.
 

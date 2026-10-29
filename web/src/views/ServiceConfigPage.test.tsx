@@ -149,6 +149,34 @@ describe("ServiceConfigPage", () => {
 		expect(screen.getByText("Mutation result unknown")).toBeInTheDocument();
 	});
 
+	it("keeps an unknown observed setting labeled Unknown after acceptance", async () => {
+		const user = userEvent.setup();
+		const observedValues: Array<boolean | undefined> = [
+			false,
+			false,
+			false,
+			undefined,
+		];
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus).mockImplementation(async () => ({
+			...demoMeshStatus,
+			cluster_mesh_enabled: observedValues.shift(),
+		}));
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(screen.getByText("Observed: Unknown")).toBeInTheDocument(),
+		);
+		expect(screen.getByText("Mutation result unknown")).toBeInTheDocument();
+	});
+
 	it("shows directed preflight failures without exposing transport details", async () => {
 		const user = userEvent.setup();
 		vi.mocked(updateAdminMeshConfig).mockRejectedValueOnce(

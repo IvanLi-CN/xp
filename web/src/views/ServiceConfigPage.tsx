@@ -91,6 +91,10 @@ function knownMeshMutationErrorMessage(error: unknown): string {
 		: `The cluster setting request was rejected (${error.status}).`;
 }
 
+function meshSettingValueLabel(value: boolean | undefined): string {
+	return value === true ? "Enabled" : value === false ? "Disabled" : "Unknown";
+}
+
 type SummaryChipProps = {
 	label: string;
 	value: string;
@@ -372,20 +376,32 @@ export function ServiceConfigPage() {
 						setMeshLockRevision((revision) => revision + 1);
 						setMeshMutationPhase("submitting");
 						try {
-							await withPrimaryBackendMutation(() =>
-								updateAdminMeshConfig(adminToken, target),
-							);
-							const refreshed = await meshQuery.refetch();
-							if (!refreshed.data || refreshed.isError) {
+							const refreshed = await withPrimaryBackendMutation(async () => {
+								await updateAdminMeshConfig(adminToken, target);
+								return meshQuery.refetch();
+							});
+							const refreshedBackend = getPrimaryBackendSnapshot();
+							const sameObservationScope =
+								refreshedBackend.primaryOrigin === expectedOrigin &&
+								refreshedBackend.generation === expectedGeneration &&
+								refreshed.data?.local.cluster_id === expectedClusterId;
+							if (!sameObservationScope) {
+								setMeshMutationIssue({
+									kind: "success_unconfirmed",
+									message:
+										"The server accepted the request, but the follow-up observation " +
+										"did not come from the confirmed backend and cluster.",
+								});
+							} else if (!refreshed.data || refreshed.isError) {
 								setMeshMutationIssue({
 									kind: "success_unconfirmed",
 									message:
 										"The server accepted the setting, but the latest cluster state could not be confirmed.",
 								});
 							} else if (refreshed.data.cluster_mesh_enabled !== target) {
-								const observedValue = refreshed.data.cluster_mesh_enabled
-									? "Enabled"
-									: "Disabled";
+								const observedValue = meshSettingValueLabel(
+									refreshed.data.cluster_mesh_enabled,
+								);
 								setMeshMutationIssue({
 									kind: "success_unconfirmed",
 									message: [

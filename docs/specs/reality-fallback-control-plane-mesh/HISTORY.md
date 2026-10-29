@@ -9,6 +9,9 @@
   lock, rechecks the selected backend after lock acquisition, and cancels stale confirmation
   refresh callbacks. It retains the lock until an accepted target is confirmed, fails closed for
   unreadable lock storage, and refuses to send after cancellation while waiting for the lock.
+  The accepted follow-up observation remains inside the backend mutation barrier and must match
+  the confirmed backend generation and cluster id before the lock can be cleared. Missing setting
+  values are rendered as `Unknown`, never as `Disabled`.
   Unknown settings render as an indeterminate control, stale or unsampled observer peers remain
   visibly marked, and missing observations never render as zero counts.
 
