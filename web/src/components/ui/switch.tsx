@@ -6,6 +6,7 @@ export interface SwitchProps
 	extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onChange"> {
 	checked?: boolean;
 	indeterminate?: boolean;
+	unknownDescription?: string;
 	onCheckedChange?: (checked: boolean) => void;
 }
 
@@ -18,48 +19,68 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
 			indeterminate = false,
 			onCheckedChange,
 			onClick,
+			unknownDescription = "The current value is unknown.",
 			...props
 		},
 		ref,
-	) => (
-		<button
-			{...props}
-			ref={ref}
-			type="button"
-			role={indeterminate ? "button" : "switch"}
-			aria-checked={indeterminate ? undefined : checked}
-			disabled={disabled}
-			data-state={
-				indeterminate ? "indeterminate" : checked ? "checked" : "unchecked"
-			}
-			onClick={(event) => {
-				onClick?.(event);
-				if (!event.defaultPrevented) onCheckedChange?.(!checked);
-			}}
-			className={cn(
-				"inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full",
-				"border-2 border-transparent outline-none transition-colors",
-				"motion-reduce:transition-none",
-				"focus-visible:ring-[3px] focus-visible:ring-ring/20",
-				"disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
-				checked ? "bg-primary hover:bg-primary/90" : "bg-muted hover:bg-accent",
-				className,
-			)}
-		>
-			<span
-				aria-hidden="true"
-				className={cn(
-					"pointer-events-none block size-5 rounded-full bg-background shadow-xs",
-					"transition-transform motion-reduce:transition-none",
-					indeterminate
-						? "translate-x-2.5"
-						: checked
-							? "translate-x-5"
-							: "translate-x-0",
-				)}
-			/>
-		</button>
-	),
+	) => {
+		const unknownDescriptionId = React.useId();
+		const describedBy = indeterminate
+			? [props["aria-describedby"], unknownDescriptionId]
+					.filter(Boolean)
+					.join(" ")
+			: props["aria-describedby"];
+
+		return (
+			<>
+				<button
+					{...props}
+					ref={ref}
+					type="button"
+					role="switch"
+					aria-checked={indeterminate ? undefined : checked}
+					aria-describedby={describedBy}
+					disabled={disabled}
+					data-state={
+						indeterminate ? "indeterminate" : checked ? "checked" : "unchecked"
+					}
+					onClick={(event) => {
+						onClick?.(event);
+						if (!event.defaultPrevented) onCheckedChange?.(!checked);
+					}}
+					className={cn(
+						"inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full",
+						"border-2 border-transparent outline-none transition-colors",
+						"motion-reduce:transition-none",
+						"focus-visible:ring-[3px] focus-visible:ring-ring/20",
+						"disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
+						checked
+							? "bg-primary hover:bg-primary/90"
+							: "bg-muted hover:bg-accent",
+						className,
+					)}
+				>
+					<span
+						aria-hidden="true"
+						className={cn(
+							"pointer-events-none block size-5 rounded-full bg-background shadow-xs",
+							"transition-transform motion-reduce:transition-none",
+							indeterminate
+								? "translate-x-2.5"
+								: checked
+									? "translate-x-5"
+									: "translate-x-0",
+						)}
+					/>
+				</button>
+				{indeterminate ? (
+					<span id={unknownDescriptionId} className="sr-only">
+						{unknownDescription}
+					</span>
+				) : null}
+			</>
+		);
+	},
 );
 Switch.displayName = "Switch";
 

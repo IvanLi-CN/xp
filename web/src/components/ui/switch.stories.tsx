@@ -104,10 +104,11 @@ export const Indeterminate: Story = {
 	),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const control = canvas.getByRole("button", {
+		const control = canvas.getByRole("switch", {
 			name: "Unknown observation",
 		});
 		await expect(control).not.toHaveAttribute("aria-checked");
+		await expect(control).toHaveAttribute("aria-describedby");
 	},
 };
 

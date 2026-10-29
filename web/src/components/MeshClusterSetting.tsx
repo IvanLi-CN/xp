@@ -257,6 +257,12 @@ export function MeshClusterSetting({
 						</div>
 						<Switch
 							aria-label="Enable Reality Direct Mesh"
+							unknownDescription={
+								value === undefined
+									? "The current cluster value is unknown. Changes are unavailable " +
+										"until a fresh observation is available."
+									: undefined
+							}
 							checked={value === true}
 							className="mt-0.5"
 							disabled={!canEdit}

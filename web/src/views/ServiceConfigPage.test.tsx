@@ -277,6 +277,35 @@ describe("ServiceConfigPage", () => {
 		expect(updateAdminMeshConfig).toHaveBeenCalledTimes(1);
 	});
 
+	it("keeps the lock when the accepted request has no follow-up observation", async () => {
+		const user = userEvent.setup();
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus)
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockRejectedValueOnce(new Error("observation unavailable"));
+		vi.mocked(updateAdminMeshConfig).mockResolvedValueOnce({ enabled: true });
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+		expect(updateAdminMeshConfig).toHaveBeenCalledTimes(1);
+		expect(
+			screen.getByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		).toBeDisabled();
+	});
+
 	it("keeps an unknown mutation locked when observation reaches the target", async () => {
 		const user = userEvent.setup();
 		vi.mocked(updateAdminMeshConfig).mockRejectedValueOnce(
@@ -311,6 +340,38 @@ describe("ServiceConfigPage", () => {
 				name: "Enable Reality Direct Mesh",
 			}),
 		).toBeDisabled();
+	});
+
+	it("requires explicit verification before clearing an unknown lock", async () => {
+		const user = userEvent.setup();
+		vi.mocked(updateAdminMeshConfig).mockRejectedValueOnce(
+			new Error("connection interrupted"),
+		);
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+		await waitFor(() =>
+			expect(screen.getByText("Mutation result unknown")).toBeInTheDocument(),
+		);
+
+		await user.click(screen.getByRole("button", { name: "Verify and unlock" }));
+		await screen.findByRole("alertdialog", {
+			name: "Unlock the local Mesh safety lock?",
+		});
+		await user.click(
+			screen.getByRole("button", {
+				name: "I verified termination and convergence",
+			}),
+		);
+
+		await waitFor(() =>
+			expect(screen.queryByText("Mutation result unknown")).toBeNull(),
+		);
+		expect(updateAdminMeshConfig).toHaveBeenCalledTimes(1);
 	});
 
 	it("does not submit after canceling the confirmation refresh", async () => {

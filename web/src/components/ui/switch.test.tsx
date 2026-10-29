@@ -64,8 +64,13 @@ describe("<Switch />", () => {
 			/>,
 		);
 
-		const control = screen.getByRole("button", { name: "Unknown feature" });
+		const control = screen.getByRole("switch", { name: "Unknown feature" });
 		expect(control).not.toHaveAttribute("aria-checked");
+		const descriptionId = control.getAttribute("aria-describedby");
+		expect(descriptionId).toBeTruthy();
+		expect(document.getElementById(descriptionId ?? "")).toHaveTextContent(
+			"The current value is unknown.",
+		);
 		expect(control).toHaveAttribute("data-state", "indeterminate");
 		await user.tab();
 		await user.keyboard("{Enter}");

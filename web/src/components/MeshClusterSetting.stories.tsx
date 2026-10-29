@@ -83,7 +83,7 @@ export const UnknownOffline: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			canvas.getByRole("button", { name: "Enable Reality Direct Mesh" }),
+			canvas.getByRole("switch", { name: "Enable Reality Direct Mesh" }),
 		).toBeDisabled();
 		await expect(canvas.getAllByText("Unknown", { exact: true })).toHaveLength(
 			2,

@@ -6,6 +6,12 @@ async function waitForMihomoProfile(page: Page) {
 	await expect(
 		page.getByRole("button", { name: "Expand editor" }).first(),
 	).toBeEnabled();
+	await expect(
+		page.locator('[data-mihomo-profile-loaded="true"]'),
+	).toBeVisible();
+	await expect(
+		page.locator('[data-mihomo-document="mixin_yaml"] .cm-content'),
+	).toBeVisible();
 }
 
 test("creates and deletes a user, fetches subscription", async ({ page }) => {
