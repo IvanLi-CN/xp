@@ -154,6 +154,41 @@ describe("ServiceConfigPage", () => {
 		expect(screen.getByText("Mutation result unknown")).toBeInTheDocument();
 	});
 
+	it("does not submit when the confirmation refresh omits the Mesh value", async () => {
+		const user = userEvent.setup();
+		vi.mocked(fetchAdminMeshStatus).mockReset();
+		vi.mocked(fetchAdminMeshStatus)
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockResolvedValueOnce({ ...demoMeshStatus, cluster_mesh_enabled: false })
+			.mockResolvedValueOnce({
+				...demoMeshStatus,
+				cluster_mesh_enabled: undefined,
+			});
+
+		renderPage();
+		await user.click(
+			await screen.findByRole("switch", {
+				name: "Enable Reality Direct Mesh",
+			}),
+		);
+		await user.click(await screen.findByRole("button", { name: "Enable" }));
+
+		await waitFor(() =>
+			expect(
+				screen.getByText(
+					"No mutation was sent because the confirmation snapshot did not " +
+						"include a boolean Mesh setting.",
+				),
+			).toBeInTheDocument(),
+		);
+		expect(updateAdminMeshConfig).not.toHaveBeenCalled();
+		expect(
+			screen.queryByRole("alertdialog", {
+				name: "Enable Reality Direct Mesh?",
+			}),
+		).toBeNull();
+	});
+
 	it("retains the lock when the accepted observation changes cluster scope", async () => {
 		const user = userEvent.setup();
 		const observedValues = [false, false, false, true];

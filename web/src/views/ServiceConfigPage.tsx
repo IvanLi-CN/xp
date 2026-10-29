@@ -331,7 +331,18 @@ export function ServiceConfigPage() {
 				closeMeshDialog();
 				return;
 			}
-			if (result.data.cluster_mesh_enabled === target) {
+			const observedMeshValue = result.data.cluster_mesh_enabled;
+			if (typeof observedMeshValue !== "boolean") {
+				setMeshMutationIssue({
+					kind: "rejected",
+					message:
+						"No mutation was sent because the confirmation snapshot did not " +
+						"include a boolean Mesh setting.",
+				});
+				closeMeshDialog();
+				return;
+			}
+			if (observedMeshValue === target) {
 				setMeshConfirmationValue(target);
 				setMeshMutationPhase("confirming");
 				return;
