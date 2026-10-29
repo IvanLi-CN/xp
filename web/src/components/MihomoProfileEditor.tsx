@@ -206,7 +206,7 @@ function MihomoSaveFeedbackPanel({
 						<div className="flex items-start gap-2">
 							<Icon
 								name="tabler:alert-triangle"
-								className="mt-0.5 size-4 shrink-0 text-foreground"
+								className="mt-1 size-4 shrink-0 text-foreground"
 								ariaLabel="Save result unknown"
 							/>
 							<div className="min-w-0 space-y-1">
@@ -255,7 +255,7 @@ function MihomoSaveFeedbackPanel({
 					>
 						<Icon
 							name="tabler:alert-circle"
-							className="mt-0.5 size-4 shrink-0"
+							className="mt-1 size-4 shrink-0"
 							ariaLabel="Save error"
 						/>
 						<span className="min-w-0 break-words">{error}</span>
