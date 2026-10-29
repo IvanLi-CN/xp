@@ -103,4 +103,34 @@ describe("RuntimePolicySchema", () => {
 			}),
 		);
 	});
+
+	it("supports direct candidate-origin validation", async () => {
+		vi.useFakeTimers({ now: Date.parse("2025-12-01T00:00:00Z") });
+		const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					policy_id: "rcp-test",
+					cluster_id: fixtureCatalog.cluster.fixture84(),
+					issued_at: fixtureCatalog.timestamp.releaseCurrent(),
+					expires_at: fixtureCatalog.timestamp.releaseHttp(),
+					api_origins: ["https://node.example"],
+				}),
+			),
+		);
+
+		await fetchRuntimePolicy(
+			"secret-token",
+			undefined,
+			"https://candidate.example",
+		);
+		expect(fetchMock).toHaveBeenCalledWith(
+			"https://candidate.example/api/admin/console/runtime-policy",
+			expect.objectContaining({
+				method: "GET",
+				headers: expect.objectContaining({
+					Authorization: "Bearer secret-token",
+				}),
+			}),
+		);
+	});
 });

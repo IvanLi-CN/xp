@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { throwIfNotOk } from "./backendError";
+import { fetchJsonWithTimeout } from "./request";
 
 export const STATIC_CONSOLE_CAPABILITY = "web.static-console-v1";
 export const RUNTIME_POLICY_PATH = "/api/admin/console/runtime-policy";
@@ -87,7 +87,7 @@ export async function fetchRuntimePolicy(
 	signal?: AbortSignal,
 	origin?: string,
 ): Promise<RuntimePolicy> {
-	const response = await fetch(
+	return fetchJsonWithTimeout(
 		origin
 			? new URL(RUNTIME_POLICY_PATH, origin).toString()
 			: RUNTIME_POLICY_PATH,
@@ -99,7 +99,6 @@ export async function fetchRuntimePolicy(
 			},
 			signal,
 		},
+		(value) => RuntimePolicySchema.parse(value),
 	);
-	await throwIfNotOk(response);
-	return RuntimePolicySchema.parse(await response.json());
 }
