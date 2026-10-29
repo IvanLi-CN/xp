@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, screen, userEvent } from "@storybook/test";
+import { expect, fn, screen, userEvent } from "@storybook/test";
 
 import { PrimaryBackendProvider } from "@/backend/PrimaryBackendProvider";
 import {
@@ -183,6 +183,8 @@ export const UnrecognizedFrontendVersion: Story = {
 };
 
 export const StagedReload: Story = {
+	tags: ["alert-reload"],
+	args: { onOpened: fn(), onOpenChange: fn(), onSwitched: fn() },
 	render: withSnapshot({
 		...getPrimaryBackendSnapshot(),
 		clusterId: "cluster-demo",

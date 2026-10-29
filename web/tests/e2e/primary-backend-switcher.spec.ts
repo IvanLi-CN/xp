@@ -176,8 +176,9 @@ test("switches API and SSE traffic to a verified recovery origin", async ({
 	).toBeVisible();
 	await page.getByRole("button", { name: "Open primary backend" }).click();
 	await page
-		.getByRole("menuitem")
-		.filter({ hasText: fixtureCatalog.identifier.nodeSecondary() })
+		.getByRole("button", {
+			name: fixtureCatalog.identifier.nodeSecondary(),
+		})
 		.click();
 
 	const switcher = page.getByRole("button", { name: "Open primary backend" });
