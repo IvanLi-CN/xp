@@ -77,7 +77,11 @@ describe("getCurrentReloadCandidate", () => {
 		await user.click(
 			screen.getByRole("button", { name: "Open primary backend" }),
 		);
-		await user.click(screen.getByRole("menuitem"));
+		await user.click(
+			screen.getByRole("menuitem", {
+				name: stagedCandidate.nodeName,
+			}),
+		);
 		expect(screen.getByRole("button", { name: "Reload once" })).toBeVisible();
 
 		mockUsePrimaryBackend.mockReturnValue(
