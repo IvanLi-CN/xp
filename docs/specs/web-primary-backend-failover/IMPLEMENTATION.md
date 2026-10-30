@@ -96,6 +96,9 @@
   in-memory generation, so a same-target reload can recover offline data while an actual target
   change still invalidates the cache; the release compatibility snapshot remains scoped to its
   backend origin for offline fallback.
+- Offline snapshot reads ignore expired values without deleting their shared storage entry, so a
+  stale read in one tab cannot delete a newer snapshot written by another. Replacement writes and
+  session-boundary cleanup continue to manage the stored entry.
 - An authenticated public probe that proves a different cluster is treated as a credential
   boundary: the token is cleared, the current transport is reset to its page/bootstrap recovery
   origin, and the UI returns to Login before any credentialed request is sent to the new cluster.
@@ -122,9 +125,9 @@
   It retains only the verified pre-auth target in memory. The cached profile remains unchanged
   until the new authenticated inventory succeeds. Explicit logout and cross-tab session changes
   still clear it.
-- Login submission is gated on the selected target's public probe and the existing mutation
-  barrier; static-console login links keep the bootstrap transport and failed probes remain
-  retryable without dropping candidates.
+- Each login submission repeats the selected target's public probe immediately before sending the
+  token and respects the existing mutation barrier; static-console login links keep the bootstrap
+  transport and failed probes remain retryable without dropping candidates.
 - Vitest, Storybook interaction, Playwright browser, and the cluster join token-hash regression
   coverage are recorded in the specification verification matrix.
 
