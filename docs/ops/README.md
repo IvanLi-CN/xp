@@ -925,6 +925,10 @@ Notes:
   clear a later deletion; persistence failure retains the prior intent and reports failure.
   Receipt mappings clear before acknowledged intent; interrupted completion retries safely.
   A bounded version-checked scan reclaims legacy orphan mappings without deleting journal rows.
+  Source deletion capture takes bounded batches of complete deletion intents, retaining all five
+  schemas for a node together. Large node intents can use multiple signed segments. The durable
+  intent and real ACK determine the next batch after restart; a partial batch is never treated as
+  a complete snapshot for orphan cleanup. A capture or storage failure rolls back staged mappings.
   Stable deletion pages include JSON brackets and separators in the page byte limit.
   For ready peers, one 5-second source cycle drains up to sixteen consecutive summary, repair, or
   tiered export pages per peer within a shared 15-second maintenance budget. The remaining budget is

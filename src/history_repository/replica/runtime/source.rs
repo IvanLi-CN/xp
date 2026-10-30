@@ -293,159 +293,175 @@ impl RepositoryReplicaRuntime {
                 Vec::new()
             });
         }
-        if self.storage.is_sqlite() {
-            let available = self
-                .storage
-                .available_bytes()
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-            if available < 256 * 1024 * 1024 {
-                return Err(RepositoryRuntimeError::WriteStopped(
-                    HistoryWriteAvailability::DegradedLowSpace,
+        let capture_result: Result<(), RepositoryRuntimeError> = (|| {
+            if self.storage.is_sqlite() {
+                let available = self
+                    .storage
+                    .available_bytes()
+                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+                if available < 256 * 1024 * 1024 {
+                    return Err(RepositoryRuntimeError::WriteStopped(
+                        HistoryWriteAvailability::DegradedLowSpace,
+                    ));
+                }
+                self.ensure_source_delivery_capacity(options.defer_journal)?;
+            }
+            if self.storage.is_sqlite() && !journal_ready && self.snapshot.local_source.epoch == 0 {
+                return Err(RepositoryRuntimeError::Storage(
+                    "source journal order repair must finish before source epoch recovery"
+                        .to_owned(),
                 ));
             }
-            self.ensure_source_delivery_capacity(options.defer_journal)?;
-        }
-        if self.storage.is_sqlite() && !journal_ready && self.snapshot.local_source.epoch == 0 {
-            return Err(RepositoryRuntimeError::Storage(
-                "source journal order repair must finish before source epoch recovery".to_owned(),
-            ));
-        }
-        if self.snapshot.local_source.epoch == 0 {
-            let result = self.storage.allocate_repository_source_epoch(
-                cluster_id,
-                identity.node_id().as_str(),
-                source_epoch(cluster_id, identity.node_id().as_str()),
-            );
-            self.snapshot.local_source.epoch = self.finish_storage_write(result)?;
-            self.snapshot.local_source.node_id = identity.node_id().as_str().to_owned();
-        }
-        let mut journal_rows = Vec::new();
-        for (stream, records) in records_by_stream {
-            let record_count = u64::try_from(records.len())
-                .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?;
-            let next_sequence = self
-                .snapshot
-                .local_source
-                .streams
-                .entry(stream.to_owned())
-                .or_default()
-                .next_sequence;
-            for (offset, record) in records.iter().enumerate() {
-                if !record.is_tombstone() {
-                    continue;
-                }
-                let sequence = next_sequence
-                    .checked_add(
-                        u64::try_from(offset)
-                            .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?,
-                    )
-                    .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
-                let cursor = ReplicaCursor::new(
+            if self.snapshot.local_source.epoch == 0 {
+                let result = self.storage.allocate_repository_source_epoch(
+                    cluster_id,
                     identity.node_id().as_str(),
-                    self.snapshot.local_source.epoch,
-                    "tombstone",
-                    sequence,
-                )?;
-                let key = ReplicaRecord::new(
-                    &cursor,
-                    record.subject_node_id(),
-                    record.observer_node_id(),
-                    record.schema().0,
-                    record.schema().1,
-                    record.record_key().to_vec(),
-                    record.payload_bytes().to_vec(),
-                )?
-                .key();
-                self.tombstones.tombstone(
-                    key.clone(),
-                    now_unix_seconds,
-                    options.ready_repositories,
-                )?;
-                let (schema_id, _) = record.schema();
-                let generation = deletion_marker_generation(record);
-                let legacy_id = deletion_marker_id_parts(schema_id, record.record_key(), 0);
-                let prefix = format!("{legacy_id}:generation:");
-                self.snapshot
+                    source_epoch(cluster_id, identity.node_id().as_str()),
+                );
+                self.snapshot.local_source.epoch = self.finish_storage_write(result)?;
+                self.snapshot.local_source.node_id = identity.node_id().as_str().to_owned();
+            }
+            let mut journal_rows = Vec::new();
+            for (stream, records) in records_by_stream {
+                let next_sequence = self
+                    .snapshot
                     .local_source
-                    .deletion_marker_keys
-                    .retain(|id, _| {
-                        if generation == 0 {
-                            return true;
+                    .streams
+                    .entry(stream.to_owned())
+                    .or_default()
+                    .next_sequence;
+                for (offset, record) in records.iter().enumerate() {
+                    if !record.is_tombstone() {
+                        continue;
+                    }
+                    let sequence = next_sequence
+                        .checked_add(
+                            u64::try_from(offset)
+                                .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?,
+                        )
+                        .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
+                    let cursor = ReplicaCursor::new(
+                        identity.node_id().as_str(),
+                        self.snapshot.local_source.epoch,
+                        "tombstone",
+                        sequence,
+                    )?;
+                    let key = ReplicaRecord::new(
+                        &cursor,
+                        record.subject_node_id(),
+                        record.observer_node_id(),
+                        record.schema().0,
+                        record.schema().1,
+                        record.record_key().to_vec(),
+                        record.payload_bytes().to_vec(),
+                    )?
+                    .key();
+                    self.tombstones.tombstone(
+                        key.clone(),
+                        now_unix_seconds,
+                        options.ready_repositories,
+                    )?;
+                    let (schema_id, _) = record.schema();
+                    let generation = deletion_marker_generation(record);
+                    let legacy_id = deletion_marker_id_parts(schema_id, record.record_key(), 0);
+                    let prefix = format!("{legacy_id}:generation:");
+                    self.snapshot
+                        .local_source
+                        .deletion_marker_keys
+                        .retain(|id, _| {
+                            if generation == 0 {
+                                return true;
+                            }
+                            if id == &legacy_id {
+                                return false;
+                            }
+                            id.strip_prefix(&prefix)
+                                .and_then(|value| value.parse::<u64>().ok())
+                                .is_none_or(|existing| existing >= generation)
+                        });
+                    self.snapshot
+                        .local_source
+                        .deletion_marker_keys
+                        .insert(deletion_marker_id(record), key);
+                }
+                let stream_state = self
+                    .snapshot
+                    .local_source
+                    .streams
+                    .get_mut(stream)
+                    .expect("source stream was initialized");
+                let mut start = 0;
+                while start < records.len() {
+                    let first_cursor = Cursor::new(
+                        identity.node_id().as_str(),
+                        self.snapshot.local_source.epoch,
+                        stream,
+                        stream_state.next_sequence,
+                    )?;
+                    let mut end = records.len();
+                    let canonical = loop {
+                        match CanonicalSegment::new(
+                            cluster_id,
+                            first_cursor.clone(),
+                            records[start..end].to_vec(),
+                            stream_state.previous_segment_hash,
+                            now_unix_seconds,
+                            now_unix_seconds,
+                        ) {
+                            Ok(segment) => break segment,
+                            Err(ProtocolError::SegmentCanonicalLimit { .. })
+                                if stream == "tombstone" && end - start > 1 =>
+                            {
+                                end = start + (end - start) / 2;
+                            }
+                            Err(error) => return Err(error.into()),
                         }
-                        if id == &legacy_id {
-                            return false;
-                        }
-                        id.strip_prefix(&prefix)
-                            .and_then(|value| value.parse::<u64>().ok())
-                            .is_none_or(|existing| existing >= generation)
+                    };
+                    let signed = canonical.sign(signing_key)?;
+                    let wire = signed.wire_bytes()?;
+                    stream_state.next_sequence = stream_state
+                        .next_sequence
+                        .checked_add(
+                            u64::try_from(end - start)
+                                .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?,
+                        )
+                        .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
+                    stream_state.previous_segment_hash = Some(signed.segment_hash()?);
+                    let stored = StoredSegment {
+                        id: hex::encode(Sha256::digest(&wire)),
+                        closed_at_unix_seconds: now_unix_seconds,
+                        identity: identity.clone(),
+                        wire: wire.clone(),
+                    };
+                    journal_rows.push(SourceDeliveryJournalRow {
+                        id: stored.id.clone(),
+                        stream: stream.to_owned(),
+                        closed_at_unix_seconds: stored.closed_at_unix_seconds,
+                        identity: stored.identity.clone(),
+                        wire: stored.wire.clone(),
                     });
-                self.snapshot
-                    .local_source
-                    .deletion_marker_keys
-                    .insert(deletion_marker_id(record), key);
-            }
-            let stream_state = self
-                .snapshot
-                .local_source
-                .streams
-                .get_mut(stream)
-                .expect("source stream was initialized");
-            let first_cursor = Cursor::new(
-                identity.node_id().as_str(),
-                self.snapshot.local_source.epoch,
-                stream,
-                stream_state.next_sequence,
-            )?;
-            let signed = CanonicalSegment::new(
-                cluster_id,
-                first_cursor,
-                records,
-                stream_state.previous_segment_hash,
-                now_unix_seconds,
-                now_unix_seconds,
-            )?
-            .sign(signing_key)?;
-            let wire = signed.wire_bytes()?;
-            stream_state.next_sequence = stream_state
-                .next_sequence
-                .checked_add(record_count)
-                .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
-            stream_state.previous_segment_hash = Some(signed.segment_hash()?);
-            let stored = StoredSegment {
-                id: hex::encode(Sha256::digest(&wire)),
-                closed_at_unix_seconds: now_unix_seconds,
-                identity: identity.clone(),
-                wire: wire.clone(),
-            };
-            journal_rows.push(SourceDeliveryJournalRow {
-                id: stored.id.clone(),
-                stream: stream.to_owned(),
-                closed_at_unix_seconds: stored.closed_at_unix_seconds,
-                identity: stored.identity.clone(),
-                wire: stored.wire.clone(),
-            });
-            stream_state.pending.push_back(stored);
-        }
-        if self.storage.is_sqlite() && !options.defer_journal {
-            if options.persist {
-                if let Err(error) = self
-                    .persist_control_state_with_journal(&journal_rows, options.ready_repositories)
-                {
-                    self.snapshot = previous_snapshot;
-                    self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
-                    return Err(error);
-                }
-            } else {
-                let result = self.storage.append_source_delivery_journal(&journal_rows);
-                if let Err(error) = self.finish_storage_write(result) {
-                    self.snapshot = previous_snapshot;
-                    self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
-                    return Err(error);
+                    stream_state.pending.push_back(stored);
+                    start = end;
                 }
             }
-        } else if options.persist
-            && let Err(error) = self.persist_control_state()
-        {
+            if self.storage.is_sqlite() && !options.defer_journal {
+                if options.persist {
+                    self.persist_control_state_with_journal(
+                        &journal_rows,
+                        options.ready_repositories,
+                    )?;
+                } else {
+                    let result = self.storage.append_source_delivery_journal(&journal_rows);
+                    self.finish_storage_write(result)?;
+                }
+            } else if options.persist
+                && let Err(error) = self.persist_control_state()
+            {
+                return Err(error);
+            }
+            Ok(())
+        })();
+        if let Err(error) = capture_result {
             self.snapshot = previous_snapshot;
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
             return Err(error);

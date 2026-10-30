@@ -94,6 +94,9 @@
   apply deletions after record upserts so a batch cannot resurrect a record it also deletes.
   Historical recovery and repair retain verified original wires while suppressing records covered by
   known tombstones; ordinary live delivery continues to reject resurrection.
+  Source deletion capture uses bounded complete-intent batches, retains every node's five schema
+  markers together, and resumes from durable intent and real ACK after restart. Partial batches do
+  not authorize orphan-map cleanup; failed capture rolls back staged source state.
   Tombstone expiry is committed atomically with the corresponding receiver state and history writes.
   Repository runtime status reads exact record and segment counts from a durable singleton updated
   by insert/delete triggers in each history transaction; existing databases backfill it once at

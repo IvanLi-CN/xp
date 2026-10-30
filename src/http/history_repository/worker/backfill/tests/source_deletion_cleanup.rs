@@ -1,6 +1,214 @@
 use super::*;
 use crate::node_history::RepositoryHistoryDeletionMarker;
 
+#[tokio::test]
+async fn large_deletion_backlog_is_captured_in_bounded_pages() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(directory.path());
+    let users = (0..1001)
+        .map(|index| format!("user-{index:04}"))
+        .collect::<Vec<_>>();
+    let nodes = (0..26)
+        .map(|index| format!("node-{index:04}"))
+        .collect::<Vec<_>>();
+    let snapshot =
+        serde_json::json!({ "schema_version": 2, "deleted_users": users, "deleted_nodes": nodes });
+    storage
+        .write(
+            crate::state::history_repository::NODE_HISTORY_KEY,
+            &serde_json::to_vec(&snapshot).unwrap(),
+        )
+        .unwrap();
+    drop(storage);
+    let state = fixture::app_state(directory.path());
+    let batch = super::super::super::super::source_records::source_records(&state, 100)
+        .await
+        .unwrap();
+    assert!(
+        batch.deletion_markers.len() <= 128,
+        "capture must remain bounded for a large backlog"
+    );
+    assert!(
+        batch.deletion_snapshot_version.is_none(),
+        "a partial page is not a complete deletion snapshot"
+    );
+    for marker in &batch.deletion_markers {
+        if let Some(node) = marker.target_node_id() {
+            assert_eq!(
+                batch
+                    .deletion_markers
+                    .iter()
+                    .filter(|candidate| candidate.target_node_id() == Some(node))
+                    .count(),
+                5
+            );
+        }
+    }
+    let ready = vec![state.cluster.node_id.clone()];
+    let unreachable = vec!["unreachable".to_owned()];
+    let later = state
+        .node_history
+        .repository_deletion_markers(&state.cluster.node_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    let identity = derived_repository_identity(
+        &state,
+        RepositoryNodeId::try_from(state.cluster.node_id.clone()).unwrap(),
+    )
+    .unwrap();
+    let key = derived_repository_signing_key(&state, &state.cluster.node_id).unwrap();
+    let record = SyncRecord::new(
+        &state.cluster.node_id,
+        &state.cluster.node_id,
+        &later.schema_id,
+        1,
+        later.record_key.clone(),
+        b"{}".to_vec(),
+        true,
+    );
+    state
+        .repository_replica
+        .lock()
+        .await
+        .queue_local_source_segments_for_repositories(
+            &state.cluster.cluster_id,
+            identity,
+            &key,
+            [record],
+            100,
+            &ready,
+        )
+        .unwrap();
+    crate::http::history_repository::worker::publish_local_history_segment(
+        &state,
+        &ready,
+        Some(&unreachable),
+        &[],
+        100,
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        mapping_count(directory.path()),
+        batch.deletion_markers.len() + 1,
+        "a partial page must not prune a mapping for a later deletion"
+    );
+    assert!(
+        !HistoryStorage::open(directory.path())
+            .source_delivery_journal()
+            .unwrap()
+            .is_empty()
+    );
+    state
+        .node_history
+        .clear_user("a-new-earlier-user")
+        .await
+        .unwrap();
+    drop(state);
+    let state = fixture::app_state(directory.path());
+    assert_eq!(
+        state
+            .node_history
+            .repository_deletion_markers(&state.cluster.node_id)
+            .await
+            .unwrap()
+            .len(),
+        1132,
+        "unacknowledged intent survives restart"
+    );
+    for tick in 0..20 {
+        crate::http::history_repository::worker::publish_local_history_segment(
+            &state,
+            &ready,
+            None,
+            &[],
+            101 + tick,
+            true,
+        )
+        .await
+        .unwrap();
+        if state
+            .node_history
+            .repository_deletion_markers(&state.cluster.node_id)
+            .await
+            .unwrap()
+            .is_empty()
+        {
+            break;
+        }
+    }
+    assert!(
+        state
+            .node_history
+            .repository_deletion_markers(&state.cluster.node_id)
+            .await
+            .unwrap()
+            .is_empty(),
+        "all deletion intents must converge after the repository returns"
+    );
+}
+
+#[tokio::test]
+async fn large_node_deletion_splits_signed_segments_without_losing_schemas() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = fixture::app_state(directory.path());
+    state
+        .node_history
+        .clear_node(&"n".repeat(19_000))
+        .await
+        .unwrap();
+    let ready = vec![state.cluster.node_id.clone()];
+    let unreachable = vec!["unreachable".to_owned()];
+    crate::http::history_repository::worker::publish_local_history_segment(
+        &state,
+        &ready,
+        Some(&unreachable),
+        &[],
+        100,
+        true,
+    )
+    .await
+    .unwrap();
+    let journal = HistoryStorage::open(directory.path())
+        .source_delivery_journal()
+        .unwrap();
+    let tombstones = journal
+        .iter()
+        .filter(|row| row.stream == "tombstone")
+        .collect::<Vec<_>>();
+    assert!(tombstones.len() > 1);
+    let mut record_count = 0;
+    for row in tombstones {
+        let segment = SignedSegment::from_wire(&row.wire).unwrap();
+        assert!(segment.canonical().canonical_bytes().unwrap().len() <= 192 * 1024);
+        record_count += segment.canonical().records().len();
+    }
+    assert_eq!(record_count, 5);
+    drop(state);
+    let state = fixture::app_state(directory.path());
+    crate::http::history_repository::worker::publish_local_history_segment(
+        &state,
+        &ready,
+        None,
+        &[],
+        101,
+        true,
+    )
+    .await
+    .unwrap();
+    assert!(
+        state
+            .node_history
+            .repository_deletion_markers(&state.cluster.node_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
 async fn acknowledged_deletion(state: &AppState) -> Vec<RepositoryHistoryDeletionMarker> {
     state.node_history.clear_user("target").await.unwrap();
     let markers = state

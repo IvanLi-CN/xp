@@ -14,6 +14,40 @@ fn tombstone(marker: &RepositoryHistoryDeletionMarker) -> SyncRecord {
     )
 }
 
+#[test]
+fn rejected_capture_does_not_hide_deletions_from_retry() {
+    let directory = tempfile::tempdir().unwrap();
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut source = load(directory.path());
+    let records = (0..1001)
+        .map(|index| {
+            SyncRecord::new(
+                "node-a",
+                "node-a",
+                "traffic.v1",
+                1,
+                format!("node-history:user:{index:04}:").into_bytes(),
+                b"{}".to_vec(),
+                true,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        source
+            .queue_local_source_segments("cluster-a", identity.clone(), &key, &records, 100)
+            .is_err()
+    );
+    let retry = source
+        .queue_local_source_segments("cluster-a", identity, &key, &records[..1], 100)
+        .unwrap();
+    assert_eq!(
+        retry.len(),
+        1,
+        "a rejected capture must not suppress a later retry"
+    );
+}
+
 #[tokio::test]
 async fn new_deletion_generation_requires_its_own_real_receipt_after_restart() {
     let source_dir = tempfile::tempdir().unwrap();

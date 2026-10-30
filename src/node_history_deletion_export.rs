@@ -29,6 +29,99 @@ pub(super) fn deletion_state_digest(state: &PersistedNodeHistoryCache) -> anyhow
 }
 
 impl NodeHistoryHandle {
+    /// Return a bounded prefix of complete deletion intents. A node intent is indivisible:
+    /// clearing it after only some of its five schemas have been acknowledged loses data.
+    pub(crate) async fn repository_deletion_capture_page(
+        &self,
+        destination_node_id: &str,
+        cluster_id: &str,
+    ) -> anyhow::Result<(Option<u64>, Vec<RepositoryHistoryDeletionMarker>)> {
+        const MAX_MARKERS: usize = 128;
+        const PAGE_BYTES: usize = 128 * 1024;
+        let budget = PAGE_BYTES.saturating_sub(
+            cluster_id
+                .len()
+                .saturating_add(destination_node_id.len().saturating_mul(2)),
+        );
+        let mut groups = BTreeMap::<Vec<u8>, Vec<RepositoryHistoryDeletionMarker>>::new();
+        let mut group = Vec::new();
+        let mut count = 0usize;
+        let mut bytes = 0usize;
+        let mut partial = false;
+        let mut oversized_key: Option<Vec<u8>> = None;
+        let estimate = |marker: &RepositoryHistoryDeletionMarker| {
+            marker
+                .record_key
+                .len()
+                .saturating_add(marker.schema_id.len())
+                .saturating_add(
+                    marker
+                        .target_node_id()
+                        .unwrap_or(destination_node_id)
+                        .len()
+                        .saturating_mul(2),
+                )
+                .saturating_add(256)
+        };
+        let version = self
+            .visit_repository_deletion_markers(destination_node_id, true, |marker| {
+                let minimum_bytes = marker
+                    .record_key
+                    .len()
+                    .saturating_add(if marker.target_node_id().is_some() {
+                        "path_health.v1".len().max("connections.v1".len())
+                    } else {
+                        marker.schema_id.len()
+                    })
+                    .saturating_add(
+                        marker
+                            .target_node_id()
+                            .unwrap_or(destination_node_id)
+                            .len()
+                            .saturating_mul(2),
+                    );
+                if minimum_bytes > 192 * 1024 {
+                    if oversized_key
+                        .as_ref()
+                        .is_none_or(|key| marker.record_key < *key)
+                    {
+                        oversized_key = Some(marker.record_key);
+                    }
+                    partial = true;
+                    return Ok(());
+                }
+                let complete_group =
+                    marker.target_node_id().is_none() || marker.schema_id == "ip_usage.v1";
+                group.push(marker);
+                if !complete_group {
+                    return Ok(());
+                }
+                let complete = std::mem::take(&mut group);
+                count = count.saturating_add(complete.len());
+                bytes = bytes.saturating_add(complete.iter().map(&estimate).sum::<usize>());
+                groups.insert(complete[0].record_key.clone(), complete);
+                while groups.len() > 1 && (count > MAX_MARKERS || bytes > budget) {
+                    let (_, removed) = groups.pop_last().expect("nonempty deletion page");
+                    count -= removed.len();
+                    bytes -= removed.iter().map(&estimate).sum::<usize>();
+                    partial = true;
+                }
+                Ok(())
+            })
+            .await?;
+        debug_assert!(group.is_empty());
+        anyhow::ensure!(
+            oversized_key.as_ref().is_none_or(|key| groups
+                .first_key_value()
+                .is_some_and(|(first, _)| first < key)),
+            "deletion marker exceeds the signed segment limit"
+        );
+        Ok((
+            (!partial).then_some(version),
+            groups.into_values().flatten().collect(),
+        ))
+    }
+
     /// Visit the current deletion intent under one read lock without cloning the full set.
     pub(crate) async fn visit_repository_deletion_markers(
         &self,

@@ -131,7 +131,7 @@ pub(super) async fn source_records(
         .await;
     let (deletion_snapshot_version, deletion_markers) = state
         .node_history
-        .repository_deletion_snapshot(&state.cluster.node_id)
+        .repository_deletion_capture_page(&state.cluster.node_id, &state.cluster.cluster_id)
         .await?;
     let pending_uptime_observations = state.uptime.pending(512).await?;
     let pending_uptime_capture_gaps = state.uptime.pending_capture_gaps(512).await?;
@@ -347,7 +347,7 @@ pub(super) async fn source_records(
     Ok(SourceRecordBatch {
         records: Some(records),
         deletion_markers,
-        deletion_snapshot_version: Some(deletion_snapshot_version),
+        deletion_snapshot_version,
         uptime_observation_ids: pending_uptime_observations
             .into_iter()
             .map(|pending| pending.id)
