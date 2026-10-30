@@ -126,7 +126,7 @@ describe("primary backend pre-auth recovery", () => {
 					: path === "/api/cluster/info"
 						? { cluster_id: fixtureCatalog.cluster.fixture84() }
 						: path === "/api/capabilities"
-							? { release_tag: "v3.22.0" }
+							? { release_tag: "v3.22.0", capabilities: ["admin.nodes"] }
 							: { items: [] };
 			return Promise.resolve(
 				new Response(JSON.stringify(body), { status: 200 }),
@@ -246,9 +246,15 @@ describe("primary backend pre-auth recovery", () => {
 			}
 			if (request.url.endsWith("/api/capabilities")) {
 				return Promise.resolve(
-					new Response(JSON.stringify({ release_tag: "v3.22.0" }), {
-						status: 200,
-					}),
+					new Response(
+						JSON.stringify({
+							release_tag: "v3.22.0",
+							capabilities: ["admin.nodes"],
+						}),
+						{
+							status: 200,
+						},
+					),
 				);
 			}
 			return Promise.resolve(
@@ -302,9 +308,15 @@ describe("primary backend pre-auth recovery", () => {
 				);
 			}
 			return Promise.resolve(
-				new Response(JSON.stringify({ release_tag: "v3.22.0" }), {
-					status: 200,
-				}),
+				new Response(
+					JSON.stringify({
+						release_tag: "v3.22.0",
+						capabilities: ["admin.nodes"],
+					}),
+					{
+						status: 200,
+					},
+				),
 			);
 		}) as typeof window.fetch;
 		installPrimaryBackendTransport();

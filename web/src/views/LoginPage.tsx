@@ -12,6 +12,7 @@ import {
 	getPrimaryBackendSnapshot,
 	hydratePrimaryBackendProfile,
 	isStaticWebConsole,
+	probeBackendCandidate,
 	probeBackendOrigin,
 	selectPreAuthBackend,
 } from "../backend/primaryBackend";
@@ -108,6 +109,27 @@ export function LoginPage({
 			setBootstrapCompatibilityPending(false);
 			const verificationTarget = getPrimaryBackendSnapshot();
 			try {
+				if (!staticConsole) {
+					if (!verificationTarget.clusterId) {
+						throw new Error(
+							"The service node cluster identity is unavailable. Retry the node check.",
+						);
+					}
+					await probeBackendCandidate({
+						origin: verificationTarget.primaryOrigin,
+						clusterId: verificationTarget.clusterId,
+					});
+					const probedTarget = getPrimaryBackendSnapshot();
+					if (
+						probedTarget.primaryOrigin !== verificationTarget.primaryOrigin ||
+						probedTarget.clusterId !== verificationTarget.clusterId ||
+						probedTarget.generation !== verificationTarget.generation
+					) {
+						throw new Error(
+							"Service node changed during verification. Try again.",
+						);
+					}
+				}
 				await verifyAdminToken(parsed.token);
 				const currentTarget = getPrimaryBackendSnapshot();
 				if (

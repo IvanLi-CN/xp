@@ -1,4 +1,7 @@
-import { resolveApiCompatibility } from "@/api/apiCompatibility";
+import {
+	CapabilitiesResponseSchema,
+	resolveApiCompatibility,
+} from "@/api/apiCompatibility";
 import type {
 	BackendCandidate,
 	PrimaryBackendSnapshot,
@@ -44,12 +47,9 @@ export function createBackendProber(context: {
 	): Promise<void> {
 		let compatibilityPayload: Record<string, unknown>;
 		try {
-			compatibilityPayload = (await directJson(
-				origin,
-				"/api/capabilities",
-				undefined,
-				signal,
-			)) as Record<string, unknown>;
+			compatibilityPayload = CapabilitiesResponseSchema.parse(
+				await directJson(origin, "/api/capabilities", undefined, signal),
+			);
 		} catch (error) {
 			if ((error as { status?: number }).status !== 404) throw error;
 			compatibilityPayload = (await directJson(
@@ -180,6 +180,7 @@ export function createBackendProber(context: {
 		if (sessionEpoch !== context.getSessionEpoch()) {
 			throw new Error("Backend session changed during verification.");
 		}
+		assertActiveStaticCandidate(origin);
 		const nodes = await directJson(
 			origin,
 			"/api/admin/nodes",
@@ -251,7 +252,24 @@ export function createBackendProber(context: {
 		) {
 			throw new Error("Backend switch identity changed during verification.");
 		}
+		assertActiveStaticCandidate(origin);
 		return directJson(origin, args.path, args.adminToken, signal);
+	}
+	function assertActiveStaticCandidate(origin: string): void {
+		if (!context.isStaticWebConsole()) return;
+		const candidate = context
+			.getState()
+			.candidates.find((item) => item.origin === origin);
+		if (
+			context.isPolicyExpired() ||
+			!context.allowedOrigins().includes(origin) ||
+			candidate?.runtimeState === "staged" ||
+			candidate?.runtimeState === "temporarily_unavailable"
+		) {
+			throw new Error(
+				"Backend is no longer available under the active runtime policy.",
+			);
+		}
 	}
 	return {
 		probeBackendOrigin,

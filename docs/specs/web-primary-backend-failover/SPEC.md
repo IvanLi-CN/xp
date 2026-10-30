@@ -169,6 +169,11 @@ ADR 0012 and does not alter this embedded-PWA contract.
   `cluster_id`, and compatible API release profile. These checks MUST NOT send
   the admin token. A failed or stale candidate MUST remain unselected and
   MUST expose a retryable error without deleting the last known profile.
+  Immediately before each embedded-console token verification, the client MUST
+  repeat these public checks for the selected origin and its expected cluster.
+  A failed check or a change to the selected origin, cluster, or backend generation
+  during the check MUST prevent the credentialed request; the administrator
+  can retry or choose another candidate.
 - **REQ-PREAUTH-TARGET**: While the Login page is active, the selected
   candidate MUST be the target for token verification and subsequent relative
   `/api/*` requests in that tab. The login attempt MUST NOT mix the current

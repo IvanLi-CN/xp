@@ -79,7 +79,12 @@ describe("backend candidate verification", () => {
 		await vi.waitFor(() => expect(finishCapabilities).toBeDefined());
 		clearPrimaryBackendDirectory();
 		finishCapabilities(
-			new Response(JSON.stringify({ release_tag: "v3.22.0" })),
+			new Response(
+				JSON.stringify({
+					release_tag: "v3.22.0",
+					capabilities: ["admin.nodes"],
+				}),
+			),
 		);
 		await expect(pending).rejects.toThrow("session changed");
 		expect(
@@ -112,9 +117,15 @@ describe("backend candidate verification", () => {
 			}
 			if (request.url.endsWith("/api/capabilities")) {
 				return Promise.resolve(
-					new Response(JSON.stringify({ release_tag: "v3.22.0" }), {
-						status: 200,
-					}),
+					new Response(
+						JSON.stringify({
+							release_tag: "v3.22.0",
+							capabilities: ["admin.nodes"],
+						}),
+						{
+							status: 200,
+						},
+					),
 				);
 			}
 			return Promise.resolve(

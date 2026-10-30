@@ -49,7 +49,10 @@ vi.mock("../backend/primaryBackend", async () => {
 	const actual = await vi.importActual<object>("../backend/primaryBackend");
 	return {
 		...actual,
-		hydratePrimaryBackendProfile: vi.fn(),
+		getPrimaryBackendSnapshot: () => ({ ...mocks.backend }),
+		hydratePrimaryBackendProfile: vi.fn((clusterId: string) => {
+			mocks.backend.clusterId = clusterId;
+		}),
 		isStaticWebConsole: mocks.isStaticWebConsole,
 		clearPrimaryBackendDirectory: vi.fn(),
 		probeBackendOrigin: mocks.probeBackendOrigin,
@@ -363,6 +366,50 @@ describe("<LoginPage />", () => {
 		expect(
 			screen.getByRole("button", { name: "Select service node" }),
 		).toBeInTheDocument();
+	});
+
+	it("rechecks the selected backend before sending a token", async () => {
+		window.history.pushState({}, "", "/login");
+		const secondary = "https://secondary.example";
+		mocks.backend.clusterId = "cluster-84";
+		mocks.backend.primaryOrigin = secondary;
+		mocks.backend.candidates = [
+			{
+				origin: secondary,
+				nodeId: fixtureCatalog.identifier.nodeSecondary(),
+				nodeName: fixtureCatalog.label.tokyo(),
+				verifiedAt: Date.now(),
+				lastError: null,
+			},
+		];
+		mocks.probeBackendCandidate
+			.mockResolvedValueOnce(undefined)
+			.mockRejectedValueOnce(
+				new Error("Backend belongs to a different cluster."),
+			);
+		render(
+			<UiPrefsProvider>
+				<LoginPage />
+			</UiPrefsProvider>,
+		);
+		fireEvent.change(screen.getByLabelText("Token"), {
+			target: { value: "unverified-token" },
+		});
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Save & Continue" }),
+			).not.toBeDisabled(),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Save & Continue" }));
+		await waitFor(() =>
+			expect(
+				screen.getByText("Backend belongs to a different cluster."),
+			).toBeInTheDocument(),
+		);
+		expect(mocks.probeBackendCandidate).toHaveBeenCalledTimes(2);
+		expect(mocks.verifyAdminToken).not.toHaveBeenCalled();
+		expect(localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)).toBeNull();
+		expect(screen.getByLabelText("Token")).toHaveValue("unverified-token");
 	});
 
 	it("consumes a fragment login handoff without moving the token into the query", async () => {

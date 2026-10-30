@@ -68,6 +68,7 @@ import {
 	useApiCompatibility,
 } from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
+import { isDemoRuntime } from "../demo/runtimeMode";
 import { usePrimaryClusterInfo } from "../hooks/usePrimaryBackendQueries";
 import { useAuthenticatedBackendProbe } from "../hooks/usePublicBackendReadiness";
 import { useAppRuntime } from "../offline/appRuntime";
@@ -161,7 +162,7 @@ export function AppShell({
 		clusterId: primaryBackend.clusterId,
 		isOnline: runtime.isOnline,
 		origin: primaryBackend.primaryOrigin,
-		staticConsole,
+		staticConsole: staticConsole || isDemoRuntime(),
 		onUnidentifiedCluster: clearUnidentifiedBackendCache,
 	});
 	useEffect(() => {

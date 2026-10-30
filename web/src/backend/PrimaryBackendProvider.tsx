@@ -2,9 +2,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 
-import { clearPersistedQueryCache } from "../offline/queryPersistence";
+import {
+	clearBackendQueryCache,
+	clearPersistedQueryCache,
+} from "../offline/queryPersistence";
 import {
 	type PrimaryBackendSnapshot,
+	getDirectorySessionEpoch,
 	getPrimaryBackendSnapshot,
 	subscribePrimaryBackend,
 } from "./primaryBackend";
@@ -24,11 +28,19 @@ export function PrimaryBackendProvider({
 	const queryClient = useQueryClient();
 	const previousGeneration = useRef(snapshot.generation);
 	const previousSnapshot = useRef(snapshot);
+	const previousSessionEpoch = useRef(getDirectorySessionEpoch());
 
 	useEffect(() => {
-		const unsubscribe = subscribePrimaryBackend(setSnapshot);
+		const unsubscribe = subscribePrimaryBackend((next) => {
+			const epoch = getDirectorySessionEpoch();
+			if (epoch !== previousSessionEpoch.current) {
+				previousSessionEpoch.current = epoch;
+				clearBackendQueryCache(queryClient);
+			}
+			setSnapshot(next);
+		});
 		return unsubscribe;
-	}, []);
+	}, [queryClient]);
 	useEffect(() => {
 		const previous = previousSnapshot.current;
 		previousSnapshot.current = snapshot;

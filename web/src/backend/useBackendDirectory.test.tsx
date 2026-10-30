@@ -39,8 +39,8 @@ const node = {
 	node_name: fixtureCatalog.nodeName.fixture18(),
 	api_base_url: fixtureCatalog.url.nodeA(),
 	access_host: fixtureCatalog.host.primary(),
-	quota_limit_bytes: 0,
-	quota_reset: { policy: "unlimited" as const },
+	quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+	quota_reset: fixtureCatalog.quota.resetNode(),
 };
 
 function setup() {

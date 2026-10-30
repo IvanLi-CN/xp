@@ -39,6 +39,7 @@ function nodes() {
 async function installLoginMocks(
 	page: import("@playwright/test").Page,
 	adminStatus: number,
+	options: { restoreRemote?: boolean; remoteUnreachable?: boolean } = {},
 ) {
 	const pageOrigin = new URL(
 		process.env.E2E_BASE_URL ?? "http://127.0.0.1:60080",
@@ -66,9 +67,9 @@ async function installLoginMocks(
 		updatedAt: fixtureCatalog.number.value100(),
 	};
 	await page.addInitScript(
-		({ activeClusterId, profile }) => {
+		({ activeClusterId, profile, restoreRemote }) => {
 			localStorage.removeItem("xp_admin_token");
-			profile.primaryOrigin = location.origin;
+			if (!restoreRemote) profile.primaryOrigin = location.origin;
 			profile.candidates[0].origin = location.origin;
 			localStorage.setItem(
 				"xp-primary-backend-profiles",
@@ -78,7 +79,14 @@ async function installLoginMocks(
 				}),
 			);
 		},
-		{ activeClusterId: clusterId, profile: initialProfile },
+		{
+			activeClusterId: clusterId,
+			profile: {
+				...initialProfile,
+				primaryOrigin: options.restoreRemote ? recoveryOrigin : pageOrigin,
+			},
+			restoreRemote: options.restoreRemote ?? false,
+		},
 	);
 
 	await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
@@ -86,6 +94,10 @@ async function installLoginMocks(
 		const url = new URL(request.url());
 		const origin = url.origin;
 		const headers = corsHeaders(pageOrigin);
+		if (origin === recoveryOrigin && options.remoteUnreachable) {
+			await route.abort("failed");
+			return;
+		}
 		if (request.method() === "OPTIONS") {
 			await route.fulfill({ status: 204, headers });
 			return;
@@ -181,6 +193,29 @@ async function installLoginMocks(
 	});
 }
 
+test("recovers to the page origin when the restored primary is unreachable", async ({
+	page,
+}) => {
+	await installLoginMocks(page, 200, {
+		restoreRemote: true,
+		remoteUnreachable: true,
+	});
+	await page.goto("/login");
+	await page.getByRole("button", { name: "Select service node" }).click();
+	await page
+		.getByRole("menuitem", {
+			name: new RegExp(fixtureCatalog.identifier.nodeNamePrimary()),
+		})
+		.click();
+	await page.getByLabel("Token").fill("valid-admin-token");
+	const login = page.waitForRequest(
+		(request) => new URL(request.url()).pathname === "/api/admin/alerts",
+	);
+	await page.getByRole("button", { name: "Save & Continue" }).click();
+	expect(new URL((await login).url()).origin).toBe(new URL(page.url()).origin);
+	await expect(page).toHaveURL(/\/$/);
+});
+
 test("uses selected recovery origin and persists after inventory hydration", async ({
 	page,
 }) => {
@@ -273,15 +308,69 @@ test("uses selected recovery origin and persists after inventory hydration", asy
 			(request) => request.url === `${recoveryOrigin}/api/admin/alerts`,
 		),
 	).toBe(true);
+	await expect
+		.poll(
+			() =>
+				apiRequests.filter(
+					(request) =>
+						new URL(request.url).pathname === "/api/admin/status/events",
+				).length,
+		)
+		.toBeGreaterThan(0);
 	const sseRequests = apiRequests.filter(
 		(request) => new URL(request.url).pathname === "/api/admin/status/events",
 	);
-	expect(sseRequests.length).toBeGreaterThan(0);
 	expect(
 		sseRequests.every(
 			(request) => new URL(request.url).origin === recoveryOrigin,
 		),
 	).toBe(true);
+});
+
+test("does not send a token when the selected node changes clusters before login", async ({
+	page,
+}) => {
+	await installLoginMocks(page, 200);
+	let changedCluster = false;
+	const adminRequests: string[] = [];
+	page.on("request", (request) => {
+		if (new URL(request.url()).pathname.startsWith("/api/admin/")) {
+			adminRequests.push(request.url());
+		}
+	});
+	await page.route("**/api/cluster/info", async (route) => {
+		if (
+			changedCluster &&
+			new URL(route.request().url()).origin === recoveryOrigin
+		) {
+			await route.fulfill({
+				status: 200,
+				headers: corsHeaders(new URL(page.url()).origin),
+				contentType: "application/json",
+				body: JSON.stringify({
+					cluster_id: fixtureCatalog.cluster.fixture95(),
+				}),
+			});
+			return;
+		}
+		await route.fallback();
+	});
+	await page.goto("/login", { waitUntil: "networkidle" });
+	await page.getByRole("button", { name: "Select service node" }).click();
+	await page.getByRole("menuitem", { name: /Tokyo/ }).click();
+	await page.getByLabel("Token").fill("valid-admin-token");
+	await expect(
+		page.getByRole("button", { name: "Save & Continue" }),
+	).toBeEnabled();
+	changedCluster = true;
+	await page.getByRole("button", { name: "Save & Continue" }).click();
+	await expect(
+		page.getByText("Backend belongs to a different cluster."),
+	).toBeVisible();
+	expect(adminRequests).toEqual([]);
+	expect(
+		await page.evaluate(() => localStorage.getItem("xp_admin_token")),
+	).toBeNull();
 });
 
 test("keeps the login page and selected origin after a recovery 401", async ({

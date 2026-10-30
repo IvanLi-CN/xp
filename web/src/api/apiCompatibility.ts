@@ -24,7 +24,7 @@ const CAPABILITIES_REQUIRING_EXPLICIT_PROBE = new Set([
 const CURRENT_API_ROUTE_CONTRACT_CAPABILITIES = new Set([
 	"cluster.mesh-gate-v1",
 ]);
-const CapabilitiesResponseSchema = z
+export const CapabilitiesResponseSchema = z
 	.object({
 		release_tag: z.string().optional(),
 		capabilities: z.array(z.string()).min(1),

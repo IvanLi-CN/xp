@@ -1,13 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const stores = vi.hoisted(() => new Map<string, Map<string, unknown>>());
+const reads = vi.hoisted(() => ({
+	store: "",
+	started: undefined as (() => void) | undefined,
+	release: undefined as (() => void) | undefined,
+}));
 vi.mock("localforage", () => ({
 	default: {
 		createInstance: ({ storeName }: { storeName: string }) => {
 			const data = new Map<string, unknown>();
 			stores.set(storeName, data);
 			return {
-				getItem: async (key: string) => data.get(key) ?? null,
+				getItem: async (key: string) => {
+					const value = data.get(key) ?? null;
+					if (reads.store === storeName) {
+						reads.store = "";
+						await new Promise<void>((resolve) => {
+							reads.release = resolve;
+							reads.started?.();
+						});
+					}
+					return value;
+				},
 				setItem: async (key: string, value: unknown) => data.set(key, value),
 				removeItem: async (key: string) => data.delete(key),
 				clear: async () => data.clear(),
@@ -19,6 +34,7 @@ vi.mock("localforage", () => ({
 import {
 	clearPersistedQueryCache,
 	createPersistOptions,
+	readPersistedQuerySnapshot,
 	writePersistedQuerySnapshot,
 } from "./queryPersistence";
 
@@ -28,9 +44,50 @@ describe("query cache cleanup", () => {
 		await clearPersistedQueryCache();
 	});
 	afterEach(() => {
+		reads.store = "";
+		reads.release?.();
+		reads.release = undefined;
+		reads.started = undefined;
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
 	});
+
+	it.each(["offline_query_snapshots", "react_query_cache"])(
+		"discards an in-flight read from %s when the session is cleared",
+		async (storeName) => {
+			const cache = {
+				buster: "test-build",
+				timestamp: Date.now(),
+				clientState: { mutations: [], queries: [] },
+			};
+			stores
+				.get("react_query_cache")
+				?.set("xp-react-query", JSON.stringify(cache));
+			stores
+				.get("offline_query_snapshots")
+				?.set(JSON.stringify(["adminNodes"]), {
+					data: ["old"],
+					dataUpdatedAt: Date.now(),
+					storedAt: Date.now(),
+					buildId: "test-build",
+				});
+			reads.store = storeName;
+			const started = new Promise<void>((resolve) => {
+				reads.started = resolve;
+			});
+			const pending =
+				storeName === "react_query_cache"
+					? createPersistOptions().persister.restoreClient()
+					: readPersistedQuerySnapshot(["adminNodes"]);
+			await started;
+			const cleanup = clearPersistedQueryCache();
+			reads.release?.();
+			const restored = await pending;
+			await cleanup;
+			if (storeName === "react_query_cache") expect(restored).toBeUndefined();
+			else expect(restored).toEqual({ data: undefined, dataUpdatedAt: null });
+		},
+	);
 
 	it("does not restore queued shared or per-query writes after cleanup", async () => {
 		vi.useFakeTimers();

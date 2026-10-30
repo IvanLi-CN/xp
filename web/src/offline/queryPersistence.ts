@@ -129,9 +129,12 @@ const persister: PersistQueryClientProviderProps["persistOptions"]["persister"] 
 			}, 1_000);
 		},
 		restoreClient: async () => {
+			const epoch = persistenceEpoch;
 			try {
 				await persistenceQueue;
-				return await basePersister.restoreClient();
+				if (epoch !== persistenceEpoch) return undefined;
+				const restored = await basePersister.restoreClient();
+				return epoch === persistenceEpoch ? restored : undefined;
 			} catch {
 				return undefined;
 			}
@@ -222,7 +225,10 @@ export function isPersistedQueryCacheFresh(
 export async function readPersistedQuerySnapshot<T>(
 	queryKey: readonly unknown[],
 ): Promise<{ data: T | undefined; dataUpdatedAt: number | null }> {
+	const epoch = persistenceEpoch;
+	const empty = { data: undefined, dataUpdatedAt: null };
 	await persistenceQueue;
+	if (epoch !== persistenceEpoch) return empty;
 	try {
 		const snapshotKey = JSON.stringify(queryKey);
 		const snapshot = await offlineSnapshotStorage.getItem<{
@@ -231,6 +237,7 @@ export async function readPersistedQuerySnapshot<T>(
 			buildId?: string;
 			storedAt?: number;
 		}>(snapshotKey);
+		if (epoch !== persistenceEpoch) return empty;
 		if (
 			snapshot &&
 			isPersistedQuerySnapshotFresh(snapshot, __XP_WEB_BUILD_ID__)
@@ -253,6 +260,7 @@ export async function readPersistedQuerySnapshot<T>(
 	} catch {
 		return { data: undefined, dataUpdatedAt: null };
 	}
+	if (epoch !== persistenceEpoch) return empty;
 	if (!raw) {
 		return { data: undefined, dataUpdatedAt: null };
 	}
