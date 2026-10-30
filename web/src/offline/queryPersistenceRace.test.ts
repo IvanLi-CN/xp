@@ -5,9 +5,6 @@ const reads = vi.hoisted(() => ({
 	store: "",
 	started: undefined as (() => void) | undefined,
 	release: undefined as (() => void) | undefined,
-	removeStarted: undefined as (() => void) | undefined,
-	removeRelease: undefined as (() => void) | undefined,
-	pauseRemove: false,
 }));
 vi.mock("localforage", () => ({
 	default: {
@@ -27,16 +24,7 @@ vi.mock("localforage", () => ({
 					return value;
 				},
 				setItem: async (key: string, value: unknown) => data.set(key, value),
-				removeItem: async (key: string) => {
-					if (reads.pauseRemove && storeName === "offline_query_snapshots") {
-						reads.pauseRemove = false;
-						await new Promise<void>((resolve) => {
-							reads.removeRelease = resolve;
-							reads.removeStarted?.();
-						});
-					}
-					return data.delete(key);
-				},
+				removeItem: async (key: string) => data.delete(key),
 				clear: async () => data.clear(),
 			};
 		},
@@ -60,31 +48,45 @@ describe("query cache cleanup", () => {
 		reads.release?.();
 		reads.release = undefined;
 		reads.started = undefined;
-		reads.pauseRemove = false;
-		reads.removeRelease?.();
-		reads.removeRelease = undefined;
-		reads.removeStarted = undefined;
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
 	});
 
-	it("finishes stale snapshot removal before a new session writes the same key", async () => {
+	it("ignores stale snapshots and clears them at the session boundary", async () => {
 		const key = ["adminNodes"];
 		stores.get("offline_query_snapshots")?.set(JSON.stringify(key), {
 			data: ["old"],
 			buildId: "test-build",
 			storedAt: 1,
 		});
-		reads.pauseRemove = true;
+		expect((await readPersistedQuerySnapshot(key)).data).toBeUndefined();
+		await clearPersistedQueryCache();
+		expect(
+			stores.get("offline_query_snapshots")?.has(JSON.stringify(key)),
+		).toBe(false);
+	});
+
+	it("does not delete another tab's new snapshot after reading an old value", async () => {
+		const key = ["adminNodes"];
+		const store = stores.get("offline_query_snapshots");
+		store?.set(JSON.stringify(key), {
+			data: ["old"],
+			buildId: "test-build",
+			storedAt: 1,
+		});
+		reads.store = "offline_query_snapshots";
 		const started = new Promise<void>((resolve) => {
-			reads.removeStarted = resolve;
+			reads.started = resolve;
 		});
 		const oldRead = readPersistedQuerySnapshot(key);
 		await started;
-		const cleanup = clearPersistedQueryCache();
-		const newWrite = writePersistedQuerySnapshot(key, ["new"], Date.now());
-		reads.removeRelease?.();
-		await Promise.all([oldRead, cleanup, newWrite]);
+		store?.set(JSON.stringify(key), {
+			data: ["new"],
+			buildId: "test-build",
+			storedAt: Date.now(),
+		});
+		reads.release?.();
+		await oldRead;
 		expect((await readPersistedQuerySnapshot<string[]>(key)).data).toEqual([
 			"new",
 		]);

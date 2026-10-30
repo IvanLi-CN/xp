@@ -247,19 +247,8 @@ export async function readPersistedQuerySnapshot<T>(
 				dataUpdatedAt: snapshot.dataUpdatedAt ?? null,
 			};
 		}
-		if (snapshot) {
-			await enqueuePersistence(async () => {
-				if (epoch !== persistenceEpoch) return;
-				const current = await offlineSnapshotStorage.getItem(snapshotKey);
-				if (
-					epoch === persistenceEpoch &&
-					JSON.stringify(current) === JSON.stringify(snapshot)
-				) {
-					await offlineSnapshotStorage.removeItem(snapshotKey);
-				}
-			});
-			if (epoch !== persistenceEpoch) return empty;
-		}
+		// Other tabs may write this key between an IndexedDB read and delete.
+		// Ignore stale data; a fresh write or session cleanup replaces it safely.
 	} catch {
 		// Fall through to the shared persisted query cache.
 	}
