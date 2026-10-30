@@ -60,6 +60,7 @@ fn source_collector_repository_ids(
 pub(super) struct SourceRecordBatch {
     records: Option<Vec<SyncRecord>>,
     pub(super) deletion_markers: Vec<crate::node_history::RepositoryHistoryDeletionMarker>,
+    pub(super) deletion_snapshot_version: Option<u64>,
     pub(super) uptime_observation_ids: Vec<String>,
     pub(super) uptime_capture_gap_ids: Vec<String>,
     pub(super) resource_rollup_buckets: Vec<i64>,
@@ -71,6 +72,7 @@ impl SourceRecordBatch {
         Self {
             records: Some(Vec::new()),
             deletion_markers: Vec::new(),
+            deletion_snapshot_version: None,
             uptime_observation_ids: Vec::new(),
             uptime_capture_gap_ids: Vec::new(),
             resource_rollup_buckets: Vec::new(),
@@ -127,9 +129,9 @@ pub(super) async fn source_records(
             MAX_SOURCE_PAYLOAD_BYTES,
         )
         .await;
-    let deletion_markers = state
+    let (deletion_snapshot_version, deletion_markers) = state
         .node_history
-        .repository_deletion_markers(&state.cluster.node_id)
+        .repository_deletion_snapshot(&state.cluster.node_id)
         .await?;
     let pending_uptime_observations = state.uptime.pending(512).await?;
     let pending_uptime_capture_gaps = state.uptime.pending_capture_gaps(512).await?;
@@ -345,6 +347,7 @@ pub(super) async fn source_records(
     Ok(SourceRecordBatch {
         records: Some(records),
         deletion_markers,
+        deletion_snapshot_version: Some(deletion_snapshot_version),
         uptime_observation_ids: pending_uptime_observations
             .into_iter()
             .map(|pending| pending.id)

@@ -385,6 +385,8 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 - 同一对象再次删除时，新删除意图必须获得持久且不同的 generation。source tombstone、
   远端清理请求和 ACK 必须绑定对应 generation；旧 ACK 不得清除新意图或确认新 tombstone。
   旧格式未带 generation 的意图保持兼容。持久化失败必须保留先前状态并向调用方报告失败。
+  真实 ACK 后先持久清理 source 回执映射，再完成删除意图；重启可重试剩余步骤。
+  旧版遗留的无主映射须根据持久删除版本有界收敛，不得删除未确认的 journal 段。
 - 稳定删除快照分页按完整 JSON 数组大小限制页面，包含括号与分隔符；合法记录跨页后仍能继续恢复。
 
 ## Interfaces and Contracts

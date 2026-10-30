@@ -67,6 +67,8 @@
   replay. Later deletions follow the durable source delivery path when a repository becomes Ready.
   Repeated deletion intents have durable generations bound to tombstones and cleanup ACKs; an older
   ACK cannot clear a newer deletion. Deletion export counts complete JSON arrays in its page limit.
+  ACK completion removes receipt mappings before intent; a bounded version-checked scan reclaims
+  orphan mappings from older versions without changing unacknowledged journal rows.
 
   SQLite releases idle WAL at normal reset with a 1 MiB retained-journal limit.
 

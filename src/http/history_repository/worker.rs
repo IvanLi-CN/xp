@@ -255,6 +255,13 @@ async fn publish_local_history_segment(
     let (segments, gaps) = {
         let mut runtime = state.repository_replica.lock().await;
         repository_blocking(|| -> Result<_, RepositoryRuntimeError> {
+            if let Some(version) = source_batch.deletion_snapshot_version {
+                runtime.reconcile_local_source_tombstones(
+                    &state.cluster.node_id,
+                    &source_batch.deletion_markers,
+                    version,
+                )?;
+            }
             let segments = if capture_paused {
                 // Load a page only when the in-memory replay window is empty.
                 let mut page = runtime.local_source_pending_segments_page_with_budget(
@@ -541,16 +548,8 @@ async fn publish_local_history_segment(
     })?;
     drop(runtime);
     if delivery_succeeded && acknowledgements_replicated && tombstones_fully_acknowledged {
-        for marker in &source_batch.deletion_markers {
-            state
-                .node_history
-                .complete_repository_deletion_marker(&state.cluster.node_id, marker)
-                .await?;
-        }
-        let mut runtime = state.repository_replica.lock().await;
-        repository_blocking(|| {
-            runtime.complete_local_source_tombstones(&source_batch.deletion_markers)
-        })?;
+        source_delivery::complete_acked_source_deletions(state, &source_batch.deletion_markers)
+            .await?;
     }
     Ok(delivery_succeeded)
 }

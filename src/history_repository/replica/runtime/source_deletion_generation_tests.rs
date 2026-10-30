@@ -257,3 +257,283 @@ async fn failed_marker_completion_retains_durable_source_receipt_mapping() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn stale_intent_snapshot_cannot_prune_a_newer_generation() {
+    let directory = tempfile::tempdir().unwrap();
+    let history = NodeHistoryHandle::new(directory.path().join("node_history_cache.json"));
+    let (version, old_markers) = history.repository_deletion_snapshot("local").await.unwrap();
+    assert!(old_markers.is_empty());
+    history.clear_user("target").await.unwrap();
+    let new_markers = history.repository_deletion_markers("local").await.unwrap();
+    let key = signing_key();
+    let mut source = load(directory.path());
+    let segments = source
+        .queue_local_source_segments(
+            "cluster-a",
+            identity(&key),
+            &key,
+            &new_markers.iter().map(tombstone).collect::<Vec<_>>(),
+            100,
+        )
+        .unwrap();
+    source
+        .reconcile_local_source_tombstones("node-a", &old_markers, version)
+        .unwrap();
+    assert_eq!(source.snapshot.local_source.deletion_marker_keys.len(), 1);
+    assert_eq!(
+        source.local_source_pending_segments_page()[0].wire,
+        segments[0].wire
+    );
+}
+
+#[tokio::test]
+async fn bounded_orphan_scan_passes_live_entries_and_keeps_unacked_wires() {
+    let directory = tempfile::tempdir().unwrap();
+    let history = NodeHistoryHandle::new(directory.path().join("node_history_cache.json"));
+    for index in 0..129 {
+        history
+            .clear_user(&format!("active-{index:03}"))
+            .await
+            .unwrap();
+    }
+    let (version, markers) = history.repository_deletion_snapshot("local").await.unwrap();
+    let mut records = markers.iter().map(tombstone).collect::<Vec<_>>();
+    records.extend((0..129).map(|index| {
+        SyncRecord::new(
+            "node-a",
+            "node-a",
+            "traffic.v1",
+            1,
+            format!("node-history:user:orphan-{index:03}:").into_bytes(),
+            b"{}".to_vec(),
+            true,
+        )
+    }));
+    let key = signing_key();
+    let mut source = load(directory.path());
+    let segments = source
+        .queue_local_source_segments("cluster-a", identity(&key), &key, &records, 100)
+        .unwrap();
+    assert_eq!(segments.len(), 1);
+    assert_eq!(source.snapshot.local_source.deletion_marker_keys.len(), 258);
+    source
+        .reconcile_local_source_tombstones("node-a", &markers, version)
+        .unwrap();
+    assert_eq!(source.snapshot.local_source.deletion_marker_keys.len(), 258);
+    source
+        .reconcile_local_source_tombstones("node-a", &markers, version)
+        .unwrap();
+    assert_eq!(source.snapshot.local_source.deletion_marker_keys.len(), 131);
+    drop(source);
+    let mut source = load(directory.path());
+    for _ in 0..3 {
+        source
+            .reconcile_local_source_tombstones("node-a", &markers, version)
+            .unwrap();
+    }
+    assert_eq!(source.snapshot.local_source.deletion_marker_keys.len(), 129);
+    assert_eq!(
+        source.local_source_pending_segments_page()[0].wire,
+        segments[0].wire
+    );
+}
+
+#[tokio::test]
+async fn failed_orphan_reconcile_keeps_mapping_and_wire_for_retry() {
+    let directory = tempfile::tempdir().unwrap();
+    let key = signing_key();
+    let record = SyncRecord::new(
+        "node-a",
+        "node-a",
+        "traffic.v1",
+        1,
+        b"node-history:user:orphan:".to_vec(),
+        b"{}".to_vec(),
+        true,
+    );
+    let mut source = load(directory.path());
+    let segments = source
+        .queue_local_source_segments("cluster-a", identity(&key), &key, &[record], 100)
+        .unwrap();
+    let (id, stored) = source
+        .snapshot
+        .local_source
+        .deletion_marker_keys
+        .iter()
+        .next()
+        .unwrap();
+    assert_eq!(stored.source_node_id(), "node-a");
+    assert!(
+        source.snapshot.local_source.node_id.is_empty()
+            || source.snapshot.local_source.node_id == "node-a"
+    );
+    assert_eq!(stored.source_epoch(), source.snapshot.local_source.epoch);
+    assert_eq!(stored.stream(), "tombstone");
+    assert_eq!(marker_mapping_generation(id, stored), Some(0));
+    let connection = rusqlite::Connection::open(directory.path().join("history.sqlite3")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_orphan_cleanup BEFORE INSERT ON history_snapshots
+             WHEN NEW.key = 'repository_replica' BEGIN
+             SELECT RAISE(ABORT, 'injected orphan cleanup failure'); END;",
+        )
+        .unwrap();
+    assert!(
+        source
+            .reconcile_local_source_tombstones("node-a", &[], 0)
+            .is_err()
+    );
+    assert_eq!(source.snapshot.local_source.deletion_marker_keys.len(), 1);
+    drop(source);
+    let mut source = load(directory.path());
+    assert_eq!(source.snapshot.local_source.deletion_marker_keys.len(), 1);
+    assert_eq!(
+        source.local_source_pending_segments_page()[0].wire,
+        segments[0].wire
+    );
+    connection
+        .execute_batch("DROP TRIGGER reject_orphan_cleanup")
+        .unwrap();
+    source
+        .reconcile_local_source_tombstones("node-a", &[], 0)
+        .unwrap();
+    drop(source);
+    let source = load(directory.path());
+    assert!(source.snapshot.local_source.deletion_marker_keys.is_empty());
+    assert_eq!(
+        source.local_source_pending_segments_page()[0].wire,
+        segments[0].wire
+    );
+}
+
+#[tokio::test]
+async fn orphan_scan_preserves_unknown_tombstone_mapping() {
+    let directory = tempfile::tempdir().unwrap();
+    let key = signing_key();
+    let record = SyncRecord::new(
+        "node-a",
+        "node-a",
+        "traffic.v1",
+        1,
+        b"unknown-tombstone".to_vec(),
+        b"{}".to_vec(),
+        true,
+    );
+    let mut source = load(directory.path());
+    let segments = source
+        .queue_local_source_segments("cluster-a", identity(&key), &key, &[record], 100)
+        .unwrap();
+    source
+        .reconcile_local_source_tombstones("node-a", &[], 0)
+        .unwrap();
+    assert_eq!(source.snapshot.local_source.deletion_marker_keys.len(), 1);
+    assert_eq!(
+        source.local_source_pending_segments_page()[0].wire,
+        segments[0].wire
+    );
+}
+
+#[tokio::test]
+async fn orphan_scan_preserves_mapping_outside_the_current_source_epoch() {
+    let directory = tempfile::tempdir().unwrap();
+    let key = signing_key();
+    let record = SyncRecord::new(
+        "node-a",
+        "node-a",
+        "traffic.v1",
+        1,
+        b"node-history:user:foreign:".to_vec(),
+        b"{}".to_vec(),
+        true,
+    );
+    let mut source = load(directory.path());
+    let segments = source
+        .queue_local_source_segments("cluster-a", identity(&key), &key, &[record], 100)
+        .unwrap();
+    let cursor = ReplicaCursor::new("other-source", 1, "tombstone", 0).unwrap();
+    let foreign = ReplicaRecord::new(
+        &cursor,
+        "node-a",
+        "node-a",
+        "traffic.v1",
+        1,
+        b"node-history:user:foreign:".to_vec(),
+        b"{}".to_vec(),
+    )
+    .unwrap()
+    .key();
+    let (_, value) = source
+        .snapshot
+        .local_source
+        .deletion_marker_keys
+        .iter_mut()
+        .next()
+        .unwrap();
+    *value = foreign;
+    source
+        .reconcile_local_source_tombstones("node-a", &[], u64::MAX)
+        .unwrap();
+    assert_eq!(source.snapshot.local_source.deletion_marker_keys.len(), 1);
+    assert_eq!(
+        source.local_source_pending_segments_page()[0].wire,
+        segments[0].wire
+    );
+}
+
+#[tokio::test]
+async fn orphan_scan_recovers_older_epoch_but_preserves_a_future_epoch() {
+    for future in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let key = signing_key();
+        let record = SyncRecord::new(
+            "node-a",
+            "node-a",
+            "traffic.v1",
+            1,
+            b"node-history:user:epoch:".to_vec(),
+            b"{}".to_vec(),
+            true,
+        );
+        let mut source = load(directory.path());
+        let segments = source
+            .queue_local_source_segments("cluster-a", identity(&key), &key, &[record], 100)
+            .unwrap();
+        let epoch = if future {
+            source.snapshot.local_source.epoch + 1
+        } else {
+            0
+        };
+        let cursor = ReplicaCursor::new("node-a", epoch, "tombstone", 0).unwrap();
+        let mapped = ReplicaRecord::new(
+            &cursor,
+            "node-a",
+            "node-a",
+            "traffic.v1",
+            1,
+            b"node-history:user:epoch:".to_vec(),
+            b"{}".to_vec(),
+        )
+        .unwrap()
+        .key();
+        let (_, value) = source
+            .snapshot
+            .local_source
+            .deletion_marker_keys
+            .iter_mut()
+            .next()
+            .unwrap();
+        *value = mapped;
+        source
+            .reconcile_local_source_tombstones("node-a", &[], u64::MAX)
+            .unwrap();
+        assert_eq!(
+            source.snapshot.local_source.deletion_marker_keys.len(),
+            usize::from(future)
+        );
+        assert_eq!(
+            source.local_source_pending_segments_page()[0].wire,
+            segments[0].wire
+        );
+    }
+}

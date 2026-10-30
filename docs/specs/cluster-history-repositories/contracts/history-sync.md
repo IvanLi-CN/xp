@@ -72,6 +72,10 @@ Later deletions use the normal durable source delivery path.
 The source assigns each repeated deletion a durable generation and binds it to the signed tombstone
 and acknowledgement. An older acknowledgement cannot discharge the newer generation. Remote cleanup
 only completes the generation sent in that request; a failed write retains prior intent.
+After a real ACK, the source persists receipt-mapping removal before completing deletion intent.
+An interrupted completion can safely retry. A bounded scan reconciles owned legacy orphan mappings
+against a durable versioned intent snapshot without changing journal rows or tombstone evidence.
+Unknown mappings, different sources and epochs ahead of the current watermark remain untouched.
 Deletion pages count the JSON array brackets and separators in the byte cap.
 
 Before applying a persisted local page, the receiver reloads the exact signed wires and checks the

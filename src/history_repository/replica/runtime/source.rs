@@ -31,6 +31,8 @@ pub(super) struct LocalSourceState {
     backpressure_gap_cursor: Option<String>,
     #[serde(skip)]
     replay_window_cursor: Option<String>,
+    #[serde(skip)]
+    deletion_marker_scan_cursor: Option<String>,
     /// Durable marker-to-cursor mapping. Tombstones use their own stream, so their sequence
     /// cannot be reconstructed from the affected schema's live cursor.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -622,6 +624,75 @@ impl RepositoryReplicaRuntime {
         Ok(())
     }
 
+    /// Reclaim old marker mappings only from a durable, versioned intent snapshot.
+    /// The source journal and the tombstone ledger remain untouched.
+    pub(crate) fn reconcile_local_source_tombstones(
+        &mut self,
+        source_node_id: &str,
+        markers: &[crate::node_history::RepositoryHistoryDeletionMarker],
+        snapshot_version: u64,
+    ) -> Result<(), RepositoryRuntimeError> {
+        use std::ops::Bound::{Excluded, Unbounded};
+        const PAGE_SIZE: usize = 128;
+        let local = &mut self.snapshot.local_source;
+        let previous_cursor = local.deletion_marker_scan_cursor.clone();
+        let mut page = match previous_cursor.as_ref() {
+            Some(cursor) => local
+                .deletion_marker_keys
+                .range((Excluded(cursor.clone()), Unbounded))
+                .take(PAGE_SIZE)
+                .map(|(id, key)| (id.clone(), key.clone()))
+                .collect::<Vec<_>>(),
+            None => Vec::new(),
+        };
+        if previous_cursor.is_none() || page.is_empty() {
+            page = local
+                .deletion_marker_keys
+                .iter()
+                .take(PAGE_SIZE)
+                .map(|(id, key)| (id.clone(), key.clone()))
+                .collect();
+        }
+        local.deletion_marker_scan_cursor = if page.len() == PAGE_SIZE {
+            page.last().map(|(id, _)| id.clone())
+        } else {
+            None
+        };
+        let mut obsolete = page
+            .into_iter()
+            .filter(|(id, key)| {
+                (local.node_id.is_empty() || local.node_id == source_node_id)
+                    && key.source_node_id() == source_node_id
+                    && key.source_epoch() <= local.epoch
+                    && key.stream() == "tombstone"
+                    && marker_mapping_generation(id, key)
+                        .is_some_and(|version| version <= snapshot_version)
+            })
+            .collect::<BTreeMap<_, _>>();
+        for marker in markers {
+            obsolete.remove(&deletion_marker_id_parts(
+                &marker.schema_id,
+                &marker.record_key,
+                marker.generation,
+            ));
+        }
+        if obsolete.is_empty() {
+            return Ok(());
+        }
+        for id in obsolete.keys() {
+            self.snapshot.local_source.deletion_marker_keys.remove(id);
+        }
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot
+                .local_source
+                .deletion_marker_keys
+                .extend(obsolete);
+            self.snapshot.local_source.deletion_marker_scan_cursor = previous_cursor;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub(crate) fn local_source_collector(
         &self,
         primary_repository_id: &str,
@@ -780,6 +851,28 @@ fn deletion_marker_id_parts(schema_id: &str, record_key: &[u8], generation: u64)
     } else {
         format!("{legacy}:generation:{generation}")
     }
+}
+
+fn marker_mapping_generation(id: &str, key: &ReplicaRecordKey) -> Option<u64> {
+    let record_key = key.record_key();
+    let schema = key.schema().0;
+    let known_node_marker = record_key.starts_with(b"node-history:node:")
+        && matches!(
+            schema,
+            "runtime.v1" | "path_health.v1" | "traffic.v1" | "connections.v1" | "ip_usage.v1"
+        );
+    let known_user_marker = record_key.starts_with(b"node-history:user:") && schema == "traffic.v1";
+    if !record_key.ends_with(b":") || !(known_node_marker || known_user_marker) {
+        return None;
+    }
+    let legacy = deletion_marker_id_parts(key.schema().0, key.record_key(), 0);
+    if id == legacy {
+        return Some(0);
+    }
+    id.strip_prefix(&format!("{legacy}:generation:"))?
+        .parse::<u64>()
+        .ok()
+        .filter(|generation| *generation > 0)
 }
 
 #[cfg(test)]

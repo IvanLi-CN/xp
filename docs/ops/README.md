@@ -923,6 +923,8 @@ Notes:
   source-journal row is deleted only after a real ACK removes that exact segment.
   Repeated deletions receive distinct durable generations. Old source or remote cleanup ACKs cannot
   clear a later deletion; persistence failure retains the prior intent and reports failure.
+  Receipt mappings clear before acknowledged intent; interrupted completion retries safely.
+  A bounded version-checked scan reclaims legacy orphan mappings without deleting journal rows.
   Stable deletion pages include JSON brackets and separators in the page byte limit.
   For ready peers, one 5-second source cycle drains up to sixteen consecutive summary, repair, or
   tiered export pages per peer within a shared 15-second maintenance budget. The remaining budget is

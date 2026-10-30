@@ -114,15 +114,26 @@ impl NodeHistoryHandle {
         &self,
         destination_node_id: &str,
     ) -> anyhow::Result<Vec<RepositoryHistoryDeletionMarker>> {
+        Ok(self
+            .repository_deletion_snapshot(destination_node_id)
+            .await?
+            .1)
+    }
+
+    pub(crate) async fn repository_deletion_snapshot(
+        &self,
+        destination_node_id: &str,
+    ) -> anyhow::Result<(u64, Vec<RepositoryHistoryDeletionMarker>)> {
         let mut markers = Vec::new();
         // Capture only durably committed deletion intent. Failure must stop source capture.
-        self.visit_repository_deletion_markers(destination_node_id, true, |marker| {
-            markers.push(marker);
-            Ok(())
-        })
-        .await?;
+        let version = self
+            .visit_repository_deletion_markers(destination_node_id, true, |marker| {
+                markers.push(marker);
+                Ok(())
+            })
+            .await?;
         markers.sort_by(|left, right| left.record_key.cmp(&right.record_key));
-        Ok(markers)
+        Ok((version, markers))
     }
 }
 
