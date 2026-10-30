@@ -103,6 +103,8 @@
   membership operation completes.
   Durable node removal also prunes active and prepared user-cleanup destinations; remote cleanup
   retries until the receiving node's in-memory and saved membership both reflect removal.
+  Before pruning a prepared target at activation, the saved node set and matching saved removal
+  operation must both prove removal; unavailable proof preserves the target for later cleanup.
   Before downgrading to a build without prepared-deletion recovery, the node must first drain its
   `prepared_user_deletions` state.
   Tombstone expiry is committed atomically with the corresponding receiver state and history writes.

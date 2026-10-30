@@ -26,6 +26,9 @@ history transaction before that operation is marked complete.
 An observed, durably saved node removal also removes that node from active and prepared destination
 sets. Activation refreshes current membership under the same local state lock; remote node cleanup
 waits for the recipient's own saved membership to reflect the removal before acknowledging it.
+Before node cleanup executes, activation excludes a prepared destination only when the saved node
+set and matching saved removal operation both prove the removal. Missing proof retains the target;
+an unreadable saved state keeps the prepared operation for retry.
 
 ## Consequences
 

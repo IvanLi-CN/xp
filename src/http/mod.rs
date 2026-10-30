@@ -7077,15 +7077,9 @@ async fn admin_delete_user(
     // A recovery worker may already have applied this prepared deletion.
     {
         let store = state.store.lock().await;
-        let destinations = store
-            .list_nodes()
-            .into_iter()
-            .filter(|node| node.node_id != state.cluster.node_id)
-            .map(|node| node.node_id)
-            .collect::<Vec<_>>();
         state
             .node_history
-            .activate_prepared_user_deletion(&user_id, &destinations)
+            .activate_user_deletion_for_membership(&user_id, &store, &state.cluster.node_id)
             .await
             .map_err(|error| {
                 tracing::warn!(%error, "prepared user history deletion awaits storage");

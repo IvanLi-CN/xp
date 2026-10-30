@@ -40,6 +40,42 @@ fn current_guard(connection: &Connection) -> Result<Option<(i64, Vec<u8>)>> {
 }
 
 impl HistoryStorage {
+    /// Prove a specific removal in the saved membership operation and saved node set.
+    pub(crate) fn saved_state_confirms_node_removal(
+        &self,
+        node_id: &str,
+        operation_id: &str,
+    ) -> Result<bool> {
+        let mut backend = self.lock_backend();
+        let connection = sqlite_connection(&mut backend)?
+            .ok_or_else(|| HistoryStorageError("durable node membership requires SQLite".into()))?;
+        let state: Option<(Option<String>, bool, bool)> = connection
+            .query_row(
+                "SELECT json_type(CAST(payload AS TEXT), '$.nodes'),
+                    EXISTS(SELECT 1 FROM json_each(
+                           CAST(history_snapshots.payload AS TEXT), '$.nodes')
+                           WHERE key = ?2),
+                    EXISTS(SELECT 1 FROM json_each(
+                           CAST(history_snapshots.payload AS TEXT), '$.membership_operations')
+                           WHERE key = ?3 AND json_extract(value, '$.operation_id') = ?3
+                             AND json_extract(value, '$.node_id') = ?2
+                             AND json_extract(value, '$.kind') = 'remove_node'
+                             AND json_extract(value, '$.phase')
+                                 IN ('membership_removed', 'completed'))
+                 FROM history_snapshots WHERE key = ?1",
+                params![STATE_KEY, node_id, operation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        match state {
+            Some((Some(kind), present, removal)) if kind == "object" => Ok(!present && removal),
+            _ => Err(HistoryStorageError(
+                "durable cluster membership is unavailable".into(),
+            )),
+        }
+    }
+
     /// Check the saved cluster snapshot, rather than a possibly uncommitted in-memory mutation.
     pub(crate) fn saved_state_lacks_node(&self, node_id: &str) -> Result<bool> {
         let mut backend = self.lock_backend();

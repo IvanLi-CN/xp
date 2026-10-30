@@ -17,7 +17,7 @@ async fn removed_destination_does_not_return_when_prepared_deletion_recovers() {
                 .unwrap();
         }
         history
-            .activate_prepared_user_deletion("target", &["retained".into()])
+            .activate_prepared_user_deletion("target", &["retained".into()], &BTreeSet::new())
             .await
             .unwrap();
         if !remove_before_activation {
@@ -63,7 +63,7 @@ async fn removing_the_only_destination_keeps_the_prepared_user_deletion() {
         .unwrap();
     history.clear_node("removed").await.unwrap();
     history
-        .activate_prepared_user_deletion("target", &[])
+        .activate_prepared_user_deletion("target", &[], &BTreeSet::new())
         .await
         .unwrap();
     assert!(

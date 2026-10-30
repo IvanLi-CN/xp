@@ -47,7 +47,7 @@ async fn remote_node_cleanup_waits_for_durable_local_membership_removal() {
     assert_eq!(attempt().await.unwrap(), axum::http::StatusCode::NO_CONTENT);
     state
         .node_history
-        .activate_prepared_user_deletion("target", &[])
+        .activate_prepared_user_deletion("target", &[], &Default::default())
         .await
         .unwrap();
     assert!(

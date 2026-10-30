@@ -140,11 +140,13 @@ impl NodeHistoryHandle {
         &self,
         user_id: &str,
         current_destinations: &[String],
+        confirmed_removed: &BTreeSet<String>,
     ) -> anyhow::Result<()> {
         self.change_deletion(|state, generation| {
             let Some(mut destinations) = state.prepared_user_deletions.remove(user_id) else {
                 return false;
             };
+            destinations.retain(|destination| !confirmed_removed.contains(destination));
             destinations.extend(current_destinations.iter().cloned());
             state.deleted_users.insert(user_id.to_owned());
             state
@@ -164,6 +166,53 @@ impl NodeHistoryHandle {
             true
         })
         .await
+    }
+
+    /// The caller holds the store lock throughout activation to prevent membership changes.
+    pub(crate) async fn activate_user_deletion_for_membership(
+        &self,
+        user_id: &str,
+        store: &JsonSnapshotStore,
+        local_node_id: &str,
+    ) -> anyhow::Result<()> {
+        use crate::state::{MembershipOperationKind, MembershipOperationPhase};
+        let destinations = store
+            .list_nodes()
+            .into_iter()
+            .filter(|node| node.node_id != local_node_id)
+            .map(|node| node.node_id)
+            .collect::<Vec<_>>();
+        let prepared = self
+            .inner
+            .read()
+            .await
+            .prepared_user_deletions
+            .get(user_id)
+            .cloned()
+            .unwrap_or_default();
+        let mut removed = BTreeSet::new();
+        for operation in store.state().membership_operations.values() {
+            let Some(node_id) = operation.node_id.as_ref() else {
+                continue;
+            };
+            if operation.kind == MembershipOperationKind::RemoveNode
+                && matches!(
+                    operation.phase,
+                    MembershipOperationPhase::MembershipRemoved
+                        | MembershipOperationPhase::Completed
+                )
+                && prepared.contains(node_id)
+                && !removed.contains(node_id)
+                && store.get_node(node_id).is_none()
+                && self
+                    .history_storage
+                    .saved_state_confirms_node_removal(node_id, &operation.operation_id)?
+            {
+                removed.insert(node_id.clone());
+            }
+        }
+        self.activate_prepared_user_deletion(user_id, &destinations, &removed)
+            .await
     }
 
     /// Resume prepared deletions even when the original request stopped before its Raft write.
@@ -218,13 +267,7 @@ impl NodeHistoryHandle {
                 continue;
             }
             let store = store.lock().await;
-            let destinations = store
-                .list_nodes()
-                .into_iter()
-                .filter(|node| node.node_id != local_node_id)
-                .map(|node| node.node_id)
-                .collect::<Vec<_>>();
-            self.activate_prepared_user_deletion(user, &destinations)
+            self.activate_user_deletion_for_membership(user, &store, local_node_id)
                 .await?;
             completed += 1;
         }

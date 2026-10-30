@@ -944,6 +944,9 @@ Notes:
   operations remain recoverable. A remote cleanup returns retryable `node_removal_pending` until
   its local in-memory and saved membership both reflect the removal; restore Raft replication or
   storage health and allow the existing cleanup retry to continue.
+  Before node-history cleanup runs, user-deletion activation excludes a prepared destination only
+  when the saved node set and matching saved removal operation both prove its removal. Missing
+  proof retains the destination; a storage error retains the prepared operation for retry.
   Receipt mappings clear before acknowledged intent; interrupted completion retries safely.
   A bounded version-checked scan reclaims legacy orphan mappings without deleting journal rows.
   Source deletion capture takes bounded batches of complete deletion intents, retaining all five
