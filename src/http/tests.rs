@@ -37,6 +37,8 @@ mod mihomo_import_tests;
 #[path = "tests/mihomo_resource_route.rs"]
 mod mihomo_resource_route;
 mod mihomo_smux;
+#[path = "tests/node_versions.rs"]
+mod node_versions;
 #[path = "tests/platform_assets.rs"]
 mod platform_assets;
 mod resource_error;
@@ -1943,10 +1945,10 @@ async fn runtime_policy_requires_admin_auth_and_returns_only_canonical_origins()
         body["api_origins"][0],
         xp_test_fixtures::url_loopback62416()
     );
+    assert_eq!(body["node_states"][0]["state"], "allowed");
     assert!(body.get("node_name").is_none());
     assert!(body.get("access_host").is_none());
 }
-
 #[tokio::test]
 async fn join_token_endpoint_returns_decodable_token() {
     let tmp = tempfile::tempdir().unwrap();
@@ -2531,7 +2533,6 @@ async fn put_user_node_quota_is_gone() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
-    // Create user.
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -2547,7 +2548,6 @@ async fn put_user_node_quota_is_gone() {
     let created = body_json(res).await;
     let user_id = created["user_id"].as_str().unwrap().to_string();
 
-    // Bootstrap node exists.
     let res = app
         .clone()
         .oneshot(req_authed("GET", "/api/admin/nodes"))
@@ -9474,28 +9474,8 @@ async fn admin_get_endpoint_probe_history_infers_legacy_participants_from_hour_w
     assert_eq!(slot["status"], "missing");
 }
 
-fn test_vless_meta(managed_default: bool) -> Value {
-    serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
-        reality: RealityConfig {
-            dest: xp_test_fixtures::address_loopback_port39531().to_owned(),
-            server_names: xp_test_fixtures::host_list_edge37(),
-            server_names_source: Default::default(),
-            fingerprint: "chrome".to_string(),
-        },
-        reality_keys: RealityKeys {
-            private_key: "private".to_string(),
-            public_key: "public".to_string(),
-        },
-        short_ids: xp_test_fixtures::endpoint_short_ids(),
-        active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
-        canary_upstream: xp_test_fixtures::none(),
-        accepted_authorities: xp_test_fixtures::host_list_empty(),
-        mihomo_smux: Default::default(),
-        transport: Default::default(),
-        managed_default,
-    })
-    .unwrap()
-}
+mod endpoint_test_fixtures;
+use endpoint_test_fixtures::test_vless_meta;
 
 #[tokio::test]
 async fn endpoint_canary_probe_url_omits_default_port() {

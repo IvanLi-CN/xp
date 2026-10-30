@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -58,7 +59,6 @@ import { useToast } from "../components/Toast";
 import { TrafficView } from "../components/TrafficView";
 import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
-import { alertClass } from "../components/ui-helpers";
 import { Badge } from "../components/ui/badge";
 import {
 	Form,
@@ -70,6 +70,7 @@ import {
 	FormMessage,
 } from "../components/ui/form";
 import { Input } from "../components/ui/input";
+import { ScrollArea } from "../components/ui/scroll-area";
 import {
 	Select,
 	SelectContent,
@@ -180,16 +181,16 @@ function NodeHistoryFallbackPanel({
 	const componentDays = latestItems(history.daily_component_status, 90);
 	return (
 		<div className="space-y-4">
-			<div className={alertClass("warning", "py-2")}>
+			<Alert tone="warning" className={"py-2"}>
 				<span>
 					Live node API is unavailable. Showing the last synchronized history
 					mirror from {formatTime(history.last_synced_at)}.
 				</span>
-			</div>
+			</Alert>
 			{history.last_sync_error ? (
-				<div className={alertClass("info", "py-2")}>
+				<Alert tone="info" className={"py-2"}>
 					<span>Last sync error: {history.last_sync_error}</span>
-				</div>
+				</Alert>
 			) : null}
 			<div className="grid gap-3 lg:grid-cols-2">
 				<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
@@ -1062,9 +1063,9 @@ export function NodeDetailsPage() {
 							{runtime ? (
 								<>
 									{runtimeSseError ? (
-										<div className={alertClass("warning", "py-2")}>
+										<Alert tone="warning" className={"py-2"}>
 											<span>Realtime stream degraded: {runtimeSseError}</span>
-										</div>
+										</Alert>
 									) : null}
 									<div className="grid gap-3 lg:grid-cols-3">
 										{runtime.components.map((component) => (
@@ -1161,7 +1162,7 @@ export function NodeDetailsPage() {
 												Refresh runtime
 											</Button>
 										</div>
-										<div className="max-h-72 overflow-auto rounded-2xl border border-border/70 bg-muted/35">
+										<ScrollArea className="max-h-72 rounded-2xl border border-border/70 bg-muted/35 [&>div]:max-h-72">
 											<table className="xp-table xp-table-compact">
 												<thead>
 													<tr>
@@ -1201,7 +1202,7 @@ export function NodeDetailsPage() {
 													)}
 												</tbody>
 											</table>
-										</div>
+										</ScrollArea>
 									</div>
 								</>
 							) : null}
@@ -1362,20 +1363,20 @@ export function NodeDetailsPage() {
 										</div>
 									</div>
 								) : (
-									<div className={alertClass("warning", "py-2")}>
+									<Alert tone="warning" className={"py-2"}>
 										<span>
 											No egress probe result is stored yet. Trigger a refresh to
 											probe the node now.
 										</span>
-									</div>
+									</Alert>
 								)}
 
 								{egressProbe?.error_summary ? (
-									<div className={alertClass("warning", "py-2")}>
+									<Alert tone="warning" className={"py-2"}>
 										<span className="break-words">
 											Last probe error: {egressProbe.error_summary}
 										</span>
-									</div>
+									</Alert>
 								) : null}
 							</div>
 							<div className="text-sm text-muted-foreground">

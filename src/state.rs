@@ -4366,6 +4366,7 @@ impl JsonSnapshotStore {
             Some(endpoint) => endpoint.clone(),
             None => return Ok(None),
         };
+        let expected = endpoint.clone();
 
         debug_assert_eq!(endpoint.kind, EndpointKind::VlessRealityVisionTcp);
 
@@ -4380,7 +4381,7 @@ impl JsonSnapshotStore {
         Ok(Some((
             DesiredStateCommand::UpsertEndpoint {
                 endpoint,
-                expected: None,
+                expected: Some(expected),
             },
             out,
         )))

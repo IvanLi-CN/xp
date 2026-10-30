@@ -151,9 +151,12 @@ const DELETE_ADMIN_NODE_TIMEOUT_MS = 30_000;
 export async function fetchAdminNodes(
 	adminToken: string,
 	signal?: AbortSignal,
+	origin?: string,
 ): Promise<AdminNodesResponse> {
 	return fetchJsonWithTimeout(
-		"/api/admin/nodes",
+		origin
+			? new URL("/api/admin/nodes", origin).toString()
+			: "/api/admin/nodes",
 		{
 			method: "GET",
 			headers: {

@@ -8,6 +8,22 @@
   membership-bound validation receipts, and Native Reverse quarantine are implemented.
 - Lifecycle: active.
 - Catalog: supersedes `nbs5f`.
+- Cluster Mesh Web control: implemented in Service config with a single cluster-wide Reality
+  Direct Mesh switch, read-only Public/Native Reverse status, observer path summary,
+  compatibility and freshness gates, confirmation for both directions, structured preflight
+  failure presentation, and a durable browser-local unknown-result lock held with the Web Locks
+  API to prevent concurrent same-cluster mutations across tabs. Configuration writes are gated
+  independently by the compatibility inventory's server route set; unknown values use an
+  indeterminate switch and stale or unsampled peer observations are labeled explicitly. The
+  shared localStorage lock map is serialized across cluster ids, and the selected backend is
+  rechecked after lock acquisition before any write begins. The lock remains held until a
+  successful observation confirms the accepted target. The accepted follow-up observation stays
+  inside the backend mutation barrier and must match the confirmed backend generation and cluster
+  id before the lock can be cleared. Cancellation during lock acquisition is fail-closed, and
+  unreadable lock storage blocks writes. Missing observer data renders as
+  unknown rather than zero-valued path counts. Authoritative capability probes use the current
+  additive route contract for the Mesh write gate, while release-tag-only legacy profiles keep
+  their historical server route set. System Status remains diagnostic and links to Service config.
 
 ## Confirmed Recovery Gap
 

@@ -15,6 +15,9 @@ use crate::{
     state::{DesiredStateCommand, JsonSnapshotStore},
 };
 
+use super::write_error::from_mesh as raft_write_error_from_mesh;
+pub use super::write_error::{RaftWriteDispatchState, RaftWriteError};
+
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 const CONDITIONAL_ENDPOINT_UPDATE_CAPABILITY: &str = "admin.endpoint-conditional-update";
@@ -395,29 +398,76 @@ impl RaftFacade for ForwardingRaftFacade {
         let store = self.store.clone();
         Box::pin(async move {
             let cmd_clone = cmd.clone();
-            match catch_raft_panic("raft client_write", raft.client_write(cmd)).await? {
+            let support_id = crate::id::new_ulid_string();
+            let raft_response = catch_raft_panic("raft client_write", raft.client_write(cmd))
+                .await
+                .map_err(|_| {
+                    anyhow::Error::new(RaftWriteError::outcome_unknown(
+                        "local_raft_panic",
+                        RaftWriteDispatchState::Unknown,
+                        None,
+                        support_id.clone(),
+                    ))
+                })?;
+            match raft_response {
                 Ok(resp) => Ok(resp.data),
                 Err(err) => {
+                    if xmux_command_requires_local_leader(&cmd_clone) {
+                        return Err(anyhow::Error::new(RaftWriteError::outcome_unknown(
+                            "xmux_leader_changed",
+                            RaftWriteDispatchState::Unknown,
+                            None,
+                            support_id,
+                        )));
+                    }
                     if lifecycle_command_requires_local_leader(&cmd_clone) {
-                        return Err(anyhow::anyhow!(concat!(
-                            "membership lifecycle leader changed; retry the recorded operation ",
-                            "on the current leader"
+                        return Err(anyhow::Error::new(RaftWriteError::outcome_unknown(
+                            "membership_leader_changed",
+                            RaftWriteDispatchState::Unknown,
+                            None,
+                            support_id,
                         )));
                     }
                     let Some(openraft::error::ClientWriteError::ForwardToLeader(forward)) =
                         err.api_error()
                     else {
-                        return Err(anyhow::anyhow!("raft client_write: {err}"));
+                        return Err(anyhow::Error::new(RaftWriteError::outcome_unknown(
+                            "raft_rejected",
+                            RaftWriteDispatchState::Unknown,
+                            None,
+                            support_id,
+                        )));
                     };
                     let metrics_snapshot = metrics.borrow().clone();
                     let leader_base_url =
                         leader_api_base_url_from_forward(forward, &metrics_snapshot).ok_or_else(
-                            || anyhow::anyhow!("raft client_write forward: leader not available"),
+                            || {
+                                anyhow::Error::new(RaftWriteError::not_dispatched(
+                                    "leader_unavailable",
+                                    None,
+                                    support_id.clone(),
+                                ))
+                            },
                         )?;
                     let target_id =
                         leader_target_id(&store, forward, &metrics_snapshot, &leader_base_url)
-                            .await?;
-                    let peer = forwarding_peer_target(&store, &target_id, &leader_base_url).await?;
+                            .await
+                            .map_err(|_| {
+                                anyhow::Error::new(RaftWriteError::not_dispatched(
+                                    "leader_target_unavailable",
+                                    None,
+                                    support_id.clone(),
+                                ))
+                            })?;
+                    let peer = forwarding_peer_target(&store, &target_id, &leader_base_url)
+                        .await
+                        .map_err(|_| {
+                            anyhow::Error::new(RaftWriteError::not_dispatched(
+                                "leader_target_unavailable",
+                                Some(target_id.clone()),
+                                support_id.clone(),
+                            ))
+                        })?;
                     forward_client_write(
                         &mesh_client,
                         &ForwardingAuth {
@@ -428,6 +478,7 @@ impl RaftFacade for ForwardingRaftFacade {
                         },
                         &peer,
                         &cmd_clone,
+                        &support_id,
                     )
                     .await
                 }
@@ -476,6 +527,16 @@ impl RaftFacade for ForwardingRaftFacade {
             Ok(())
         })
     }
+}
+
+pub(crate) fn xmux_command_requires_local_leader(cmd: &DesiredStateCommand) -> bool {
+    let DesiredStateCommand::UpsertEndpoint { endpoint, expected } = cmd else {
+        return false;
+    };
+    expected
+        .as_ref()
+        .and_then(|item| item.meta.get("mihomo_xmux"))
+        != endpoint.meta.get("mihomo_xmux")
 }
 
 fn lifecycle_command_requires_local_leader(cmd: &DesiredStateCommand) -> bool {
@@ -566,7 +627,8 @@ async fn send_forwarded_mesh_request(
     path_and_query: &str,
     body: Vec<u8>,
     allow_ambiguous_fallback: bool,
-) -> anyhow::Result<reqwest::Response> {
+    support_id: &str,
+) -> Result<reqwest::Response, RaftWriteError> {
     client
         .send_peer_request(
             peer,
@@ -577,7 +639,7 @@ async fn send_forwarded_mesh_request(
                 body,
                 total_budget: Duration::from_secs(10),
                 allow_ambiguous_fallback,
-                request_id: crate::id::new_ulid_string(),
+                request_id: support_id.to_string(),
                 route: InternalRoute::MeshV2,
                 cluster_id: auth.cluster_id.to_string(),
                 sender_id: auth.sender_id.to_string(),
@@ -587,7 +649,7 @@ async fn send_forwarded_mesh_request(
             auth.cluster_ca_pem,
         )
         .await
-        .map_err(|error| anyhow::anyhow!(error.to_string()))
+        .map_err(|error| raft_write_error_from_mesh(error, peer.node_id.clone(), support_id))
 }
 
 async fn forward_client_write(
@@ -595,6 +657,7 @@ async fn forward_client_write(
     auth: &ForwardingAuth<'_>,
     peer: &MeshPeerTarget,
     cmd: &DesiredStateCommand,
+    support_id: &str,
 ) -> anyhow::Result<ClientResponse> {
     if command_requires_conditional_endpoint_update(cmd)
         && !leader_supports_conditional_endpoint_update(client, peer)
@@ -608,7 +671,13 @@ async fn forward_client_write(
                 .to_string(),
         });
     }
-    let body = serde_json::to_vec(cmd)?;
+    let body = serde_json::to_vec(cmd).map_err(|_| {
+        anyhow::Error::new(RaftWriteError::not_dispatched(
+            "request_encoding",
+            Some(peer.node_id.clone()),
+            support_id,
+        ))
+    })?;
     let response = send_forwarded_mesh_request(
         client,
         auth,
@@ -616,19 +685,30 @@ async fn forward_client_write(
         "/api/admin/_internal/raft/client-write",
         body,
         true,
+        support_id,
     )
     .await
-    .context("forward client_write request")?;
+    .map_err(anyhow::Error::new)?;
     if !response.status().is_success() {
-        anyhow::bail!(
-            "forward client_write response status: {}",
-            response.status()
-        );
+        let status = response.status();
+        return Err(anyhow::Error::new(
+            RaftWriteError::outcome_unknown(
+                "remote_error_response",
+                RaftWriteDispatchState::DispatchedNoVerifiedResponse,
+                Some(peer.node_id.clone()),
+                support_id,
+            )
+            .with_remote_status(status.as_u16()),
+        ));
     }
-    let response = response
-        .json::<ClientResponse>()
-        .await
-        .context("parse forward client_write response")?;
+    let response = response.json::<ClientResponse>().await.map_err(|_| {
+        anyhow::Error::new(RaftWriteError::outcome_unknown(
+            "response_decode",
+            RaftWriteDispatchState::DispatchedNoVerifiedResponse,
+            Some(peer.node_id.clone()),
+            support_id,
+        ))
+    })?;
     Ok(response)
 }
 

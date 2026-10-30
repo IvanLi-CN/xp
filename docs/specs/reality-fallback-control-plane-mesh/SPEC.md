@@ -227,6 +227,75 @@
 
 ## Web
 
+### Cluster Mesh setting
+
+**REQ-MESH-WEB-CONTROL**: Service config 的 Cluster settings 是 Cluster Mesh Setting 的唯一
+Web 配置入口；System Status 提供前往该入口的链接，并保留 peer 诊断。Service config 页面
+说明须区分可编辑的集群设置与只读的 node runtime 配置。
+
+- 单个 `Enable Reality Direct Mesh` switch 表示 `cluster_mesh_enabled`；点击只打开确认对话框，
+  switch 保持最后确认的值直到刷新确认，不得乐观切换。Public Path 是不可单独配置的路径；
+  Native Reverse 显示为不可用的只读状态，Vision/TCP 与 XHTTP Reality fallback 由 endpoint
+  配置决定，不提供多个能力勾选项。
+- 显示 `Enabled`、`Disabled` 或 `Unknown` 及 snapshot 时间。缺失字段、无有效数据或状态不可确认时
+  显示 `Unknown`，不能将未知解释为关闭。只读展示 Public Path 是支持的回退路径，不能保证网络可达；
+  Native Reverse 为 `disabled_pending_rework`。
+- 配置状态与实际路径分开显示：以当前所选 backend 节点为观察者，对该节点的远端 peer 按 `current_path`
+  显示 Mesh、Public 和未知数量及采样时间。空 peer 集合、未采样或 stale 数据须明确标示，不得把本地
+  视角称为全网有向边覆盖率、预检结果或 Direct 健康证明；详细 peer 的 Direct validation、路径、
+  breaker 与 probe 结果留在 System Status。
+- 仅当管理员已认证、在线、非 read-only、Mesh 配置能力已确认且集群设置有新鲜的有效状态时允许变更。
+  打开确认框时重新读取当前 backend 的状态；提交时读取结果须不超过 30 秒且 backend 和集群身份未改变，
+  否则重新读取并要求基于新状态确认。无 token、认证失败、能力缺失或未知、网络不可用、缓存过期、状态
+  刷新失败与 read-only 必须给出原因并禁用操作。缓存快照可带时间戳展示，不排队或自动重放 mutation；
+  配置能力不得仅凭状态路由存在或 `admin.mesh` 读取能力推断，需依现有兼容清单和可确认的接口支持判断。
+
+**REQ-MESH-WEB-MUTATION**: 启用与停用都必须在确认后通过现有管理员 Bearer
+`PUT /api/admin/mesh/config` 发出单次 `{ "enabled": boolean }` 请求。不得自动重试、切换
+backend 重放请求或新增预检 job、轮询或 SSE 协议。
+
+- 启用确认说明变更作用于整个集群；全部当前 voter 和 learner 必须满足能力门槛，所有当前 voter-to-voter
+  有向边执行签名预检。合格 managed endpoint 使用 Direct-only，owner-approved 且没有该 endpoint 的
+  private Docker voter 使用注册的 API 路径。预检在关闭的 Mesh gate 下进行，不把 Public 可用性或 TCP
+  连通当作 Direct 成功。
+- 停用确认说明控制面将使用注册的 Public Path，已有 Public 路径仍可使用，但不保证可达；停用不执行
+  启用路径预检。两种变更均须经过所有当前 voter 与 learner 的能力门槛。
+- 请求期间显示不确定进度：启用为 `Validating directed cluster paths…`，停用为
+  `Applying cluster setting…`；不得伪造逐边进度或完成比例。禁用重复提交、关闭按钮、Escape 和
+  遮罩关闭；确认前可取消。预检有服务端 30 秒截止，该期限不代表整个请求一定在 30 秒内结束。
+- 成功响应后重新读取状态；仅在该节点观察到目标值时显示观察到的设置，不能把本地 apply 宣称为全部
+  节点已生效。刷新失败则展示已收到成功响应但状态尚未确认，并禁用进一步变更直至成功刷新；读到相反
+  值时展示当前观察值和可能存在并发变更或复制延迟，不能宣称本次写入未发生。
+- 收到结构化 `409 mesh_preflight_failed` 时，说明该次请求未写入 Raft，显示有界
+  `sender_node_id → target_node_id` 与 `invalid_target`、`transport` 或 `protocol` 分类；名称可从
+  可靠的节点映射解析，否则显示 ID。不得展示 socket、IP、端口、证书、endpoint URL 或签名。刷新当前
+  状态后提供手动重试入口，重试仍需重新确认；其他管理员可能同时变更状态，因此不得仅凭该失败断言
+  当前集群仍关闭。
+- 恢复提示指向 System Status 的观察节点和失败方向、检查 endpoint 与 canary、按需运行现有 probe，以及
+  经人工判断后重试。probe 是当前节点对选定 peer 的诊断，不是全有向预检；Public 成功、TCP 成功或旧的
+  验证记录均不证明失败方向已经恢复。禁止自动更改配置、重启服务、移除成员或启用 Native Reverse。
+
+**REQ-MESH-WEB-UNKNOWN**: 网络中断、客户端取消、无结构 5xx 或无法解析的 mutation 响应属于结果未知。
+在发出 mutation 前持久化与集群身份绑定的本地锁和目标，以覆盖刷新或进程中断；没有终态时恢复为结果未知
+并禁止重复启用或停用。刷新、路由切换或重新打开页面不能清除锁。只保存必要的目标和锁状态，不保存凭据；
+无法持久化锁时不得发送。其他浏览器、管理员或 API 客户端不受这个客户端锁约束，UI 不得暗示它是服务端
+互斥锁。
+
+- 手动或自动刷新只能报告某节点当时观察到的值和时间；无论值是否等于目标，均不能证明该次请求的终态、
+  归因或所有节点收敛，不能自动解锁。该 API 不提供操作 ID、终态或线性一致的确认合同；预检时限、等待
+  时间、页面刷新或 backend 切换都不能作为终态证明。
+- 指导管理员通过独立运维核查确认原请求已终止且集群状态已收敛，再明确确认解除本地锁；该确认只解除 UI
+  锁，不写集群状态。若不能核实则继续锁定并保留检查入口。已确认的失败和已确认成功后的状态刷新走
+  各自正常路径，不使用未知结果的自动重试。
+- 待处理 mutation 遵守现有 Primary Backend 切换屏障及 60 秒未知超时；切换不得重放请求，也不得清除该集群的 Mesh 本地锁。页面中断后必须恢复未知结果提示和锁定。
+
+**VER-MESH-WEB-CONTROL** covers: REQ-MESH-WEB-CONTROL, REQ-MESH-WEB-MUTATION,
+REQ-MESH-WEB-UNKNOWN. 界面验收须覆盖桌面和移动布局、键盘与可访问名称、开启/关闭确认、所有
+capability 与离线状态、源节点路径统计及 stale/unknown、私有 voter 例外、有向预检失败分类、成功后
+状态刷新失败、响应丢失和延迟提交、刷新与 backend 切换后的锁保留、人工解锁，以及并发管理员变更。
+测试必须证明旧状态读和目标状态读均不会自动解除未知结果锁，且无自动重试、mutation 重放或敏感网络
+细节泄漏。
+
 - `/system-status` 在桌面显示无分页的全部 peer 表格。
 - 每行包含当前路径、24h uptime、1h/24h availability、Mesh availability、
   p50/p95、breaker、最近切换和操作。
@@ -314,6 +383,24 @@
   Storybook、Playwright 与 style budget。
 
 ## Visual Evidence
+
+Reality Direct Mesh cluster setting:
+
+- Source: Storybook canvas `Components/MeshClusterSetting/Enabled` and `UnknownOffline`.
+- Bound implementation: current candidate branch `th/reality-direct-mesh-settings`.
+- Capture metadata: `source_type=storybook_canvas`, `target_program=mock-only`,
+  `capture_scope=element`, `viewport_strategy=storybook-viewport`,
+  `margin_policy=require_margin`, `evidence_surface=component`,
+  `sensitive_exclusion=N/A`, `submission_gate=pending-owner-approval`.
+- Desktop capture shows one cluster-wide switch, read-only Public Path and Native Reverse,
+  and the separate observer path summary.
+
+![Reality Direct Mesh enabled](./assets/reality-direct-mesh-enabled.png)
+
+- Mobile capture uses the source-bound `393x852` viewport and shows the stacked layout,
+  explicit Unknown state, offline read-only reason, and observer summary.
+
+![Reality Direct Mesh mobile unknown state](./assets/reality-direct-mesh-mobile-unknown.png)
 
 Web upgrade stale-conflict state:
 

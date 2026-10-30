@@ -32,6 +32,7 @@ mod mesh;
 mod mihomo_import_api;
 mod mihomo_resource_route;
 mod node_delete;
+mod raft_write_error;
 mod resource_alerts;
 mod resource_history_capacity;
 mod resource_mesh_error;
@@ -125,6 +126,7 @@ use mesh::{
 };
 use mihomo_import_api::admin_preview_user_mihomo_import;
 use node_delete::AdminNodeDeletePreviewEndpoint;
+use raft_write_error::map_raft_write_error;
 use resource_alerts::admin_get_alerts_response;
 use resource_monitoring::{
     admin_get_node_resources, admin_get_node_resources_history, admin_get_node_resources_recent,
@@ -138,14 +140,17 @@ mod bounded_json;
 mod browser_cors;
 mod capabilities;
 mod console_runtime_policy;
+mod endpoint_create;
 mod history_repository;
 mod join_capability;
 mod join_protocol;
 mod membership_restore;
 mod node_metadata;
+mod node_versions;
 mod service_monitors;
 mod version_check;
 mod web_assets;
+use endpoint_create::admin_create_endpoint;
 use endpoint_requests::{CreateEndpointRequest, PatchEndpointRequest, deserialize_optional_string};
 use version_check::{VersionCheckCache, api_version_check};
 use {browser_cors::browser_cors, capabilities::api_capabilities};
@@ -613,6 +618,8 @@ struct ClusterJoinRequest {
     access_host: String,
     api_base_url: String,
     csr_pem: String,
+    #[serde(default)]
+    xmux_settings_v1: bool,
 }
 
 #[derive(Serialize)]
@@ -1201,6 +1208,10 @@ pub fn build_router_with_mesh_telemetry(
         .route("/status/events", get(admin_stream_status_events))
         .route("/nodes", get(admin_list_nodes))
         .route(
+            "/nodes/versions",
+            get(node_versions::admin_list_node_versions),
+        )
+        .route(
             "/membership-operations/{operation_id}",
             get(admin_get_membership_operation),
         )
@@ -1773,7 +1784,7 @@ async fn raft_write(
         .raft
         .client_write(cmd)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(map_raft_write_error)?;
 
     match resp {
         RaftClientResponse::Ok { result } => Ok(result),
@@ -1869,7 +1880,13 @@ fn validate_https_origin(origin: &str) -> Result<(), ApiError> {
     if url.scheme() != "https" {
         return Err(ApiError::invalid_request("api_base_url must use https"));
     }
-    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+    if url.path() != "/"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.as_str().contains('@')
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return Err(ApiError::invalid_request(
             "api_base_url must be an origin (no path/query)",
         ));
@@ -2111,6 +2128,31 @@ async fn cluster_join(
     let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
         .lock_owned()
         .await;
+    state
+        .raft
+        .ensure_linearizable()
+        .await
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
+    if !req.xmux_settings_v1
+        && state
+            .store
+            .lock()
+            .await
+            .list_endpoints()
+            .iter()
+            .any(|endpoint| {
+                endpoint
+                    .meta
+                    .get("mihomo_xmux")
+                    .is_some_and(|value| !value.is_null())
+            })
+    {
+        return Err(ApiError::new(
+            "coordinated_upgrade_required",
+            StatusCode::CONFLICT,
+            "joining XP must support XMUX settings while the cluster contains custom XMUX configuration",
+        ));
+    }
     let request_fingerprint = crate::join_session::JoinSession::request_fingerprint(
         &req.node_name,
         &req.access_host,
@@ -5070,121 +5112,6 @@ async fn admin_start_upgrade(
     }))
 }
 
-async fn admin_create_endpoint(
-    Extension(state): Extension<AppState>,
-    ApiJson(req): ApiJson<CreateEndpointRequest>,
-) -> Result<Json<Endpoint>, ApiError> {
-    let endpoint = match req {
-        CreateEndpointRequest::VlessRealityVisionTcp {
-            node_id,
-            port,
-            reality,
-            canary_upstream,
-            accepted_authorities,
-            mihomo_smux,
-            transport,
-        } => {
-            let mihomo_smux = mihomo_smux.unwrap_or_default();
-            mihomo_smux.validate().map_err(ApiError::invalid_request)?;
-            let transport = transport.unwrap_or(crate::protocol::VlessRealityTransport::Xhttp);
-            let store = state.store.lock().await;
-            if let Some(reality) = reality {
-                if canary_upstream.is_some() {
-                    return Err(ApiError::invalid_request(
-                        "canary_upstream is only editable on managed VLESS endpoints",
-                    ));
-                }
-                if accepted_authorities.is_some() {
-                    return Err(ApiError::invalid_request(
-                        "accepted_authorities is only editable on managed VLESS endpoints",
-                    ));
-                }
-                store.build_endpoint(
-                    node_id,
-                    crate::domain::EndpointKind::VlessRealityVisionTcp,
-                    port,
-                    json!({ "reality": reality, "mihomo_smux": mihomo_smux, "transport": transport }),
-                )?
-            } else {
-                let node = store.get_node(&node_id).ok_or_else(|| {
-                    ApiError::invalid_request(format!("node not found: {node_id}"))
-                })?;
-                let reality =
-                    managed_vless_reality_for_node(&state, &node, DEFAULT_VLESS_FINGERPRINT)?;
-                let spec = DefaultVlessEndpointSpec {
-                    port,
-                    reality_dest: reality.dest,
-                    server_names: reality.server_names,
-                    server_names_source: reality.server_names_source,
-                    fingerprint: reality.fingerprint,
-                };
-                let mut endpoint =
-                    build_managed_default_vless_endpoint(&spec, node_id).map_err(|e| {
-                        ApiError::invalid_request(format!(
-                            "failed to create managed VLESS endpoint: {e}"
-                        ))
-                    })?;
-                let mut meta: VlessRealityVisionTcpEndpointMeta =
-                    serde_json::from_value(endpoint.meta.clone())
-                        .map_err(|e| ApiError::internal(e.to_string()))?;
-                meta.canary_upstream = canary_upstream.map(|mut upstream| {
-                    upstream.url = upstream.url.trim().to_string();
-                    upstream
-                });
-                meta.accepted_authorities =
-                    normalize_accepted_authorities(accepted_authorities.as_deref().unwrap_or(&[]))
-                        .map_err(|(reason, authority)| {
-                            ApiError::invalid_request(format!(
-                                "invalid accepted_authority: {authority} ({reason})"
-                            ))
-                        })?;
-                meta.mihomo_smux = mihomo_smux;
-                meta.transport = transport;
-                endpoint.meta =
-                    serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
-                endpoint
-            }
-        }
-        CreateEndpointRequest::Ss2022_2022Blake3Aes128Gcm {
-            node_id,
-            port,
-            canary_upstream,
-            accepted_authorities,
-            mihomo_smux,
-        } => {
-            if canary_upstream.is_some() {
-                return Err(ApiError::invalid_request(
-                    "canary_upstream is only supported for vless endpoints",
-                ));
-            }
-            if accepted_authorities.is_some() {
-                return Err(ApiError::invalid_request(
-                    "accepted_authorities is only supported for managed vless endpoints",
-                ));
-            }
-            let mihomo_smux = mihomo_smux.unwrap_or_default();
-            mihomo_smux.validate().map_err(ApiError::invalid_request)?;
-            let store = state.store.lock().await;
-            store.build_endpoint(
-                node_id,
-                crate::domain::EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                port,
-                json!({ "mihomo_smux": mihomo_smux }),
-            )?
-        }
-    };
-    let _ = raft_write(
-        &state,
-        crate::state::DesiredStateCommand::UpsertEndpoint {
-            endpoint: endpoint.clone(),
-            expected: None,
-        },
-    )
-    .await?;
-    state.reconcile.request_full();
-    Ok(Json(endpoint))
-}
-
 async fn admin_list_endpoints(
     Extension(state): Extension<AppState>,
 ) -> Result<Json<Items<AdminEndpointWithProbe>>, ApiError> {
@@ -6371,6 +6298,14 @@ async fn admin_patch_endpoint(
     Path(endpoint_id): Path<String>,
     ApiJson(req): ApiJson<PatchEndpointRequest>,
 ) -> Result<Json<Endpoint>, ApiError> {
+    let _xmux_guard = if let Some(xmux) = &req.mihomo_xmux {
+        if let Some(xmux) = xmux {
+            xmux.validate().map_err(ApiError::invalid_request)?;
+        }
+        join_capability::lock_xmux_settings_change(&state).await?
+    } else {
+        None
+    };
     let (mut endpoint, nodes, endpoints) = {
         let store = state.store.lock().await;
         let endpoint = store
@@ -6477,6 +6412,9 @@ async fn admin_patch_endpoint(
                 };
                 meta.transport = transport;
             }
+            if let Some(xmux) = req.mihomo_xmux {
+                meta.mihomo_xmux = xmux.filter(|value| *value != Default::default());
+            }
             if meta.managed_default {
                 let desired_node = nodes
                     .iter()
@@ -6510,6 +6448,11 @@ async fn admin_patch_endpoint(
             }
         }
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
+            if req.mihomo_xmux.is_some() {
+                return Err(ApiError::invalid_request(
+                    "mihomo_xmux is only supported for vless endpoints",
+                ));
+            }
             if req.transport.is_some() {
                 return Err(ApiError::invalid_request(
                     "transport is only supported for vless endpoints",

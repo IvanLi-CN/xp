@@ -1,8 +1,16 @@
-# XP Mihomo Subscription
+# XP Product Glossary
 
-This glossary defines XP Mihomo subscription, dynamic proxy-group, and external resource terms.
+This glossary defines XP cluster terms and Mihomo subscription vocabulary.
 
 ## Language
+
+### Cluster Nodes
+
+**Registered Cluster Node**:
+A node recorded in the current XP cluster's node directory.
+_Avoid_: Available backend, subscription node
+
+### Subscription Nodes
 
 **Subscription Node**:
 A node with an endpoint membership in the current user's subscription.
@@ -88,6 +96,18 @@ _Avoid_: Upstream origin, cluster primary
 An External Resource eligible for access through XP's Resource Mirror.
 _Avoid_: Any URL, proxied resource
 
+## DDNS
+
+**DDNS Family Synchronization**:
+Successful detection of a public address and synchronization of its DNS record.
+Both occur in the current reconciliation round.
+_Avoid_: Client reachability, historical address
+
+**DDNS Health**:
+The status of DDNS reconciliation.
+It is up when a family completes DDNS Family Synchronization in the current round.
+_Avoid_: Universal client availability
+
 ## Web Demo
 
 **Demo Runtime**:
@@ -109,3 +129,21 @@ _Avoid_: Product settings, query-string toolbar
 **Demo Share State**:
 The allowlisted URL parameters that reproduce a Demo scene, persona, fault profile and product page without carrying secrets or mutation payloads.
 _Avoid_: Serialized demo state, shareable credentials
+
+## Web Admin
+
+**Primary Backend**:
+The single same-cluster HTTPS node origin that receives the browser's API and
+status-stream requests for the current Web/PWA session.
+_Avoid_: Service node, current node, automatic failover node
+
+**Backend Candidate**:
+A same-cluster HTTPS origin already known to the browser from the current page,
+an authenticated node profile, or an approved static-console runtime policy and
+eligible for manual selection.
+_Avoid_: Arbitrary backend, relay node
+
+**Pre-auth Backend Selection**:
+A temporary Primary Backend choice made on the Login page before admin-token
+verification; it becomes durable only after authentication succeeds.
+_Avoid_: Login server switch, automatic failover

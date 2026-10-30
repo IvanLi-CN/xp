@@ -74,6 +74,11 @@ None
   - `POST /api/admin/_internal/nodes/egress-probe/local/refresh`
 - 组件状态必须支持枚举：`disabled/up/down/unknown`；节点摘要支持：`up/degraded/down/unknown`。
 - DDNS 组件必须区分“地址族缺失”和“探测异常”：IPv4 可用但 IPv6 出口不可用的节点应维护 `A` 记录、删除或不创建 `AAAA`，且不得仅因 IPv6 地址族缺失把 DDNS 标记为 `degraded`。
+- DDNS 本轮只要有一个地址族探测成功且对应 DNS 记录同步成功，状态为 `up`；另一地址族的探测或 DNS 异常仍须可见。
+  `up` 不证明所有客户端可达，历史同步地址不能证明本轮成功。
+  A 和 AAAA 独立协调，一方失败不得阻断另一方。
+- 仅连续硬缺失达到配置阈值后可删除对应记录。
+  探测目标缺少该地址族、超时、拒绝连接或查询失败均不证明节点缺失该地址族，须保留记录并中断该族连续缺失计数。
 - 历史窗口固定 `7d/30min`（336 slots），事件保留 7 天，重启后可恢复。
 - cloudflared 未启用时必须显示 `disabled`，且不触发重启请求。
 - cloudflared 启用后，连续失败达到阈值时触发重启并记录事件。
@@ -142,6 +147,9 @@ None
 - Given cloudflared 未启用，When 打开详情，Then cloudflared 状态为 `disabled` 且无重启事件。
 - Given cloudflared 已启用并故障，When 连续失败达到阈值，Then 记录重启请求与结果事件。
 - Given 节点只有 IPv4 公网出口且无 IPv6 route，When DDNS IPv6 探测失败但 IPv4 探测成功，Then DDNS 不记录 `ddns ipv6 probe` 异常，DNS 仅保持 `A` 记录且节点运行态不因此降级。
+- Given 本轮 A 同步成功且 IPv6 探测超时或 AAAA 查询失败，When 协调完成，Then 状态为 `up`、异常可见，既存 AAAA 不被删除且缺失计数清零。
+- Given IPv6 连续硬缺失尚未达到 grace，When 中间出现未知结果，Then 后续硬缺失重新计数，不得累计跨越未知结果删除 AAAA。
+- Given 两个地址族本轮均未完成同步，When 只有历史同步 IP，Then 状态不得为 `up`；重启后的历史状态也不能证明本轮成功。
 - Given `xp` 进程重启，When 重新打开详情，Then 可看到重启前 7 天窗口内历史槽位与事件。
 - Given 任一远端节点不可达，When 请求 `/api/admin/nodes/runtime`，Then 返回 `partial=true` 且 `unreachable_nodes` 包含该节点。
 
@@ -192,6 +200,13 @@ covers: REQ-NODE-TAB-URL, REQ-NODE-TAB-CONTINUITY, REQ-NODE-TAB-ORDER
   - state: `Pages/NodeDetailsPage/MetadataEgressProbe`
   - evidence_note: `NodeDetailsPage` 的 metadata 页会展示节点主动探测得到的出口 IP、Geo 与订阅地区，并提供手动刷新按钮。
     ![Node details egress probe summary](./assets/node-details-egress-probe-story.png)
+
+- source_type=storybook_canvas · target_program=mock-only · capture_scope=element
+  - state: `Pages/NodeDetailsPage/ServiceRuntimeKeyEvents`
+  - evidence_note: `Key events` 使用主题滚动区域承载多条有意义的运行时事件，
+    滚动条与页面深色 UI 保持一致。
+    ![runtime events scrollbar](./assets/node-details-runtime-events-scrollbar.png)
+    ![scrolled](./assets/node-details-runtime-events-scrollbar-scrolled.png)
 
 ## 计划资产（Plan assets）
 

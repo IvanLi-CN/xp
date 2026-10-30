@@ -1,9 +1,9 @@
+import { Alert } from "@/components/ui/alert";
 import { useState } from "react";
 
 import { AuthRecoveryAction, isUnauthorizedError } from "./AuthRecoveryAction";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
-import { alertClass } from "./ui-helpers";
 
 type ReadStateBannerProps = {
 	tone: "info" | "warning";
@@ -63,11 +63,9 @@ export function ReadStateBanner({
 
 	if (variant === "inline") {
 		return (
-			<div
-				className={alertClass(
-					tone,
-					"items-center justify-between gap-2 rounded-lg px-3 py-2",
-				)}
+			<Alert
+				tone={tone}
+				className={"items-center justify-between gap-2 rounded-lg px-3 py-2"}
 			>
 				<div className="flex min-w-0 items-start gap-2">
 					<Icon
@@ -87,12 +85,12 @@ export function ReadStateBanner({
 					</div>
 				</div>
 				{actions}
-			</div>
+			</Alert>
 		);
 	}
 
 	return (
-		<div className={alertClass(tone, "justify-between")}>
+		<Alert tone={tone} className={"justify-between"}>
 			<div className="flex min-w-0 items-start gap-3">
 				<Icon
 					name={iconName}
@@ -107,6 +105,6 @@ export function ReadStateBanner({
 				</div>
 			</div>
 			{actions}
-		</div>
+		</Alert>
 	);
 }

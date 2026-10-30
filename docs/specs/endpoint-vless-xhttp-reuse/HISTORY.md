@@ -17,8 +17,10 @@
 
 - XHTTP/XMUX 替代“给 VLESS 下发 SMux”的错误方案。
 - 历史字段缺失保持 Vision/TCP，避免服务升级本身造成协议 hard cut。
-- 固定一条连接、以负 keepalive period 关闭 H2 PING、无限复用次数，减少 socket、TLS
-  建连与定时器资源。
+- 默认一条连接、以负 keepalive period 关闭 H2 PING、无限复用次数，减少 socket、TLS 建连与定时器资源；管理员可以按接入点显式调整。
+- 短 ID 轮换和托管接入点更新使用条件快照，防止旧快照丢弃并发保存的客户端策略。
+- leader 在一致性屏障之后检查加入兼容性；Raft 应用仅客户端策略变化时不请求重建 inbound。
+- 恢复已离开的节点时也验证其 XMUX 能力，防止旧节点绕过加入保护。
 
 ## References
 

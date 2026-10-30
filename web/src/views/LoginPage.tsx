@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -6,8 +7,17 @@ import { z } from "zod";
 
 import { verifyAdminToken } from "../api/adminAuth";
 import { isBackendApiError } from "../api/backendError";
-import { isStaticWebConsole } from "../backend/primaryBackend";
+import { usePrimaryBackend } from "../backend/PrimaryBackendProvider";
+import {
+	getPrimaryBackendSnapshot,
+	hydratePrimaryBackendProfile,
+	isStaticWebConsole,
+	probeBackendCandidate,
+	probeBackendOrigin,
+	selectPreAuthBackend,
+} from "../backend/primaryBackend";
 import { Button } from "../components/Button";
+import { LoginBackendSelector } from "../components/LoginBackendSelector";
 import { XpBrandLogo } from "../components/XpBrandLogo";
 import {
 	ADMIN_TOKEN_STORAGE_KEY,
@@ -25,7 +35,10 @@ import {
 } from "../components/ui/form";
 import { Input } from "../components/ui/input";
 import { parseAdminTokenInput } from "../utils/adminToken";
-import { sanitizeRedirectPath } from "../utils/navigation";
+import {
+	parseLoginHandoffHash,
+	sanitizeRedirectPath,
+} from "../utils/navigation";
 import { LoginBootstrapCompatibilityPending } from "./LoginBootstrapCompatibilityPending";
 
 function formatError(err: unknown): string {
@@ -62,6 +75,8 @@ export function LoginPage({
 	staticConsole = isStaticWebConsole(),
 }: LoginPageProps) {
 	const navigate = useNavigate();
+	const backend = usePrimaryBackend();
+	const [preAuthTargetReady, setPreAuthTargetReady] = useState(staticConsole);
 	const storedToken = useMemo(() => readAdminToken(), []);
 	const [tokenLength, setTokenLength] = useState(storedToken.length);
 	const [isVerifying, setIsVerifying] = useState(false);
@@ -92,9 +107,44 @@ export function LoginPage({
 			setIsVerifying(true);
 			setServerError(null);
 			setBootstrapCompatibilityPending(false);
+			const verificationTarget = getPrimaryBackendSnapshot();
 			try {
+				if (!staticConsole) {
+					if (!verificationTarget.clusterId) {
+						throw new Error(
+							"The service node cluster identity is unavailable. Retry the node check.",
+						);
+					}
+					await probeBackendCandidate({
+						origin: verificationTarget.primaryOrigin,
+						clusterId: verificationTarget.clusterId,
+					});
+					const probedTarget = getPrimaryBackendSnapshot();
+					if (
+						probedTarget.primaryOrigin !== verificationTarget.primaryOrigin ||
+						probedTarget.clusterId !== verificationTarget.clusterId ||
+						probedTarget.generation !== verificationTarget.generation
+					) {
+						throw new Error(
+							"Service node changed during verification. Try again.",
+						);
+					}
+				}
 				await verifyAdminToken(parsed.token);
-				writeAdminToken(parsed.token);
+				const currentTarget = getPrimaryBackendSnapshot();
+				if (
+					currentTarget.primaryOrigin !== verificationTarget.primaryOrigin ||
+					currentTarget.clusterId !== verificationTarget.clusterId ||
+					currentTarget.generation !== verificationTarget.generation
+				) {
+					setServerError(
+						"Service node changed while the token was being verified. Try again.",
+					);
+					return;
+				}
+				writeAdminToken(parsed.token, {
+					retainVerifiedPreAuthTarget: !staticConsole,
+				});
 				setTokenLength(parsed.token.length);
 				form.reset({ token: parsed.token });
 				navigate({ href: redirectTarget });
@@ -113,26 +163,92 @@ export function LoginPage({
 
 	useEffect(() => {
 		const params = new URLSearchParams(window.location.search);
-		const loginToken = params.get("login_token");
+		const loginToken =
+			params.get("login_token") ??
+			parseLoginHandoffHash(window.location.hash)?.token;
 		if (!loginToken) return;
 
 		params.delete("login_token");
 		const nextQuery = params.toString();
 		const nextUrl = `${window.location.pathname}${
 			nextQuery.length ? `?${nextQuery}` : ""
-		}${window.location.hash ?? ""}`;
+		}`;
 		window.history.replaceState(null, "", nextUrl);
 
 		form.reset({ token: loginToken });
-		void submitToken(loginToken);
-	}, [form, submitToken]);
+		let active = true;
+		setIsVerifying(true);
+		void (async () => {
+			try {
+				const initialTarget = getPrimaryBackendSnapshot();
+				if (!staticConsole) {
+					const probeResult = await probeBackendOrigin({
+						origin: window.location.origin,
+					});
+					if (!active) return;
+					const currentTarget = getPrimaryBackendSnapshot();
+					if (currentTarget.primaryOrigin !== initialTarget.primaryOrigin) {
+						setServerError(
+							"Service node selection changed. Review the selected node and retry.",
+						);
+						return;
+					}
+					if (probeResult.clusterId !== currentTarget.clusterId) {
+						hydratePrimaryBackendProfile(probeResult.clusterId);
+					}
+					const selectionResult = await selectPreAuthBackend(
+						window.location.origin,
+					);
+					if (selectionResult.timedOut) {
+						setServerError(
+							"The previous write result is unknown. Verify the service node before retrying.",
+						);
+						return;
+					}
+				}
+				if (!active) return;
+				await submitToken(loginToken);
+			} catch (error) {
+				setServerError(
+					error instanceof Error
+						? error.message
+						: "Unable to select the current service node.",
+				);
+			} finally {
+				if (active) setIsVerifying(false);
+			}
+		})();
+		return () => {
+			active = false;
+		};
+	}, [form, staticConsole, submitToken]);
+
+	const handleFormSubmit = form.handleSubmit((values) => {
+		if (!staticConsole && backend.state === "switching") {
+			setServerError("Service node switching is still in progress.");
+			return;
+		}
+		if (!staticConsole && !preAuthTargetReady) {
+			setServerError("Verify the selected service node before continuing.");
+			return;
+		}
+		void submitToken(values.token);
+	});
 
 	return (
-		<div className="flex min-h-screen items-center justify-center bg-muted/35 px-6 py-10">
+		<div
+			className={[
+				"relative flex min-h-dvh items-center justify-center bg-muted/35",
+				"px-3 py-10 sm:px-6 md:pt-28",
+			].join(" ")}
+		>
 			<div className="xp-card w-full max-w-lg">
 				<div className="xp-card-body space-y-5">
-					<div className="flex items-start gap-4">
-						<XpBrandLogo kind="lockup" className="h-12 w-[10rem] shrink-0" />
+					<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+						<XpBrandLogo
+							kind="lockup"
+							className="h-10 w-[8.5rem] shrink-0 sm:h-12 sm:w-[10rem]"
+						/>
 						<div className="space-y-1">
 							<h1 className="text-2xl font-semibold tracking-tight">
 								Admin login
@@ -142,6 +258,16 @@ export function LoginPage({
 							</p>
 						</div>
 					</div>
+
+					<LoginBackendSelector
+						className={[
+							"md:absolute md:right-6 md:top-6 md:w-max md:min-w-28",
+							"md:max-w-[min(24rem,calc(100vw-3rem))]",
+						].join(" ")}
+						disabled={isVerifying}
+						staticConsole={staticConsole}
+						onProbeStateChange={setPreAuthTargetReady}
+					/>
 
 					<div className="space-y-2">
 						<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
@@ -153,12 +279,7 @@ export function LoginPage({
 					</div>
 
 					<Form {...form}>
-						<form
-							className="space-y-4"
-							onSubmit={form.handleSubmit((values) =>
-								submitToken(values.token),
-							)}
-						>
+						<form className="space-y-4" onSubmit={handleFormSubmit}>
 							<FormField
 								control={form.control}
 								name="token"
@@ -192,25 +313,29 @@ export function LoginPage({
 									Token is not saved until verification succeeds.
 								</p>
 							) : (
-								<div className="xp-alert xp-alert-warning px-4 py-3">
+								<Alert
+									tone="warning"
+									className="flex-col items-start gap-1 px-4 py-3"
+								>
 									<p className="font-medium">No token set.</p>
 									<p className="mt-1 text-muted-foreground">
 										Ask an administrator for a token or a temporary login link.
 									</p>
-								</div>
+								</Alert>
 							)}
 
 							{bootstrapCompatibilityPending ? (
 								<LoginBootstrapCompatibilityPending />
 							) : serverError ? (
-								<div className="xp-alert xp-alert-error px-4 py-3">
+								<Alert role="alert" tone="error" className="px-4 py-3">
 									{serverError}
-								</div>
+								</Alert>
 							) : null}
 
 							<div className="flex flex-wrap justify-end gap-2">
 								<Button
 									variant="ghost"
+									disabled={isVerifying}
 									onClick={() => {
 										clearAdminToken();
 										setTokenLength(0);
@@ -225,7 +350,11 @@ export function LoginPage({
 									type="submit"
 									variant="secondary"
 									loading={isVerifying}
-									disabled={isVerifying}
+									disabled={
+										isVerifying ||
+										(!staticConsole &&
+											(!preAuthTargetReady || backend.state === "switching"))
+									}
 								>
 									Save &amp; Continue
 								</Button>

@@ -31,6 +31,17 @@ Current support boundaries that operators must know:
   automatic restart is introduced. The existing alert stream additionally reports XP process PSS
   at fixed 28 MiB warning / 32 MiB critical thresholds after one minute; alerts never restart XP.
 - Feature delivery must not be container-only. Runtime contracts such as managed-default endpoint reconcile, VLESS HTTPS canary fallback, Mihomo relay URL generation, and upgrade-time auto-adoption must behave the same way once a node is running, regardless of whether the node is host-managed or container-managed.
+- Custom VLESS XMUX subscription settings require every Raft member to support
+  `admin.endpoint-vless-xmux-settings-v1`.
+  Complete a rolling upgrade and use the current leader before changing them.
+  The change is rejected while membership work is active.
+  Once any custom policy exists, an older XP cannot join or be restored into the cluster.
+  A restore target must acknowledge the capability through its signed control-plane endpoint.
+  Before downgrading to an unsupported XP, PATCH each configured VLESS endpoint with
+  `mihomo_xmux: null` on the leader.
+  Confirm every endpoint no longer contains the field on every node.
+  Refresh client subscriptions.
+  A predecessor cannot preserve this metadata.
 - Managed-default endpoint ports are cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` only bootstrap a missing endpoint; changing or
   removing those env values does not reconfigure or delete an existing endpoint.
@@ -74,6 +85,23 @@ release tag from `GET /api/version/check`, and finally uses local endpoint finge
 capability disables only the affected UI feature; an endpoint or schema failure for a declared capability
 is an API regression and must be investigated as such. PWA build IDs and API release profiles are
 independent and must not be manually aligned.
+
+Before authentication, the embedded PWA `/login` page provides a service-node selector containing
+the current page origin and only the candidates recorded in the active cluster profile. Each
+candidate must pass public health, cluster identity, and compatibility probes before it can be
+selected; these probes never send the admin token. The selection is limited to the current tab and
+does not update the durable profile. The independent static console does not expose this selector:
+its login link keeps the bootstrap/runtime-policy path. A `login_token` link in the embedded PWA
+probes the current page origin first, while the static console retains its bootstrap behavior. A
+rejected token keeps the login page, selected node, and unverified token available for correction
+without saving the token.
+After authentication succeeds, the authenticated node inventory is the persistence gate for a new
+Primary Backend target. If the selector is unavailable, operators should use the current page
+origin or an already recorded active-profile candidate rather than entering an arbitrary URL.
+If an authenticated public probe detects that the restored target belongs to another cluster, XP
+clears the token, resets transport to the page/bootstrap recovery origin, and returns to Login
+without sending the token to that cluster. Logout also clears the static runtime-policy transport;
+the next login must establish it again from the bootstrap path.
 
 ### Independent static Web console
 
@@ -711,6 +739,10 @@ DDNS runtime notes:
 - `cloudflared` is only used as a heuristic fast-mode trigger (`down -> up` / `became available`), never as the source of truth for public IPs.
 - Probe timeouts or transient upstream errors do not delete records; only repeated hard evidence of a missing address family can remove `A` / `AAAA`.
 - Nodes with only IPv4 connectivity are healthy DDNS targets: IPv6 `network unreachable`, `no route`, unsupported address family, or local address assignment failures are treated as missing IPv6 candidates rather than runtime degradation.
+- DDNS is `up` when a family is detected and its DNS record is synchronized in the current round.
+  Errors for the other family remain visible; this status does not guarantee reachability for every client.
+  Probe-target family mismatches and uncertain observations reset the affected missing count.
+  They never authorize record deletion.
 
 Optional quota knobs:
 
@@ -792,8 +824,8 @@ and confirm every affected client runs Mihomo `v1.19.29` or newer. Change one en
 1. Select **XHTTP / XMUX** and save. XP removes and rebuilds that endpoint's Xray inbound, so
    active connections on that endpoint are interrupted briefly.
 2. Re-render and refresh the affected YAML subscriptions. The new profile carries `network: xhttp`
-   and fixed low-resource XMUX settings; an old Vision/TCP profile cannot connect to the rebuilt
-   inbound.
+   and the endpoint's configured XMUX policy (one connection by default).
+   An old Vision/TCP profile cannot connect to the rebuilt inbound.
 3. Observe new connection samples after the historical chart window has rolled forward. The TCP
    chart still combines business traffic and Mesh traffic, so use the endpoint's new steady-state
    samples rather than an old 24-hour peak as the migration verdict.

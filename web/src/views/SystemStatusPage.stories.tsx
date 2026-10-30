@@ -51,6 +51,9 @@ export const Healthy: Story = {
 		await expect(
 			await canvas.findByRole("heading", { name: "Peer transport" }),
 		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("link", { name: "Mesh settings" }),
+		).toHaveAttribute("href", "/service-config");
 		const probe = await canvas.findByRole("button", {
 			name: `Probe ${demoMeshStatus.peers[0].node_name}`,
 		});

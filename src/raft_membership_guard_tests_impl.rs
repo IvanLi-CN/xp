@@ -257,21 +257,51 @@ async fn stale_learner_recovery_requires_an_exact_preview_and_completes_restore(
         store.clone(),
         &target_node_id,
         "stale-membership-revision",
+        None,
     )
     .await
     .unwrap_err();
     assert!(error.to_string().contains("membership revision changed"));
     assert!(store.lock().await.state().membership_operations.is_empty());
 
+    store.lock().await.state_mut().endpoints.insert(
+        xp_test_fixtures::primary_endpoint_id().to_owned(),
+        crate::domain::Endpoint {
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
+            kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::json!({"mihomo_xmux": {"max_connections": "2"}}),
+        },
+    );
+    let error = begin_stale_learner_recovery(
+        raft.clone(),
+        store.clone(),
+        &target_node_id,
+        &preview.expected_membership,
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("XMUX capability"));
     let operation = begin_stale_learner_recovery(
         raft.clone(),
         store.clone(),
         &target_node_id,
         &preview.expected_membership,
+        Some(&target),
     )
     .await
     .unwrap();
     assert_eq!(operation.kind, MembershipOperationKind::Restore);
+    assert!(
+        operation
+            .evidence
+            .as_deref()
+            .unwrap()
+            .contains(&crate::raft_membership_guard::restore_xmux_proof(&target))
+    );
     assert_eq!(
         store.lock().await.state().join_sessions[&target_node_id].status,
         crate::join_session::JoinSessionStatus::Consumed

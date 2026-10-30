@@ -1,6 +1,6 @@
 use super::internal_auth::InternalRoute;
 use super::*;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct MeshRequest {
@@ -34,6 +34,27 @@ pub enum PeerDirectPath {
 }
 
 impl MeshAwareHttpClient {
+    pub(crate) async fn send_registered_public_read(
+        &self,
+        base_url: &str,
+        path_and_query: &str,
+        budget: Duration,
+    ) -> Result<(reqwest::Response, Instant), MeshRequestError> {
+        let url = join_url(base_url, path_and_query, true)?;
+        let deadline = Instant::now() + budget;
+        let response = tokio::time::timeout(
+            deadline.saturating_duration_since(Instant::now()),
+            self.public_direct
+                .get(url)
+                .header(reqwest::header::ACCEPT, "application/json")
+                .send(),
+        )
+        .await
+        .map_err(|_| MeshRequestError::TransportTimeout)?
+        .map_err(MeshRequestError::Public)?;
+        Ok((response, deadline))
+    }
+
     /// Sends through Mesh first, then public only after a retryable transport failure.
     pub async fn send_peer_request(
         &self,

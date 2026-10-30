@@ -6,6 +6,7 @@ import type {
 	AdminMihomoImportPreview,
 	AdminUserMihomoProfile,
 } from "../api/adminUsers";
+import type { MihomoSaveFeedback } from "../utils/mihomoSaveOutcome";
 import { MihomoProfileEditor } from "./MihomoProfileEditor";
 import type { MihomoImportPreviewRequestFn } from "./MihomoSubscriptionImportDialog";
 
@@ -23,6 +24,7 @@ type EditorStoryProps = {
 	startWithError?: boolean;
 	startSaving?: boolean;
 	holdSave?: boolean;
+	startWithUnknown?: boolean;
 	importAvailable?: boolean;
 };
 
@@ -53,10 +55,11 @@ function EditorStory({
 	startWithError = false,
 	startSaving = false,
 	holdSave = false,
+	startWithUnknown = false,
 	importAvailable = false,
 }: EditorStoryProps) {
 	const initialDraft =
-		startWithError || holdSave
+		startWithError || holdSave || startWithUnknown
 			? {
 					...initialProfile,
 					mixin_yaml: `${initialProfile.mixin_yaml}# retry me\n`,
@@ -67,8 +70,23 @@ function EditorStory({
 	const [draft, setDraft] = useState(initialDraft);
 	const [savedProfile, setSavedProfile] = useState(initialProfile);
 	const [isSaving, setIsSaving] = useState(startSaving);
+	const [isVerifying, setIsVerifying] = useState(false);
 	const [saveAttempts, setSaveAttempts] = useState(0);
 	const [error, setError] = useState<string | null>(null);
+	const [saveFeedback, setSaveFeedback] = useState<MihomoSaveFeedback | null>(
+		startWithUnknown
+			? {
+					kind: "outcome_unknown",
+					verification: "different",
+					diagnostics: {
+						code: "raft_write_outcome_unknown",
+						dispatchState: "dispatched_no_verified_response",
+						supportId: "01JDEMO-SUPPORT",
+						targetNodeId: "node-demo",
+					},
+				}
+			: null,
+	);
 	const [visualEvidenceTarget, setVisualEvidenceTarget] =
 		useState<HTMLDivElement | null>(null);
 	const pendingSaveResolve = useRef<(() => void) | null>(null);
@@ -90,6 +108,22 @@ function EditorStory({
 		if (!holdSave) {
 			setSavedProfile(draft);
 		}
+		setSaveFeedback(null);
+		return true;
+	};
+	const verify = async () => {
+		setIsVerifying(true);
+		await Promise.resolve();
+		setSavedProfile(draft);
+		setSaveFeedback({
+			kind: "outcome_unknown",
+			verification: "matches",
+			diagnostics: {
+				code: "raft_write_outcome_unknown",
+				dispatchState: "dispatched_no_verified_response",
+			},
+		});
+		setIsVerifying(false);
 		return true;
 	};
 
@@ -113,8 +147,10 @@ function EditorStory({
 							savedProfile[key as keyof AdminUserMihomoProfile],
 					)}
 					isSaving={isSaving}
+					isVerifying={isVerifying}
 					readOnly={readOnly}
 					error={error}
+					saveFeedback={saveFeedback}
 					isLoaded
 					importAvailable={importAvailable}
 					previewImport={
@@ -138,6 +174,7 @@ function EditorStory({
 						setError(null);
 					}}
 					onSave={save}
+					onVerify={verify}
 				/>
 				{holdSave ? (
 					<button
@@ -323,6 +360,7 @@ export const SaveError: Story = {
 	args: { startWithError: true },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const feedback = within(document.body);
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Expand editor" }),
 		);
@@ -332,9 +370,16 @@ export const SaveError: Story = {
 		});
 		expect(saveButton).toBeEnabled();
 		await userEvent.click(saveButton);
-		await expect(within(dialog).getByRole("alert")).toHaveTextContent(
+		await expect(feedback.getByRole("alert")).toHaveTextContent(
 			"The previous save failed",
 		);
+		await expect(
+			within(dialog).getByTestId("mihomo-workspace-surface"),
+		).not.toHaveTextContent("The previous save failed");
+		const feedbackOverlay = document.querySelector(
+			"[data-mihomo-feedback-overlay]",
+		);
+		expect(feedbackOverlay?.closest('[role="dialog"]')).toBe(dialog);
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: /extra_proxies_yaml/ }),
 		);
@@ -346,7 +391,38 @@ export const SaveError: Story = {
 		);
 		await expect(dialog).toHaveTextContent("keep me too");
 		await userEvent.click(saveButton);
-		await expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+		await expect(feedback.queryByRole("alert")).not.toBeInTheDocument();
+	},
+};
+
+export const OutcomeUnknown: Story = {
+	args: { startWithUnknown: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const feedback = within(document.body);
+		await expect(
+			canvas.queryByText("Save result is still unknown"),
+		).not.toBeInTheDocument();
+		await expect(
+			feedback.getByText("Save result is still unknown"),
+		).toBeVisible();
+		await expect(feedback.getByRole("status")).toHaveAttribute(
+			"aria-live",
+			"polite",
+		);
+		await expect(
+			feedback.getByRole("button", { name: "Check again" }),
+		).toBeEnabled();
+		await userEvent.click(feedback.getByRole("button", { name: "Retry save" }));
+		await expect(feedback.getByRole("alert")).toHaveTextContent(
+			"Click Retry save again to confirm",
+		);
+		await userEvent.click(
+			feedback.getByRole("button", { name: "Check again" }),
+		);
+		await expect(feedback.getByRole("status")).toHaveTextContent(
+			"Read-back matches your draft",
+		);
 	},
 };
 
@@ -383,6 +459,65 @@ export const Saving: Story = {
 	},
 };
 
+const mobileFilesPlay = async ({
+	canvasElement,
+}: { canvasElement: HTMLElement }) => {
+	const canvas = within(canvasElement);
+	await userEvent.click(canvas.getByRole("button", { name: "Expand editor" }));
+	const dialog = await within(document.body).findByRole("dialog");
+	const filesButton = within(dialog).queryByRole("button", {
+		name: "Open files",
+	});
+	if (filesButton) {
+		await userEvent.click(filesButton);
+		await expect(
+			within(document.body).getByRole("heading", { name: "Files" }),
+		).toBeInTheDocument();
+		await userEvent.click(
+			within(document.body).getByRole("button", {
+				name: /extra_proxies_yaml/,
+			}),
+		);
+		await expect(filesButton).toHaveFocus();
+	} else {
+		await expect(dialog.querySelector("aside")).not.toBeNull();
+	}
+};
+
+const mobileFilesOutcomeUnknownPlay = async ({
+	canvasElement,
+}: { canvasElement: HTMLElement }) => {
+	const canvas = within(canvasElement);
+	await userEvent.click(canvas.getByRole("button", { name: "Expand editor" }));
+	const dialog = await within(document.body).findByRole("dialog");
+	const filesButton = within(dialog).queryByRole("button", {
+		name: "Open files",
+	});
+	if (!filesButton) {
+		const feedbackStatus = within(document.body).getByRole("status");
+		await expect(feedbackStatus).toBeVisible();
+		expect(
+			document
+				.querySelector("[data-mihomo-feedback-overlay]")
+				?.closest('[role="dialog"]'),
+		).toBe(dialog);
+		return;
+	}
+	await userEvent.click(filesButton);
+	const filesHeading = await within(document.body).findByRole("heading", {
+		name: "Files",
+	});
+	const sheet = filesHeading.closest('[role="dialog"]');
+	expect(sheet).not.toBeNull();
+	const feedbackStatus = within(document.body).getByRole("status");
+	await expect(feedbackStatus).toBeVisible();
+	expect(
+		document
+			.querySelector("[data-mihomo-feedback-overlay]")
+			?.closest('[role="dialog"]'),
+	).toBe(sheet);
+};
+
 export const MobileFiles: Story = {
 	args: {},
 	parameters: {
@@ -397,28 +532,39 @@ export const MobileFiles: Story = {
 			},
 		},
 	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await userEvent.click(
-			canvas.getByRole("button", { name: "Expand editor" }),
-		);
-		const dialog = await within(document.body).findByRole("dialog");
-		const filesButton = within(dialog).queryByRole("button", {
-			name: "Files",
-		});
-		if (filesButton) {
-			await userEvent.click(filesButton);
-			await expect(
-				within(document.body).getByRole("heading", { name: "Files" }),
-			).toBeInTheDocument();
-			await userEvent.click(
-				within(document.body).getByRole("button", {
-					name: /extra_proxies_yaml/,
-				}),
-			);
-			await expect(filesButton).toHaveFocus();
-		} else {
-			await expect(dialog.querySelector("aside")).not.toBeNull();
-		}
+	play: mobileFilesPlay,
+};
+
+export const MobileFilesNarrow: Story = {
+	args: {},
+	parameters: {
+		viewport: {
+			defaultViewport: "mihomoMobile320",
+			viewports: {
+				mihomoMobile320: {
+					name: "Mihomo mobile (320x568)",
+					styles: { width: "320px", height: "568px" },
+					type: "mobile",
+				},
+			},
+		},
 	},
+	play: mobileFilesPlay,
+};
+
+export const MobileFilesOutcomeUnknown: Story = {
+	args: { startWithUnknown: true },
+	parameters: {
+		viewport: {
+			defaultViewport: "mihomoMobile393",
+			viewports: {
+				mihomoMobile393: {
+					name: "Mihomo mobile (393x852)",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	play: mobileFilesOutcomeUnknownPlay,
 };

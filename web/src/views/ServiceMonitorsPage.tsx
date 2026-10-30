@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
@@ -214,9 +215,11 @@ export function ServiceMonitorsPage() {
 			) : (
 				<>
 					{attention.length > 0 ? (
-						<section
+						<Alert
+							as="section"
+							tone="warning"
 							aria-labelledby="monitor-attention-heading"
-							className="rounded-2xl border border-warning/40 bg-warning/8 px-4 py-3 sm:px-5"
+							className="flex-col rounded-2xl px-4 py-3 sm:px-5"
 						>
 							<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
 								<div className="flex items-center gap-2">
@@ -241,7 +244,7 @@ export function ServiceMonitorsPage() {
 									))}
 								</div>
 							</div>
-						</section>
+						</Alert>
 					) : null}
 					<section className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
 						<div

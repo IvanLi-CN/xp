@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { AuthRecoveryAction } from "./AuthRecoveryAction";
 import { QueryRetryAction } from "./QueryRetryAction";
 
@@ -19,8 +20,9 @@ export function QueryRefreshError({
 	title,
 }: QueryRefreshErrorProps) {
 	return (
-		<div
-			className="xp-alert xp-alert-error flex items-center justify-between gap-3 px-4 py-2"
+		<Alert
+			tone="error"
+			className="flex items-center justify-between gap-3 px-4 py-2"
 			role="alert"
 		>
 			<div className="min-w-0">
@@ -35,6 +37,6 @@ export function QueryRefreshError({
 					onRetry={onRetry}
 				/>
 			</div>
-		</div>
+		</Alert>
 	);
 }

@@ -11,6 +11,7 @@ pub mod node;
 pub mod runtime;
 pub mod storage;
 pub mod types;
+pub mod write_error;
 
 pub use node::{BindInfo, RaftNode};
 pub use types::{NodeId, NodeMeta, TypeConfig};

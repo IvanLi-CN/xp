@@ -4,7 +4,9 @@ import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	AdminMeshConnectionUsageSchema,
 	AdminMeshPeerSchema,
+	parseMeshPreflightFailures,
 } from "./adminMesh";
+import { BackendApiError } from "./backendError";
 
 function peerFixture() {
 	return {
@@ -44,6 +46,39 @@ function peerFixture() {
 }
 
 describe("AdminMeshPeerSchema", () => {
+	it("keeps only safe structured preflight failure fields", () => {
+		const failures = parseMeshPreflightFailures(
+			new BackendApiError({
+				status: 409,
+				code: "mesh_preflight_failed",
+				message: "preflight failed",
+				details: {
+					failures: [
+						{
+							sender_node_id: "node-a",
+							target_node_id: "node-b",
+							kind: "transport",
+							url: "https://must-not-render.example",
+						},
+						{
+							sender_node_id: "node-b",
+							target_node_id: "node-c",
+							kind: "certificate",
+						},
+					],
+				},
+			}),
+		);
+
+		expect(failures).toEqual([
+			{
+				sender_node_id: "node-a",
+				target_node_id: "node-b",
+				kind: "transport",
+			},
+		]);
+	});
+
 	it("keeps unavailable socket inspection distinct from zero traffic", () => {
 		const parsed = AdminMeshConnectionUsageSchema.parse({
 			supported: false,

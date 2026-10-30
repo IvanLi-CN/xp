@@ -429,8 +429,10 @@ fn desired_inbound_hash(endpoint: &Endpoint) -> Option<String> {
                 .unwrap_or_else(|| endpoint.meta.clone())
         }
     };
-    meta.as_object_mut()
-        .map(|object| object.remove("mihomo_smux"));
+    if let Some(object) = meta.as_object_mut() {
+        object.remove("mihomo_smux");
+        object.remove("mihomo_xmux");
+    }
     let cfg = serde_json::json!({
         "kind": endpoint_kind_key(&endpoint.kind),
         "tag": endpoint.tag,

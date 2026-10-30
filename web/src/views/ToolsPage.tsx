@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { type FormEvent, useRef, useState } from "react";
 
 import {
@@ -267,7 +268,9 @@ export function ToolsPage() {
 						</div>
 
 						{error ? (
-							<div className="xp-alert xp-alert-error px-4 py-2">{error}</div>
+							<Alert tone="error" className="px-4 py-2">
+								{error}
+							</Alert>
 						) : null}
 
 						{sourceKind === "url" ? (

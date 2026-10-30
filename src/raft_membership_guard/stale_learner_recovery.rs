@@ -57,6 +57,7 @@ pub async fn begin_stale_learner_recovery(
     store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
     node_id: &str,
     expected_membership: &str,
+    verified_xmux_node: Option<&Node>,
 ) -> anyhow::Result<MembershipOperation> {
     let _guard = membership_operation_gate().lock_owned().await;
     let raft_node_id = raft_node_id_from_ulid(node_id)?;
@@ -71,6 +72,9 @@ pub async fn begin_stale_learner_recovery(
         Some(expected_membership),
     )
     .await?;
+    if super::has_custom_xmux(&*store.lock().await) && verified_xmux_node != Some(&input.node) {
+        anyhow::bail!("restore target XMUX capability must be verified for its current identity")
+    }
 
     let operation = MembershipOperation {
         operation_id: uuid::Uuid::new_v4().to_string(),
@@ -87,7 +91,14 @@ pub async fn begin_stale_learner_recovery(
         created_at: Utc::now().to_rfc3339(),
         next_retry_at: None,
         terminal_at: None,
-        evidence: Some("manual stale learner recovery".to_string()),
+        evidence: Some(if let Some(node) = verified_xmux_node {
+            format!(
+                "manual stale learner recovery; {}",
+                super::restore_xmux_proof(node)
+            )
+        } else {
+            "manual stale learner recovery".to_string()
+        }),
     };
     let (node, join_session) = match input.consumed_join_session {
         Some(join_session) => (Some(input.node), Some(join_session)),

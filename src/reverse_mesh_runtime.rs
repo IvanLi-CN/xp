@@ -148,6 +148,7 @@ pub fn build_reverse_desired(
                     active_short_id: endpoint.short_id.clone(),
                     canary_upstream: None,
                     accepted_authorities: Vec::new(),
+                    mihomo_xmux: None,
                     mihomo_smux: Default::default(),
                     transport: if endpoint.transport == "xhttp" {
                         VlessRealityTransport::Xhttp

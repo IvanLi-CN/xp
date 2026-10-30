@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { previewAdminUserMihomoImport } from "./adminUsers";
+import { MihomoSaveOutcomeUnknownError } from "../utils/mihomoSaveOutcome";
+import {
+	previewAdminUserMihomoImport,
+	putAdminUserMihomoProfile,
+} from "./adminUsers";
 
 describe("previewAdminUserMihomoImport", () => {
 	afterEach(() => {
@@ -54,4 +58,40 @@ describe("previewAdminUserMihomoImport", () => {
 			}),
 		);
 	});
+});
+
+describe("putAdminUserMihomoProfile", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it.each([
+		["malformed JSON", "not-json"],
+		["invalid profile schema", JSON.stringify({ mixin_yaml: "ok" })],
+	])(
+		"classifies a successful but unverifiable response as unknown (%s)",
+		async (_, body) => {
+			const payload = {
+				mixin_yaml: "port: 7890\n",
+				extra_proxies_yaml: "",
+				extra_proxy_providers_yaml: "",
+			};
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockResolvedValue(
+					new Response(body, {
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					}),
+				),
+			);
+
+			await expect(
+				putAdminUserMihomoProfile("admin-token", "user-1", payload),
+			).rejects.toMatchObject({
+				constructor: MihomoSaveOutcomeUnknownError,
+				submittedProfile: payload,
+			});
+		},
+	);
 });

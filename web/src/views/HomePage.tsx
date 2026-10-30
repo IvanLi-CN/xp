@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useState } from "react";
@@ -10,6 +11,7 @@ import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { useApiCapability } from "../api/useApiCompatibility";
+import { getPrimaryBackendSnapshot } from "../backend/primaryBackend";
 import { AuthRecoveryAction } from "../components/AuthRecoveryAction";
 import { Button } from "../components/Button";
 import { NodeInventoryList } from "../components/NodeInventoryList";
@@ -24,10 +26,7 @@ import {
 	readAdminToken,
 	writeAdminToken,
 } from "../components/auth";
-import {
-	alertClass,
-	inputClass as inputControlClass,
-} from "../components/ui-helpers";
+import { inputClass as inputControlClass } from "../components/ui-helpers";
 import { Input } from "../components/ui/input";
 import { useAppRuntime } from "../offline/appRuntime";
 import {
@@ -251,7 +250,19 @@ export function HomePage() {
 								setIsSavingAdminToken(true);
 								setAdminTokenError(null);
 								try {
+									const verificationTarget = getPrimaryBackendSnapshot();
 									await verifyAdminToken(parsed.token);
+									const currentTarget = getPrimaryBackendSnapshot();
+									if (
+										currentTarget.primaryOrigin !==
+											verificationTarget.primaryOrigin ||
+										currentTarget.clusterId !== verificationTarget.clusterId ||
+										currentTarget.generation !== verificationTarget.generation
+									) {
+										throw new Error(
+											"Service node selection changed. Review the selected node and retry.",
+										);
+									}
 									writeAdminToken(parsed.token);
 									setAdminToken(parsed.token);
 									setAdminTokenDraft(parsed.token);
@@ -409,7 +420,7 @@ export function HomePage() {
 							<span className="font-mono">{adminAlerts.data.items.length}</span>
 						</p>
 						{adminAlerts.data.partial ? (
-							<div className={alertClass("warning")}>
+							<Alert tone="warning">
 								<div className="space-y-1">
 									<p className="font-semibold">
 										Warning: results are partial due to unreachable nodes.
@@ -421,15 +432,15 @@ export function HomePage() {
 											: "none"}
 									</p>
 								</div>
-							</div>
+							</Alert>
 						) : null}
 						{adminAlerts.data.items.length > 0 ? (
 							<div className="space-y-3">
-								<div className={alertClass("error")}>
+								<Alert tone="error">
 									<p className="font-semibold">
 										Warning: {adminAlerts.data.items.length} alert(s) detected.
 									</p>
-								</div>
+								</Alert>
 								<div className="hidden sm:block">
 									<ResourceTable
 										ariaLabel="Dashboard alerts"
@@ -528,11 +539,11 @@ export function HomePage() {
 				) : adminResources.data ? (
 					<div className="space-y-3">
 						{adminResources.data.partial ? (
-							<div className={alertClass("warning")}>
+							<Alert tone="warning">
 								Partial resource data:{" "}
 								{adminResources.data.unreachable_nodes.join(", ") ||
 									"some nodes are unreachable"}
-							</div>
+							</Alert>
 						) : null}
 						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 							{adminResources.data.items.map((item) => (

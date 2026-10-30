@@ -3,6 +3,10 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
+import {
+	NODE_RESOURCE_HISTORY_METRICS,
+	RUNTIME_RESOURCE_HISTORY_METRICS,
+} from "../api/adminResources";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import * as resourceMonitoringFixtures from "../fixture-policy/resourceMonitoring";
 import { useNodeResourceQueries } from "./useNodeResourceQueries";
@@ -221,7 +225,7 @@ describe("useNodeResourceQueries lifecycle", () => {
 		);
 	});
 
-	it("does not reuse a snapshot after the page session unmounts", async () => {
+	it("does not reuse or retain resource queries after page session unmounts", async () => {
 		mocks.fetchAdminNodeResources
 			.mockReset()
 			.mockResolvedValue(supportedSnapshot);
@@ -240,20 +244,51 @@ describe("useNodeResourceQueries lifecycle", () => {
 			nodesAvailable: true,
 			isOnline: true,
 			activeTab: "resources",
-			selectedRuntimeRole: null,
+			selectedRuntimeRole: "xray",
 		} as const;
 
-		const first = renderHook(() => useNodeResourceQueries(props), { wrapper });
-		await waitFor(() =>
-			expect(first.result.current.resourceQuery.isSuccess).toBe(true),
-		);
-		first.unmount();
+		const resourceQueryKeys = () =>
+			queryClient
+				.getQueryCache()
+				.getAll()
+				.filter(
+					({ queryKey }) =>
+						queryKey[0] === "adminNodeResources" ||
+						queryKey[0] === "adminNodeResourceHistory" ||
+						queryKey[0] === "adminNodeRuntimeResourceHistory",
+				)
+				.map(({ queryKey }) => queryKey);
 
-		const second = renderHook(() => useNodeResourceQueries(props), { wrapper });
-		expect(second.result.current.resourceQuery.isPending).toBe(true);
-		await waitFor(() =>
-			expect(second.result.current.resourceQuery.isSuccess).toBe(true),
-		);
-		expect(mocks.fetchAdminNodeResources).toHaveBeenCalledTimes(2);
+		for (let sessionIndex = 0; sessionIndex < 3; sessionIndex += 1) {
+			const session = renderHook(() => useNodeResourceQueries(props), {
+				wrapper,
+			});
+			if (sessionIndex > 0) {
+				expect(session.result.current.resourceQuery.isPending).toBe(true);
+			}
+			await waitFor(() =>
+				expect(session.result.current.resourceQuery.isSuccess).toBe(true),
+			);
+
+			const keys = resourceQueryKeys();
+			expect(keys).toHaveLength(
+				1 +
+					NODE_RESOURCE_HISTORY_METRICS.length +
+					RUNTIME_RESOURCE_HISTORY_METRICS.length,
+			);
+			for (const key of keys) {
+				expect(key[1]).toBe(props.adminToken);
+				expect(key[2]).toBe(props.nodeId);
+			}
+			expect(keys.find((key) => key[0] === "adminNodeResources")).toEqual([
+				"adminNodeResources",
+				props.adminToken,
+				props.nodeId,
+			]);
+
+			session.unmount();
+			expect(resourceQueryKeys()).toHaveLength(0);
+		}
+		expect(mocks.fetchAdminNodeResources).toHaveBeenCalledTimes(3);
 	});
 });

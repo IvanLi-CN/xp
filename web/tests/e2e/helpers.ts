@@ -546,6 +546,22 @@ export async function setupApiMocks(
 			return;
 		}
 
+		if (path === "/api/admin/nodes/versions" && method === "GET") {
+			jsonResponse(route, {
+				items: state.nodes.map((_, index) => ({
+					node_id:
+						state.nodes.length === 1
+							? fixtureCatalog.nodeId.fixture32()
+							: index === 0
+								? fixtureCatalog.identifier.nodePrimary()
+								: fixtureCatalog.identifier.nodeSecondary(),
+					xp_version: state.clusterInfo.xp_version,
+					error: null,
+				})),
+			});
+			return;
+		}
+
 		if (path === "/api/admin/nodes/runtime" && method === "GET") {
 			const items = state.nodes.map(buildNodeRuntimeListItem);
 			jsonResponse(route, {

@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { renderHook, waitFor } from "@testing-library/react";
+import { type ReactNode, createElement } from "react";
+import { describe, expect, it, vi } from "vitest";
 
 import { resolveApiCompatibility } from "./apiCompatibility";
 import {
 	getApiCapabilityState,
+	getApiRouteState,
 	persistCompatibility,
 	readPersistedCompatibility,
+	useApiCompatibility,
 } from "./useApiCompatibility";
 
 describe("API capability state", () => {
@@ -29,6 +34,81 @@ describe("API capability state", () => {
 		expect(state.available).toBe(false);
 		expect(state.pending).toBe(false);
 		expect(state.reason).toMatch(/admin\.mesh/);
+	});
+
+	it("does not send a token-bearing compatibility request after identity changes", async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+		const queryClient = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		});
+		const wrapper = ({ children }: { children: ReactNode }) =>
+			createElement(QueryClientProvider, { client: queryClient }, children);
+		const beforeAuthenticatedRequest = vi.fn().mockResolvedValue(false);
+
+		const { result } = renderHook(
+			() =>
+				useApiCompatibility(
+					"unverified-token",
+					true,
+					"https://primary.example",
+					0,
+					beforeAuthenticatedRequest,
+				),
+			{ wrapper },
+		);
+
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+		expect(beforeAuthenticatedRequest).toHaveBeenCalledOnce();
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(result.current.data).toBeNull();
+		queryClient.clear();
+		vi.unstubAllGlobals();
+	});
+	it("does not expose a write route absent from the selected server profile", () => {
+		const compatibility = resolveApiCompatibility({
+			releaseTag: "v3.22.5",
+		});
+		const state = getApiRouteState(
+			compatibility,
+			"admin.mesh",
+			"PUT /api/admin/mesh/config",
+		);
+
+		expect(state.available).toBe(false);
+		expect(state.reason).toMatch(/PUT \/api\/admin\/mesh\/config/);
+	});
+
+	it("does not infer the current write route from legacy mesh telemetry", () => {
+		const compatibility = resolveApiCompatibility({
+			releaseTag: "v3.22.5",
+			capabilities: ["admin.mesh", "admin.mesh-transport-reuse"],
+			capabilitiesAreAuthoritative: true,
+		});
+		const state = getApiRouteState(
+			compatibility,
+			"admin.mesh",
+			"PUT /api/admin/mesh/config",
+		);
+
+		expect(state.available).toBe(false);
+		expect(state.unavailable).toBe(true);
+	});
+
+	it("accepts current routes only with a current route contract capability", () => {
+		const compatibility = resolveApiCompatibility({
+			releaseTag: "v0.2.0",
+			capabilities: ["admin.mesh", "cluster.mesh-gate-v1"],
+			capabilitiesAreAuthoritative: true,
+		});
+		const state = getApiRouteState(
+			compatibility,
+			"admin.mesh",
+			"PUT /api/admin/mesh/config",
+		);
+
+		expect(state.available).toBe(true);
+		expect(state.unavailable).toBe(false);
 	});
 
 	it("keeps probe-only capabilities disabled after persistence and restore", () => {

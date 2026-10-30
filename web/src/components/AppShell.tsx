@@ -1,28 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-	Link,
-	Outlet,
-	useNavigate,
-	useRouterState,
-} from "@tanstack/react-router";
-import type { ReactNode } from "react";
-import {
-	useCallback,
-	useEffect,
-	useMemo,
-	useReducer,
-	useRef,
-	useState,
-} from "react";
-
-import { fetchAdminNodes } from "@/api/adminNodes";
 import { startAdminStatusEvents } from "@/api/adminStatusEvents";
 import { fetchRuntimePolicy } from "@/api/runtimePolicy";
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
 import {
-	hydratePrimaryBackendProfile,
+	STATIC_BOOTSTRAP_ORIGIN,
+	canonicalBackendOrigin,
+	getDirectorySessionEpoch,
 	isStaticWebConsole,
 } from "@/backend/primaryBackend";
+import { useBackendDirectory } from "@/backend/useBackendDirectory";
 import { Badge } from "@/components/ui/badge";
 import {
 	CommandDialog,
@@ -55,22 +40,39 @@ import {
 	SheetHeader,
 	SheetTitle,
 } from "@/components/ui/sheet";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	Link,
+	Outlet,
+	useNavigate,
+	useRouterState,
+} from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useReducer,
+	useRef,
+	useState,
+} from "react";
 import { fetchAdminAlerts } from "../api/adminAlerts";
 import {
 	fetchAdminUpgradeStatus,
 	startAdminUpgrade,
 } from "../api/adminUpgrade";
 import { isBackendApiError } from "../api/backendError";
-import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import {
 	ApiCompatibilityProvider,
 	useApiCompatibility,
 } from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
+import { isDemoRuntime } from "../demo/runtimeMode";
+import { usePrimaryClusterInfo } from "../hooks/usePrimaryBackendQueries";
+import { useAuthenticatedBackendProbe } from "../hooks/usePublicBackendReadiness";
 import { useAppRuntime } from "../offline/appRuntime";
-import { clearAppliedRuntimePolicyId } from "../offline/runtimePolicySession";
-import { clearServiceWorkerRuntimePolicy } from "../offline/serviceWorkerPolicy";
+import { clearBackendQueryCache } from "../offline/queryPersistence";
 import { requestServiceWorkerUpdateCheck } from "../offline/serviceWorkerUpdates";
 import { classifyUpgradeStartError } from "../offline/upgradeObservation";
 import { shouldRefreshAfterUpgradeTransition } from "../offline/upgradeRefreshPolicy";
@@ -87,13 +89,15 @@ import {
 	useObjectNavigationBrowserBlocker,
 	useObjectNavigationGuard,
 } from "./ObjectNavigationGuard";
+import { PageState } from "./PageState";
 import { PrimaryBackendSwitcher } from "./PrimaryBackendSwitcher";
 import { ReadStateIndicator } from "./ReadStateIndicator";
 import { useUiPrefs } from "./UiPrefs";
 import { VersionIndicator } from "./VersionIndicator";
 import { XpBrandLogo } from "./XpBrandLogo";
-import { clearAdminToken, readAdminToken } from "./auth";
+import { clearAdminToken } from "./auth";
 import { inputClass } from "./ui-helpers";
+import { useActiveAdminSession } from "./useActiveAdminSession";
 import {
 	type VersionCheckUiState,
 	readVersionCheckLastAtMs,
@@ -101,7 +105,6 @@ import {
 	shouldAutoCheckVersion,
 	writeVersionCheckLastAtMs,
 } from "./versionCheckUi";
-
 type AppShellProps = {
 	brand: {
 		name: string;
@@ -114,7 +117,6 @@ type AppShellProps = {
 	headerStatus?: ReactNode;
 	children?: ReactNode;
 };
-
 function safeHostFromUrl(value: string): string | null {
 	try {
 		const url = new URL(value);
@@ -123,7 +125,6 @@ function safeHostFromUrl(value: string): string | null {
 		return null;
 	}
 }
-
 function formatApiError(err: unknown): string {
 	if (isBackendApiError(err)) {
 		return err.code
@@ -132,7 +133,6 @@ function formatApiError(err: unknown): string {
 	}
 	return err instanceof Error ? err.message : "request failed";
 }
-
 export function AppShell({
 	brand,
 	navItems,
@@ -149,23 +149,46 @@ export function AppShell({
 	const prefs = useUiPrefs();
 	const primaryBackend = usePrimaryBackend();
 	const staticConsole = isStaticWebConsole();
-	const [adminToken] = useState(() => readAdminToken());
+	const adminToken = useActiveAdminSession();
+	const sessionEpoch = getDirectorySessionEpoch();
+	const activeAdminSession = adminToken.length > 0;
+	const clearUnidentifiedBackendCache = useCallback(
+		() => clearBackendQueryCache(queryClient),
+		[queryClient],
+	);
+	const { requestNavigation } = useObjectNavigationGuard();
+	useObjectNavigationBrowserBlocker();
+	const publicBackend = useAuthenticatedBackendProbe({
+		clusterId: primaryBackend.clusterId,
+		isOnline: runtime.isOnline,
+		origin: primaryBackend.primaryOrigin,
+		staticConsole: staticConsole || isDemoRuntime(),
+		onUnidentifiedCluster: clearUnidentifiedBackendCache,
+	});
+	useEffect(() => {
+		if (!publicBackend.clusterMismatch) return;
+		clearAdminToken();
+		clearBackendQueryCache(queryClient);
+		void navigate({ to: "/login" });
+	}, [navigate, publicBackend.clusterMismatch, queryClient]);
 	const apiCompatibility = useApiCompatibility(
 		adminToken,
 		runtime.isOnline,
 		primaryBackend.primaryOrigin,
 		primaryBackend.generation,
+		publicBackend.probe,
 	);
-	const { requestNavigation } = useObjectNavigationGuard();
-	useObjectNavigationBrowserBlocker();
-	const compatibility = apiCompatibility.data ?? null;
+	const compatibility = publicBackend.ready
+		? (apiCompatibility.data ?? null)
+		: null;
 	const alertsCapabilityAvailable =
-		apiCompatibility.data?.kind === "compatible" &&
-		apiCompatibility.data.isFeatureAvailable("admin.alerts");
+		compatibility?.kind === "compatible" &&
+		compatibility.isFeatureAvailable("admin.alerts");
 	const upgradeCapabilityAvailable =
-		apiCompatibility.data?.kind === "compatible" &&
-		apiCompatibility.data.isFeatureAvailable("admin.upgrade");
+		compatibility?.kind === "compatible" &&
+		compatibility.isFeatureAvailable("admin.upgrade");
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+	const [backendSelectorOpen, setBackendSelectorOpen] = useState(false);
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
 	const [versionCheck, dispatchVersionCheck] = useReducer(
 		reduceVersionCheckUiState,
@@ -190,15 +213,12 @@ export function AppShell({
 		queryKey: ["health"],
 		queryFn: ({ signal }) => fetchHealth(signal),
 	});
-	const clusterInfo = useQuery({
-		queryKey: ["clusterInfo"],
-		queryFn: ({ signal }) => fetchClusterInfo(signal),
-	});
+	const clusterInfo = usePrimaryClusterInfo();
 	const runtimePolicy = useQuery({
-		queryKey: ["runtimePolicy", adminToken, primaryBackend.clusterId],
+		queryKey: ["runtimePolicy", sessionEpoch, primaryBackend.clusterId],
 		enabled:
 			staticConsole &&
-			adminToken.length > 0 &&
+			activeAdminSession &&
 			runtime.isOnline &&
 			Boolean(primaryBackend.clusterId),
 		queryFn: ({ signal }) => fetchRuntimePolicy(adminToken, signal),
@@ -207,6 +227,20 @@ export function AppShell({
 		refetchIntervalInBackground: true,
 		retry: false,
 	});
+	const activeBackendOrigin = canonicalBackendOrigin(
+		primaryBackend.primaryOrigin,
+	);
+	const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
+	const runtimePolicyReady =
+		!staticConsole ||
+		(runtimePolicy.data !== undefined &&
+			runtimePolicy.data.cluster_id === clusterInfo.data?.cluster_id &&
+			Date.parse(runtimePolicy.data.expires_at) > Date.now() &&
+			activeBackendOrigin !== null &&
+			(activeBackendOrigin === bootstrapOrigin ||
+				runtimePolicy.data.api_origins.some(
+					(origin) => canonicalBackendOrigin(origin) === activeBackendOrigin,
+				)));
 	const compatibilityError =
 		staticConsole &&
 		adminToken.length > 0 &&
@@ -219,57 +253,32 @@ export function AppShell({
 					? "API compatibility is unavailable while offline."
 					: null;
 
-	const backendNodes = useQuery({
-		queryKey: ["adminNodes", adminToken],
-		enabled:
-			!staticConsole &&
-			adminToken.length > 0 &&
-			Boolean(clusterInfo.data?.cluster_id) &&
-			clusterInfo.data?.cluster_id === primaryBackend.clusterId,
-		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+	const directory = useBackendDirectory({
+		adminToken: activeAdminSession ? adminToken : "",
+		clusterId: clusterInfo.data?.cluster_id,
+		primaryClusterId: primaryBackend.clusterId,
+		primaryOrigin: primaryBackend.primaryOrigin,
+		runtimeOnline: runtime.isOnline && publicBackend.ready,
+		staticConsole,
+		runtimePolicyReady,
+		selectorOpen: backendSelectorOpen,
+		refreshRuntimePolicy: runtimePolicy.refetch,
 	});
 
-	const refreshBackendCandidates = useCallback(() => {
-		if (!adminToken || !primaryBackend.clusterId) return;
-		if (staticConsole) void runtimePolicy.refetch();
-		else void backendNodes.refetch();
-	}, [
-		adminToken,
-		backendNodes.refetch,
-		primaryBackend.clusterId,
-		runtimePolicy.refetch,
-		staticConsole,
-	]);
-
-	useEffect(() => {
-		const clusterId = clusterInfo.data?.cluster_id;
-		if (!clusterId) return;
-		hydratePrimaryBackendProfile(
-			clusterId,
-			backendNodes.isSuccess ? backendNodes.data.items : undefined,
-		);
-	}, [
-		clusterInfo.data?.cluster_id,
-		backendNodes.data?.items,
-		backendNodes.isSuccess,
-	]);
-
 	useStaticRuntimePolicy({
-		enabled: staticConsole,
+		enabled: staticConsole && activeAdminSession,
 		clusterId: clusterInfo.data?.cluster_id,
 		policy: runtimePolicy.data,
 	});
-
 	useRuntimePolicyExpiry({
 		enabled: staticConsole && Boolean(runtimePolicy.data),
 		clusterId: clusterInfo.data?.cluster_id,
 		expiresAt: runtimePolicy.data?.expires_at,
 	});
-
 	useEffect(() => {
 		if (primaryBackend.state !== "unreachable") return;
-		refreshBackendCandidates();
-	}, [primaryBackend.state, refreshBackendCandidates]);
+		directory.refreshBackendCandidates();
+	}, [primaryBackend.state, directory.refreshBackendCandidates]);
 
 	const previousBackendGeneration = useRef(primaryBackend.generation);
 	useEffect(() => {
@@ -277,16 +286,15 @@ export function AppShell({
 		previousBackendGeneration.current = primaryBackend.generation;
 		void (async () => {
 			await queryClient.cancelQueries();
+			queryClient.removeQueries({ queryKey: ["clusterInfo"] });
 			await queryClient.invalidateQueries();
 		})();
 	}, [primaryBackend.generation, queryClient]);
-
 	const adminAlerts = useQuery({
 		queryKey: ["adminAlerts", adminToken],
 		enabled: adminToken.length > 0 && alertsCapabilityAvailable,
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
 	});
-
 	const adminUpgradeStatus = useQuery({
 		queryKey: ["adminUpgradeStatus", adminToken],
 		enabled: adminToken.length > 0 && upgradeCapabilityAvailable,
@@ -300,7 +308,6 @@ export function AppShell({
 				: false;
 		},
 	});
-
 	const adminUpgradeStart = useMutation({
 		mutationFn: async (payload: { targetTag: string }) => {
 			if (!upgradeCapabilityAvailable) {
@@ -337,12 +344,10 @@ export function AppShell({
 		adminUpgradeStart.reset();
 		upgradeObservation.clear();
 	}, [adminUpgradeStart.reset, upgradeObservation.clear]);
-
 	useEffect(() => {
 		if (!upgradeStatusData) return;
 		upgradeObservation.observeStatus(upgradeStatusData.status);
 	}, [upgradeObservation.observeStatus, upgradeStatusData]);
-
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (!(event.ctrlKey || event.metaKey)) return;
@@ -353,21 +358,18 @@ export function AppShell({
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, []);
-
 	const runVersionCheck = useCallback(
 		async (options?: { force?: boolean }) => {
 			const force = options?.force ?? false;
-			if (!runtime.isOnline) return;
+			if (!runtime.isOnline || (!staticConsole && !publicBackend.ready)) return;
 			const nowMs = Date.now();
 			const canRun =
 				force ||
 				shouldAutoCheckVersion({ nowMs, lastAtMs: versionCheckLastAtMs });
 			if (!canRun) return;
-
 			writeVersionCheckLastAtMs(nowMs);
 			setVersionCheckLastAtMs(nowMs);
 			dispatchVersionCheck({ type: "start" });
-
 			try {
 				const data = await fetchVersionCheck({
 					refresh: force,
@@ -383,9 +385,14 @@ export function AppShell({
 				dispatchVersionCheck({ type: "fail", message });
 			}
 		},
-		[adminToken, runtime.isOnline, versionCheckLastAtMs],
+		[
+			adminToken,
+			publicBackend.ready,
+			runtime.isOnline,
+			staticConsole,
+			versionCheckLastAtMs,
+		],
 	);
-
 	useEffect(() => {
 		// The stream lifetime is bound to the selected backend generation.
 		void primaryBackend.generation;
@@ -393,8 +400,6 @@ export function AppShell({
 			setStatusStream({ connected: false, lastEventAtMs: null, error: null });
 			return;
 		}
-
-		const compatibility = apiCompatibility.data;
 		const statusEventsAvailable =
 			runtime.isOnline &&
 			compatibility?.kind === "compatible" &&
@@ -410,7 +415,6 @@ export function AppShell({
 			});
 			return;
 		}
-
 		const handle = startAdminStatusEvents({
 			adminToken,
 			onOpen: () => {
@@ -434,7 +438,6 @@ export function AppShell({
 					}));
 					return;
 				}
-
 				if (message.type === "snapshot") {
 					const lastEventAtMs = Date.parse(message.data.emitted_at);
 					queryClient.setQueryData(["health"], message.data.health);
@@ -467,38 +470,31 @@ export function AppShell({
 				}
 			},
 		});
-
 		return () => handle.close();
 	}, [
 		adminToken,
-		apiCompatibility.data,
+		compatibility,
 		primaryBackend.generation,
 		queryClient,
 		runtime.isOnline,
 	]);
-
 	useEffect(() => {
 		const onFocus = () => {
 			void runVersionCheck();
 		};
-
 		window.addEventListener("focus", onFocus);
 		if (typeof document.hasFocus === "function" && document.hasFocus()) {
 			onFocus();
 		}
-
 		return () => window.removeEventListener("focus", onFocus);
 	}, [runVersionCheck]);
-
 	useEffect(() => {
 		const nextState = adminUpgradeStatus.data?.status.state ?? null;
 		const prevState = lastUpgradeStateRef.current;
 		lastUpgradeStateRef.current = nextState;
-
 		if (!shouldRefreshAfterUpgradeTransition(prevState, nextState)) {
 			return;
 		}
-
 		void clusterInfo.refetch();
 		void health.refetch();
 		void runVersionCheck({ force: true });
@@ -511,7 +507,6 @@ export function AppShell({
 		health,
 		runVersionCheck,
 	]);
-
 	const effectiveNavGroups =
 		navGroups ??
 		(navItems
@@ -522,16 +517,13 @@ export function AppShell({
 					},
 				]
 			: []);
-
 	function navigateLink(href: string) {
 		setMobileNavOpen(false);
 		void navigate({ to: href as never });
 	}
-
 	function navigateResource(href: string) {
 		requestNavigation(() => navigateLink(href));
 	}
-
 	const navEntries = useMemo(
 		() =>
 			effectiveNavGroups.flatMap((group) =>
@@ -539,13 +531,13 @@ export function AppShell({
 			),
 		[effectiveNavGroups],
 	);
-
 	const statusBadges = useMemo(() => {
 		const items: ReactNode[] = [];
 		const compatibilityUnavailable =
-			apiCompatibility.data?.kind === "incompatible" ||
-			(apiCompatibility.data?.kind === "compatible" &&
-				!apiCompatibility.data.isFeatureAvailable("admin.status-events"));
+			compatibility === null ||
+			compatibility?.kind === "incompatible" ||
+			(compatibility?.kind === "compatible" &&
+				!compatibility.isFeatureAvailable("admin.status-events"));
 		const healthOk = health.isSuccess && health.data?.status === "ok";
 		items.push(
 			<Badge
@@ -559,7 +551,6 @@ export function AppShell({
 				<span className="opacity-80">{healthOk ? "OK" : "error"}</span>
 			</Badge>,
 		);
-
 		if (clusterInfo.isSuccess) {
 			const leaderHost = safeHostFromUrl(clusterInfo.data.leader_api_base_url);
 			const leaderValue =
@@ -591,7 +582,6 @@ export function AppShell({
 				</Badge>,
 			);
 		}
-
 		if (adminAlerts.isSuccess) {
 			const count = adminAlerts.data.items.length;
 			const unreachable = adminAlerts.data.unreachable_nodes.length;
@@ -615,7 +605,6 @@ export function AppShell({
 				</Badge>,
 			);
 		}
-
 		items.push(
 			<Badge
 				key="realtime"
@@ -642,7 +631,6 @@ export function AppShell({
 				</span>
 			</Badge>,
 		);
-
 		return items;
 	}, [
 		adminAlerts.data,
@@ -651,13 +639,11 @@ export function AppShell({
 		clusterInfo.isSuccess,
 		health.data,
 		health.isSuccess,
-		apiCompatibility.data,
+		compatibility,
 		runtime.isOnline,
 		statusStream.connected,
 	]);
-
 	const statusMenuBadges = headerStatus ?? statusBadges;
-
 	const versionIndicator = useMemo(() => {
 		const xpVersion =
 			clusterInfo.isSuccess && clusterInfo.data?.xp_version
@@ -707,7 +693,6 @@ export function AppShell({
 		upgradeObservation,
 		versionCheck,
 	]);
-
 	const globalReadStateIndicator = runtime.isReadOnly ? (
 		<ReadStateIndicator
 			tone="warning"
@@ -719,13 +704,13 @@ export function AppShell({
 		/>
 	) : null;
 	const serviceMonitorWorkspace = pathname.startsWith("/monitors");
-
 	const navContent = (
 		<AppResourceNavigation
 			adminToken={adminToken}
 			compatibility={compatibility}
 			compatibilityError={compatibilityError}
 			compatibilityPending={
+				(!staticConsole && !publicBackend.ready) ||
 				apiCompatibility.isFetching ||
 				(staticConsole &&
 					adminToken.length > 0 &&
@@ -733,6 +718,8 @@ export function AppShell({
 					!runtimePolicy.isError)
 			}
 			groups={effectiveNavGroups}
+			backendOrigin={primaryBackend.primaryOrigin}
+			backendClusterId={primaryBackend.clusterId}
 			localNodeId={clusterInfo.data?.node_id ?? null}
 			pathname={pathname}
 			search={search}
@@ -741,7 +728,6 @@ export function AppShell({
 			onRetryCompatibility={() => void apiCompatibility.refetch()}
 		/>
 	);
-
 	return (
 		<div className="min-h-screen bg-background">
 			<div className="p-1.5 sm:p-4 md:p-5">
@@ -795,7 +781,6 @@ export function AppShell({
 									) : null}
 								</Link>
 							</div>
-
 							<div className="hidden items-center justify-center lg:col-start-2 lg:row-start-1 lg:flex">
 								<div className="relative w-full max-w-md">
 									<button
@@ -817,7 +802,6 @@ export function AppShell({
 									</div>
 								</div>
 							</div>
-
 							<div className="flex min-w-0 flex-1 items-center justify-end gap-px sm:gap-2 lg:flex-none">
 								<div className="flex min-w-0 items-center gap-px sm:gap-2">
 									<span className="hidden items-center sm:inline-flex">
@@ -825,7 +809,6 @@ export function AppShell({
 									</span>
 									{versionIndicator}
 								</div>
-
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
 										<Button
@@ -849,7 +832,6 @@ export function AppShell({
 										</div>
 									</DropdownMenuContent>
 								</DropdownMenu>
-
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
 										<Button
@@ -922,8 +904,7 @@ export function AppShell({
 											className="text-destructive focus:text-destructive"
 											onSelect={() => {
 												requestNavigation(() => {
-													clearServiceWorkerRuntimePolicy();
-													clearAppliedRuntimePolicyId();
+													clearBackendQueryCache(queryClient);
 													clearAdminToken();
 													void navigate({ to: "/login" });
 												});
@@ -934,29 +915,44 @@ export function AppShell({
 										</DropdownMenuItem>
 									</DropdownMenuContent>
 								</DropdownMenu>
-
 								<PrimaryBackendSwitcher
+									directoryStatus={directory.directoryStatus}
 									adminToken={adminToken}
 									clusterId={
 										clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
 									}
-									onOpened={refreshBackendCandidates}
+									onOpened={directory.refreshBackendCandidates}
+									onOpenChange={setBackendSelectorOpen}
+									revalidateBeforeSwitch={directory.revalidateBackendCandidate}
 								/>
 							</div>
 						</div>
 					</header>
-
 					<div className="grid grid-cols-1 gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
 						<aside className="hidden lg:block">{navContent}</aside>
 						<main className="xp-panel p-[var(--xp-page-padding)]">
-							<ApiCompatibilityProvider value={apiCompatibility.data ?? null}>
-								{children ?? <Outlet />}
+							<ApiCompatibilityProvider value={compatibility}>
+								{!staticConsole &&
+								runtime.isOnline &&
+								adminToken.length > 0 &&
+								!publicBackend.ready &&
+								!publicBackend.revalidating ? (
+									<PageState
+										variant="loading"
+										title="Verifying backend identity"
+										description={
+											"Public health and cluster checks must complete before " +
+											"authenticated requests are sent."
+										}
+									/>
+								) : (
+									(children ?? <Outlet />)
+								)}
 							</ApiCompatibilityProvider>
 						</main>
 					</div>
 				</div>
 			</div>
-
 			<CommandDialog
 				open={commandPaletteOpen}
 				onOpenChange={setCommandPaletteOpen}
@@ -985,7 +981,6 @@ export function AppShell({
 					</CommandGroup>
 				</CommandList>
 			</CommandDialog>
-
 			<Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
 				<SheetContent
 					side="left"

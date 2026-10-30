@@ -161,6 +161,14 @@
   to clear legacy Reverse artifacts and matching sockets must be verified at zero. Status APIs and
   System Status expose the dormant state and keep any internal Reverse socket accounting separate
   from external user inbound sessions.
+- VLESS XMUX settings are cluster-backed client subscription policy.
+  Custom settings require every Raft member to advertise `admin.endpoint-vless-xmux-settings-v1`.
+  Changes must be made on the current leader and cannot run during a membership operation.
+  While any custom policy exists, joining XP must declare `xmux_settings_v1`.
+  Restore also requires signed verification of the target's XMUX capability
+  before registration or promotion.
+  Before downgrading to unsupported XP, clear every custom policy with `mihomo_xmux: null`.
+  Verify cluster convergence before proceeding.
 - Managed-default endpoint ports become cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` are bootstrap inputs only; normal `xp` startup,
   `xp-ops xp sync-node-meta`, container restart, and upgrade must preserve the port stored in Raft.
@@ -315,6 +323,9 @@
   and the node-local `${XP_DATA_DIR}/mihomo-resource-policy.json` Web override; all policy
   inputs accept bare private IPs and canonicalize them to `/32` or `/128`; policy state is
   never stored in Raft.
+- DDNS is up when a family has a successful probe and DNS sync in the current round.
+  Other family errors remain visible and do not establish universal client reachability.
+  Uncertain observations interrupt the missing count and never authorize record deletion.
 - Backend checks: `cargo test`, `cargo fmt`, `cargo clippy -- -D warnings`
 - Install frontend deps: `cd web && bun install`
 - Run frontend dev server: `cd web && bun run dev` (binds `127.0.0.1:60080`)

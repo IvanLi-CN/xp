@@ -3,21 +3,22 @@ import { useMemo, useState } from "react";
 import {
 	type BackendCandidate,
 	canonicalBackendOrigin,
+	currentWebReleaseVersion,
+	isStaticRuntimePolicyExpired,
+	recognizedReleaseVersion,
 	switchPrimaryBackend,
 	verifyBackendCandidate,
 } from "@/backend/primaryBackend";
+import { Alert } from "@/components/ui/alert";
+import { cn } from "@/lib/utils";
+import { writeAppliedRuntimePolicyId } from "@/offline/runtimePolicySession";
+import { setServiceWorkerRuntimePolicy } from "@/offline/serviceWorkerPolicy";
+import { buildNodePageHref } from "@/utils/navigation";
 
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 function hostLabel(origin: string) {
 	try {
@@ -27,24 +28,58 @@ function hostLabel(origin: string) {
 	}
 }
 
+export function getCurrentReloadCandidate(
+	pending: BackendCandidate | null,
+	candidates: readonly BackendCandidate[],
+	expired = false,
+): BackendCandidate | null {
+	if (!pending || expired) return null;
+	return (
+		candidates.find(
+			(candidate) =>
+				candidate.nodeId === pending.nodeId &&
+				candidate.origin === pending.origin &&
+				candidate.runtimeState === "staged" &&
+				candidate.runtimePolicyId === pending.runtimePolicyId,
+		) ?? null
+	);
+}
+
 export function PrimaryBackendSwitcher(props: {
 	adminToken: string;
 	clusterId: string | null;
 	onOpened?: () => void;
+	onOpenChange?: (open: boolean) => void;
 	onSwitched?: () => void;
+	revalidateBeforeSwitch?: (candidate: BackendCandidate) => Promise<boolean>;
+	frontendVersion?: string | null;
+	directoryStatus?: "loading" | "ready" | "stale" | "error";
+	portalContainer?: HTMLElement | null;
 }) {
 	const backend = usePrimaryBackend();
 	const [open, setOpen] = useState(false);
 	const [checkingOrigin, setCheckingOrigin] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [reloadCandidate, setReloadCandidate] =
+		useState<BackendCandidate | null>(null);
 	const candidates = useMemo(
 		() =>
 			[...backend.candidates].sort((left, right) => {
-				if (left.origin === backend.primaryOrigin) return -1;
-				if (right.origin === backend.primaryOrigin) return 1;
-				return hostLabel(left.origin).localeCompare(hostLabel(right.origin));
+				const leftCurrent = left.origin === backend.primaryOrigin;
+				const rightCurrent = right.origin === backend.primaryOrigin;
+				if (leftCurrent !== rightCurrent) return leftCurrent ? -1 : 1;
+				return (
+					hostLabel(left.origin).localeCompare(hostLabel(right.origin)) ||
+					left.nodeName.localeCompare(right.nodeName) ||
+					left.nodeId.localeCompare(right.nodeId)
+				);
 			}),
 		[backend.candidates, backend.primaryOrigin],
+	);
+	const currentReloadCandidate = getCurrentReloadCandidate(
+		reloadCandidate,
+		backend.candidates,
+		isStaticRuntimePolicyExpired(),
 	);
 
 	const handleSelect = async (candidate: BackendCandidate) => {
@@ -56,6 +91,28 @@ export function PrimaryBackendSwitcher(props: {
 			setOpen(false);
 			return;
 		}
+		if (candidate.runtimeState === "temporarily_unavailable") {
+			setError(
+				"This node is temporarily unreachable and remains out of service.",
+			);
+			return;
+		}
+		if (candidate.runtimeState === "staged") {
+			if (isStaticRuntimePolicyExpired()) {
+				setError("Runtime policy has expired; backend switching is locked.");
+				return;
+			}
+			setReloadCandidate(candidate);
+			setError(null);
+			return;
+		}
+		if (candidate.switchable === false) {
+			setError(
+				candidate.switchBlockedReason ??
+					"This node cannot be selected as the primary backend.",
+			);
+			return;
+		}
 		setCheckingOrigin(candidate.origin);
 		setError(null);
 		try {
@@ -64,7 +121,12 @@ export function PrimaryBackendSwitcher(props: {
 				clusterId: props.clusterId,
 				adminToken: props.adminToken,
 			});
-			await switchPrimaryBackend(verified);
+			await switchPrimaryBackend(
+				{ ...verified, nodeId: candidate.nodeId, nodeName: candidate.nodeName },
+				{
+					revalidate: props.revalidateBeforeSwitch,
+				},
+			);
 			props.onSwitched?.();
 			setOpen(false);
 		} catch (reason) {
@@ -78,20 +140,37 @@ export function PrimaryBackendSwitcher(props: {
 		}
 	};
 
+	const frontendVersion =
+		props.frontendVersion === undefined
+			? currentWebReleaseVersion()
+			: recognizedReleaseVersion(props.frontendVersion);
+	const versionLabel = (candidate: BackendCandidate) => {
+		if (
+			!frontendVersion ||
+			candidate.versionState !== "ready" ||
+			!candidate.serviceVersion
+		) {
+			return null;
+		}
+		if (candidate.serviceVersion === frontendVersion) return null;
+		return `v${candidate.serviceVersion}`;
+	};
+
 	const label =
 		backend.state === "unreachable"
 			? "Primary backend unavailable"
 			: `Primary backend: ${hostLabel(backend.primaryOrigin)}`;
 
 	return (
-		<DropdownMenu
+		<Popover
 			open={open}
 			onOpenChange={(nextOpen) => {
 				setOpen(nextOpen);
+				props.onOpenChange?.(nextOpen);
 				if (nextOpen) props.onOpened?.();
 			}}
 		>
-			<DropdownMenuTrigger asChild>
+			<PopoverTrigger asChild>
 				<Button
 					variant="secondary"
 					size="sm"
@@ -105,13 +184,35 @@ export function PrimaryBackendSwitcher(props: {
 						{hostLabel(backend.primaryOrigin)}
 					</span>
 				</Button>
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="xp-menu-content">
-				<DropdownMenuLabel className="px-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+			</PopoverTrigger>
+			<PopoverContent
+				align="end"
+				aria-label="Primary backend"
+				className={
+					"xp-menu-content max-h-[var(--radix-popover-content-available-height)] " +
+					"overflow-y-auto"
+				}
+				portalContainer={props.portalContainer}
+			>
+				<p className="px-1 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
 					Primary backend
-				</DropdownMenuLabel>
+				</p>
+				{props.directoryStatus === "stale" ? (
+					<output className="block px-2 pt-2 text-xs text-muted-foreground">
+						Node list may be out of date.
+					</output>
+				) : props.directoryStatus === "error" ? (
+					<p role="alert" className="px-2 pt-2 text-xs text-muted-foreground">
+						Unable to load node list.
+					</p>
+				) : null}
 				<div className="mt-2 space-y-1">
-					{candidates.length === 0 ? (
+					{props.directoryStatus === "loading" ? (
+						<p className="px-2 py-2 text-sm text-muted-foreground">
+							Loading nodes…
+						</p>
+					) : props.directoryStatus === "error" ? null : candidates.length ===
+						0 ? (
 						<p className="px-2 py-2 text-sm text-muted-foreground">
 							No registered backends found.
 						</p>
@@ -119,35 +220,115 @@ export function PrimaryBackendSwitcher(props: {
 						candidates.map((candidate) => {
 							const isCurrent = candidate.origin === backend.primaryOrigin;
 							const isChecking = checkingOrigin === candidate.origin;
+							const resolved = buildNodePageHref(
+								candidate.origin,
+								window.location.href,
+								props.adminToken,
+								{ loginHandoff: "fragment" },
+							);
+							const version = versionLabel(candidate);
+							const switchDisabled =
+								Boolean(checkingOrigin) ||
+								candidate.runtimeState === "temporarily_unavailable" ||
+								(candidate.switchable === false &&
+									candidate.runtimeState !== "staged");
 							return (
-								<DropdownMenuItem
-									key={candidate.origin}
-									disabled={Boolean(checkingOrigin) || isCurrent}
-									onSelect={(event) => {
-										event.preventDefault();
-										void handleSelect(candidate);
-									}}
-									className="items-start py-2"
+								<div
+									key={candidate.nodeId}
+									className={cn(
+										"grid grid-cols-[minmax(0,1fr)_auto] gap-1",
+										isCurrent &&
+											"rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15",
+									)}
 								>
-									<Icon
-										name={isCurrent ? "tabler:circle-check" : "tabler:server"}
-										ariaLabel={isCurrent ? "Current" : "Backend"}
-										className="mt-0.5 shrink-0"
-									/>
-									<span className="min-w-0 flex-1">
-										<span className="block truncate font-medium">
-											{candidate.nodeName}
+									<button
+										type="button"
+										disabled={isCurrent || switchDisabled}
+										aria-current={isCurrent ? "true" : undefined}
+										onClick={() => {
+											void handleSelect(candidate);
+										}}
+										className={cn(
+											"flex min-w-0 items-start gap-2 rounded-lg px-2 py-2 " +
+												"text-left text-sm outline-none focus-visible:ring-2 " +
+												"focus-visible:ring-ring hover:bg-accent",
+											isCurrent
+												? "disabled:opacity-100"
+												: "disabled:opacity-50",
+										)}
+										aria-label={
+											isCurrent
+												? `${candidate.nodeName}, current backend`
+												: candidate.switchable === false &&
+														candidate.switchBlockedReason
+													? `${candidate.nodeName}, ${candidate.switchBlockedReason}`
+													: candidate.nodeName
+										}
+									>
+										<Icon
+											name={isCurrent ? "tabler:circle-check" : "tabler:server"}
+											ariaLabel={isCurrent ? "Current" : "Backend"}
+											className={`mt-0.5 shrink-0${isCurrent ? " text-primary" : ""}`}
+										/>
+										<span className="min-w-0 flex-1">
+											<span className="block truncate font-medium">
+												{candidate.nodeName}
+											</span>
+											<span className="block truncate text-xs text-muted-foreground">
+												{hostLabel(candidate.origin)}
+												{version ? (
+													<span className="font-medium text-warning">
+														{` · ${version}`}
+													</span>
+												) : null}
+											</span>
 										</span>
-										<span className="block truncate text-xs text-muted-foreground">
-											{hostLabel(candidate.origin)}
-										</span>
-									</span>
-									{isChecking ? (
-										<span className="text-xs text-muted-foreground">
-											Checking
-										</span>
-									) : null}
-								</DropdownMenuItem>
+										{isChecking ? (
+											<span className="text-xs text-muted-foreground">
+												Checking
+											</span>
+										) : null}
+										{candidate.runtimeState === "staged" ? (
+											<span className="text-xs text-foreground">
+												Reload required
+											</span>
+										) : null}
+										{candidate.runtimeState === "temporarily_unavailable" ? (
+											<span className="text-xs text-muted-foreground">
+												Unavailable
+											</span>
+										) : null}
+									</button>
+									{resolved.disabled ? (
+										<button
+											type="button"
+											disabled
+											aria-label={resolved.reason}
+											className="px-2 opacity-50"
+										>
+											<Icon
+												name="tabler:external-link-off"
+												ariaLabel="Open node unavailable"
+											/>
+										</button>
+									) : (
+										<a
+											href={resolved.href}
+											target="_blank"
+											rel="noopener noreferrer"
+											aria-label={`Open ${candidate.nodeName} frontend in a new tab`}
+											className={
+												"flex items-center rounded-lg px-2 outline-none hover:bg-accent " +
+												"focus-visible:ring-2 focus-visible:ring-ring"
+											}
+										>
+											<Icon
+												name="tabler:external-link"
+												ariaLabel="Open node frontend"
+											/>
+										</a>
+									)}
+								</div>
 							);
 						})
 					)}
@@ -158,19 +339,64 @@ export function PrimaryBackendSwitcher(props: {
 					</p>
 				) : null}
 				{backend.lastSwitchTimedOut ? (
-					<p className="mt-2 rounded-md bg-warning/15 px-2 py-1.5 text-xs text-warning-foreground">
+					<Alert as="p" tone="warning" className="mt-2 px-2 py-1.5 text-xs">
 						The previous change result is unknown.
-					</p>
+					</Alert>
+				) : null}
+				{currentReloadCandidate ? (
+					<Alert tone="warning" className="mt-2 flex-col p-2 text-xs">
+						<output>
+							{hostLabel(currentReloadCandidate.origin)} is not in this page's
+							active policy. Reload to allow this backend to be checked; you
+							must select it again after reloading. Unsaved changes may be lost.
+						</output>
+						<div className="mt-2 flex justify-end gap-2">
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={() => setReloadCandidate(null)}
+							>
+								Cancel
+							</Button>
+							<Button
+								size="sm"
+								onClick={() => {
+									if (isStaticRuntimePolicyExpired()) {
+										setReloadCandidate(null);
+										return;
+									}
+									if (currentReloadCandidate.runtimePolicyGrant) {
+										setServiceWorkerRuntimePolicy(
+											currentReloadCandidate.runtimePolicyGrant,
+										);
+									}
+									if (currentReloadCandidate.runtimePolicyId) {
+										writeAppliedRuntimePolicyId(
+											currentReloadCandidate.runtimePolicyId,
+										);
+									}
+									window.location.reload();
+								}}
+							>
+								Reload once
+							</Button>
+						</div>
+					</Alert>
 				) : null}
 				{error ? (
 					<>
-						<DropdownMenuSeparator />
-						<p role="alert" className="px-1 text-sm text-destructive">
+						<div className="my-1 h-px bg-border" />
+						<Alert
+							as="p"
+							tone="error"
+							role="alert"
+							className="mt-2 px-2 text-sm"
+						>
 							{error}
-						</p>
+						</Alert>
 					</>
 				) : null}
-			</DropdownMenuContent>
-		</DropdownMenu>
+			</PopoverContent>
+		</Popover>
 	);
 }

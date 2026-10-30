@@ -23,6 +23,15 @@
 
 ## Follow-up Requirements
 
+### Raft write outcome and Mihomo save feedback
+
+- [x] Shared admin Raft writes expose `raft_write_not_dispatched` only for a proven pre-dispatch
+      failure and `raft_write_outcome_unknown` for every other unverified result, with redacted
+      correlation details.
+- [x] The Mihomo editor keeps the draft after an unknown result, performs one automatic read-back
+      comparison across all three documents, offers manual re-check, and warns before a manual
+      retry.
+
 The following rendering requirements were clarified after delivery and are now implemented.
 
 - [x] Put every generated `🛬 {base}` Landing Group before the regional candidates in `🤯 All`.

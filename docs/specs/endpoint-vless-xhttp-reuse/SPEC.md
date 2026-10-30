@@ -7,7 +7,7 @@
 
 None
 
-## 背景 / 问题陈述
+## Context and Scope
 
 VLESS Reality Vision/TCP 的每个代理 TCP 流都占用一条外部 TCP 连接。即使应用请求量不大，
 浏览器、代理组探测和并发应用流量也会在 Xray `connIdle=300` 的回收窗口内形成大量常驻连接。
@@ -20,11 +20,10 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 
 ### Goals
 
-- 新建 VLESS 接入点默认使用 XHTTP/XMUX；连接池预热后，每个客户端到每个接入点稳态使用一条
-  HTTP/2 TCP 连接。
+- 新建 VLESS 接入点默认使用 XHTTP/XMUX；默认参数下连接池预热后，每个客户端到每个接入点稳态使用一条 HTTP/2 TCP 连接。
 - 历史接入点缺少 transport 字段时继续使用 Vision/TCP，避免升级后无提示改变现有订阅。
 - 管理员可在接入点高级设置中显式切换 XHTTP/XMUX 与 legacy Vision/TCP。
-- 使用固定、低资源的 XMUX 参数，不增加定时 H2 PING，也不暴露高风险调优项。
+- 每个 VLESS 接入点可配置客户端 XMUX 连接数或并发数策略，以及连接复用次数、存续时间和空闲保活周期；默认保留现有低资源配置。
 
 ### Non-goals
 
@@ -32,7 +31,7 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 - 不在同一接入点端口同时运行 Vision/TCP 与 XHTTP；切换会重建该 inbound。
 - 不自动迁移历史接入点，不自动刷新客户端订阅。
 - 不修改 Xray `connIdle=300`、Reality 密钥、端口、路由、配额或用户授权。
-- 不为 operator 暴露 path、mode、XMUX 窗口、连接数或 keepalive 调优项。
+- 不为 operator 暴露 path、mode、XMUX 窗口或 hMaxRequestTimes 调优项。
 
 ## 范围（Scope）
 
@@ -49,9 +48,14 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 - sing-box、原生 Xray client 或其他订阅格式。
 - Mesh 控制面 HTTP/2 pool；它由 Reality Mesh 规格管理。
 
-## 需求（Requirements）
+## Requirements
 
 ### MUST
+
+- REQ-TRANSPORT: VLESS endpoint 必须遵守下述 transport 默认值与 inbound 合同。
+- REQ-XMUX: XMUX 客户端订阅设置必须按接入点保存并遵循下述默认值和验证约束。
+- REQ-UPGRADE: 自定义设置的写入、加入和降级必须遵循下述混合版本保护合同。
+- REQ-API: API capability 与条件 PATCH 必须遵循下述兼容与冲突合同。
 
 - `meta.transport` 只接受 `vision_tcp` 或 `xhttp`。历史 metadata 缺少该字段时反序列化为
   `vision_tcp`，并在无关 metadata 重写中继续保持字段缺失。
@@ -59,10 +63,22 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 - XHTTP Xray inbound 必须使用 `protocol_name=splithttp`、path `/xp-xhttp`、mode
   `stream-one` 与 Reality security；对应 VLESS user account 的 `flow` 必须为空。
 - Vision/TCP inbound 与订阅必须继续使用 TCP transport 和 `xtls-rprx-vision`。
-- XHTTP Mihomo YAML 必须使用 `network: xhttp`、`alpn: [h2]`、固定 path/mode，并包含：
-  `max-connections: "1"`、`max-concurrency: "0"`、`c-max-reuse-times: "0"`、
-  `h-max-request-times: "0"`、`h-max-reusable-secs: "0"`、
-  `h-keep-alive-period: -1`。负值关闭 Mihomo 默认的 HTTP/2 PING。
+- XHTTP Mihomo YAML 必须使用 `network: xhttp`、`alpn: [h2]` 和固定 path/mode。
+  XMUX 默认值为 `max-connections: "1"`、`max-concurrency: "0"`、`c-max-reuse-times: "0"`、
+  `h-max-request-times: "0"`、`h-max-reusable-secs: "0"`、`h-keep-alive-period: -1`。
+- 管理员可按接入点配置互斥的连接数或并发数策略、复用次数、存续秒数及保活秒数。
+  除保活外支持单个非负整数或升序范围；所选策略必须为正数或正数范围，未选策略为零。
+  复用次数和存续时间可使用 `0-2` 等零起点范围；保存默认策略会清除自定义配置。
+  保活 `-1` 禁用、`0` 使用客户端默认、正数为间隔秒数。并发策略初始建议 `16-32`。
+- 保存的 XMUX 参数在 Vision/TCP 不生效，切回 XHTTP 时恢复。客户端刷新订阅后生效，XMUX 变化不得重建 inbound。
+  该约束同时适用于 Raft 状态机的重建请求。
+- 混合版本期间必须阻止不支持该合同的节点静默覆盖配置或返回不一致的订阅；启用自定义设置前必须验证所有 Raft 成员具备能力，且不得有活动中的成员变更，不满足时明确拒绝。
+  保存与成员变更互斥；存在自定义配置时，缺少能力声明的旧版加入请求必须拒绝。
+  恢复 absent 节点或 stale learner 时必须验证目标节点的 XMUX 能力，并在恢复协调器重放时保持该验证结果。
+  自定义设置的创建、变更和清除必须在当前 leader 上执行；leader 变化时拒绝或报告结果未知，不能转发至旧版 leader。
+  leader 在持有成员操作锁后必须先取得线性一致的状态，再检查成员操作与加入兼容性。
+- `mihomo_xmux: null` 显式移除自定义配置并恢复原默认值。
+  降级到不支持该合同的 XP 之前，必须逐个移除所有接入点的自定义配置，并核实整个集群已收敛；旧版软件无法保护新增 metadata。
 - XHTTP Raw URI 必须使用 Mihomo v1.19.29 可解析的 `type=xhttp` 与 `extra.xmux`；
   legacy Vision/TCP URI 必须保持原字节合同。
 - API 必须广告 `admin.endpoint-vless-xhttp` capability。新 Web 仅在 capability 存在时展示并
@@ -70,6 +86,7 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 - transport PATCH 为 `null`、未知枚举或用于 SS2022 时必须返回明确的 `400`。
 - 接入点 PATCH 必须拒绝陈旧快照并返回 `409 conflict`，不得让端口等无关字段的旧编辑覆盖
   已保存的 transport 切换。
+- 短 ID 轮换和托管接入点更新也必须使用条件快照，避免并发更新覆盖已保存的 XMUX 策略。
 - 条件 PATCH 在既有 `upsert_endpoint` 命令中使用可选快照字段，保证旧节点仍可反序列化
   Raft 日志；转发到未声明 `admin.endpoint-conditional-update` 的 leader 时必须返回
   `409 coordinated_upgrade_required`，不得退化为无条件覆盖。
@@ -115,7 +132,12 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 
 - 契约由本文内联定义，不新增独立 contract 文件。
 
-## 验收标准（Acceptance Criteria）
+## Verification
+
+- VER-TRANSPORT: covers: REQ-TRANSPORT；验证旧 endpoint、默认创建、Xray inbound 与 transport 切换。
+- VER-XMUX: covers: REQ-XMUX；验证 XMUX 配置和校验、所有订阅输出、客户端解析、复用与重连。
+- VER-UPGRADE: covers: REQ-UPGRADE；验证混合版本写入保护、成员变更互斥与旧版节点加入拒绝。
+- VER-API: covers: REQ-API；验证 capability、错误和并发条件 PATCH。
 
 - Given 历史 VLESS metadata 缺少 transport，When 读取、无关 PATCH、Reality domain 更新或
   shortId rotation，Then transport 仍为 Vision/TCP 且 JSON 仍不新增该字段。
@@ -128,31 +150,6 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
   全部成功且 counting proxy 总共只接受一条外部 TCP。
 - Given 已建立的 XHTTP TCP 被主动切断，When 发起下一请求，Then 请求成功且总建连数增加到 2。
 - Given legacy Vision/TCP fixture，When 渲染 YAML 与 URI，Then 与变更前字节一致。
-
-## 验收清单（Acceptance checklist）
-
-- [x] 核心路径的长期行为已被明确描述。
-- [x] 关键边界/错误场景已被覆盖。
-- [x] 涉及的接口/契约已写清楚。
-- [x] 相关验收条件已经可以用于实现与 review 对齐。
-
-## 非功能性验收 / 质量门槛（Quality Gates）
-
-### Testing
-
-- Unit tests：metadata 默认/legacy shape、builder flow/transport、inbound hash 与订阅合同。
-- Integration tests：HTTP create/PATCH/capability、官方 Mihomo 配置解析。
-- E2E tests：真实 Xray Reality + Mihomo 顺序/并发/断链重连与 TCP accept 计数。
-
-### UI / Storybook
-
-- 新建默认、历史回退、capability 缺失、双向切换与 API error 状态。
-- 受控 Storybook/Playwright 检查 desktop/mobile 与 light/dark；不操作用户 Chrome。
-
-### Quality checks
-
-- `cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`。
-- Web lint、typecheck、Vitest、Storybook、Playwright 与 style budget。
 
 ## Visual Evidence
 
@@ -169,16 +166,15 @@ margin_policy: trim_only
 evidence_surface: page
 sensitive_exclusion: N/A
 submission_gate: approved
-evidence_note: The creation form uses one compact label rail and keeps explanatory text behind
-help icons. XHTTP/XMUX is selected by default and Create endpoint remains visible.
+evidence_note: The creation form places the XMUX strategy and sliders within the advanced panel.
+XHTTP/XMUX is selected by default and Create endpoint remains visible.
 
-PR: include
 ![Create VLESS endpoint with XHTTP](./assets/endpoint-create-xhttp.png)
 
 source_type: storybook_canvas
 target_program: mock-only
 story_id_or_title: Pages/EndpointDetailsPage/VlessXhttpTransport
-state: edit an existing VLESS endpoint from Vision TCP to XHTTP/XMUX
+state: edit an existing VLESS endpoint with XHTTP/XMUX settings
 requested_viewport: 1280x900
 viewport_strategy: storybook-viewport
 capture_scope: browser-viewport
@@ -186,17 +182,15 @@ margin_policy: trim_only
 evidence_surface: page
 sensitive_exclusion: N/A
 submission_gate: approved
-evidence_note: The editing form uses one shared label rail: port, transport mode, and canary
-upstream controls begin on the same desktop column. Changing Vision TCP replaces the ordinary
-transport help icon with one warning tooltip beside the label before Save changes.
+evidence_note: The expanded panel separates XMUX settings from the canary fields that follow.
+Slider controls and editable values remain inside the panel.
 
-PR: include
 ![Edit VLESS endpoint with XHTTP](./assets/endpoint-edit-xhttp.png)
 
 source_type: storybook_canvas
 target_program: mock-only
 story_id_or_title: Components/EndpointVlessTransportSettings/DefaultXhttp
-state: default XHTTP/XMUX
+state: XHTTP/XMUX with per-connection concurrency and range slider
 requested_viewport: 1280x900
 viewport_strategy: storybook-viewport
 capture_scope: element
@@ -204,8 +198,8 @@ margin_policy: require_margin
 evidence_surface: component
 sensitive_exclusion: N/A
 submission_gate: approved
-evidence_note: The flattened transport advanced setting shares the form label rail and keeps its
-segmented control on the same row without a nested card.
+evidence_note: The advanced transport panel has a clear boundary and segmented strategy selection.
+Sliders are paired with editable XMUX values.
 
 ![VLESS XHTTP desktop](./assets/vless-xhttp-desktop.png)
 
@@ -220,19 +214,10 @@ margin_policy: require_margin
 evidence_surface: component
 sensitive_exclusion: N/A
 submission_gate: approved
-evidence_note: The mobile control keeps both options readable without horizontal overflow. The
-transport-impact explanation replaces the ordinary help icon in the same label position.
+evidence_note: The mobile panel keeps choices, sliders, and values readable without overflow.
+The transport-impact indicator remains beside the label.
 
 ![VLESS XHTTP mobile](./assets/vless-xhttp-mobile.png)
-
-## Related PRs
-
-- None
-
-## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
-
-- 风险：切换 transport 会短暂移除并重建 inbound，活跃连接会中断。
-- 假设：YAML 客户端最低基线为 Mihomo v1.19.29，managed Xray 最低基线为 v26.3.27。
 
 ## 参考（References）
 

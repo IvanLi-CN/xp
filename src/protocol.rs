@@ -94,6 +94,95 @@ impl MihomoSmuxConfig {
     }
 }
 
+/// Client-side XHTTP connection reuse policy. Range values use Mihomo's
+/// inclusive `min-max` syntax; `0` disables the corresponding limit.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MihomoXmuxConfig {
+    pub max_connections: String,
+    pub max_concurrency: String,
+    pub c_max_reuse_times: String,
+    pub h_max_reusable_secs: String,
+    pub h_keep_alive_period: i32,
+}
+
+impl Default for MihomoXmuxConfig {
+    fn default() -> Self {
+        Self {
+            max_connections: "1".into(),
+            max_concurrency: "0".into(),
+            c_max_reuse_times: "0".into(),
+            h_max_reusable_secs: "0".into(),
+            h_keep_alive_period: -1,
+        }
+    }
+}
+
+impl MihomoXmuxConfig {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        fn range(value: &str) -> Option<(u32, u32)> {
+            let mut parts = value.split('-');
+            let parse = |part: &str| {
+                (!part.is_empty()
+                    && (part == "0" || !part.starts_with('0'))
+                    && part.bytes().all(|c| c.is_ascii_digit()))
+                .then(|| part.parse::<i32>().ok())
+                .flatten()
+                .map(|n| n as u32)
+            };
+            let first = parse(parts.next()?)?;
+            let last = match parts.next() {
+                Some(last) => parse(last)?,
+                None => first,
+            };
+            (parts.next().is_none() && first <= last).then_some((first, last))
+        }
+
+        let connections = range(&self.max_connections).ok_or("invalid max_connections")?;
+        let concurrency = range(&self.max_concurrency).ok_or("invalid max_concurrency")?;
+        if (connections.0 > 0) == (concurrency.0 > 0)
+            || (connections.0 == 0 && self.max_connections != "0")
+            || (concurrency.0 == 0 && self.max_concurrency != "0")
+        {
+            return Err("exactly one XMUX connection strategy must be enabled");
+        }
+        range(&self.c_max_reuse_times).ok_or("invalid c_max_reuse_times")?;
+        range(&self.h_max_reusable_secs).ok_or("invalid h_max_reusable_secs")?;
+        if self.h_keep_alive_period < -1 {
+            return Err("h_keep_alive_period must be -1 or greater");
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod xmux_tests {
+    use super::MihomoXmuxConfig;
+
+    #[test]
+    fn validates_mutually_exclusive_strategies_and_ranges() {
+        let mut config = MihomoXmuxConfig::default();
+        assert!(config.validate().is_ok());
+        config.max_connections = "0".into();
+        config.max_concurrency = "16-32".into();
+        config.c_max_reuse_times = "20-40".into();
+        config.h_max_reusable_secs = "120-240".into();
+        assert!(config.validate().is_ok());
+        config.c_max_reuse_times = "0-2".into();
+        config.h_max_reusable_secs = "0-60".into();
+        assert!(config.validate().is_ok());
+        for invalid in ["", "-1", "32-16", "0-2", "1-2-3", "2147483648"] {
+            config.max_concurrency = invalid.into();
+            assert!(config.validate().is_err(), "accepted {invalid}");
+        }
+        config.max_concurrency = "1".into();
+        config.max_connections = "1".into();
+        assert!(config.validate().is_err());
+        config.max_connections = "0".into();
+        config.h_keep_alive_period = -2;
+        assert!(config.validate().is_err());
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RealityServerNamesSource {
@@ -120,6 +209,8 @@ pub struct VlessRealityVisionTcpEndpointMeta {
     pub accepted_authorities: Vec<String>,
     #[serde(default)]
     pub mihomo_smux: MihomoSmuxConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mihomo_xmux: Option<MihomoXmuxConfig>,
     #[serde(default, skip_serializing_if = "VlessRealityTransport::is_vision_tcp")]
     pub transport: VlessRealityTransport,
     #[serde(default)]
