@@ -2,6 +2,81 @@ use super::*;
 use crate::node_history::RepositoryHistoryDeletionMarker;
 
 #[tokio::test]
+async fn failed_raft_persistence_never_activates_prepared_history_deletion() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = fixture::app_state(directory.path());
+    let user = state
+        .store
+        .lock()
+        .await
+        .create_user("raft write failure".to_owned(), None)
+        .unwrap();
+    state
+        .node_history
+        .prepare_user_deletion(&user.user_id, &["peer".to_owned()])
+        .await
+        .unwrap();
+    let connection = rusqlite::Connection::open(directory.path().join("history.sqlite3")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_raft_state BEFORE INSERT ON history_snapshots
+         WHEN NEW.key = 'persistent_state' BEGIN
+         SELECT RAISE(ABORT, 'injected Raft save failure'); END;",
+        )
+        .unwrap();
+    for _ in 0..2 {
+        assert_eq!(
+            state
+                .node_history
+                .recover_prepared_user_deletions(
+                    &state.store,
+                    state.raft.as_ref(),
+                    &state.cluster.node_id
+                )
+                .await
+                .unwrap(),
+            0
+        );
+    }
+    assert!(
+        state
+            .node_history
+            .repository_deletion_markers("peer")
+            .await
+            .unwrap()
+            .is_empty(),
+        "an uncommitted in-memory deletion must never propagate"
+    );
+    drop(state);
+    connection
+        .execute_batch("DROP TRIGGER reject_raft_state")
+        .unwrap();
+    let state = fixture::app_state(directory.path());
+    assert!(state.store.lock().await.get_user(&user.user_id).is_some());
+    assert_eq!(
+        state
+            .node_history
+            .recover_prepared_user_deletions(
+                &state.store,
+                state.raft.as_ref(),
+                &state.cluster.node_id
+            )
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        state
+            .node_history
+            .repository_deletion_markers("peer")
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn admin_delete_recovers_all_destinations_after_activation_failure() {
     let directory = tempfile::tempdir().unwrap();
     let state = fixture::app_state(directory.path());

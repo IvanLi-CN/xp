@@ -98,8 +98,8 @@
   markers together, and resumes from durable intent and real ACK after restart. Partial batches do
   not authorize orphan-map cleanup; failed capture rolls back staged source state.
   User deletion persists its full cleanup fanout as an inactive prepared operation before Raft
-  deletion; a five-second worker resumes it and activates all destinations atomically after the
-  committed deletion. Remove-node history cleanup atomically records all destinations before the
+  deletion; a five-second worker resumes it and activates all destinations atomically only after a
+  successful Raft response. Remove-node cleanup records every destination before the
   membership operation completes.
   Before downgrading to a build without prepared-deletion recovery, the node must first drain its
   `prepared_user_deletions` state.

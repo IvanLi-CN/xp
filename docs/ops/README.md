@@ -926,7 +926,8 @@ Notes:
   User deletion first persists a prepared operation with every known cleanup destination before
   submitting the Raft deletion. The prepared operation does not remove history; a five-second
   recovery worker retries the Raft operation when needed and atomically activates all destination
-  cleanups after a committed deletion. A failed activation remains prepared for retry after restart.
+  cleanups only after a successful committed Raft response. A failed activation remains prepared
+  for retry after restart; an in-memory absence after a failed save never activates cleanup.
   An error after preparation does not cancel the requested deletion; it can complete when Raft and
   storage become available again.
   Pending preparations remain in the `node_history` snapshot in `history.sqlite3`; inspect XP logs

@@ -188,27 +188,27 @@ impl NodeHistoryHandle {
             {
                 continue;
             }
-            let present = store.lock().await.get_user(user).is_some();
-            if present {
-                let response = tokio::time::timeout(
-                    Duration::from_secs(3),
-                    raft.client_write(crate::state::DesiredStateCommand::DeleteUser {
-                        user_id: user.clone(),
-                    }),
-                )
-                .await;
-                if !matches!(
-                    response,
-                    Ok(Ok(crate::raft::types::ClientResponse::Ok {
-                        result: crate::state::DesiredStateApplyResult::UserDeleted { .. }
-                    }))
-                ) {
-                    warn!(
-                        user_id = %user,
-                        "prepared user deletion is waiting for Raft; retry retained"
-                    );
-                    continue;
-                }
+            // A failed state-machine save can leave an uncommitted in-memory absence. Only a
+            // successful Raft response, including an idempotent already-absent result, proves
+            // that activation is safe.
+            let response = tokio::time::timeout(
+                Duration::from_secs(3),
+                raft.client_write(crate::state::DesiredStateCommand::DeleteUser {
+                    user_id: user.clone(),
+                }),
+            )
+            .await;
+            if !matches!(
+                response,
+                Ok(Ok(crate::raft::types::ClientResponse::Ok {
+                    result: crate::state::DesiredStateApplyResult::UserDeleted { .. }
+                }))
+            ) {
+                warn!(
+                    user_id = %user,
+                    "prepared user deletion is waiting for Raft; retry retained"
+                );
+                continue;
             }
             let store = store.lock().await;
             let destinations = store

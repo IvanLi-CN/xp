@@ -17,7 +17,8 @@ before submitting the Raft deletion. Preparation alone neither removes history n
 repository tombstone. After Raft confirms the deletion, a single guarded history transaction
 activates local deletion and every recorded destination. A bounded recovery worker retries an
 interrupted Raft write and activation using the prepared record. The worker serializes with the
-request path and keeps preparation when Raft or local storage is unavailable.
+request path and keeps preparation when Raft or local storage is unavailable. Activation requires
+a successful committed Raft response; an in-memory absence after a failed save is not proof.
 
 Node membership removal already has a Raft-backed operation that is retried until its cleanup
 finishes. Its local deletion and complete destination set are therefore committed in one guarded
