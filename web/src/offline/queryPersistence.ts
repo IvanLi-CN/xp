@@ -247,7 +247,14 @@ export async function readPersistedQuerySnapshot<T>(
 				dataUpdatedAt: snapshot.dataUpdatedAt ?? null,
 			};
 		}
-		if (snapshot) await offlineSnapshotStorage.removeItem(snapshotKey);
+		if (snapshot) {
+			await enqueuePersistence(async () => {
+				if (epoch === persistenceEpoch) {
+					await offlineSnapshotStorage.removeItem(snapshotKey);
+				}
+			});
+			if (epoch !== persistenceEpoch) return empty;
+		}
 	} catch {
 		// Fall through to the shared persisted query cache.
 	}

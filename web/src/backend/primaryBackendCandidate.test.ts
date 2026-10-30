@@ -1,14 +1,25 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fixtureCatalog } from "@/fixture-policy/catalog";
 import {
 	clearPrimaryBackendDirectory,
+	hydratePrimaryBackendProfile,
 	installPrimaryBackendTransport,
 	resetPrimaryBackendTransportForTests,
 	verifyBackendCandidate,
 } from "./primaryBackend";
 
 describe("backend candidate verification", () => {
+	beforeEach(() => {
+		window.localStorage.clear();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+	});
 	afterEach(() => {
 		resetPrimaryBackendTransportForTests();
 		vi.restoreAllMocks();

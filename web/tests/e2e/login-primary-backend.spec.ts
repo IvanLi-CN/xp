@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 import { apiCapabilitiesFixture } from "./apiCapabilities";
+import { statusEventsFixture } from "./statusEvents";
 
 const clusterId = fixtureCatalog.cluster.fixture84();
 const recoveryOrigin = fixtureCatalog.url.secondaryApi();
@@ -39,7 +40,11 @@ function nodes() {
 async function installLoginMocks(
 	page: import("@playwright/test").Page,
 	adminStatus: number,
-	options: { restoreRemote?: boolean; remoteUnreachable?: boolean } = {},
+	options: {
+		restoreRemote?: boolean;
+		remoteUnreachable?: boolean;
+		authenticated?: boolean;
+	} = {},
 ) {
 	const pageOrigin = new URL(
 		process.env.E2E_BASE_URL ?? "http://127.0.0.1:60080",
@@ -67,8 +72,10 @@ async function installLoginMocks(
 		updatedAt: fixtureCatalog.number.value100(),
 	};
 	await page.addInitScript(
-		({ activeClusterId, profile, restoreRemote }) => {
-			localStorage.removeItem("xp_admin_token");
+		({ activeClusterId, profile, restoreRemote, authenticated }) => {
+			if (authenticated)
+				localStorage.setItem("xp_admin_token", "valid-admin-token");
+			else localStorage.removeItem("xp_admin_token");
 			if (!restoreRemote) profile.primaryOrigin = location.origin;
 			profile.candidates[0].origin = location.origin;
 			localStorage.setItem(
@@ -86,6 +93,7 @@ async function installLoginMocks(
 				primaryOrigin: options.restoreRemote ? recoveryOrigin : pageOrigin,
 			},
 			restoreRemote: options.restoreRemote ?? false,
+			authenticated: options.authenticated ?? false,
 		},
 	);
 
@@ -180,7 +188,7 @@ async function installLoginMocks(
 					"content-type": "text/event-stream",
 					"cache-control": "no-cache",
 				},
-				body: "event: hello\\ndata: {}\\n\\n",
+				body: statusEventsFixture(),
 			});
 			return;
 		}
@@ -192,6 +200,47 @@ async function installLoginMocks(
 		});
 	});
 }
+
+test("clears a restored session before sending credentials to a different cluster", async ({
+	page,
+}) => {
+	await installLoginMocks(page, 200, {
+		restoreRemote: true,
+		authenticated: true,
+	});
+	const credentialedRequests: string[] = [];
+	page.on("request", (request) => {
+		if (
+			new URL(request.url()).origin === recoveryOrigin &&
+			request.headers().authorization
+		) {
+			credentialedRequests.push(request.url());
+		}
+	});
+	await page.route("**/api/cluster/info", async (route) => {
+		if (new URL(route.request().url()).origin !== recoveryOrigin)
+			return route.fallback();
+		await route.fulfill({
+			status: 200,
+			headers: corsHeaders(new URL(page.url()).origin),
+			contentType: "application/json",
+			body: JSON.stringify({
+				cluster_id: fixtureCatalog.cluster.fixture95(),
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				role: "leader",
+				leader_api_base_url: fixtureCatalog.url.secondaryApi(),
+				term: 1,
+				xp_version: "v3.22.5",
+			}),
+		});
+	});
+	await page.goto("/");
+	await expect(page).toHaveURL(/\/login/);
+	await expect
+		.poll(() => page.evaluate(() => localStorage.getItem("xp_admin_token")))
+		.toBeNull();
+	expect(credentialedRequests).toEqual([]);
+});
 
 test("recovers to the page origin when the restored primary is unreachable", async ({
 	page,
@@ -325,6 +374,7 @@ test("uses selected recovery origin and persists after inventory hydration", asy
 			(request) => new URL(request.url).origin === recoveryOrigin,
 		),
 	).toBe(true);
+	await expect(page.getByText("Term: 73")).toBeVisible();
 });
 
 test("does not send a token when the selected node changes clusters before login", async ({

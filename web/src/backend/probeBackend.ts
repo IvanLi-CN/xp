@@ -180,6 +180,15 @@ export function createBackendProber(context: {
 		if (sessionEpoch !== context.getSessionEpoch()) {
 			throw new Error("Backend session changed during verification.");
 		}
+		if (
+			context.getState().clusterId !== args.clusterId ||
+			(origin !== context.getPageOrigin() &&
+				!context
+					.getState()
+					.candidates.some((candidate) => candidate.origin === origin))
+		) {
+			throw new Error("Backend candidate is no longer available.");
+		}
 		assertActiveStaticCandidate(origin);
 		const nodes = await directJson(
 			origin,

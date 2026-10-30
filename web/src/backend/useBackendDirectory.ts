@@ -112,13 +112,19 @@ export function useBackendDirectory(args: {
 	const nodeVersionsUpdatedAt = nodeVersions.dataUpdatedAt;
 	useEffect(() => {
 		if (
+			args.staticConsole &&
 			args.adminToken &&
 			args.clusterId &&
 			args.clusterId !== args.primaryClusterId
 		) {
 			hydratePrimaryBackendProfile(args.clusterId);
 		}
-	}, [args.adminToken, args.clusterId, args.primaryClusterId]);
+	}, [
+		args.adminToken,
+		args.clusterId,
+		args.primaryClusterId,
+		args.staticConsole,
+	]);
 	useEffect(() => {
 		const clusterId = args.clusterId;
 		if (
