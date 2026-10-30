@@ -66,6 +66,9 @@ fn generation_key(node: bool, id: &str) -> String {
 }
 
 impl NodeHistoryHandle {
+    pub(crate) async fn lock_user_deletion(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.user_deletion_lock.lock().await
+    }
     // Serialize mutation, persistence and the durable version. A failed write restores the
     // previous in-memory intent before releasing the lock or returning to an RPC caller.
     async fn change_deletion(
@@ -104,6 +107,154 @@ impl NodeHistoryHandle {
         self.durable_deletion_version
             .store(state.deletion_version, std::sync::atomic::Ordering::Release);
         Ok(())
+    }
+
+    /// Persist the intended fanout before the Raft deletion; preparation alone never deletes data.
+    pub(crate) async fn prepare_user_deletion(
+        &self,
+        user_id: &str,
+        destinations: &[String],
+    ) -> anyhow::Result<()> {
+        self.change_deletion(|state, _| {
+            let was_present = state.prepared_user_deletions.contains_key(user_id);
+            let pending = state
+                .prepared_user_deletions
+                .entry(user_id.to_owned())
+                .or_default();
+            let before = pending.len();
+            pending.extend(destinations.iter().cloned());
+            !was_present || before != pending.len()
+        })
+        .await
+    }
+
+    /// Activate one prepared operation only after committed Raft state proves the user absent.
+    pub(crate) async fn activate_prepared_user_deletion(
+        &self,
+        user_id: &str,
+        current_destinations: &[String],
+    ) -> anyhow::Result<()> {
+        self.change_deletion(|state, generation| {
+            let Some(mut destinations) = state.prepared_user_deletions.remove(user_id) else {
+                return false;
+            };
+            destinations.extend(current_destinations.iter().cloned());
+            state.deleted_users.insert(user_id.to_owned());
+            state
+                .deletion_generations
+                .insert(generation_key(false, user_id), generation);
+            for record in state.nodes.values_mut() {
+                record.user_traffic.remove(user_id);
+                record.user_traffic_users.remove(user_id);
+            }
+            for destination in destinations {
+                state
+                    .pending_user_traffic_cleanup
+                    .entry(destination)
+                    .or_default()
+                    .insert(user_id.to_owned());
+            }
+            true
+        })
+        .await
+    }
+
+    /// Resume prepared deletions even when the original request stopped before its Raft write.
+    pub(crate) async fn recover_prepared_user_deletions(
+        &self,
+        store: &Arc<Mutex<JsonSnapshotStore>>,
+        raft: &dyn crate::raft::app::RaftFacade,
+        local_node_id: &str,
+    ) -> anyhow::Result<usize> {
+        const MAX_RECOVERY_BATCH: usize = 16;
+        let users = {
+            let state = self.inner.read().await;
+            state
+                .prepared_user_deletions
+                .keys()
+                .take(MAX_RECOVERY_BATCH)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let mut completed = 0;
+        for user in &users {
+            let _guard = self.lock_user_deletion().await;
+            if !self
+                .inner
+                .read()
+                .await
+                .prepared_user_deletions
+                .contains_key(user)
+            {
+                continue;
+            }
+            let present = store.lock().await.get_user(user).is_some();
+            if present {
+                let response = tokio::time::timeout(
+                    Duration::from_secs(3),
+                    raft.client_write(crate::state::DesiredStateCommand::DeleteUser {
+                        user_id: user.clone(),
+                    }),
+                )
+                .await;
+                if !matches!(
+                    response,
+                    Ok(Ok(crate::raft::types::ClientResponse::Ok {
+                        result: crate::state::DesiredStateApplyResult::UserDeleted { .. }
+                    }))
+                ) {
+                    warn!(
+                        user_id = %user,
+                        "prepared user deletion is waiting for Raft; retry retained"
+                    );
+                    continue;
+                }
+            }
+            let store = store.lock().await;
+            let destinations = store
+                .list_nodes()
+                .into_iter()
+                .filter(|node| node.node_id != local_node_id)
+                .map(|node| node.node_id)
+                .collect::<Vec<_>>();
+            self.activate_prepared_user_deletion(user, &destinations)
+                .await?;
+            completed += 1;
+        }
+        Ok(completed)
+    }
+
+    /// Node membership removal is already Raft-durable; install the whole fanout atomically.
+    pub(crate) async fn clear_node_with_destinations(
+        &self,
+        node_id: &str,
+        destinations: &[String],
+    ) -> anyhow::Result<()> {
+        self.change_deletion(|state, generation| {
+            state.deleted_nodes.insert(node_id.to_owned());
+            state
+                .deletion_generations
+                .insert(generation_key(true, node_id), generation);
+            state.nodes.remove(node_id);
+            state.pending_user_traffic_cleanup.remove(node_id);
+            state.pending_node_history_cleanup.remove(node_id);
+            for targets in state.pending_node_history_cleanup.values_mut() {
+                targets.remove(node_id);
+            }
+            state
+                .pending_node_history_cleanup
+                .retain(|_, targets| !targets.is_empty());
+            for destination in destinations {
+                state
+                    .pending_node_history_cleanup
+                    .entry(destination.clone())
+                    .or_default()
+                    .insert(node_id.to_owned());
+            }
+            state.prune_generations();
+            true
+        })
+        .await
     }
 
     pub async fn clear_node(&self, node_id: &str) -> anyhow::Result<()> {

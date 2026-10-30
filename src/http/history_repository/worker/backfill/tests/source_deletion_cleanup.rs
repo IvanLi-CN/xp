@@ -2,6 +2,224 @@ use super::*;
 use crate::node_history::RepositoryHistoryDeletionMarker;
 
 #[tokio::test]
+async fn admin_delete_recovers_all_destinations_after_activation_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = fixture::app_state(directory.path());
+    let (user, destinations) = {
+        let mut store = state.store.lock().await;
+        let user = store.create_user("api recovery".to_owned(), None).unwrap();
+        let template = store.get_node(&state.cluster.node_id).unwrap();
+        let mut destinations = Vec::new();
+        for _ in 0..2 {
+            let mut node = template.clone();
+            node.node_id = crate::id::new_ulid_string();
+            destinations.push(node.node_id.clone());
+            store.upsert_node(node).unwrap();
+        }
+        (user, destinations)
+    };
+    let connection = rusqlite::Connection::open(directory.path().join("history.sqlite3")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_activated_fanout BEFORE INSERT ON history_snapshots
+         WHEN NEW.key = 'node_history'
+          AND CAST(NEW.payload AS TEXT) NOT LIKE '%prepared_user_deletions%'
+         BEGIN SELECT RAISE(ABORT, 'injected activation failure'); END;",
+        )
+        .unwrap();
+    let error = crate::http::admin_delete_user(
+        axum::Extension(state.clone()),
+        axum::extract::Path(user.user_id.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
+    assert!(state.store.lock().await.get_user(&user.user_id).is_none());
+    drop(state);
+    connection
+        .execute_batch("DROP TRIGGER reject_activated_fanout")
+        .unwrap();
+    let state = fixture::app_state(directory.path());
+    assert_eq!(
+        state
+            .node_history
+            .recover_prepared_user_deletions(
+                &state.store,
+                state.raft.as_ref(),
+                &state.cluster.node_id
+            )
+            .await
+            .unwrap(),
+        1
+    );
+    for destination in destinations {
+        assert_eq!(
+            state
+                .node_history
+                .repository_deletion_markers(&destination)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
+async fn prepared_user_deletion_recovers_raft_and_all_destinations_after_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = fixture::app_state(directory.path());
+    let user = state
+        .store
+        .lock()
+        .await
+        .create_user("recover".to_owned(), None)
+        .unwrap();
+    let destinations = vec!["peer-b".to_owned(), "peer-c".to_owned()];
+    state
+        .node_history
+        .prepare_user_deletion(&user.user_id, &destinations)
+        .await
+        .unwrap();
+    assert!(
+        state
+            .node_history
+            .repository_deletion_markers("peer-c")
+            .await
+            .unwrap()
+            .is_empty(),
+        "preparation must not delete history before Raft commits"
+    );
+    drop(state);
+    let state = fixture::app_state(directory.path());
+    let (first, second) = tokio::join!(
+        state.node_history.recover_prepared_user_deletions(
+            &state.store,
+            state.raft.as_ref(),
+            &state.cluster.node_id
+        ),
+        state.node_history.recover_prepared_user_deletions(
+            &state.store,
+            state.raft.as_ref(),
+            &state.cluster.node_id
+        ),
+    );
+    assert_eq!(
+        first.unwrap() + second.unwrap(),
+        1,
+        "concurrent recovery must activate once"
+    );
+    assert!(state.store.lock().await.get_user(&user.user_id).is_none());
+    let ready = vec![state.cluster.node_id.clone()];
+    crate::http::history_repository::worker::publish_local_history_segment(
+        &state,
+        &ready,
+        None,
+        &[],
+        100,
+        true,
+    )
+    .await
+    .unwrap();
+    assert!(
+        HistoryStorage::open(directory.path())
+            .source_delivery_journal()
+            .unwrap()
+            .is_empty(),
+        "the local receiver must really ACK the wire"
+    );
+    drop(state);
+    let state = fixture::app_state(directory.path());
+    for destination in &destinations {
+        assert_eq!(
+            state
+                .node_history
+                .repository_deletion_markers(destination)
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "every destination remains retryable after ACK and restart"
+        );
+    }
+}
+
+#[tokio::test]
+async fn failed_fanout_activation_is_recovered_after_raft_commit_and_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = fixture::app_state(directory.path());
+    let user = state
+        .store
+        .lock()
+        .await
+        .create_user("recover failed write".to_owned(), None)
+        .unwrap();
+    let destinations = vec!["peer-b".to_owned(), "peer-c".to_owned()];
+    state
+        .node_history
+        .prepare_user_deletion(&user.user_id, &destinations)
+        .await
+        .unwrap();
+    let connection = rusqlite::Connection::open(directory.path().join("history.sqlite3")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_fanout BEFORE INSERT ON history_snapshots
+             WHEN NEW.key = 'node_history' BEGIN
+             SELECT RAISE(ABORT, 'injected fanout failure'); END;",
+        )
+        .unwrap();
+    assert!(
+        state
+            .node_history
+            .recover_prepared_user_deletions(
+                &state.store,
+                state.raft.as_ref(),
+                &state.cluster.node_id
+            )
+            .await
+            .is_err()
+    );
+    assert!(state.store.lock().await.get_user(&user.user_id).is_none());
+    assert!(
+        state
+            .node_history
+            .repository_deletion_markers("peer-c")
+            .await
+            .unwrap()
+            .is_empty(),
+        "a failed activation must not expose a partial fanout"
+    );
+    drop(state);
+    connection
+        .execute_batch("DROP TRIGGER reject_fanout")
+        .unwrap();
+    let state = fixture::app_state(directory.path());
+    assert_eq!(
+        state
+            .node_history
+            .recover_prepared_user_deletions(
+                &state.store,
+                state.raft.as_ref(),
+                &state.cluster.node_id
+            )
+            .await
+            .unwrap(),
+        1
+    );
+    for destination in &destinations {
+        assert_eq!(
+            state
+                .node_history
+                .repository_deletion_markers(destination)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
 async fn large_deletion_backlog_is_captured_in_bounded_pages() {
     let directory = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(directory.path());

@@ -443,6 +443,8 @@ struct PersistedNodeHistoryCache {
     deleted_nodes: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     deletion_generations: BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    prepared_user_deletions: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl PersistedNodeHistoryCache {
@@ -461,6 +463,7 @@ impl PersistedNodeHistoryCache {
             deleted_users: BTreeSet::new(),
             deleted_nodes: BTreeSet::new(),
             deletion_generations: BTreeMap::new(),
+            prepared_user_deletions: BTreeMap::new(),
         }
     }
 }
@@ -470,6 +473,7 @@ pub struct NodeHistoryHandle {
     inner: Arc<RwLock<PersistedNodeHistoryCache>>,
     history_storage: HistoryStorage,
     persistence_lock: Arc<Mutex<()>>,
+    user_deletion_lock: Arc<Mutex<()>>,
     durable_deletion_version: Arc<std::sync::atomic::AtomicU64>,
     deletion_proof_healthy: bool,
 }
@@ -491,6 +495,7 @@ impl NodeHistoryHandle {
             inner: Arc::new(RwLock::new(cache)),
             history_storage,
             persistence_lock: Arc::new(Mutex::new(())),
+            user_deletion_lock: Arc::new(Mutex::new(())),
             durable_deletion_version: Arc::new(std::sync::atomic::AtomicU64::new(durable_version)),
             deletion_proof_healthy,
         }
@@ -1877,6 +1882,28 @@ pub fn spawn_node_history_remote_sync_worker(
                 endpoints,
             )
             .await;
+        }
+    })
+}
+
+/// Recover deletions interrupted between Raft commit and local history activation.
+pub fn spawn_node_history_deletion_recovery_worker(
+    local_node_id: String,
+    store: Arc<Mutex<JsonSnapshotStore>>,
+    history: NodeHistoryHandle,
+    raft: Arc<dyn crate::raft::app::RaftFacade>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(5));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            if let Err(error) = history
+                .recover_prepared_user_deletions(&store, raft.as_ref(), &local_node_id)
+                .await
+            {
+                warn!(%error, "recover prepared user history deletion; retry retained");
+            }
         }
     })
 }

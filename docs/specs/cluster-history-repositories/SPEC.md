@@ -390,6 +390,10 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
   Source 删除意图按完整对象分批采集，每批最多 128 条标记并受字节预算约束；节点的五种 schema
   必须一起采集，必要时拆成多个有序签名段。真实 ACK 与保留的持久意图驱动下一批，重启后继续重试。
   不完整的采集页不得作为完整删除快照清理无主映射；采集或持久化失败必须回滚内存映射及水位。
+  用户删除在 Raft 提交之前必须持久准备删除对象和目标节点集合，但准备状态不得触发历史删除或投递。
+  准备后发生错误或重启时继续重试 Raft 删除；确认用户已从已提交状态移除后，原子激活本地删除及所有目标的清理任务。
+  节点移除的本地删除与所有目标清理任务也必须原子登记。真实仓库 ACK 不得清除尚未持久登记的目标。
+  降级到不支持准备状态的版本前，该节点的 `prepared_user_deletions` 必须为空。
 - 稳定删除快照分页按完整 JSON 数组大小限制页面，包含括号与分隔符；合法记录跨页后仍能继续恢复。
 
 ## Interfaces and Contracts
@@ -523,6 +527,7 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 
 - [ADR 0002](../../adr/0002-history-synchronization-recovery-order.md)
 - [ADR 0019](../../adr/0019-history-handoff-completion-and-recovery-preflight.md)
+- [ADR 0030](../../adr/0030-recoverable-history-deletion-fanout.md)
 
 ## Recovery cluster preflight
 

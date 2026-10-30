@@ -1,6 +1,61 @@
 use super::*;
 
 #[tokio::test]
+async fn node_deletion_fanout_is_atomic_and_survives_ack_and_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("node_history_cache.json");
+    let history = NodeHistoryHandle::new(path.clone());
+    let destinations = vec!["peer-b".to_owned(), "peer-c".to_owned()];
+    let connection = reject_deletion_writes(directory.path());
+    assert!(
+        history
+            .clear_node_with_destinations("target", &destinations)
+            .await
+            .is_err()
+    );
+    assert!(
+        history
+            .repository_deletion_markers("peer-b")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        history
+            .repository_deletion_markers("peer-c")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    connection
+        .execute_batch("DROP TRIGGER reject_deletion_write")
+        .unwrap();
+    history
+        .clear_node_with_destinations("target", &destinations)
+        .await
+        .unwrap();
+    let local = history.repository_deletion_markers("local").await.unwrap();
+    for marker in &local {
+        history
+            .complete_repository_deletion_marker("local", marker)
+            .await
+            .unwrap();
+    }
+    drop(history);
+    let restored = NodeHistoryHandle::new(path);
+    for destination in &destinations {
+        assert_eq!(
+            restored
+                .repository_deletion_markers(destination)
+                .await
+                .unwrap()
+                .len(),
+            5
+        );
+    }
+}
+
+#[tokio::test]
 async fn old_repository_ack_cannot_clear_a_reentered_deletion_intent() {
     for node in [false, true] {
         let directory = tempfile::tempdir().unwrap();

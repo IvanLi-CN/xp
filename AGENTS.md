@@ -97,6 +97,12 @@
   Source deletion capture uses bounded complete-intent batches, retains every node's five schema
   markers together, and resumes from durable intent and real ACK after restart. Partial batches do
   not authorize orphan-map cleanup; failed capture rolls back staged source state.
+  User deletion persists its full cleanup fanout as an inactive prepared operation before Raft
+  deletion; a five-second worker resumes it and activates all destinations atomically after the
+  committed deletion. Remove-node history cleanup atomically records all destinations before the
+  membership operation completes.
+  Before downgrading to a build without prepared-deletion recovery, the node must first drain its
+  `prepared_user_deletions` state.
   Tombstone expiry is committed atomically with the corresponding receiver state and history writes.
   Repository runtime status reads exact record and segment counts from a durable singleton updated
   by insert/delete triggers in each history transaction; existing databases backfill it once at

@@ -923,6 +923,22 @@ Notes:
   source-journal row is deleted only after a real ACK removes that exact segment.
   Repeated deletions receive distinct durable generations. Old source or remote cleanup ACKs cannot
   clear a later deletion; persistence failure retains the prior intent and reports failure.
+  User deletion first persists a prepared operation with every known cleanup destination before
+  submitting the Raft deletion. The prepared operation does not remove history; a five-second
+  recovery worker retries the Raft operation when needed and atomically activates all destination
+  cleanups after a committed deletion. A failed activation remains prepared for retry after restart.
+  An error after preparation does not cancel the requested deletion; it can complete when Raft and
+  storage become available again.
+  Pending preparations remain in the `node_history` snapshot in `history.sqlite3`; inspect XP logs
+  for `prepared user deletion is waiting for Raft` or `recover prepared user history deletion`
+  when progress stops. Restore Raft quorum or storage health and let the worker retry.
+  Before downgrading to an XP version that does not support prepared deletion recovery, confirm
+  that `prepared_user_deletions` is empty on the node; older versions do not preserve that field.
+  If a node has not observed the requested user and cannot confirm a quorum-backed leader view,
+  deletion returns a retryable `user_deletion_state_unavailable` response instead of guessing that
+  the user is absent. After preparation, `user_deletion_pending` means recovery will retry.
+  A remove-node operation atomically records its local and remote history cleanup after membership
+  removal; the Raft membership operation remains incomplete until that write succeeds.
   Receipt mappings clear before acknowledged intent; interrupted completion retries safely.
   A bounded version-checked scan reclaims legacy orphan mappings without deleting journal rows.
   Source deletion capture takes bounded batches of complete deletion intents, retaining all five

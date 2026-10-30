@@ -25,6 +25,9 @@ pub(super) fn deletion_state_digest(state: &PersistedNodeHistoryCache) -> anyhow
     if !state.deletion_generations.is_empty() {
         serde_json::to_writer(&mut writer, &state.deletion_generations)?;
     }
+    if !state.prepared_user_deletions.is_empty() {
+        serde_json::to_writer(&mut writer, &state.prepared_user_deletions)?;
+    }
     Ok(writer.0.finalize().into())
 }
 
