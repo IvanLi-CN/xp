@@ -7,7 +7,7 @@ pub(super) async fn resume_local_history_backfill_page(
     ready_repository_ids: &[String],
     page_cursor: Option<String>,
     completed: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<super::InitialBackfillProgress> {
     if let Some(cursor) = page_cursor.as_deref() {
         super::HistoricalBackfillPageCursor::decode(cursor)?;
     }
@@ -28,45 +28,39 @@ pub(super) async fn resume_local_history_backfill_page(
                 ready_repository_ids,
                 &state.cluster.node_id,
             )?;
-    } else {
-        // Keep the legacy durable page replay path for upgrades that already have a page
-        // queued by the predecessor. New pages persist their wire set separately.
-        let segments = state
-            .repository_replica
-            .lock()
-            .await
-            .local_history_backfill_inflight_segments()?;
-        for segment in &segments {
-            if segment.identity != *identity {
-                anyhow::bail!("local history backfill segment identity is not current");
-            }
-            if !super::super::super::identity_is_valid_for_history_replay(state, &segment.identity)
-                .await
-                .map_err(|_| anyhow::anyhow!("check local history backfill segment identity"))?
-            {
-                anyhow::bail!("local history backfill segment identity is not pinned");
-            }
-        }
-        if !segments.is_empty() {
-            super::super::receive_local_source_page(
-                state,
-                &segments,
-                ready_repository_ids,
-                now_unix_seconds,
-            )
-            .await?;
-            state
-                .repository_replica
-                .lock()
-                .await
-                .acknowledge_local_source_segments_and_checkpoint_backfill(
-                    &segments,
-                    page_cursor,
-                    completed,
-                )?;
+        Ok(if completed {
+            super::InitialBackfillProgress::Complete
         } else {
-            anyhow::bail!("legacy local history backfill page has no source segments");
+            super::InitialBackfillProgress::InProgress
+        })
+    } else {
+        if !super::super::super::identity_is_valid_for_history_replay(state, identity)
+            .await
+            .map_err(|_| anyhow::anyhow!("check local history backfill segment identity"))?
+        {
+            anyhow::bail!("local history backfill segment identity is not pinned");
         }
+        let outcome = super::legacy_recovery::recover_legacy_original_page(
+            state,
+            identity,
+            now_unix_seconds,
+            ready_repository_ids,
+        )
+        .await?;
+        Ok(match outcome {
+            super::legacy_recovery::LegacyRecoveryOutcome::Complete if completed => {
+                super::InitialBackfillProgress::Complete
+            }
+            super::legacy_recovery::LegacyRecoveryOutcome::Complete
+            | super::legacy_recovery::LegacyRecoveryOutcome::InProgress => {
+                super::InitialBackfillProgress::InProgress
+            }
+            super::legacy_recovery::LegacyRecoveryOutcome::Unavailable => {
+                super::InitialBackfillProgress::Unavailable
+            }
+            super::legacy_recovery::LegacyRecoveryOutcome::NotLegacy => {
+                anyhow::bail!("local history backfill page disappeared during recovery")
+            }
+        })
     }
-    Ok(())
 }

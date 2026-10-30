@@ -2,7 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 mod diagnostics;
+#[cfg(test)]
+#[path = "tests/expired_tombstone_tests.rs"]
+mod expired_tombstone_tests;
+mod original_backfill;
 mod segments;
+mod stale_recovery_storage;
 mod summary;
 #[cfg(test)]
 pub(crate) use segments::segment_phase_sql;
@@ -82,12 +87,19 @@ pub(crate) struct RepositoryHistoryTombstone {
     pub(crate) source_node_id: String,
     pub(crate) source_epoch: u64,
     pub(crate) stream: String,
+    pub(crate) source_stream: Option<String>,
     pub(crate) subject_node_id: String,
     pub(crate) observer_node_id: String,
     pub(crate) schema_id: String,
     pub(crate) schema_version: u32,
     pub(crate) record_key: Vec<u8>,
     pub(crate) prefix: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RepositoryExpiredTombstone {
+    pub(crate) tombstone: RepositoryHistoryTombstone,
+    pub(crate) sequence: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +130,8 @@ pub(crate) struct RepositoryCommitOutcome {
 /// accepted rows, a deleted payload, or an orphaned segment behind.
 #[derive(Debug, Default)]
 pub(crate) struct RepositoryReplicaMutation {
+    /// Exact tombstone rows expired by the receiver before this mutation's new records.
+    pub(crate) expired_tombstones: Vec<RepositoryExpiredTombstone>,
     pub(crate) target_repository_id: String,
     /// Wall-clock time of the receiver commit. Historical segment timestamps are only a
     /// fallback for legacy callers; throughput windows must measure processing time.
@@ -301,6 +315,15 @@ impl HistoryStorage {
         mutation: RepositoryReplicaMutation,
         control_payload: &[u8],
     ) -> Result<RepositoryCommitOutcome> {
+        self.commit_repository_replica_mutation_with(mutation, control_payload, |_| Ok(()))
+    }
+
+    fn commit_repository_replica_mutation_with(
+        &self,
+        mutation: RepositoryReplicaMutation,
+        control_payload: &[u8],
+        extra: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<()>,
+    ) -> Result<RepositoryCommitOutcome> {
         #[cfg(test)]
         let fail_maintenance = self
             .fail_maintenance_after_commit
@@ -312,11 +335,17 @@ impl HistoryStorage {
             ));
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        for tombstone in &mutation.tombstones {
-            delete_repository_history_for_tombstone(&transaction, tombstone)?;
+        extra(&transaction)?;
+        for tombstone in &mutation.expired_tombstones {
+            delete_expired_tombstone(&transaction, tombstone)?;
         }
         for row in &mutation.records {
             upsert_repository_history_record(&transaction, row)?;
+        }
+        // A batch can contain a record followed by its tombstone. Apply the deletes after all
+        // upserts so an older record cannot be reinserted in the same atomic transaction.
+        for tombstone in &mutation.tombstones {
+            delete_repository_history_for_tombstone(&transaction, tombstone)?;
         }
         let canonical_bytes_by_id = mutation
             .applied_canonical_segments
@@ -413,6 +442,7 @@ impl HistoryStorage {
         Ok(affected)
     }
 
+    #[cfg(test)]
     pub(crate) fn delete_repository_history_tombstone(
         &self,
         tombstone: &RepositoryHistoryTombstone,
@@ -424,10 +454,9 @@ impl HistoryStorage {
         connection
             .execute(
                 "DELETE FROM repository_history_records
-                 WHERE source_node_id = ?1 AND source_epoch = ?2 AND stream = ?3
-                   AND subject_node_id = ?4 AND observer_node_id = ?5
-                   AND schema_id = ?6 AND schema_version = ?7 AND record_key = ?8
-                   AND is_tombstone = 1",
+                 WHERE source_node_id=?1 AND source_epoch=?2 AND stream=?3
+                   AND subject_node_id=?4 AND observer_node_id=?5 AND schema_id=?6
+                   AND schema_version=?7 AND record_key=?8 AND is_tombstone=1",
                 params![
                     tombstone.source_node_id,
                     durable_i64(tombstone.source_epoch, "source epoch")?,
@@ -625,6 +654,67 @@ impl HistoryStorage {
         transaction.commit().map_err(sqlite_error)?;
         maintain_sqlite(connection)
     }
+}
+
+fn delete_expired_tombstone(
+    connection: &Connection,
+    expired: &RepositoryExpiredTombstone,
+) -> Result<usize> {
+    // Expiration always removes the exact stored tombstone, even for a prefix deletion.
+    let tombstone = &expired.tombstone;
+    let removed = if let Some(sequence) = expired.sequence {
+        connection
+            .execute(
+                "DELETE FROM repository_history_records
+         WHERE source_node_id = ?1 AND source_epoch = ?2 AND stream = ?3
+           AND subject_node_id = ?4 AND observer_node_id = ?5
+           AND schema_id = ?6 AND schema_version = ?7 AND record_key = ?8
+           AND is_tombstone = 1 AND sequence = ?9",
+                params![
+                    tombstone.source_node_id,
+                    durable_i64(tombstone.source_epoch, "source epoch")?,
+                    tombstone.stream,
+                    tombstone.subject_node_id,
+                    tombstone.observer_node_id,
+                    tombstone.schema_id,
+                    i64::from(tombstone.schema_version),
+                    tombstone.record_key,
+                    durable_i64(sequence, "expired tombstone sequence")?
+                ],
+            )
+            .map_err(sqlite_error)?
+    } else {
+        0
+    };
+    if removed == 0 {
+        // Old checkpoints may omit the sequence. Do not guess which later row is the expired
+        // event, or silently leave it exportable after removing its ledger entry.
+        let other_sequence = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM repository_history_records
+                 WHERE source_node_id=?1 AND source_epoch=?2 AND stream=?3
+                   AND subject_node_id=?4 AND observer_node_id=?5 AND schema_id=?6
+                   AND schema_version=?7 AND record_key=?8 AND is_tombstone=1)",
+                params![
+                    tombstone.source_node_id,
+                    durable_i64(tombstone.source_epoch, "source epoch")?,
+                    tombstone.stream,
+                    tombstone.subject_node_id,
+                    tombstone.observer_node_id,
+                    tombstone.schema_id,
+                    i64::from(tombstone.schema_version),
+                    tombstone.record_key,
+                ],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(sqlite_error)?;
+        if other_sequence {
+            return Err(HistoryStorageError(
+                "expired tombstone sequence is ambiguous".into(),
+            ));
+        }
+    }
+    Ok(removed)
 }
 
 fn replace_repository_history_records_in_transaction(

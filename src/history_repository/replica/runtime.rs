@@ -22,7 +22,7 @@ use crate::{
             },
         },
         history_storage::{
-            HistoryStorageDiagnosticOperation, REPOSITORY_REPLICA_KEY,
+            HistoryStorageDiagnosticOperation, REPOSITORY_REPLICA_KEY, RepositoryExpiredTombstone,
             RepositoryHistoryCompactionCursor, RepositoryHistoryRecordRow,
             RepositoryHistorySegmentRow, RepositoryHistoryTombstone, RepositoryReplicaMutation,
         },

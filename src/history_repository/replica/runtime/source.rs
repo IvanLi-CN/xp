@@ -43,6 +43,24 @@ struct LocalSourceQueueOptions<'a> {
     defer_journal: bool,
 }
 impl LocalSourceState {
+    pub(super) fn stream_checkpoint(&self, stream: &str) -> Option<(u64, Option<[u8; 32]>)> {
+        self.streams
+            .get(stream)
+            .map(|state| (state.next_sequence, state.previous_segment_hash))
+    }
+
+    pub(super) fn has_never_emitted_tombstones(&self) -> bool {
+        self.streams
+            .get("tombstone")
+            .is_none_or(|state| state.next_sequence == 0 && state.previous_segment_hash.is_none())
+            && self.deletion_marker_keys.is_empty()
+            && !self.backpressure_gaps.contains_key("tombstone")
+    }
+
+    pub(super) fn has_tombstone_backpressure_gap(&self) -> bool {
+        self.backpressure_gaps.contains_key("tombstone")
+    }
+
     pub(super) fn epoch(&self) -> u64 {
         self.epoch
     }
@@ -82,6 +100,42 @@ struct LocalSourceGap {
     end_unix_seconds: u64,
 }
 impl RepositoryReplicaRuntime {
+    pub(super) fn validate_existing_tombstone_receiver(
+        &self,
+        identity: &RepositoryNodeIdentity,
+        epoch: u64,
+        end: u64,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let Some(receiver) = self.receiver.as_ref() else {
+            return Ok(());
+        };
+        let checkpoint = serde_json::to_value(receiver.checkpoint()?)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let streams = checkpoint["streams"]
+            .as_array()
+            .ok_or_else(|| RepositoryRuntimeError::Storage("invalid receiver checkpoint".into()))?;
+        for entry in streams {
+            if entry["key"]["source_node_id"].as_str() != Some(identity.node_id().as_str())
+                || entry["key"]["stream"].as_str() != Some("tombstone")
+            {
+                continue;
+            }
+            let progress = &entry["progress"];
+            if progress["epoch"].as_u64() != Some(epoch)
+                || progress["hash_chain_verified"].as_bool() != Some(true)
+                || progress["last_sequence"]
+                    .as_u64()
+                    .is_none_or(|sequence| sequence >= end)
+            {
+                return Err(RepositoryRuntimeError::Storage(
+                    "existing tombstone receiver is unverified or beyond the captured source tail"
+                        .into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn set_local_source_epoch(&mut self, epoch: u64, node_id: &str) {
         self.snapshot.local_source.epoch = epoch;
         self.snapshot.local_source.node_id = node_id.to_owned();

@@ -38,9 +38,11 @@ const MAX_REPAIR_REQUEST_IDS: usize = 64;
 const REPOSITORY_ED25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-ed25519-v1\0";
 const REPOSITORY_X25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-x25519-v1\0";
 pub(super) mod gaps;
+mod initial_backfill_query;
 pub(crate) mod recovery;
 pub(crate) mod recovery_preflight;
 mod worker;
+use initial_backfill_query::RepositoryInitialBackfillQuery;
 pub(crate) use worker::spawn_repository_replica_worker;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,13 +58,6 @@ pub(super) struct RepositoryHistoryQuery {
     schema_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct RepositoryInitialBackfillQuery {
-    #[serde(default)]
-    page_cursor: Option<String>,
-    #[serde(default)]
-    page_size: Option<usize>,
-}
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ReplaceRepositoryMembershipRequest {
@@ -258,10 +253,15 @@ pub(super) async fn admin_internal_initial_history_repository_backfill(
     Query(query): Query<RepositoryInitialBackfillQuery>,
 ) -> Result<Json<worker::RepositoryInitialBackfillPage>, ApiError> {
     ensure_cluster_sender(&state, internal).await?;
-    worker::initial_backfill_page(&state, query.page_cursor.as_deref(), query.page_size)
-        .await
-        .map(Json)
-        .map_err(|error| ApiError::invalid_request(error.to_string()))
+    worker::initial_backfill_page_stable(
+        &state,
+        query.page_cursor.as_deref(),
+        query.page_size,
+        query.stable_deletions,
+    )
+    .await
+    .map(Json)
+    .map_err(|error| ApiError::invalid_request(error.to_string()))
 }
 
 fn repository_identity_matches_sender(identity: &RepositoryNodeIdentity, sender_id: &str) -> bool {

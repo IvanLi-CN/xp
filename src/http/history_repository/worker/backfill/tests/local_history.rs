@@ -5,6 +5,9 @@ use crate::state::history_repository::{HistoryStorage, replica::RepositoryReplic
 #[path = "app_state.rs"]
 mod fixture;
 
+#[path = "legacy_inflight.rs"]
+mod legacy_inflight;
+
 #[tokio::test]
 async fn first_repository_worker_resumes_local_history_without_consuming_advanced_live_wire() {
     let directory = tempfile::tempdir().unwrap();

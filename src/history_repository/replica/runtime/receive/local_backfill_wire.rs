@@ -6,7 +6,7 @@ impl RepositoryReplicaRuntime {
         request: RepositoryWireRequest<'_>,
         mutation_sink: Option<&mut PendingRepositoryMutation>,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
-        self.receive_wire_from_repository_inner_without_rebuild(request, mutation_sink, true)
+        self.receive_wire_from_repository_inner_without_rebuild(request, mutation_sink, true, false)
     }
 
     pub(crate) fn receive_local_history_backfill_wire(
@@ -36,9 +36,11 @@ impl RepositoryReplicaRuntime {
             },
             None,
             false,
+            true,
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn receive_local_history_backfill_legacy_page(
         &mut self,
         cluster_id: &str,

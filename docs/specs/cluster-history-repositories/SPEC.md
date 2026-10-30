@@ -80,7 +80,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - 初始追赶遇到不可达的 Ready peer 时，必须继续处理同一 tick 中其他可达的 Ready peer，但任何
   不可达或缺少节点元数据的 Ready peer 都会使本轮聚合结果保持未完成；在所有 Ready peer 都被
   覆盖前不得启动本地 ready 稳定窗口。失效成员仍保留在 Raft 并由状态/运维面报告，不能自动
-  删除、跳过其历史或伪造 ACK。
+  删除、跳过其历史或伪造 ACK。若本地仍有旧页且已有 Ready peer，必须先完成 Ready peer 的追赶，
+  再恢复本地旧页；Ready peer 未完成或不可达时不得导入该旧页或宣称追赶完成。
 - 初始 backfill 接收方必须先以不超过 4 倍语义页预算的 JSON wire body 上限读取响应，并在 typed
   record 解码前拒绝超过 128 条记录；随后执行与服务端相同的 128 条 / 192 KiB 页上限。历史源页
   使用 JSON 记录预算，Ready repository tiered 页使用发送方的 canonical segment 字节预算。接收方
@@ -92,6 +93,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   复用已经推进的实时 source sequence、实时 pending outbox 或实时 hash-chain head；若 live
   source epoch 尚未建立，首个非空 backfill 页可以在同一 durable 初始化步骤建立该身份 epoch，
   但不得推进 live sequence、outbox 或 hash-chain。
+- 升级前已排队在实时 source journal 中的旧页是例外：保留原签名 wire 和原始流坐标，先从已注册节点的
+  公网 HTTPS 接口分页取回并严格验证缺失前序，再沿原链接收旧页。恢复进度必须持久化并能在重启后继续；
+  前序签名段和记录必须完整保留，不能仅推进水位。旧页接收、页游标和覆盖原 ID 的真实 collector ACK
+  必须原子提交。旧页之后的新回填仍使用独立签名流。前序暂不可用时自动重试，不伪造 ACK 或永久 gap。
 - 本地 backfill 页必须在导入前持久化完整的签名 wire 集、segment IDs、backfill epoch、每条流的下一个
   sequence/hash、page cursor 和 completed 标志。重启只能重放该精确 wire 集；重放前必须重新检查
   cluster 归属、当前派生 repository identity、签名、source node、backfill epoch、流名、sequence
@@ -114,6 +119,14 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   查询必须为 `partial`。
 - tombstone 必须先于受影响记录同步并阻止复活；同一 epoch 同一 sequence 出现两个有效不同 payload
   时隔离旧流并轮换 epoch。
+- 节点或用户前缀 tombstone 依据 subject、observer、schema 和 key 前缀覆盖不同 source/epoch；
+  exact tombstone 覆盖其目标流和对应 backfill 流。重放拦截与 SQLite 删除范围必须一致，
+  同一事务中先插入的受影响记录也必须被删除。
+  历史恢复和 repair 接收原签名 wire 时，已知 tombstone 覆盖的记录不得物化；其他记录正常导入，
+  签名链、水位、删除保护和真实 ACK 仍须原子持久化。普通实时接收保持严格拦截。
+- tombstone 的过期、receiver 状态、记录、检查点及相关 ACK 必须在同一持久事务中提交。
+  批次失败或重启前发生存储错误时，过期删除不得提前落盘。
+  过期只删除对应 source、epoch、stream 和 sequence 的标记；同键较新标记继续保护受影响记录。
 - repository summary 分页只投影 SQLite segment 的 `id` 与 tombstone phase metadata，用于生成
   segment IDs 和 continuation cursor；summary 不得读取或反序列化 payload。需要 wire 内容的
   repair/backfill 路径仍按既有完整 payload 查询执行，summary 的外部 JSON、分页顺序和 cursor
@@ -304,10 +317,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 sequence，不能改变已经排队的历史页。tombstone 使用对应的 backfill stream，仍先于受影响记录，
 并在 backfill 自己的页状态中保持顺序。
 
-恢复旧页时，worker 只能读取 durable checkpoint 中的 exact wire、segment ID、页游标、completed
-标志和 stream state。receiver 先验证当前 cluster 与派生 repository identity，再验证签名、source
-归属、epoch、backfill stream、sequence 连续性和 hash-chain；随后才允许记录导入。验证或容量失败
-不得写入半页，也不得把 cursor 当成已完成。
+恢复新格式页时，worker 只能读取 durable checkpoint 中的 exact wire、segment ID、页游标、completed
+标志和 stream state，并校验独立 backfill 流。恢复旧 source-journal 页时，保留原流并先逐段恢复可证明
+的前序。两种路径都必须验证 cluster、identity、签名、source、epoch、sequence 连续性及 hash-chain；
+验证或容量失败不得写入半页，也不得把 cursor 当成已完成。
 
 成功页的 wire 接收、记录/tombstone 导入、ACK、stream state 与 page checkpoint 一起提交。提交失败
 恢复到页前状态，未确认 wire 保留以便下一次重放；新格式页只有 durable receive/apply ACK 成功后才
@@ -362,7 +375,12 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
   无效聚合元信息不得被误判为未变化；原始行可合法地持久化空聚合范围。
 - legacy relay payload 仅保留接收边界的 wire 兼容性；repository worker 不构造、不发送
   relay 请求，也不得把公网传输失败误报为数据已持久化。
-- 仓库过期超过 tombstone horizon 必须清除并重建，不允许继续宣称 converged。
+- 仓库过期超过 tombstone horizon 时不得继续宣称 converged。存在未确认的旧格式本地页时，
+  必须保留原始数据；有 Ready peer 时先按原页和当前 peer 身份、地址及成员集合绑定恢复
+  generation，原子导入删除标记与进度，再验证并接收原签名链。失败或成员变化时保持可重试。
+  没有 Ready peer 时，有界扫描当前注册 source 的删除意图，绑定持久删除版本、source 身份
+  和成员集合；删除证据及分页进度原子提交。扫描后新增删除由现有持久投递继续传播。
+  没有未确认旧页的过期仓库沿用现有重建合同。
 
 ## Interfaces and Contracts
 

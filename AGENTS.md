@@ -56,6 +56,16 @@
   also uses only that public HTTPS path; a transport failure leaves the durable outbox pending for
   the next bounded retry and never opens a history Mesh relay.
 
+  A legacy initial-backfill page already queued in the live source journal retains its original
+  signed stream. Recovery verifies and durably imports missing predecessors over registered public
+  HTTPS before atomically accepting the original page, advancing its checkpoint and recording a real
+  ACK. New backfill pages use independent signed streams; unavailable predecessors remain retryable.
+  If a receiver is stale and a legacy page is pending, Ready peers first supply a deletion baseline
+  bound to the page, peer identities, addresses and membership. Recovery retains the original data
+  and resumes the committed generation after restart; a missing peer or changed binding retries.
+  Without Ready peers, recovery scans the registered sources' version-bound deletion intent before
+  replay. Later deletions follow the durable source delivery path when a repository becomes Ready.
+
   SQLite releases idle WAL at normal reset with a 1 MiB retained-journal limit.
 
   Active frames and readers remain safe; capacity admission still counts the full WAL.
@@ -75,6 +85,12 @@
   primary without changing the outbox or source epoch. Old metadata is rebuilt
   in place; predecessor rollback cannot consume v3-prefixed digests. Permanent gaps keep
   queries partial and replica convergence false even after retained-data verification.
+  Prefix tombstones block matching subject, observer, schema and key prefixes across sources and
+  epochs; exact tombstones protect the affected target and backfill streams. Repository transactions
+  apply deletions after record upserts so a batch cannot resurrect a record it also deletes.
+  Historical recovery and repair retain verified original wires while suppressing records covered by
+  known tombstones; ordinary live delivery continues to reject resurrection.
+  Tombstone expiry is committed atomically with the corresponding receiver state and history writes.
   Repository runtime status reads exact record and segment counts from a durable singleton updated
   by insert/delete triggers in each history transaction; existing databases backfill it once at
   startup. Status requests do not traverse retained history tables and run off Tokio workers.

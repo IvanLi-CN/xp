@@ -161,15 +161,16 @@
   state, page cursor and completion are committed together; failures restore the prior snapshot and
   leave unacknowledged wires available. New-format pages clear their in-flight wires only at the
   durable receive/apply ACK boundary; legacy snapshots without embedded wires validate the current
-  local identity, apply the whole source-journal page atomically, and defer ordinary source ACK
-  deletion while that page owns the rows, then continue to replay the exact rows until their real
-  collector ACK commits. A durable local in-flight page is prioritized over Ready-peer catch-up,
-  stale repository rebuilds happen before reading the next local cursor and fail closed while an
-  unacknowledged local page exists. A collected page is discarded if its repository state changes
-  before apply. Replay after tombstone freshness expires also fails closed; no automatic repair is
-  supported for that combined condition. New pending pages persist their creation time; older pages
-  without a provable creation time remain blocked. The bounded page collector traverses every
-  retained Mesh bucket instead of reusing the rotating real-time sample window. Source collection
+  local identity, verify the original source-journal chain and defer ordinary source ACK deletion
+  while that page owns the rows. Recovery first imports known deletion evidence from Ready peers,
+  or from version-bound registered sources when no Ready peer exists. It persists bounded recovery
+  progress and retains the original page across failures and restarts. Original-stream receive,
+  checkpoint and real ACK commit atomically after that evidence is applied. Later source deletions
+  follow normal durable delivery. A collected page is discarded if its repository state changes
+  before apply. New pending pages persist their creation time; predecessor recovery uses bounded,
+  resumable retrieval.
+  The bounded page collector traverses every retained Mesh bucket instead of reusing the rotating
+  real-time sample window. Source collection
   keeps mesh, IP and endpoint history working sets bounded.
   Coverage includes separate-chain,
   epoch reuse, restart hash-chain continuation, exact-wire retry, commit rollback, tombstone

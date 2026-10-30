@@ -54,6 +54,13 @@ Backfill does not consume or advance the live source outbox, live sequence head,
 state. If the live source epoch is unset, the first non-empty page may durably initialize that
 identity epoch before creating its independent sequence chain; this is not a live sequence advance.
 
+A predecessor-format page already queued in the live source journal keeps its original signed
+stream. The worker retrieves missing predecessors from registered peers over signed public HTTPS,
+verifies and durably imports each bounded chain page, and resumes after a restart. It accepts the
+original pending page only after its chain is complete; the records, page checkpoint and genuine
+collector ACK for its exact original IDs commit atomically. Missing predecessors are retried without
+inventing a permanent gap. Subsequent newly collected backfill pages use the independent stream.
+
 Before applying a persisted local page, the receiver reloads the exact signed wires and checks the
 current cluster binding, derived repository identity, segment ownership, signature, source node,
 backfill epoch, stream suffix, expected sequence, and predecessor hash chain. The page's computed
@@ -86,6 +93,18 @@ the earliest retained cursor and an explicit gap. Tombstones replicate before
 affected records and remain until every current ready repository acknowledges
 them plus the tombstone horizon. Anti-entropy exchanges partition summaries,
 repairs ranges first, then drills down.
+
+Prefix tombstones target matching subject, observer, schema and key prefix across sources and
+epochs. Exact tombstones also cover the corresponding target stream and backfill stream. Replay
+protection follows the same scope as SQLite deletion, and an atomic batch applies deletions after
+record upserts so a record from the same batch cannot reappear.
+Historical recovery and repair preserve the original verified wire, suppress only records covered by
+known durable tombstones, and atomically persist the remaining records, deletion state and receipt.
+Ordinary live delivery retains strict resurrection rejection.
+Tombstone expiry is committed with the receiver checkpoint and records; a failed batch preserves
+the prior durable tombstone and receiver state.
+Expiry identifies the exact source, epoch, stream and sequence; newer tombstones with the same key
+remain durable and continue to suppress matching records.
 
 SQLite repositories maintain v3 summaries in the existing `history.sqlite3`.
 

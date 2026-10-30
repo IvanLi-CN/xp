@@ -44,27 +44,43 @@ generation, delete source outbox rows, increase quota, create a second database,
 
 The first repository baseline is not ordinary live source delivery. Schema records use a separate
 signed `<stream>-backfill-<source_node_id>` chain, while tombstones use the matching
-`tombstone-backfill-<source_node_id>` stream and backfill page state. A local page persists its
-exact signed wires, IDs, backfill epoch,
-stream state, page cursor and completion flag before import. On restart, XP must recheck the current
-cluster binding, derived repository identity, segment ownership, signature, source/epoch/stream,
-sequence continuity and predecessor hash before applying any record. A failed check or storage write
-leaves the
-page pending; it must not advance the cursor or delete an original wire. New-format in-flight wires
-clear only at the durable receive/apply ACK boundary; predecessor source-journal rows require a real
-collector ACK for the exact segment.
+`tombstone-backfill-<source_node_id>` stream and backfill page state.
+Before import, each local page saves its exact wires, IDs, epoch, stream state and cursor.
+It also saves whether backfill is complete.
+On restart, XP rechecks the cluster binding, derived identity, ownership and signatures.
+It validates source, epoch, stream, sequence and predecessor hash before applying records.
+A failed check or storage write leaves the page pending.
+It must not advance the cursor or delete an original wire.
+New-format in-flight wires clear only at the durable receive/apply ACK boundary.
+Predecessor source-journal rows require a real collector ACK for the exact segment.
 
-If the repository is older than the tombstone freshness horizon and a local page is still pending,
-XP blocks the rebuild and replay to preserve the signed page and avoid accepting expired deletion
-evidence. The error reports a stale rebuild blocked by an unacknowledged page, or a required
-tombstone-safe rebuild. There is currently
-no supported automatic or operator repair for this combined condition. Preserve the database, WAL,
-source journal and signed page; collect diagnostics for investigation rather than deleting the page,
-forcing freshness, or marking catch-up complete.
+If the repository is older than the tombstone freshness horizon and a legacy local page is still
+pending, XP preserves the database and original page. With Ready peers, it first imports their
+deletion pages using a durable recovery generation bound to the original page, peer identities,
+addresses and Ready membership. It then verifies and receives the original signed chain. A failed
+write, unavailable peer or changed membership leaves recovery pending for retry; a restart resumes
+the committed progress. Do not delete the page, force freshness, or mark catch-up complete.
 
-New local pages persist their creation time independently of historical record timestamps.
-An older pending page without that time also remains blocked, even if another receive later updates
-the repository verification time: that update cannot establish the age of the pending page.
+Without a Ready peer, XP scans the registered sources' deletion intent before restoring the page.
+The scan uses bounded pages bound to each source's durable deletion version and current identity;
+changes restart that source's scan. Unavailable sources remain retryable. Deletions created after
+the scan continue through the normal durable source delivery path when a repository becomes Ready.
+
+New local pages persist their creation time independently of historical record timestamps. A legacy
+source-journal page must retain its original wire and must not use an invented creation time.
+When Ready peers exist, XP first catches up with all of them before restoring a pending local page.
+An unavailable Ready peer keeps that page pending until the peer can be checked.
+Recovery verifies the signed predecessor chain and the known deletion state. A record covered by a
+durable tombstone is not materialized; unaffected records and the original signed wire are retained.
+The receive state, page cursor and genuine ACK commit atomically. Network failure or a missing
+predecessor is retryable; neither proves a permanent gap. Later local history uses the independent
+backfill stream.
+
+Deletion diagnostics must consider the subject, observer, schema and key scope across sources.
+They must also consider all relevant epochs.
+An empty local tombstone stream does not prove that other nodes issued no applicable deletion.
+If a predecessor checkpoint lacks a tombstone sequence, XP retains that uncertainty.
+An ambiguous expiration preserves the marker and reports a storage error for investigation.
 
 For a read-only US4 field sample, record the candidate SHA, node ID and `XP_DATA_DIR`, then capture
 `GET /api/admin/history-repositories` with the already-authorized admin credential on every

@@ -223,6 +223,7 @@ impl RepositoryReplicaRuntime {
                 .map(StoredRecord::sqlite_row)
                 .collect::<Result<Vec<_>, _>>()?,
             tombstones: Vec::new(),
+            expired_tombstones: Vec::new(),
             segments: self
                 .snapshot
                 .segments
@@ -876,6 +877,10 @@ impl StoredRecord {
     }
 
     pub(crate) fn matches_key(&self, key: &super::ReplicaRecordKey) -> bool {
+        key.known_sequence() == Some(self.sequence) && self.matches_tombstone_identity(key)
+    }
+
+    pub(crate) fn matches_tombstone_identity(&self, key: &super::ReplicaRecordKey) -> bool {
         let (schema_id, schema_version) = key.schema();
         self.source_node_id == key.source_node_id()
             && self.source_epoch == key.source_epoch()

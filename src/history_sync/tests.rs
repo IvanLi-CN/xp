@@ -1,5 +1,8 @@
 use ed25519_dalek::SigningKey;
 
+mod historical_accept;
+mod verified_history;
+
 use crate::state::history_repository::identity::{
     Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey,
 };

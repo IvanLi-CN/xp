@@ -13,6 +13,7 @@ use crate::state::history_repository::identity::RepositoryNodeIdentity;
 mod checkpoint;
 mod replay;
 mod retained_anchor;
+mod segment;
 pub(crate) use checkpoint::SegmentReceiverCheckpoint;
 
 pub(crate) const MAX_RECORDS_PER_SEGMENT: usize = 1_000;
@@ -72,7 +73,6 @@ impl Cursor {
             sequence,
         })
     }
-
     pub(crate) fn source_node_id(&self) -> &str {
         &self.source_node_id
     }
@@ -85,7 +85,6 @@ impl Cursor {
     pub(crate) fn sequence(&self) -> u64 {
         self.sequence
     }
-
     fn with_sequence(&self, sequence: u64) -> Result<Self, ProtocolError> {
         Self::new(
             self.source_node_id.clone(),
@@ -94,14 +93,12 @@ impl Cursor {
             sequence,
         )
     }
-
     fn stream_key(&self) -> StreamKey {
         StreamKey {
             source_node_id: self.source_node_id.clone(),
             stream: self.stream.clone(),
         }
     }
-
     fn into_proto(self) -> proto::Cursor {
         proto::Cursor {
             source_node_id: self.source_node_id,
@@ -110,7 +107,6 @@ impl Cursor {
             sequence: self.sequence,
         }
     }
-
     fn from_proto(cursor: proto::Cursor) -> Result<Self, ProtocolError> {
         Self::new(
             cursor.source_node_id,
@@ -150,7 +146,6 @@ impl SyncRecord {
             tombstone,
         }
     }
-
     pub(crate) fn is_tombstone(&self) -> bool {
         self.tombstone
     }
@@ -185,7 +180,6 @@ impl SyncRecord {
         }
         Ok(())
     }
-
     fn into_proto(self) -> proto::Record {
         proto::Record {
             subject_node_id: self.subject_node_id,
@@ -197,7 +191,6 @@ impl SyncRecord {
             tombstone: self.tombstone,
         }
     }
-
     fn from_proto(record: proto::Record) -> Self {
         Self {
             subject_node_id: record.subject_node_id,
@@ -258,24 +251,19 @@ impl CanonicalSegment {
         segment.validate()?;
         Ok(segment)
     }
-
     pub(crate) fn first_cursor(&self) -> &Cursor {
         &self.first_cursor
     }
-
     pub(crate) fn last_cursor(&self) -> &Cursor {
         &self.last_cursor
     }
-
     pub(crate) fn records(&self) -> &[SyncRecord] {
         &self.records
     }
-
     pub(crate) fn canonical_bytes(&self) -> Result<Vec<u8>, ProtocolError> {
         self.validate()?;
         Ok(self.proto_without_signature().encode_to_vec())
     }
-
     pub(crate) fn sign(&self, signing_key: &SigningKey) -> Result<SignedSegment, ProtocolError> {
         let canonical = self.canonical_bytes()?;
         let signature = signing_key.sign(&canonical).to_bytes();
@@ -284,15 +272,12 @@ impl CanonicalSegment {
             signature,
         })
     }
-
     pub(crate) fn records_hash(&self) -> [u8; 32] {
         self.records_hash
     }
-
     pub(crate) fn opened_at_unix_seconds(&self) -> u64 {
         self.opened_at_unix_seconds
     }
-
     pub(crate) fn closed_at_unix_seconds(&self) -> u64 {
         self.closed_at_unix_seconds
     }
@@ -353,7 +338,6 @@ impl CanonicalSegment {
         }
         Ok(())
     }
-
     fn proto_without_signature(&self) -> proto::Segment {
         proto::Segment {
             cluster_id: self.cluster_id.clone(),
@@ -498,7 +482,6 @@ impl EncodedResponse {
             wire,
         })
     }
-
     pub(crate) fn from_wire(
         encoding: PayloadEncoding,
         canonical_len: usize,
@@ -654,6 +637,18 @@ impl SegmentReceiver {
         segment: &SignedSegment,
         identity: &RepositoryNodeIdentity,
     ) -> Result<Acceptance, ProtocolError> {
+        self.accept_historical(segment, identity, |_, _| false)
+    }
+    /// Accept unchanged historical wire using trusted runtime deletion decisions for old conflicts.
+    /// The runtime must suppress those records and persist deletion evidence with this checkpoint.
+    /// The runtime must account for tombstones in the signed segment before allowing a conflict.
+    /// The predicate runs only for prior tombstone conflicts, after identity and chain checks.
+    pub(crate) fn accept_historical(
+        &mut self,
+        segment: &SignedSegment,
+        identity: &RepositoryNodeIdentity,
+        mut is_deleted: impl FnMut(&Cursor, &SyncRecord) -> bool,
+    ) -> Result<Acceptance, ProtocolError> {
         segment.verify_identity(identity)?;
         if self.expected_cluster_id != segment.canonical.cluster_id {
             return Err(ProtocolError::ClusterMismatch);
@@ -793,10 +788,15 @@ impl SegmentReceiver {
             .collect();
         let resurrected = records
             .iter()
-            .filter(|record| !record.tombstone)
-            .any(|record| {
+            .zip(first.sequence..)
+            .filter(|(record, _)| !record.tombstone)
+            .any(|(record, sequence)| {
                 let key = TombstoneKey::new(first, record);
-                self.tombstones.contains(&key) || tombstone_keys.contains(&key)
+                (tombstone_keys.contains(&key) || self.tombstones.contains(&key)) && {
+                    let mut position = first.clone();
+                    position.sequence = sequence;
+                    !is_deleted(&position, record)
+                }
             });
         if resurrected {
             return Err(ProtocolError::ResurrectionPrevented);

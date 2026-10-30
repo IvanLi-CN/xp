@@ -30,6 +30,8 @@ use crate::{
     xray,
 };
 
+#[path = "node_history_deletion_export.rs"]
+mod deletion_export;
 #[path = "node_history_remote.rs"]
 mod remote;
 
@@ -421,6 +423,8 @@ impl PersistedNodeHistoryRecord {
 struct PersistedNodeHistoryCache {
     schema_version: u32,
     #[serde(default)]
+    deletion_version: u64,
+    #[serde(default)]
     nodes: BTreeMap<String, PersistedNodeHistoryRecord>,
     #[serde(default)]
     pending_user_traffic_cleanup: BTreeMap<String, BTreeSet<String>>,
@@ -433,9 +437,15 @@ struct PersistedNodeHistoryCache {
 }
 
 impl PersistedNodeHistoryCache {
+    fn bump_deletion_version(&mut self) {
+        // The saturated value permanently disables stable export instead of wrapping.
+        self.deletion_version = self.deletion_version.saturating_add(1);
+    }
+
     fn empty() -> Self {
         Self {
             schema_version: HISTORY_SCHEMA_VERSION,
+            deletion_version: 0,
             nodes: BTreeMap::new(),
             pending_user_traffic_cleanup: BTreeMap::new(),
             pending_node_history_cleanup: BTreeMap::new(),
@@ -450,6 +460,8 @@ pub struct NodeHistoryHandle {
     inner: Arc<RwLock<PersistedNodeHistoryCache>>,
     history_storage: HistoryStorage,
     persistence_lock: Arc<Mutex<()>>,
+    durable_deletion_version: Arc<std::sync::atomic::AtomicU64>,
+    deletion_proof_healthy: bool,
 }
 
 impl NodeHistoryHandle {
@@ -460,12 +472,17 @@ impl NodeHistoryHandle {
     fn new(persistence_path: PathBuf) -> Self {
         let data_dir = persistence_path.parent().unwrap_or_else(|| Path::new("."));
         let history_storage = HistoryStorage::open(data_dir);
-        let cache =
-            load_history_cache(&history_storage).unwrap_or_else(PersistedNodeHistoryCache::empty);
+        let loaded = load_history_cache(&history_storage);
+        let deletion_proof_healthy =
+            loaded.is_some() || matches!(history_storage.read(NODE_HISTORY_KEY), Ok(None));
+        let durable_version = loaded.as_ref().map_or(0, |cache| cache.deletion_version);
+        let cache = loaded.unwrap_or_else(PersistedNodeHistoryCache::empty);
         Self {
             inner: Arc::new(RwLock::new(cache)),
             history_storage,
             persistence_lock: Arc::new(Mutex::new(())),
+            durable_deletion_version: Arc::new(std::sync::atomic::AtomicU64::new(durable_version)),
+            deletion_proof_healthy,
         }
     }
 
@@ -475,84 +492,6 @@ impl NodeHistoryHandle {
             .nodes
             .get(node_id)
             .map(PersistedNodeHistoryRecord::snapshot)
-    }
-
-    /// Pending cleanup is durable local deletion intent. Repository sources turn these markers
-    /// into signed tombstones before publishing later records, and keep retrying until the
-    /// repository tombstone ledger has fanned acknowledgements out.
-    pub async fn repository_deletion_markers(
-        &self,
-        destination_node_id: &str,
-    ) -> Vec<RepositoryHistoryDeletionMarker> {
-        let state = self.inner.read().await;
-        let node_ids = state
-            .pending_node_history_cleanup
-            .get(destination_node_id)
-            .into_iter()
-            .flat_map(|nodes| nodes.iter())
-            .chain(state.deleted_nodes.iter())
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let mut markers = node_ids
-            .into_iter()
-            .flat_map(|node_id| {
-                [
-                    "runtime.v1",
-                    "path_health.v1",
-                    "traffic.v1",
-                    "connections.v1",
-                    "ip_usage.v1",
-                ]
-                .into_iter()
-                .map(move |schema_id| RepositoryHistoryDeletionMarker {
-                    schema_id: schema_id.to_owned(),
-                    record_key: format!("node-history:node:{node_id}:").into_bytes(),
-                    kind: RepositoryHistoryDeletionKind::Node(node_id.clone()),
-                })
-            })
-            .collect::<Vec<_>>();
-        markers.extend(
-            state
-                .pending_user_traffic_cleanup
-                .get(destination_node_id)
-                .into_iter()
-                .flat_map(|users| users.iter())
-                .chain(state.deleted_users.iter())
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .map(|user_id| RepositoryHistoryDeletionMarker {
-                    schema_id: "traffic.v1".to_owned(),
-                    record_key: format!("node-history:user:{user_id}:").into_bytes(),
-                    kind: RepositoryHistoryDeletionKind::User(user_id.to_string()),
-                }),
-        );
-        markers.sort_by(|left, right| left.record_key.cmp(&right.record_key));
-        markers
-    }
-
-    pub async fn complete_repository_deletion_marker(
-        &self,
-        destination_node_id: &str,
-        marker: &RepositoryHistoryDeletionMarker,
-    ) {
-        match &marker.kind {
-            RepositoryHistoryDeletionKind::Node(node_id) => {
-                self.complete_node_history_cleanup(destination_node_id, node_id)
-                    .await;
-                let changed = self.inner.write().await.deleted_nodes.remove(node_id);
-                if changed {
-                    self.persist().await;
-                }
-            }
-            RepositoryHistoryDeletionKind::User(user_id) => {
-                self.complete_user_traffic_cleanup(destination_node_id, user_id)
-                    .await;
-                let changed = self.inner.write().await.deleted_users.remove(user_id);
-                if changed {
-                    self.persist().await;
-                }
-            }
-        }
     }
 
     pub async fn record_local_sample(
@@ -647,6 +586,7 @@ impl NodeHistoryHandle {
     pub async fn clear_node(&self, node_id: &str) {
         {
             let mut state = self.inner.write().await;
+            state.bump_deletion_version();
             state.deleted_nodes.insert(node_id.to_string());
             state.nodes.remove(node_id);
             state.pending_user_traffic_cleanup.remove(node_id);
@@ -664,6 +604,7 @@ impl NodeHistoryHandle {
     pub async fn clear_user(&self, user_id: &str) {
         {
             let mut state = self.inner.write().await;
+            state.bump_deletion_version();
             state.deleted_users.insert(user_id.to_string());
             for record in state.nodes.values_mut() {
                 record.user_traffic.remove(user_id);
@@ -676,11 +617,15 @@ impl NodeHistoryHandle {
     pub async fn queue_user_traffic_cleanup(&self, node_id: &str, user_id: &str) {
         let changed = {
             let mut state = self.inner.write().await;
-            state
+            let changed = state
                 .pending_user_traffic_cleanup
                 .entry(node_id.to_string())
                 .or_default()
-                .insert(user_id.to_string())
+                .insert(user_id.to_string());
+            if changed {
+                state.bump_deletion_version();
+            }
+            changed
         };
         if changed {
             self.persist().await;
@@ -707,6 +652,9 @@ impl NodeHistoryHandle {
             if users.is_empty() {
                 state.pending_user_traffic_cleanup.remove(node_id);
             }
+            if changed {
+                state.bump_deletion_version();
+            }
             changed
         };
         if changed {
@@ -717,11 +665,15 @@ impl NodeHistoryHandle {
     pub async fn queue_node_history_cleanup(&self, destination_node_id: &str, node_id: &str) {
         let changed = {
             let mut state = self.inner.write().await;
-            state
+            let changed = state
                 .pending_node_history_cleanup
                 .entry(destination_node_id.to_string())
                 .or_default()
-                .insert(node_id.to_string())
+                .insert(node_id.to_string());
+            if changed {
+                state.bump_deletion_version();
+            }
+            changed
         };
         if changed {
             self.persist().await;
@@ -752,6 +704,9 @@ impl NodeHistoryHandle {
                 state
                     .pending_node_history_cleanup
                     .remove(destination_node_id);
+            }
+            if changed {
+                state.bump_deletion_version();
             }
             changed
         };
@@ -824,13 +779,22 @@ impl NodeHistoryHandle {
     }
 
     async fn persist(&self) {
+        if !self.deletion_proof_healthy {
+            warn!("node history cache was not loaded; refusing to overwrite it");
+            return;
+        }
         let _guard = self.persistence_lock.lock().await;
         let state = self.inner.read().await.clone();
-        if let Err(err) = persist_history_cache(&self.history_storage, &state) {
-            warn!(
-                error = %err,
-                "persist node history cache"
-            );
+        match persist_history_cache(&self.history_storage, &state) {
+            Ok(())
+                if self.history_storage.mode()
+                    == crate::state::history_storage::HistoryStorageMode::Sqlite =>
+            {
+                self.durable_deletion_version
+                    .store(state.deletion_version, std::sync::atomic::Ordering::Release);
+            }
+            Ok(()) => {}
+            Err(err) => warn!(error = %err, "persist node history cache"),
         }
     }
 }
@@ -2265,9 +2229,16 @@ fn persist_history_cache(
     cache: &PersistedNodeHistoryCache,
 ) -> anyhow::Result<()> {
     let bytes = serde_json::to_vec_pretty(cache)?;
-    storage
-        .write(NODE_HISTORY_KEY, &bytes)
-        .map_err(|error| anyhow::anyhow!(error.to_string()))
+    let result = if storage.mode() == crate::state::history_storage::HistoryStorageMode::Sqlite {
+        storage.write_node_history_guarded(
+            &bytes,
+            cache.deletion_version,
+            &deletion_export::deletion_state_digest(cache)?,
+        )
+    } else {
+        storage.write(NODE_HISTORY_KEY, &bytes)
+    };
+    result.map_err(|error| anyhow::anyhow!(error.to_string()))
 }
 
 fn rfc3339(at: DateTime<Utc>) -> String {

@@ -618,7 +618,7 @@ fn local_history_backfill_tombstone_protects_the_independent_record_stream() {
         )
         .expect("apply historical tombstone");
 
-    let error = runtime
+    runtime
         .apply_local_history_backfill_page(
             "cluster-a",
             identity,
@@ -641,14 +641,18 @@ fn local_history_backfill_tombstone_protects_the_independent_record_stream() {
             &["local".to_owned()],
             "local",
         )
-        .expect_err("tombstone must prevent resurrection");
-    assert!(matches!(
-        error,
-        super::RepositoryRuntimeError::Protocol(ProtocolError::ResurrectionPrevented)
-    ));
+        .expect("known deletion suppresses the record while advancing the historical page");
     assert_eq!(
         runtime.local_history_backfill_cursor(),
-        Some("history-page-2")
+        Some("history-page-3")
+    );
+    assert!(runtime.local_history_backfill_completed());
+    assert!(
+        runtime
+            .storage
+            .repository_history_records(None, None, None, 0, 8)
+            .unwrap()
+            .is_empty()
     );
 }
 

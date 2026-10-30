@@ -11,6 +11,10 @@ use crate::state::history_repository::{
 
 use super::*;
 
+#[cfg(test)]
+#[path = "tiered_tombstone_tests.rs"]
+mod tiered_tombstone_tests;
+
 #[derive(Debug, Clone)]
 pub(crate) struct RepositoryTieredBackfillRecord {
     pub(crate) observed_at_unix_seconds: u64,
@@ -503,14 +507,16 @@ impl RepositoryReplicaRuntime {
                     )?
                     .key();
                     self.delete_records_for_tombstone(&target_key, &mut mutation)?;
+                    self.protect_tombstone_origin(&key, &mut mutation)?;
                     self.tombstones
                         .tombstone(key, now_unix_seconds, ready_repositories)?;
                     self.tombstones
                         .acknowledge(replica_record.key(), local_repository_id)?;
                 } else if !self.tombstones.allows(&key) {
-                    return Err(RepositoryRuntimeError::Protocol(
-                        ProtocolError::ResurrectionPrevented,
-                    ));
+                    // A retained deletion is a terminal disposition for this historical row.
+                    // Commit receipt progress with the page without materializing deleted data.
+                    self.record_source_received_from_cursor(&cursor, now_unix_seconds);
+                    continue;
                 }
                 let stored = StoredRecord::from_record(
                     observed_at_unix_seconds,

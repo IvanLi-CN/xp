@@ -1,4 +1,7 @@
 use super::*;
+#[path = "original_backfill.rs"]
+mod original_backfill;
+pub(crate) use original_backfill::tombstone_acknowledgements_for_segment;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn receive_local_history_backfill_page(
@@ -132,6 +135,7 @@ pub(crate) fn receive_local_history_backfill_page(
             },
             Some(&mut mutation),
             false,
+            true,
         ) {
             runtime.restore(&previous_receiver, previous_snapshot.clone())?;
             runtime.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;

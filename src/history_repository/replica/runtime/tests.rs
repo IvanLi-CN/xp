@@ -1,4 +1,9 @@
 use super::*;
+
+#[path = "cross_source_tombstone_tests.rs"]
+mod cross_source_tombstone_tests;
+#[path = "tombstone_expiry_atomic_tests.rs"]
+mod tombstone_expiry_atomic_tests;
 use crate::{
     history_sync::{CanonicalSegment, SyncRecord},
     state::history_repository::identity::{Ed25519PublicKey, RepositoryNodeId, X25519PublicKey},
@@ -958,7 +963,10 @@ fn tombstone_backfill_time_repair() {
     );
     assert!(
         !restored
-            .expire_tombstones(TOMBSTONE_HORIZON_SECONDS + 1)
+            .expire_tombstones(
+                TOMBSTONE_HORIZON_SECONDS + 1,
+                &mut PendingRepositoryMutation::default(),
+            )
             .expect("retain repaired tombstone")
     );
 

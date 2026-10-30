@@ -1,8 +1,8 @@
 use super::{
     AntiEntropySchedule, CollectorSelector, PartitionSummary, RepairPlan, ReplicaConvergence,
-    ReplicaCursor, ReplicaFreshness, ReplicaPartition, ReplicaRecord, RepositoryRetentionPolicy,
-    RetentionResolution, StreamForkGuard, TombstoneLedger, UnknownSchemaBuffer,
-    rendezvous_collectors,
+    ReplicaCursor, ReplicaFreshness, ReplicaPartition, ReplicaRecord, ReplicaRecordKey,
+    RepositoryRetentionPolicy, RetentionResolution, StreamForkGuard, TombstoneLedger,
+    UnknownSchemaBuffer, rendezvous_collectors,
 };
 
 #[test]
@@ -125,6 +125,45 @@ fn tombstones_do_not_resurrect_and_only_expire_after_horizon_and_ready_acks() {
         .expect("ack new ready repository");
     assert_eq!(tombstones.expire(110).len(), 1);
     assert!(tombstones.allows(&record.key()));
+}
+
+#[test]
+fn legacy_tombstone_key_does_not_alias_a_known_zero_sequence() {
+    let cursor = ReplicaCursor::new("source-a", 1, "traffic", 0).unwrap();
+    let key = ReplicaRecord::new(
+        &cursor,
+        "subject-a",
+        "observer-a",
+        "known",
+        1,
+        b"deleted".to_vec(),
+        b"payload".to_vec(),
+    )
+    .unwrap()
+    .key();
+    let mut value = serde_json::to_value(&key).unwrap();
+    value.as_object_mut().unwrap().remove("sequence");
+    let legacy: ReplicaRecordKey = serde_json::from_value(value).unwrap();
+    assert_eq!(legacy.known_sequence(), None);
+    assert!(
+        serde_json::to_value(&legacy)
+            .unwrap()
+            .get("sequence")
+            .is_none()
+    );
+    let mut ledger = TombstoneLedger::new(100);
+    ledger.tombstone(legacy.clone(), 10, ["repo-a"]).unwrap();
+    ledger.tombstone(key.clone(), 11, ["repo-a"]).unwrap();
+    ledger.acknowledge(key.clone(), "repo-a").unwrap();
+    assert!(ledger.fully_acknowledged(&key));
+    assert!(!ledger.fully_acknowledged(&legacy));
+    assert_eq!(
+        serde_json::to_value(ledger.checkpoint()).unwrap()["entries"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]

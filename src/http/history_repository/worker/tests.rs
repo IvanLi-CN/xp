@@ -369,6 +369,67 @@ fn completed_catch_up_starts_a_stability_window_without_rechecking_live_segments
     assert!(super::should_run_initial_catch_up(false));
 }
 
+#[tokio::test]
+async fn pending_local_page_waits_until_every_ready_peer_is_caught_up() {
+    use super::backfill::InitialBackfillProgress;
+    use std::cell::RefCell;
+    let calls = RefCell::new(Vec::new());
+    for peer_progress in [
+        InitialBackfillProgress::Unavailable,
+        InitialBackfillProgress::InProgress,
+    ] {
+        let result = catch_up_before_pending_local(
+            true,
+            true,
+            || async {
+                calls.borrow_mut().push("peer");
+                Ok(peer_progress)
+            },
+            || async {
+                calls.borrow_mut().push("local");
+                Ok(InitialBackfillProgress::Complete)
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, peer_progress);
+        assert_eq!(&*calls.borrow(), &["peer"]);
+        calls.borrow_mut().clear();
+    }
+    let result = catch_up_before_pending_local(
+        true,
+        true,
+        || async {
+            calls.borrow_mut().push("peer");
+            Ok(InitialBackfillProgress::Complete)
+        },
+        || async {
+            calls.borrow_mut().push("local");
+            Ok(InitialBackfillProgress::InProgress)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result, InitialBackfillProgress::InProgress);
+    assert_eq!(&*calls.borrow(), &["peer", "local"]);
+    calls.borrow_mut().clear();
+    catch_up_before_pending_local(
+        true,
+        false,
+        || async {
+            calls.borrow_mut().push("peer");
+            Ok(InitialBackfillProgress::Complete)
+        },
+        || async {
+            calls.borrow_mut().push("local");
+            Ok(InitialBackfillProgress::Complete)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(&*calls.borrow(), &["local"]);
+}
+
 #[test]
 fn syncing_tombstone_backfill_checkpoint() {
     assert!(!super::should_fanout_tombstone_acknowledgements(
