@@ -14,6 +14,7 @@ import type {
 } from "../../src/api/adminUsers";
 import type { NodeQuotaReset, UserQuotaReset } from "../../src/api/quotaReset";
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
+import { MihomoXmuxSchema } from "../../src/utils/mihomoXmux";
 
 type NodePatchPayload = {
 	node_name?: string;
@@ -424,6 +425,20 @@ export function normalizeFixtureEndpointPatch<T extends AdminEndpoint>(
 			...updated,
 			meta: { ...updated.meta, mihomo_smux: mihomoSmux },
 		};
+	}
+	if (payload.mihomo_xmux !== undefined) {
+		if (updated.kind !== fixtureCatalog.endpoint.vlessKind()) return undefined;
+		if (payload.mihomo_xmux === null) {
+			const { mihomo_xmux: _removed, ...meta } = updated.meta;
+			updated = { ...updated, meta };
+		} else {
+			const parsed = MihomoXmuxSchema.safeParse(payload.mihomo_xmux);
+			if (!parsed.success) return undefined;
+			updated = {
+				...updated,
+				meta: { ...updated.meta, mihomo_xmux: parsed.data },
+			};
+		}
 	}
 	if (payload.transport !== undefined) {
 		if (updated.kind !== fixtureCatalog.endpoint.vlessKind()) return undefined;

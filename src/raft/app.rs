@@ -412,6 +412,14 @@ impl RaftFacade for ForwardingRaftFacade {
             match raft_response {
                 Ok(resp) => Ok(resp.data),
                 Err(err) => {
+                    if xmux_command_requires_local_leader(&cmd_clone) {
+                        return Err(anyhow::Error::new(RaftWriteError::outcome_unknown(
+                            "xmux_leader_changed",
+                            RaftWriteDispatchState::Unknown,
+                            None,
+                            support_id,
+                        )));
+                    }
                     if lifecycle_command_requires_local_leader(&cmd_clone) {
                         return Err(anyhow::Error::new(RaftWriteError::outcome_unknown(
                             "membership_leader_changed",
@@ -519,6 +527,16 @@ impl RaftFacade for ForwardingRaftFacade {
             Ok(())
         })
     }
+}
+
+pub(crate) fn xmux_command_requires_local_leader(cmd: &DesiredStateCommand) -> bool {
+    let DesiredStateCommand::UpsertEndpoint { endpoint, expected } = cmd else {
+        return false;
+    };
+    expected
+        .as_ref()
+        .and_then(|item| item.meta.get("mihomo_xmux"))
+        != endpoint.meta.get("mihomo_xmux")
 }
 
 fn lifecycle_command_requires_local_leader(cmd: &DesiredStateCommand) -> bool {

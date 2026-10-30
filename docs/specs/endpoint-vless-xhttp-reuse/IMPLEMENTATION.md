@@ -4,16 +4,16 @@
 
 ## Current Status
 
-- Implementation: complete
-- Lifecycle: local verification complete
-- Catalog note: XHTTP transport、XMUX subscription、管理界面与真实客户端复用验证均已完成。
+- Implementation: in progress
+- Lifecycle: candidate verification in progress
+- Catalog note: XHTTP transport 已实现；可配置 XMUX 与高级设置调整正在验证。
 
 ## Coverage / rollout summary
 
 - Metadata 采用 legacy `vision_tcp` / new `xhttp` 双默认边界。
 - Xray SplitHTTP proto、dynamic inbound 与 transport-specific user flow 已接入。
 - Mihomo YAML/URI 覆盖 Clash、direct、chain 与 system provider。
-- API capability、创建/PATCH 和管理 Web advanced control 已纳入实现范围。
+- API capability、创建/PATCH 和管理 Web advanced control 支持按接入点配置 XMUX；成员升级与加入能力受到保护。
 - 官方 Mihomo v1.19.29 已接受脱敏 XHTTP fixture；真实 Xray Reality + Mihomo E2E 已验证
   预热后 64 个并发代理请求共享一条外部 TCP，断链后自动以第二条连接恢复。
 

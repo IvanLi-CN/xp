@@ -69,7 +69,12 @@ function renderPage({
 			...API_CAPABILITIES.filter(
 				(capability) => capability !== "admin.endpoint-vless-xhttp",
 			),
-			...(xhttpSupported ? ["admin.endpoint-vless-xhttp"] : []),
+			...(xhttpSupported
+				? [
+						"admin.endpoint-vless-xhttp",
+						"admin.endpoint-vless-xmux-settings-v1",
+					]
+				: []),
 			...(smuxSupported ? ["admin.endpoint-mihomo-smux"] : []),
 		],
 	});

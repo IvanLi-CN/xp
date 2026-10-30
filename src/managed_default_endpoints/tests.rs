@@ -125,7 +125,7 @@ async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest
         reconcile_host_managed_default_endpoints(
             tempdir.path(),
             "n1",
-            &[endpoint],
+            &[endpoint.clone()],
             HostManagedDefaultEndpointsOptions {
                 explicit: &spec,
                 access_host: xp_test_fixtures::label_node_afixture_test(),
@@ -139,6 +139,11 @@ async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest
     }
 
     assert_eq!(writes.len(), 1);
+    assert!(matches!(
+        &writes[0],
+        DesiredStateCommand::UpsertEndpoint { expected: Some(previous), .. }
+            if previous == &endpoint
+    ));
     match &writes[0] {
         DesiredStateCommand::UpsertEndpoint { endpoint, .. } => {
             let meta: VlessRealityVisionTcpEndpointMeta =

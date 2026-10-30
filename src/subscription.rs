@@ -4861,7 +4861,8 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                         endpoint_id: endpoint.endpoint_id.clone(),
                     });
                 }
-                let transport = mihomo_vless_transport_config(meta.transport);
+                let transport =
+                    mihomo_vless_transport_config(meta.transport, meta.mihomo_xmux.as_ref());
                 let proxy = ClashProxy::Vless(ClashVlessProxy {
                     name: format!("{prefix}-reality"),
                     proxy_type: "vless".to_string(),
@@ -4905,7 +4906,8 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                         endpoint_id: endpoint.endpoint_id.clone(),
                     });
                 }
-                let transport = mihomo_vless_transport_config(meta.transport);
+                let transport =
+                    mihomo_vless_transport_config(meta.transport, meta.mihomo_xmux.as_ref());
                 let chain = ClashProxy::Vless(ClashVlessProxy {
                     name: format!("{prefix}-reality-chain"),
                     proxy_type: "vless".to_string(),
@@ -5112,7 +5114,9 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                     ),
                     VlessRealityTransport::Xhttp => {
                         let path_q = percent_encode_rfc3986(VLESS_XHTTP_PATH);
-                        let extra_q = percent_encode_rfc3986(&mihomo_xhttp_share_extra_json());
+                        let extra_q = percent_encode_rfc3986(&mihomo_xhttp_share_extra_json(
+                            meta.mihomo_xmux.as_ref(),
+                        ));
                         format!(
                             concat!(
                                 "vless://{}@{}:{}?encryption=none&security=reality&type=xhttp",
@@ -5133,7 +5137,8 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                     }
                 };
 
-                let transport = mihomo_vless_transport_config(meta.transport);
+                let transport =
+                    mihomo_vless_transport_config(meta.transport, meta.mihomo_xmux.as_ref());
                 let proxy = ClashProxy::Vless(ClashVlessProxy {
                     name: name.clone(),
                     proxy_type: "vless".to_string(),

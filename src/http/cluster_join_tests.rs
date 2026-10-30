@@ -39,6 +39,8 @@ struct DeferredPromotionRaft {
 #[derive(Clone)]
 struct BlockingCatchUpRaft {
     inner: LocalRaft,
+    store: Arc<Mutex<JsonSnapshotStore>>,
+    pending_xmux_endpoint: Arc<Mutex<Option<crate::domain::Endpoint>>>,
     wait_calls: Arc<Mutex<usize>>,
     promotion_calls: Arc<Mutex<usize>>,
 }
@@ -46,6 +48,21 @@ struct BlockingCatchUpRaft {
 impl RaftFacade for BlockingCatchUpRaft {
     fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<u64, RaftNodeMeta>> {
         <LocalRaft as RaftFacade>::metrics(&self.inner)
+    }
+
+    fn ensure_linearizable(&self) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move {
+            <LocalRaft as RaftFacade>::ensure_linearizable(&self.inner).await?;
+            if let Some(endpoint) = self.pending_xmux_endpoint.lock().await.take() {
+                self.store
+                    .lock()
+                    .await
+                    .state_mut()
+                    .endpoints
+                    .insert(endpoint.endpoint_id.clone(), endpoint);
+            }
+            Ok(())
+        })
     }
 
     fn client_write(
@@ -432,6 +449,19 @@ fn app_with_blocking_catch_up(
     Arc<Mutex<usize>>,
     Arc<Mutex<usize>>,
 ) {
+    app_with_blocking_catch_up_and_pending_xmux(tmp, None)
+}
+
+#[allow(clippy::type_complexity)]
+fn app_with_blocking_catch_up_and_pending_xmux(
+    tmp: &TempDir,
+    pending_xmux_endpoint: Option<crate::domain::Endpoint>,
+) -> (
+    axum::Router,
+    Arc<Mutex<JsonSnapshotStore>>,
+    Arc<Mutex<usize>>,
+    Arc<Mutex<usize>>,
+) {
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
@@ -479,6 +509,8 @@ fn app_with_blocking_catch_up(
     let promotion_calls = Arc::new(Mutex::new(0));
     let raft: Arc<dyn RaftFacade> = Arc::new(BlockingCatchUpRaft {
         inner: LocalRaft::new(store.clone(), rx),
+        store: store.clone(),
+        pending_xmux_endpoint: Arc::new(Mutex::new(pending_xmux_endpoint)),
         wait_calls: wait_calls.clone(),
         promotion_calls: promotion_calls.clone(),
     });
@@ -522,6 +554,56 @@ fn app_with_blocking_catch_up(
         geo_db_update,
     );
     (router, store, wait_calls, promotion_calls)
+}
+
+#[tokio::test]
+async fn cluster_join_requires_xmux_capability_when_custom_settings_exist() {
+    let tmp = TempDir::new().unwrap();
+    let (app, _store, _, _) = app_with_blocking_catch_up_and_pending_xmux(
+        &tmp,
+        Some(crate::domain::Endpoint {
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
+            kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: json!({"mihomo_xmux": {"max_connections": "2"}}),
+        }),
+    );
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .unwrap();
+    let join_token = signed_join_token(&cluster, &ca_pem, &ca_key_pem);
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+            .unwrap();
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
+    let mut request = json!({
+        "join_token": join_token,
+        "node_name": "node-2",
+        "access_host": "example.com",
+        "api_base_url": "https://node-2.internal:8443",
+        "csr_pem": csr.csr_pem,
+    });
+    let response = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/cluster/join",
+            request.clone(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    request["xmux_settings_v1"] = json!(true);
+    let response = app
+        .oneshot(req_authed_json("POST", "/api/cluster/join", request))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]

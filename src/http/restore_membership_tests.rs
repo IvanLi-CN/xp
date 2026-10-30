@@ -173,18 +173,19 @@ fn req_json(method: &str, uri: &str, value: serde_json::Value) -> Request<Body> 
 async fn app_with_recording_raft(
     tmp: &TempDir,
 ) -> (axum::Router, RecordedMembershipCalls, Node, String) {
-    app_with_recording_raft_mode(tmp, false).await
+    app_with_recording_raft_mode(tmp, false, false).await
 }
 
 async fn app_with_recording_stale_learner(
     tmp: &TempDir,
 ) -> (axum::Router, RecordedMembershipCalls, Node, String) {
-    app_with_recording_raft_mode(tmp, true).await
+    app_with_recording_raft_mode(tmp, true, false).await
 }
 
 async fn app_with_recording_raft_mode(
     tmp: &TempDir,
     include_stale_learner: bool,
+    custom_xmux: bool,
 ) -> (axum::Router, RecordedMembershipCalls, Node, String) {
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
@@ -219,6 +220,19 @@ async fn app_with_recording_raft_mode(
         quota_reset: NodeQuotaReset::default(),
     };
     store.lock().await.upsert_node(restored.clone()).unwrap();
+    if custom_xmux {
+        store.lock().await.state_mut().endpoints.insert(
+            xp_test_fixtures::primary_endpoint_id().to_owned(),
+            crate::domain::Endpoint {
+                endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+                node_id: xp_test_fixtures::primary_node_id().to_owned(),
+                tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
+                kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
+                port: 443,
+                meta: json!({"mihomo_xmux": {"max_connections": "2"}}),
+            },
+        );
+    }
 
     let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
     let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
@@ -414,6 +428,45 @@ async fn internal_restore_stale_learner_starts_the_durable_restore_operation() {
     assert_eq!(body["dry_run"], false);
     assert_eq!(body["operation"]["kind"], "restore");
     assert_eq!(body["operation"]["phase"], "learner_registered");
+}
+
+#[tokio::test]
+async fn restore_rejects_unverified_xmux_target() {
+    let tmp = TempDir::new().unwrap();
+    let (app, calls, restored, ca_key_pem) = app_with_recording_raft_mode(&tmp, false, true).await;
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let body = json!({ "node_id": restored.node_id }).to_string();
+    let uri: Uri = "/api/admin/_internal/raft/restore-node".parse().unwrap();
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        &cluster.cluster_id,
+        &cluster.node_id,
+        &cluster.node_id,
+        crate::id::new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        &ca_key_pem,
+        &ca_pem,
+        &Method::POST,
+        &uri,
+        Some("application/json"),
+        body.as_bytes(),
+        &context,
+        &mut headers,
+    )
+    .unwrap();
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .unwrap();
+    request.headers_mut().extend(headers);
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(calls.add_learners.lock().await.is_empty());
 }
 
 #[tokio::test]

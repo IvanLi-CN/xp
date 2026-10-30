@@ -360,7 +360,7 @@ where
             );
             write_command(DesiredStateCommand::UpsertEndpoint {
                 endpoint: next,
-                expected: None,
+                expected: Some(endpoint.clone()),
             })
             .await?;
         }
@@ -384,7 +384,7 @@ where
             );
             write_command(DesiredStateCommand::UpsertEndpoint {
                 endpoint: next,
-                expected: None,
+                expected: Some(endpoint.clone()),
             })
             .await?;
         } else {
@@ -458,6 +458,7 @@ impl ManagedEndpointSpec for DefaultVlessEndpointSpec {
             active_short_id: short_id,
             canary_upstream: None,
             accepted_authorities: Vec::new(),
+            mihomo_xmux: None,
             mihomo_smux: Default::default(),
             transport: crate::protocol::VlessRealityTransport::Xhttp,
             managed_default: true,

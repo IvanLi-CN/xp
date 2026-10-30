@@ -13,6 +13,8 @@ use crate::{
     state::{JsonSnapshotStore, StoreInit, UserNodeQuotaConfig},
 };
 
+mod xmux;
+
 fn test_store_init(tmp_dir: &Path) -> StoreInit {
     StoreInit {
         data_dir: tmp_dir.to_path_buf(),

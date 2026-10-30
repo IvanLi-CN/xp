@@ -1,7 +1,11 @@
 import { useId } from "react";
+import type { MihomoXmuxDraft } from "../utils/mihomoXmux";
+import { Input } from "./ui/input";
+import { Slider } from "./ui/slider";
 
 import type { VlessRealityTransport } from "../api/adminEndpoints";
 import { cn } from "../lib/utils";
+import { AdvancedSettings } from "./AdvancedSettings";
 import { InlineHelpTooltip } from "./InlineHelpTooltip";
 
 const TRANSPORT_OPTIONS: ReadonlyArray<{
@@ -33,6 +37,8 @@ type EndpointVlessTransportSettingsProps = {
 	disabled?: boolean;
 	existing?: boolean;
 	changed?: boolean;
+	xmux?: MihomoXmuxDraft;
+	onXmuxChange?: (value: MihomoXmuxDraft) => void;
 };
 
 export function EndpointVlessTransportSettings({
@@ -42,6 +48,8 @@ export function EndpointVlessTransportSettings({
 	disabled = false,
 	existing = false,
 	changed = false,
+	xmux,
+	onXmuxChange,
 }: EndpointVlessTransportSettingsProps) {
 	const id = useId();
 	if (!visible) return null;
@@ -55,10 +63,7 @@ export function EndpointVlessTransportSettings({
 		: helpText;
 
 	return (
-		<details className="border-t border-border/70 pt-3">
-			<summary className="cursor-pointer list-none text-sm font-medium">
-				Advanced: VLESS transport
-			</summary>
+		<AdvancedSettings title="Advanced: VLESS transport">
 			<div className={TRANSPORT_FORM_ROW_CLASS}>
 				<div className="flex items-center gap-1">
 					<span className="text-sm font-medium">Transport mode</span>
@@ -122,6 +127,142 @@ export function EndpointVlessTransportSettings({
 					</div>
 				</fieldset>
 			</div>
-		</details>
+			{value === "xhttp" && xmux && onXmuxChange ? (
+				<div className="space-y-3 border-t border-border/70 mt-4 pt-4">
+					<fieldset disabled={disabled} className="flex flex-col gap-2">
+						<legend className="text-sm font-medium">XMUX strategy</legend>
+						<div
+							className={cn(
+								"grid w-full grid-cols-2 rounded-lg border",
+								"border-border/70 bg-background p-1 shadow-xs",
+							)}
+						>
+							{(
+								[
+									["connections", "Limit total connections"],
+									["concurrency", "Per-connection concurrency"],
+								] as const
+							).map(([strategy, label]) => (
+								<div className="contents" key={strategy}>
+									<input
+										type="radio"
+										id={`${id}-strategy-${strategy}`}
+										name={`${id}-strategy`}
+										className="peer sr-only"
+										checked={xmux.strategy === strategy}
+										onChange={() => onXmuxChange({ ...xmux, strategy })}
+									/>
+									<label
+										htmlFor={`${id}-strategy-${strategy}`}
+										className={cn(
+											"inline-flex min-w-0 cursor-pointer items-center justify-center rounded-md px-3 py-1.5",
+											"text-center text-sm font-medium transition-colors",
+											"peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/20",
+											"peer-disabled:pointer-events-none peer-disabled:opacity-50",
+											xmux.strategy === strategy
+												? "bg-primary text-primary-foreground shadow-sm"
+												: "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+										)}
+									>
+										{label}
+									</label>
+								</div>
+							))}
+						</div>
+					</fieldset>
+					{(
+						[
+							[
+								xmux.strategy === "connections"
+									? "maxConnections"
+									: "maxConcurrency",
+								xmux.strategy === "connections"
+									? "Maximum connections"
+									: "Maximum concurrency",
+								xmux.strategy === "connections"
+									? xmux.maxConnections
+									: xmux.maxConcurrency,
+								1,
+								xmux.strategy === "connections" ? 32 : 128,
+							],
+							["reuseTimes", "Maximum reuse times", xmux.reuseTimes, 0, 1024],
+							[
+								"reusableSecs",
+								"Maximum reusable time (seconds)",
+								xmux.reusableSecs,
+								0,
+								7200,
+							],
+							[
+								"keepAlive",
+								"Idle keepalive period (seconds)",
+								xmux.keepAlive,
+								-1,
+								300,
+							],
+						] as const
+					).map(([key, label, fieldValue, minimum, defaultMax]) => {
+						const parts = fieldValue.split("-");
+						const isNegativeOne = key === "keepAlive" && fieldValue === "-1";
+						const valid =
+							isNegativeOne ||
+							(/^(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*))?$/.test(fieldValue) &&
+								(key !== "keepAlive" || parts.length === 1));
+						const numbers = isNegativeOne ? [-1] : parts.map(Number);
+						const sliderMin =
+							numbers.length > 1 ? Math.max(1, minimum) : minimum;
+						const validNumbers =
+							valid &&
+							numbers.every(
+								(number) =>
+									Number.isSafeInteger(number) &&
+									number >= sliderMin &&
+									number <= 2147483647,
+							) &&
+							(numbers.length === 1 || numbers[0] <= numbers[1]);
+						const sliderValues = validNumbers ? numbers : [sliderMin];
+						const sliderMax = Math.max(defaultMax, ...sliderValues);
+						return (
+							<div className={TRANSPORT_FORM_ROW_CLASS} key={key}>
+								<label className="text-sm font-medium" htmlFor={`${id}-${key}`}>
+									{label}
+								</label>
+								<div className="flex min-w-0 items-center gap-4">
+									<Slider
+										label={`${label} adjustment`}
+										value={sliderValues}
+										min={sliderMin}
+										max={sliderMax}
+										step={1}
+										disabled={disabled || !validNumbers}
+										onValueChange={(values) =>
+											onXmuxChange({ ...xmux, [key]: values.join("-") })
+										}
+									/>
+									<Input
+										id={`${id}-${key}`}
+										className="w-28 shrink-0"
+										value={fieldValue}
+										disabled={disabled}
+										onChange={(event) =>
+											onXmuxChange({ ...xmux, [key]: event.target.value })
+										}
+									/>
+								</div>
+							</div>
+						);
+					})}
+					<p className="text-xs text-muted-foreground">
+						Enter a number or an ascending range (for example 16-32); range
+						values use two slider handles. Zero disables reuse or time limits.
+						Keepalive: -1 disables, 0 uses the client default, a positive value
+						sets seconds.
+					</p>
+					<p className="text-xs text-muted-foreground">
+						Refresh client subscriptions after saving XMUX changes.
+					</p>
+				</div>
+			) : null}
+		</AdvancedSettings>
 	);
 }

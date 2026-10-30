@@ -3,7 +3,7 @@ import { expect, userEvent, within } from "@storybook/test";
 import { useState } from "react";
 
 import type { VlessRealityTransport } from "../api/adminEndpoints";
-import { cn } from "../lib/utils";
+import { DEFAULT_XMUX_DRAFT } from "../utils/mihomoXmux";
 import { EndpointVlessTransportSettings } from "./EndpointVlessTransportSettings";
 
 type SettingsStoryProps = {
@@ -20,20 +20,19 @@ function SettingsStory({
 	visible,
 }: SettingsStoryProps) {
 	const [value, setValue] = useState(initialValue);
+	const [xmux, setXmux] = useState(DEFAULT_XMUX_DRAFT);
 
 	return (
 		<div
-			className="mx-auto w-full max-w-[568px] bg-background p-4 sm:p-6"
+			className="mx-auto w-full max-w-[568px] bg-background p-6"
 			data-testid="vless-transport-evidence-frame"
+			data-visual-evidence-surface
 		>
-			<div
-				className={cn(
-					"mx-auto w-full max-w-[520px] border-2 border-[#94bfc4] bg-[#cfe9ec] p-8",
-					"dark:border-[#28565a] dark:bg-[#172728]",
-				)}
-			>
+			<div className="w-full" data-visual-evidence-target>
 				<EndpointVlessTransportSettings
 					changed={existing && value !== initialValue}
+					xmux={xmux}
+					onXmuxChange={setXmux}
 					disabled={disabled}
 					existing={existing}
 					onValueChange={setValue}
@@ -91,6 +90,12 @@ export const DefaultXhttp: Story = {
 		await expect(
 			await canvas.findByRole("radio", { name: "XHTTP / XMUX" }),
 		).toBeChecked();
+		await userEvent.click(
+			canvas.getByRole("radio", { name: "Per-connection concurrency" }),
+		);
+		await expect(canvas.getByLabelText("Maximum concurrency")).toHaveValue(
+			"16-32",
+		);
 		await userEvent.hover(
 			await canvas.findByRole("button", { name: "About VLESS transport" }),
 		);
