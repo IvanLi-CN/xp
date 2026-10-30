@@ -411,6 +411,8 @@
 
 - Signed preflight tests use catalog node IDs and reject auth, quorum or cluster-binding drift.
 - SQLite tests cover handoff rollback/restart, audited recovery, fingerprints and lease expiry.
+- User-deletion and node-removal interleaving tests use catalog fixtures and cover committed and
+  unsaved removals, saved-proof failures, retained peers, real ACK and restart recovery.
 
 ## Tiered keyset recovery
 

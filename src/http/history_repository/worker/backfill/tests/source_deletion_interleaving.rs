@@ -6,12 +6,12 @@ use crate::raft::{
 use crate::state::DesiredStateCommand;
 use std::collections::BTreeSet;
 
-fn removal_operation(node_id: &str) -> crate::state::MembershipOperation {
+fn removal_operation() -> crate::state::MembershipOperation {
     crate::state::MembershipOperation {
         operation_id: "remove-interleaved".into(),
         kind: crate::state::MembershipOperationKind::RemoveNode,
         raft_node_id: 2,
-        node_id: Some(node_id.into()),
+        node_id: Some(xp_test_fixtures::identifier_ulid_a().to_owned()),
         expected_membership: "test-membership".into(),
         phase: crate::state::MembershipOperationPhase::MembershipRemoved,
         legacy: false,
@@ -19,7 +19,7 @@ fn removal_operation(node_id: &str) -> crate::state::MembershipOperation {
         delete_endpoints: true,
         expected_endpoint_ids: vec![],
         expected_endpoint_tags: vec![],
-        created_at: "2026-01-01T00:00:00Z".into(),
+        created_at: xp_test_fixtures::baseline_timestamp().to_owned(),
         next_retry_at: None,
         terminal_at: None,
         evidence: Some("membership removed".into()),
@@ -49,10 +49,10 @@ impl RaftFacade for RemovingRaft {
             if deleting_user {
                 let mut store = self.state.store.lock().await;
                 if !self.prune_before_return {
-                    store.state_mut().membership_operations.insert(
-                        "remove-interleaved".into(),
-                        removal_operation(&self.removed),
-                    );
+                    store
+                        .state_mut()
+                        .membership_operations
+                        .insert("remove-interleaved".into(), removal_operation());
                 }
                 store.state_mut().nodes.remove(&self.removed);
                 store.save()?;
@@ -169,7 +169,7 @@ async fn committed_removal_is_not_reintroduced_before_cleanup_after_restart() {
             .create_user("committed removal".to_owned(), None)
             .unwrap();
         let mut node = store.get_node(&state.cluster.node_id).unwrap();
-        node.node_id = crate::id::new_ulid_string();
+        node.node_id = xp_test_fixtures::identifier_ulid_a().to_owned();
         let removed = node.node_id.clone();
         store.upsert_node(node.clone()).unwrap();
         node.node_id = crate::id::new_ulid_string();
@@ -233,7 +233,7 @@ async fn prepared_recovery_excludes_durably_removed_member_after_restart() {
         let mut store = state.store.lock().await;
         let user = store.create_user("recover removal".into(), None).unwrap();
         let mut node = store.get_node(&state.cluster.node_id).unwrap();
-        node.node_id = crate::id::new_ulid_string();
+        node.node_id = xp_test_fixtures::identifier_ulid_a().to_owned();
         let removed = node.node_id.clone();
         store.upsert_node(node.clone()).unwrap();
         node.node_id = crate::id::new_ulid_string();
@@ -251,7 +251,7 @@ async fn prepared_recovery_excludes_durably_removed_member_after_restart() {
         store
             .state_mut()
             .membership_operations
-            .insert("remove-interleaved".into(), removal_operation(&removed));
+            .insert("remove-interleaved".into(), removal_operation());
         store.state_mut().nodes.remove(&removed);
         store.save().unwrap();
     }
@@ -309,13 +309,13 @@ async fn unsaved_removal_never_discards_prepared_destination() {
     let removed = {
         let mut store = state.store.lock().await;
         let mut node = store.get_node(&state.cluster.node_id).unwrap();
-        node.node_id = crate::id::new_ulid_string();
+        node.node_id = xp_test_fixtures::identifier_ulid_a().to_owned();
         let removed = node.node_id.clone();
         store.upsert_node(node).unwrap();
         store
             .state_mut()
             .membership_operations
-            .insert("remove-interleaved".into(), removal_operation(&removed));
+            .insert("remove-interleaved".into(), removal_operation());
         store.save().unwrap();
         removed
     };
@@ -363,7 +363,7 @@ async fn unreadable_removal_proof_preserves_preparation_for_retry() {
     let removed = {
         let mut store = state.store.lock().await;
         let mut node = store.get_node(&state.cluster.node_id).unwrap();
-        node.node_id = crate::id::new_ulid_string();
+        node.node_id = xp_test_fixtures::identifier_ulid_a().to_owned();
         let removed = node.node_id.clone();
         store.upsert_node(node).unwrap();
         removed
@@ -378,7 +378,7 @@ async fn unreadable_removal_proof_preserves_preparation_for_retry() {
         store
             .state_mut()
             .membership_operations
-            .insert("remove-interleaved".into(), removal_operation(&removed));
+            .insert("remove-interleaved".into(), removal_operation());
         store.state_mut().nodes.remove(&removed);
         store.save().unwrap();
     }
