@@ -2,6 +2,86 @@ use super::*;
 use crate::node_history::RepositoryHistoryDeletionMarker;
 
 #[tokio::test]
+async fn remote_node_cleanup_waits_for_durable_local_membership_removal() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = fixture::app_state(directory.path());
+    let removed = {
+        let mut store = state.store.lock().await;
+        let mut node = store.get_node(&state.cluster.node_id).unwrap();
+        node.node_id = crate::id::new_ulid_string();
+        let id = node.node_id.clone();
+        store.upsert_node(node).unwrap();
+        id
+    };
+    state
+        .node_history
+        .prepare_user_deletion("target", &[removed.clone()])
+        .await
+        .unwrap();
+    let auth = || {
+        Some(axum::Extension(crate::http::InternalSignatureAuth {
+            verified: None,
+        }))
+    };
+    let attempt = || {
+        crate::http::admin_internal_clear_node_history(
+            axum::Extension(state.clone()),
+            axum::extract::Path(removed.clone()),
+            auth(),
+        )
+    };
+    assert_eq!(
+        attempt().await.unwrap_err().status,
+        axum::http::StatusCode::SERVICE_UNAVAILABLE
+    );
+    {
+        let mut store = state.store.lock().await;
+        store.state_mut().nodes.remove(&removed);
+    }
+    assert_eq!(
+        attempt().await.unwrap_err().status,
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "an uncommitted in-memory removal must not discard the prepared target"
+    );
+    state.store.lock().await.save().unwrap();
+    assert_eq!(attempt().await.unwrap(), axum::http::StatusCode::NO_CONTENT);
+    state
+        .node_history
+        .activate_prepared_user_deletion("target", &[])
+        .await
+        .unwrap();
+    assert!(
+        state
+            .node_history
+            .repository_deletion_markers("local")
+            .await
+            .unwrap()
+            .iter()
+            .any(|marker| marker.record_key == b"node-history:user:target:")
+    );
+    crate::http::history_repository::worker::publish_local_history_segment(
+        &state,
+        &[state.cluster.node_id.clone()],
+        None,
+        &[],
+        110,
+        true,
+    )
+    .await
+    .unwrap();
+    let markers = state
+        .node_history
+        .repository_deletion_markers(&removed)
+        .await
+        .unwrap();
+    assert!(
+        !markers
+            .iter()
+            .any(|marker| marker.record_key == b"node-history:user:target:")
+    );
+}
+
+#[tokio::test]
 async fn failed_raft_persistence_never_activates_prepared_history_deletion() {
     let directory = tempfile::tempdir().unwrap();
     let state = fixture::app_state(directory.path());

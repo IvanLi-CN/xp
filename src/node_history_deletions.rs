@@ -1,6 +1,13 @@
 use super::*;
 
 impl PersistedNodeHistoryCache {
+    fn remove_prepared_destination(&mut self, node_id: &str) {
+        // Empty destination sets still represent pending user deletions and must survive.
+        for destinations in self.prepared_user_deletions.values_mut() {
+            destinations.remove(node_id);
+        }
+    }
+
     pub(super) fn deletion_generation(&self, node: bool, id: &str) -> u64 {
         self.deletion_generations
             .get(&generation_key(node, id))
@@ -238,6 +245,7 @@ impl NodeHistoryHandle {
             state.nodes.remove(node_id);
             state.pending_user_traffic_cleanup.remove(node_id);
             state.pending_node_history_cleanup.remove(node_id);
+            state.remove_prepared_destination(node_id);
             for targets in state.pending_node_history_cleanup.values_mut() {
                 targets.remove(node_id);
             }
@@ -266,6 +274,7 @@ impl NodeHistoryHandle {
             state.nodes.remove(node_id);
             state.pending_user_traffic_cleanup.remove(node_id);
             state.pending_node_history_cleanup.remove(node_id);
+            state.remove_prepared_destination(node_id);
             for targets in state.pending_node_history_cleanup.values_mut() {
                 targets.remove(node_id);
             }

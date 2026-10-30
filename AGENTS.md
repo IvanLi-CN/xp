@@ -101,6 +101,8 @@
   deletion; a five-second worker resumes it and activates all destinations atomically only after a
   successful Raft response. Remove-node cleanup records every destination before the
   membership operation completes.
+  Durable node removal also prunes active and prepared user-cleanup destinations; remote cleanup
+  retries until the receiving node's in-memory and saved membership both reflect removal.
   Before downgrading to a build without prepared-deletion recovery, the node must first drain its
   `prepared_user_deletions` state.
   Tombstone expiry is committed atomically with the corresponding receiver state and history writes.

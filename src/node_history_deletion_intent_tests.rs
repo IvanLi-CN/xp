@@ -1,6 +1,88 @@
 use super::*;
 
 #[tokio::test]
+async fn removed_destination_does_not_return_when_prepared_deletion_recovers() {
+    for remove_before_activation in [true, false] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("node_history_cache.json");
+        let history = NodeHistoryHandle::new(path.clone());
+        history
+            .prepare_user_deletion("target", &["removed".into(), "retained".into()])
+            .await
+            .unwrap();
+        if remove_before_activation {
+            history
+                .clear_node_with_destinations("removed", &["retained".into()])
+                .await
+                .unwrap();
+        }
+        history
+            .activate_prepared_user_deletion("target", &["retained".into()])
+            .await
+            .unwrap();
+        if !remove_before_activation {
+            history
+                .clear_node_with_destinations("removed", &["retained".into()])
+                .await
+                .unwrap();
+        }
+        let user_markers = history
+            .repository_deletion_markers("local")
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|marker| marker.record_key == b"node-history:user:target:")
+            .collect::<Vec<_>>();
+        assert_eq!(user_markers.len(), 1);
+        history
+            .complete_repository_deletion_marker("local", &user_markers[0])
+            .await
+            .unwrap();
+        drop(history);
+        let restored = NodeHistoryHandle::new(path);
+        assert_eq!(
+            restored.pending_user_traffic_cleanup("retained").await,
+            vec!["target"]
+        );
+        assert!(
+            restored
+                .pending_user_traffic_cleanup("removed")
+                .await
+                .is_empty()
+        );
+    }
+}
+
+#[tokio::test]
+async fn removing_the_only_destination_keeps_the_prepared_user_deletion() {
+    let directory = tempfile::tempdir().unwrap();
+    let history = NodeHistoryHandle::new(directory.path().join("node_history_cache.json"));
+    history
+        .prepare_user_deletion("target", &["removed".into()])
+        .await
+        .unwrap();
+    history.clear_node("removed").await.unwrap();
+    history
+        .activate_prepared_user_deletion("target", &[])
+        .await
+        .unwrap();
+    assert!(
+        history
+            .repository_deletion_markers("local")
+            .await
+            .unwrap()
+            .iter()
+            .any(|marker| marker.record_key == b"node-history:user:target:")
+    );
+    assert!(
+        history
+            .pending_user_traffic_cleanup("removed")
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn node_deletion_fanout_is_atomic_and_survives_ack_and_restart() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("node_history_cache.json");

@@ -40,6 +40,30 @@ fn current_guard(connection: &Connection) -> Result<Option<(i64, Vec<u8>)>> {
 }
 
 impl HistoryStorage {
+    /// Check the saved cluster snapshot, rather than a possibly uncommitted in-memory mutation.
+    pub(crate) fn saved_state_lacks_node(&self, node_id: &str) -> Result<bool> {
+        let mut backend = self.lock_backend();
+        let connection = sqlite_connection(&mut backend)?
+            .ok_or_else(|| HistoryStorageError("durable node membership requires SQLite".into()))?;
+        let state: Option<(Option<String>, bool)> = connection
+            .query_row(
+                "SELECT json_type(CAST(payload AS TEXT), '$.nodes'), EXISTS(
+                    SELECT 1 FROM json_each(CAST(history_snapshots.payload AS TEXT), '$.nodes')
+                    WHERE key = ?2
+                 ) FROM history_snapshots WHERE key = ?1",
+                params![STATE_KEY, node_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        match state {
+            Some((Some(kind), present)) if kind == "object" => Ok(!present),
+            _ => Err(HistoryStorageError(
+                "durable cluster membership is unavailable".into(),
+            )),
+        }
+    }
+
     /// Commit deletion version and node history in one SQLite transaction without JSON fallback.
     pub(crate) fn write_node_history_guarded(
         &self,

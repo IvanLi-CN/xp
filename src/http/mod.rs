@@ -3948,6 +3948,21 @@ async fn admin_internal_clear_node_history(
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
+    // Keep membership observation and history cleanup ordered against local user preparation.
+    // A failed Raft state save can leave an uncommitted in-memory removal, so require the saved
+    // snapshot to agree before discarding any prepared or active destination.
+    let store = state.store.lock().await;
+    let durable_absence = HistoryStorage::open(&state.config.data_dir)
+        .saved_state_lacks_node(&node_id)
+        .map_err(|error| ApiError::internal(format!("verify durable node removal: {error}")))?;
+    if store.get_node(&node_id).is_some() || !durable_absence {
+        return Err(ApiError::new(
+            "node_removal_pending",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "node removal has not reached durable local state; retry cleanup",
+        )
+        .with_detail("retryable", true));
+    }
     state
         .node_history
         .clear_node(&node_id)
@@ -7019,7 +7034,7 @@ async fn admin_delete_user(
     }
     // The local state lock orders the durable preparation before any committed deletion can
     // become visible here. A prepared operation never removes history on its own.
-    let destinations = {
+    {
         let store = state.store.lock().await;
         if store.get_user(&user_id).is_none() {
             return Err(ApiError::not_found(format!("user not found: {user_id}")));
@@ -7035,8 +7050,7 @@ async fn admin_delete_user(
             .prepare_user_deletion(&user_id, &destinations)
             .await
             .map_err(|error| ApiError::internal(format!("prepare history deletion: {error}")))?;
-        destinations
-    };
+    }
     let out = raft_write(
         &state,
         crate::state::DesiredStateCommand::DeleteUser {
@@ -7061,19 +7075,28 @@ async fn admin_delete_user(
         return Err(ApiError::internal("unexpected raft apply result"));
     };
     // A recovery worker may already have applied this prepared deletion.
-    state
-        .node_history
-        .activate_prepared_user_deletion(&user_id, &destinations)
-        .await
-        .map_err(|error| {
-            tracing::warn!(%error, "prepared user history deletion awaits storage");
-            ApiError::new(
-                "user_deletion_pending",
-                StatusCode::SERVICE_UNAVAILABLE,
-                "user deletion is committed and history cleanup will retry",
-            )
-            .with_detail("retryable", true)
-        })?;
+    {
+        let store = state.store.lock().await;
+        let destinations = store
+            .list_nodes()
+            .into_iter()
+            .filter(|node| node.node_id != state.cluster.node_id)
+            .map(|node| node.node_id)
+            .collect::<Vec<_>>();
+        state
+            .node_history
+            .activate_prepared_user_deletion(&user_id, &destinations)
+            .await
+            .map_err(|error| {
+                tracing::warn!(%error, "prepared user history deletion awaits storage");
+                ApiError::new(
+                    "user_deletion_pending",
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "user deletion is committed and history cleanup will retry",
+                )
+                .with_detail("retryable", true)
+            })?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

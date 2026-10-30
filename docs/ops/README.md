@@ -940,6 +940,10 @@ Notes:
   the user is absent. After preparation, `user_deletion_pending` means recovery will retry.
   A remove-node operation atomically records its local and remote history cleanup after membership
   removal; the Raft membership operation remains incomplete until that write succeeds.
+  Removed nodes are pruned from active and prepared user-cleanup destinations, while empty prepared
+  operations remain recoverable. A remote cleanup returns retryable `node_removal_pending` until
+  its local in-memory and saved membership both reflect the removal; restore Raft replication or
+  storage health and allow the existing cleanup retry to continue.
   Receipt mappings clear before acknowledged intent; interrupted completion retries safely.
   A bounded version-checked scan reclaims legacy orphan mappings without deleting journal rows.
   Source deletion capture takes bounded batches of complete deletion intents, retaining all five

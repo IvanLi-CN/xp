@@ -23,6 +23,9 @@ a successful committed Raft response; an in-memory absence after a failed save i
 Node membership removal already has a Raft-backed operation that is retried until its cleanup
 finishes. Its local deletion and complete destination set are therefore committed in one guarded
 history transaction before that operation is marked complete.
+An observed, durably saved node removal also removes that node from active and prepared destination
+sets. Activation refreshes current membership under the same local state lock; remote node cleanup
+waits for the recipient's own saved membership to reflect the removal before acknowledging it.
 
 ## Consequences
 

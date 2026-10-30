@@ -23,6 +23,8 @@ use std::sync::{
 mod budget;
 #[path = "source_deletion_cleanup.rs"]
 mod deletion_cleanup;
+#[path = "source_deletion_interleaving.rs"]
+mod deletion_interleaving;
 #[path = "app_state.rs"]
 mod fixture;
 
