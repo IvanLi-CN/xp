@@ -959,6 +959,27 @@ pub(super) async fn admin_internal_raft_client_write(
             IdempotencyBegin::New => {}
         }
     }
+    let _xmux_guard = if crate::raft::app::xmux_command_requires_local_leader(&cmd) {
+        match crate::http::join_capability::lock_xmux_settings_change(&state).await {
+            Ok(guard) => guard,
+            Err(error) => {
+                if let Some((request_id, request)) = idempotency_request.as_ref() {
+                    state
+                        .internal_idempotency
+                        .abort(request_id, request)
+                        .await
+                        .map_err(|abort_error| {
+                            ApiError::internal(format!(
+                                "abort internal idempotency request: {abort_error}"
+                            ))
+                        })?;
+                }
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
     let _membership_operation_guard = if matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. })
     {
         let guard = crate::raft_membership_guard::membership_operation_gate()

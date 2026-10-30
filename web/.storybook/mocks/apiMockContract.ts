@@ -22,7 +22,6 @@ import type { ClusterInfoResponse } from "../../src/api/clusterInfo";
 import type { HealthResponse } from "../../src/api/health";
 import {
 	API_CAPABILITIES,
-	type ApiCapability,
 	CURRENT_API_FINGERPRINT,
 } from "../../src/api/releaseInventories";
 import type { VersionCheckResponse } from "../../src/api/versionCheck";
@@ -60,7 +59,7 @@ export type MockStateSeed = {
 	versionCheck: VersionCheckResponse;
 	capabilities: {
 		release_tag: string;
-		capabilities: ApiCapability[];
+		capabilities: string[];
 		fingerprint: Record<string, string[]>;
 	};
 	nodes: AdminNode[];
@@ -104,13 +103,14 @@ export const DEFAULT_API_CAPABILITIES = {
 	capabilities: [
 		...API_CAPABILITIES,
 		"admin.endpoint-mihomo-smux",
+		"admin.endpoint-vless-xmux-settings-v1",
 		"admin.history-repositories",
 		"admin.repository-history",
 		"admin.service-monitors",
 		"admin.service-monitor-observer-policy-v1",
 		"admin.service-monitor-draft-tests-v1",
 		"admin.service-monitor-draft-tests-same-origin-v1",
-	] satisfies ApiCapability[],
+	] satisfies string[],
 	fingerprint: Object.fromEntries(
 		Object.entries(CURRENT_API_FINGERPRINT).map(([path, fields]) => [
 			path,

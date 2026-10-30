@@ -1,11 +1,7 @@
 use super::MihomoSmuxConfig;
-use crate::protocol::{VLESS_XHTTP_PATH, VlessRealityTransport};
+use crate::protocol::{MihomoXmuxConfig, VLESS_XHTTP_PATH, VlessRealityTransport};
 
-const XHTTP_MAX_CONNECTIONS: &str = "1";
-const XHTTP_MAX_CONCURRENCY: &str = "0";
-const XHTTP_C_MAX_REUSE_TIMES: &str = "0";
 const XHTTP_H_MAX_REQUEST_TIMES: &str = "0";
-const XHTTP_H_MAX_REUSABLE_SECS: &str = "0";
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 #[serde(untagged)]
@@ -51,17 +47,17 @@ pub(super) struct ClashXhttpOpts {
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub(super) struct ClashXhttpReuseSettings {
     #[serde(rename = "max-connections")]
-    pub(super) max_connections: &'static str,
+    pub(super) max_connections: String,
     #[serde(rename = "max-concurrency")]
-    pub(super) max_concurrency: &'static str,
+    pub(super) max_concurrency: String,
     #[serde(rename = "c-max-reuse-times")]
-    pub(super) c_max_reuse_times: &'static str,
+    pub(super) c_max_reuse_times: String,
     #[serde(rename = "h-max-request-times")]
     pub(super) h_max_request_times: &'static str,
     #[serde(rename = "h-max-reusable-secs")]
-    pub(super) h_max_reusable_secs: &'static str,
+    pub(super) h_max_reusable_secs: String,
     #[serde(rename = "h-keep-alive-period")]
-    pub(super) h_keep_alive_period: i8,
+    pub(super) h_keep_alive_period: i32,
 }
 
 pub(super) struct ClashVlessTransportConfig {
@@ -125,6 +121,7 @@ pub(super) fn mihomo_smux_config(config: &MihomoSmuxConfig) -> Option<ClashSmuxC
 
 pub(super) fn mihomo_vless_transport_config(
     transport: VlessRealityTransport,
+    xmux: Option<&MihomoXmuxConfig>,
 ) -> ClashVlessTransportConfig {
     match transport {
         VlessRealityTransport::VisionTcp => ClashVlessTransportConfig {
@@ -140,14 +137,14 @@ pub(super) fn mihomo_vless_transport_config(
             xhttp_opts: Some(Box::new(ClashXhttpOpts {
                 path: VLESS_XHTTP_PATH,
                 mode: "stream-one",
-                reuse_settings: xhttp_reuse_settings(),
+                reuse_settings: xhttp_reuse_settings(xmux),
             })),
         },
     }
 }
 
-pub(super) fn mihomo_xhttp_share_extra_json() -> String {
-    let reuse = xhttp_reuse_settings();
+pub(super) fn mihomo_xhttp_share_extra_json(xmux: Option<&MihomoXmuxConfig>) -> String {
+    let reuse = xhttp_reuse_settings(xmux);
     serde_json::json!({
         "xmux": {
             "maxConnections": reuse.max_connections,
@@ -161,13 +158,14 @@ pub(super) fn mihomo_xhttp_share_extra_json() -> String {
     .to_string()
 }
 
-fn xhttp_reuse_settings() -> ClashXhttpReuseSettings {
+fn xhttp_reuse_settings(xmux: Option<&MihomoXmuxConfig>) -> ClashXhttpReuseSettings {
+    let config = xmux.cloned().unwrap_or_default();
     ClashXhttpReuseSettings {
-        max_connections: XHTTP_MAX_CONNECTIONS,
-        max_concurrency: XHTTP_MAX_CONCURRENCY,
-        c_max_reuse_times: XHTTP_C_MAX_REUSE_TIMES,
+        max_connections: config.max_connections,
+        max_concurrency: config.max_concurrency,
+        c_max_reuse_times: config.c_max_reuse_times,
         h_max_request_times: XHTTP_H_MAX_REQUEST_TIMES,
-        h_max_reusable_secs: XHTTP_H_MAX_REUSABLE_SECS,
-        h_keep_alive_period: -1,
+        h_max_reusable_secs: config.h_max_reusable_secs,
+        h_keep_alive_period: config.h_keep_alive_period,
     }
 }

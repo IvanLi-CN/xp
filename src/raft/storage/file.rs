@@ -22,6 +22,25 @@ use openraft::{
 use tokio::sync::Mutex;
 mod legacy_mesh;
 mod snapshot_install;
+
+fn endpoint_requires_inbound_rebuild(
+    previous: &crate::domain::Endpoint,
+    next: &crate::domain::Endpoint,
+) -> bool {
+    if previous.port != next.port {
+        return true;
+    }
+    let mut previous_meta = previous.meta.clone();
+    let mut next_meta = next.meta.clone();
+    if let Some(object) = previous_meta.as_object_mut() {
+        object.remove("mihomo_xmux");
+    }
+    if let Some(object) = next_meta.as_object_mut() {
+        object.remove("mihomo_xmux");
+    }
+    previous_meta != next_meta
+}
+
 #[derive(Debug, Clone)]
 pub struct StorePaths {
     pub wal_json: PathBuf,
@@ -506,7 +525,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                         DesiredStateCommand::UpsertEndpoint { endpoint, .. } => store
                             .get_endpoint(&endpoint.endpoint_id)
                             .filter(|existing| {
-                                existing.port != endpoint.port || existing.meta != endpoint.meta
+                                endpoint_requires_inbound_rebuild(existing, endpoint)
                             })
                             .map(|_| endpoint.endpoint_id.clone()),
                         _ => None,

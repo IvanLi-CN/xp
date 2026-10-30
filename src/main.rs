@@ -232,6 +232,7 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         "access_host": access_host,
         "api_base_url": api_base_url,
         "csr_pem": pending.csr_pem,
+        "xmux_settings_v1": true,
     });
 
     let resp = client.post(url).json(&req).send().await?;

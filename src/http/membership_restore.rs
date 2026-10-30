@@ -54,13 +54,7 @@ pub(super) async fn admin_internal_restore_node(
     }
     join_capability::require_membership_lifecycle_on_voters(&state).await?;
 
-    let node = state
-        .store
-        .lock()
-        .await
-        .get_node(&request.node_id)
-        .ok_or_else(|| ApiError::not_found(format!("node not found: {}", request.node_id)))?;
-    let raft_node_id = raft_node_id_from_ulid(&node.node_id)
+    let raft_node_id = raft_node_id_from_ulid(&request.node_id)
         .map_err(|error| ApiError::invalid_request(error.to_string()))?;
     let allowed_missing = request
         .allow_missing_node_ids
@@ -93,12 +87,22 @@ pub(super) async fn admin_internal_restore_node(
     if !is_leader(&metrics) {
         return Err(ApiError::invalid_request("not leader"));
     }
+    let node = state
+        .store
+        .lock()
+        .await
+        .get_node(&request.node_id)
+        .ok_or_else(|| ApiError::not_found(format!("node not found: {}", request.node_id)))?;
 
     let target_is_voter = metrics
         .membership_config
         .membership()
         .voter_ids()
         .any(|node_id| node_id == raft_node_id);
+    let custom_xmux = crate::raft_membership_guard::has_custom_xmux(&*state.store.lock().await);
+    if custom_xmux && !target_is_voter {
+        join_capability::require_xmux_settings_on_node(&state, &node).await?;
+    }
     let active_operation = {
         let store = state.store.lock().await;
         store.state().active_membership_operation().cloned()
@@ -134,7 +138,7 @@ pub(super) async fn admin_internal_restore_node(
                 operation_id: uuid::Uuid::new_v4().to_string(),
                 kind: crate::state::MembershipOperationKind::Restore,
                 raft_node_id,
-                node_id: Some(node.node_id),
+                node_id: Some(node.node_id.clone()),
                 expected_membership: crate::raft_membership_guard::membership_revision(&metrics)
                     .map_err(|error| ApiError::internal(error.to_string()))?,
                 phase: crate::state::MembershipOperationPhase::Prepared,
@@ -146,7 +150,14 @@ pub(super) async fn admin_internal_restore_node(
                 created_at: Utc::now().to_rfc3339(),
                 next_retry_at: None,
                 terminal_at: None,
-                evidence: Some("restore requested".to_string()),
+                evidence: Some(if custom_xmux {
+                    format!(
+                        "restore requested; {}",
+                        crate::raft_membership_guard::restore_xmux_proof(&node)
+                    )
+                } else {
+                    "restore requested".to_string()
+                }),
             };
             let _ = raft_write(
                 &state,
@@ -219,12 +230,26 @@ pub(super) async fn admin_internal_restore_stale_learner(
         .expected_membership
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| ApiError::invalid_request("--apply requires expected_membership"))?;
+    let custom_xmux = crate::raft_membership_guard::has_custom_xmux(&*state.store.lock().await);
+    let verified_node = if custom_xmux {
+        let node = state
+            .store
+            .lock()
+            .await
+            .get_node(&request.node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {}", request.node_id)))?;
+        join_capability::require_xmux_settings_on_node(&state, &node).await?;
+        Some(node)
+    } else {
+        None
+    };
     let operation =
         crate::raft_membership_guard::stale_learner_recovery::begin_stale_learner_recovery(
             state.raft.clone(),
             state.store.clone(),
             &request.node_id,
             &expected_membership,
+            verified_node.as_ref(),
         )
         .await
         .map_err(|error| ApiError::conflict(error.to_string()))?;

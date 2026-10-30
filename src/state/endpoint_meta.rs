@@ -4,9 +4,9 @@ use super::StoreError;
 use crate::{
     domain::EndpointKind,
     protocol::{
-        MihomoSmuxConfig, RealityKeys, SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
-        VlessRealityTransport, VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
-        generate_short_id_16hex, generate_ss2022_psk_b64,
+        MihomoSmuxConfig, MihomoXmuxConfig, RealityKeys, SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
+        Ss2022EndpointMeta, VlessRealityTransport, VlessRealityVisionTcpEndpointMeta,
+        generate_reality_keypair, generate_short_id_16hex, generate_ss2022_psk_b64,
     },
 };
 
@@ -19,6 +19,8 @@ struct VlessRealityEndpointMetaInput {
     accepted_authorities: Vec<String>,
     #[serde(default)]
     mihomo_smux: MihomoSmuxConfig,
+    #[serde(default)]
+    mihomo_xmux: Option<MihomoXmuxConfig>,
     #[serde(default = "default_new_vless_transport")]
     transport: VlessRealityTransport,
 }
@@ -54,6 +56,7 @@ pub(super) fn build_endpoint_meta(
                 active_short_id: short_id,
                 canary_upstream: input.canary_upstream,
                 accepted_authorities: input.accepted_authorities,
+                mihomo_xmux: input.mihomo_xmux,
                 mihomo_smux: input.mihomo_smux,
                 transport: input.transport,
                 managed_default: false,

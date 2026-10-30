@@ -36,6 +36,24 @@ pub use crate::raft_membership_cleanup::{
     MembershipRemovalCleanup, finalize_remove_node_cleanup_once,
 };
 static MEMBERSHIP_OPERATION_GATE: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
+pub(crate) const RESTORE_XMUX_VERIFIED: &str = "xmux-settings-v1 target verified";
+
+pub(crate) fn restore_xmux_proof(node: &crate::domain::Node) -> String {
+    let mut digest = Sha256::new();
+    digest.update(node.node_id.as_bytes());
+    digest.update([0]);
+    digest.update(node.api_base_url.as_bytes());
+    format!("{RESTORE_XMUX_VERIFIED}:{}", hex::encode(digest.finalize()))
+}
+
+pub(crate) fn has_custom_xmux(store: &crate::state::JsonSnapshotStore) -> bool {
+    store.list_endpoints().iter().any(|endpoint| {
+        endpoint
+            .meta
+            .get("mihomo_xmux")
+            .is_some_and(|value| !value.is_null())
+    })
+}
 pub fn membership_operation_gate() -> Arc<Mutex<()>> {
     MEMBERSHIP_OPERATION_GATE
         .get_or_init(|| Arc::new(Mutex::new(())))
@@ -628,7 +646,20 @@ pub(crate) async fn transition_operation(
 ) -> anyhow::Result<MembershipOperation> {
     operation.expected_membership = membership_revision(&raft.metrics().borrow().clone())?;
     operation.phase = phase;
-    operation.evidence = Some(evidence.to_string());
+    let proof = (operation.kind == MembershipOperationKind::Restore)
+        .then_some(operation.evidence.as_deref())
+        .flatten()
+        .and_then(|value| {
+            value
+                .split("; ")
+                .find(|part| part.starts_with(RESTORE_XMUX_VERIFIED))
+        })
+        .map(str::to_owned);
+    operation.evidence = Some(if let Some(proof) = proof {
+        format!("{evidence}; {proof}")
+    } else {
+        evidence.to_string()
+    });
     if operation.phase.is_terminal() {
         operation.terminal_at = Some(Utc::now().to_rfc3339());
     }
@@ -719,6 +750,21 @@ async fn resume_restore_operation(
         .await
         .get_node(&node_id)
         .ok_or_else(|| anyhow::anyhow!("restore operation node is missing"))?;
+    if has_custom_xmux(&*store.lock().await)
+        && !operation.evidence.as_deref().is_some_and(|value| {
+            value
+                .split("; ")
+                .any(|part| part == restore_xmux_proof(&node))
+        })
+    {
+        block_membership_operation(
+            raft,
+            operation,
+            "restore target has no verified XMUX capability for its current identity",
+        )
+        .await?;
+        return Ok(());
+    }
     let metrics = raft.metrics().borrow().clone();
     if !is_current_local_leader(&metrics) {
         return Ok(());
@@ -874,6 +920,10 @@ pub async fn resume_membership_operations_once(
     let Ok(_guard) = membership_operation_gate().try_lock_owned() else {
         return Ok(());
     };
+    if !is_current_local_leader(&raft.metrics().borrow().clone()) {
+        return Ok(());
+    }
+    raft.ensure_linearizable().await?;
     let operation = store
         .lock()
         .await
