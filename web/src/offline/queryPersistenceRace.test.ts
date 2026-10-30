@@ -90,6 +90,27 @@ describe("query cache cleanup", () => {
 		]);
 	});
 
+	it("keeps a newer snapshot written while an old read is pending", async () => {
+		const key = ["adminNodes"];
+		stores.get("offline_query_snapshots")?.set(JSON.stringify(key), {
+			data: ["old"],
+			buildId: "test-build",
+			storedAt: 1,
+		});
+		reads.store = "offline_query_snapshots";
+		const started = new Promise<void>((resolve) => {
+			reads.started = resolve;
+		});
+		const oldRead = readPersistedQuerySnapshot(key);
+		await started;
+		await writePersistedQuerySnapshot(key, ["new"], Date.now());
+		reads.release?.();
+		await oldRead;
+		expect((await readPersistedQuerySnapshot<string[]>(key)).data).toEqual([
+			"new",
+		]);
+	});
+
 	it.each(["offline_query_snapshots", "react_query_cache"])(
 		"discards an in-flight read from %s when the session is cleared",
 		async (storeName) => {

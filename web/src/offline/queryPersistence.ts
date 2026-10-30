@@ -249,7 +249,12 @@ export async function readPersistedQuerySnapshot<T>(
 		}
 		if (snapshot) {
 			await enqueuePersistence(async () => {
-				if (epoch === persistenceEpoch) {
+				if (epoch !== persistenceEpoch) return;
+				const current = await offlineSnapshotStorage.getItem(snapshotKey);
+				if (
+					epoch === persistenceEpoch &&
+					JSON.stringify(current) === JSON.stringify(snapshot)
+				) {
 					await offlineSnapshotStorage.removeItem(snapshotKey);
 				}
 			});
