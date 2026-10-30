@@ -915,9 +915,9 @@ Notes:
   `tombstone-backfill-<source_node_id>` with separate backfill state. This page never consumes or
   advances the live source sequence, outbox or hash chain. If the live source epoch is unset, the
   first backfill page durably initializes that identity epoch before creating its independent
-  sequence chain. A persisted page is resumed only after XP rechecks cluster binding, the derived repository
-  identity, segment ownership, signature, source/epoch/stream, sequence continuity and predecessor
-  hash. Wire receive, record/tombstone import, ACK and page cursor commit
+  sequence chain. A persisted page resumes only after XP rechecks the cluster binding and derived
+  repository identity. It also checks segment ownership, signature, source/epoch/stream, sequence
+  continuity and predecessor hash. Wire receive, record/tombstone import, ACK and page cursor commit
   atomically; a failure leaves the exact unacknowledged wires for retry.
   New-format in-flight wires clear only at the durable receive/apply ACK boundary; an old
   source-journal row is deleted only after a real ACK removes that exact segment.

@@ -29,7 +29,7 @@ struct Source {
     target: String,
     available: Arc<AtomicBool>,
     max_requests: Arc<AtomicUsize>,
-    requests: Arc<tokio::sync::Mutex<Vec<Option<String>>>>,
+    request_log: Arc<tokio::sync::Mutex<Vec<Option<String>>>>,
 }
 
 struct Server {
@@ -65,7 +65,7 @@ async fn serve(State(source): State<Source>, uri: Uri, headers: HeaderMap) -> Re
         .find_map(|pair| pair.strip_prefix("page_cursor="))
         .map(str::to_owned);
     let request_count = {
-        let mut requests = source.requests.lock().await;
+        let mut requests = source.request_log.lock().await;
         requests.push(cursor.clone());
         requests.len()
     };
@@ -113,7 +113,7 @@ async fn server(owner: &AppState, exporter: AppState, target: &str) -> Server {
         target: target.to_owned(),
         available: Arc::new(AtomicBool::new(true)),
         max_requests: Arc::new(AtomicUsize::new(usize::MAX)),
-        requests: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+        request_log: Arc::new(tokio::sync::Mutex::new(Vec::new())),
     };
     let issuer = Issuer::from_ca_cert_pem(
         &owner.cluster_ca_pem,
@@ -299,7 +299,7 @@ async fn first_repository_waits_for_source_deletions_across_pages_outage_and_res
         InitialBackfillProgress::Complete
     );
     assert_eq!(local_data(&storage, &state.cluster.node_id).len(), 1);
-    let requests = server.source.requests.lock().await;
+    let requests = server.source.request_log.lock().await;
     assert_eq!(requests.len(), 3);
     assert_eq!(requests[0], None);
     assert_eq!(requests[1], checkpoint.page_cursor);
@@ -614,7 +614,7 @@ async fn stale_first_repository_restarts_changed_multipage_source_after_restart(
             .iter()
             .any(|row| row.record_key.starts_with(b"node-history:node:"))
     );
-    let requests = server.source.requests.lock().await;
+    let requests = server.source.request_log.lock().await;
     assert!(requests.iter().filter(|cursor| cursor.is_none()).count() >= 2);
 }
 
@@ -959,8 +959,8 @@ async fn every_registered_source_must_finish_before_local_replay() {
     );
     assert!(storage.source_delivery_journal().unwrap().is_empty());
     assert_eq!(local_data(&storage, &state.cluster.node_id).len(), 2);
-    assert_eq!(first.source.requests.lock().await.len(), 1);
-    assert_eq!(second.source.requests.lock().await.len(), 2);
+    assert_eq!(first.source.request_log.lock().await.len(), 1);
+    assert_eq!(second.source.request_log.lock().await.len(), 2);
 }
 
 #[test]

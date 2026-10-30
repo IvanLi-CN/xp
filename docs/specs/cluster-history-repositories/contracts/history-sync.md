@@ -61,6 +61,15 @@ original pending page only after its chain is complete; the records, page checkp
 collector ACK for its exact original IDs commit atomically. Missing predecessors are retried without
 inventing a permanent gap. Subsequent newly collected backfill pages use the independent stream.
 
+When an expired repository has a pending legacy page and no Ready peer, it scans registered sources
+over signed public HTTPS before replay. The initial-backfill request uses `stable_deletions=true`;
+the response contains only deletion markers and a `deletion_snapshot` bound to the cluster, source
+identity, marker set and durable deletion version. Each continuation preserves that snapshot and the
+fixed observation time. A changed snapshot restarts the bounded export.
+A missing or invalid snapshot fails closed and remains retryable.
+Deletion evidence and page progress commit atomically against the current source membership.
+Later deletions use the normal durable source delivery path.
+
 Before applying a persisted local page, the receiver reloads the exact signed wires and checks the
 current cluster binding, derived repository identity, segment ownership, signature, source node,
 backfill epoch, stream suffix, expected sequence, and predecessor hash chain. The page's computed

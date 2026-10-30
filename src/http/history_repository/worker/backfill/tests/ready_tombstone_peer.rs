@@ -32,7 +32,7 @@ struct PeerState {
     sender: String,
     target: String,
     fault: Arc<Mutex<Option<Fault>>>,
-    requests: Arc<Mutex<Vec<String>>>,
+    request_log: Arc<Mutex<Vec<String>>>,
     evidence: Arc<Mutex<Option<RepositoryReplicaSegment>>>,
     gap: Arc<Mutex<Option<RepositoryReplicaGap>>>,
     initial_page: Arc<Mutex<Option<serde_json::Value>>>,
@@ -76,7 +76,7 @@ impl Peer {
             sender: state.cluster.node_id.clone(),
             target: "registered-syncing-peer".into(),
             fault: Arc::new(Mutex::new(None)),
-            requests: Arc::new(Mutex::new(Vec::new())),
+            request_log: Arc::new(Mutex::new(Vec::new())),
             evidence: Arc::new(Mutex::new(None)),
             gap: Arc::new(Mutex::new(None)),
             initial_page: Arc::new(Mutex::new(None)),
@@ -133,7 +133,7 @@ impl Peer {
     }
 
     pub(super) async fn requests(&self) -> Vec<String> {
-        self.state.requests.lock().await.clone()
+        self.state.request_log.lock().await.clone()
     }
 
     pub(super) async fn evidence(&self, row: Option<RepositoryReplicaSegment>) {
@@ -165,7 +165,7 @@ async fn response(
     .unwrap();
     assert_eq!(verified.context.sender_id, state.sender);
     assert_eq!(verified.context.route, InternalRoute::MeshV2);
-    state.requests.lock().await.push(uri.to_string());
+    state.request_log.lock().await.push(uri.to_string());
     let fault = *state.fault.lock().await;
     let is_repair = uri.path().ends_with("/repair");
     let triggered = (uri.path().ends_with("/initial-backfill")

@@ -310,7 +310,7 @@ fn successor_segment(
         })
         .collect();
     CanonicalSegment::new(
-        "cluster",
+        xp_test_fixtures::primary_cluster_id(),
         Cursor::new("source", epoch, stream, sequence).unwrap(),
         records,
         previous,
@@ -364,7 +364,15 @@ fn successor_page(
     bytes: usize,
 ) -> Result<(Vec<SourceDeliveryJournalRow>, u64, [u8; 32])> {
     storage.source_delivery_journal_successors(
-        "cluster", identity, 7, "runtime", start, end, hash, count, bytes,
+        xp_test_fixtures::primary_cluster_id(),
+        identity,
+        7,
+        "runtime",
+        start,
+        end,
+        hash,
+        count,
+        bytes,
     )
 }
 
@@ -672,7 +680,7 @@ fn successor_preflight_and_blob_reads_use_one_snapshot_with_concurrent_writer() 
     let mut backend = storage.lock_backend();
     let connection = sqlite_connection(&mut backend).unwrap().unwrap();
     let query = SuccessorQuery {
-        cluster_id: "cluster",
+        cluster_id: xp_test_fixtures::primary_cluster_id(),
         identity: &identity,
         epoch: 7,
         stream: "runtime",
@@ -838,7 +846,7 @@ fn successor_can_read_indexed_signed_epoch_zero_without_treating_it_as_legacy() 
     insert_successor(&storage, &identity, &first);
     let (rows, next, hash) = storage
         .source_delivery_journal_successors(
-            "cluster",
+            xp_test_fixtures::primary_cluster_id(),
             &identity,
             0,
             "runtime",
