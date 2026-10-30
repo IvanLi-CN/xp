@@ -1,7 +1,6 @@
-# XP Glossary
+# XP Product Glossary
 
 This glossary defines XP cluster terms and Mihomo subscription vocabulary.
-It also covers dynamic proxy groups and external resources.
 
 ## Language
 
@@ -130,3 +129,21 @@ _Avoid_: Product settings, query-string toolbar
 **Demo Share State**:
 The allowlisted URL parameters that reproduce a Demo scene, persona, fault profile and product page without carrying secrets or mutation payloads.
 _Avoid_: Serialized demo state, shareable credentials
+
+## Web Admin
+
+**Primary Backend**:
+The single same-cluster HTTPS node origin that receives the browser's API and
+status-stream requests for the current Web/PWA session.
+_Avoid_: Service node, current node, automatic failover node
+
+**Backend Candidate**:
+A same-cluster HTTPS origin already known to the browser from the current page,
+an authenticated node profile, or an approved static-console runtime policy and
+eligible for manual selection.
+_Avoid_: Arbitrary backend, relay node
+
+**Pre-auth Backend Selection**:
+A temporary Primary Backend choice made on the Login page before admin-token
+verification; it becomes durable only after authentication succeeds.
+_Avoid_: Login server switch, automatic failover

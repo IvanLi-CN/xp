@@ -1,4 +1,5 @@
 import type { Preview } from "@storybook/react";
+import { configure } from "@storybook/test";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
 	Outlet,
@@ -9,6 +10,8 @@ import {
 	createRouter,
 } from "@tanstack/react-router";
 
+import { PrimaryBackendProvider } from "../src/backend/PrimaryBackendProvider";
+import { resetPrimaryBackendTransportForTests } from "../src/backend/primaryBackend";
 import { AppLayout } from "../src/components/AppLayout";
 import { PwaStatusPrompt } from "../src/components/PwaStatusPrompt";
 import { ToastProvider } from "../src/components/Toast";
@@ -58,6 +61,8 @@ type StorybookAppRuntimeParameters = {
 	initialIsOnline?: boolean;
 };
 
+// Page stories wait for public backend readiness and authenticated hydration.
+configure({ asyncUtilTimeout: 5_000 });
 installStorybookFetchMock();
 
 function safeLocalStorageSet(key: string, value: string) {
@@ -153,6 +158,8 @@ const preview: Preview = {
 			const density =
 				context.globals.density === "compact" ? "compact" : "comfortable";
 
+			safeLocalStorageRemove("xp-primary-backend-profiles");
+			resetPrimaryBackendTransportForTests();
 			configureStorybookApiMock(context.id, mockParams);
 
 			safeLocalStorageSet(UI_THEME_STORAGE_KEY, theme);
@@ -352,7 +359,9 @@ const preview: Preview = {
 							initialIsOnline={appRuntimeParams?.initialIsOnline}
 						>
 							<ToastProvider>
-								<RouterProvider router={router} />
+								<PrimaryBackendProvider>
+									<RouterProvider router={router} />
+								</PrimaryBackendProvider>
 								<PwaStatusPrompt />
 							</ToastProvider>
 						</AppRuntimeProvider>

@@ -5,6 +5,7 @@
 - [ADR 0011](../../adr/0011-cross-origin-primary-backend-for-embedded-pwa.md)
 - [ADR 0012](../../adr/0012-edgeone-static-web-console.md)
 - [ADR 0013](../../adr/0013-authenticated-node-directory-for-static-console.md)
+- [ADR 0029](../../adr/0029-pre-auth-primary-backend-recovery.md)
 
 ## Context and Scope
 
@@ -19,6 +20,13 @@ The scope includes the Rust `/api` browser-CORS middleware, the Web transport
 and profile store, candidate verification, the AppShell header selector, query
 and SSE refresh behavior, the mutation switch barrier, controlled UI tests,
 and operator-facing deployment documentation.
+
+The existing implementation has a login recovery gap: the selector is only
+available inside the authenticated AppShell, while login verification is sent
+to the current transport target. A stale or node-local token can therefore
+leave an administrator on the login page with no way to choose a previously
+verified same-cluster backend. This extension defines the pre-auth recovery
+path and cold-start restoration of a persisted primary origin.
 
 The scope excludes cross-origin cookies, automatic failover, arbitrary URL entry,
 request replay, multi-cluster profiles, changes to server-side
@@ -60,13 +68,15 @@ ADR 0012 and does not alter this embedded-PWA contract.
   allowlist. An origin absent from the authenticated current inventory is a
   formally removed node and MUST be retired. Policy expiry MUST lock backend
   switching until a fresh authenticated policy is received.
-- **REQ-CANDIDATE**: A candidate MUST come only from the current page origin
-  or an authenticated current-cluster node inventory. Registered node origins
-  MUST be canonical HTTPS origins without userinfo, paths, queries, or hashes.
+- **REQ-CANDIDATE**: An authenticated switching candidate MUST come only from
+  the current page origin or an authenticated current-cluster node inventory.
+  Registered node origins MUST be canonical HTTPS origins without userinfo, paths, queries,
+  or hashes.
   Before a credentialed
   probe, the browser MUST verify public health, matching `cluster_id`, an
   immutable compatible API release profile, and the candidate inventory. A
-  failed check MUST neither persist nor select the candidate.
+  failed check MUST neither persist nor select the candidate. The pre-auth recovery
+  exception is defined by REQ-PREAUTH-SOURCE, REQ-PREAUTH-PROBE and REQ-PREAUTH-PERSIST.
 - **REQ-NODE-DIRECTORY**: After authentication, the selector MUST derive its
   rows from the current cluster's registered node inventory. Each row MUST
   show the registered node name and HTTPS origin, mark the selected node, and
@@ -140,6 +150,66 @@ ADR 0012 and does not alter this embedded-PWA contract.
   rightmost header control, after Settings, on desktop and narrow viewports.
   It MUST provide accessible labels and keep the selector and adjacent
   controls within the viewport.
+- **REQ-PREAUTH-SELECTOR**: The Login page MUST expose a service-node selector
+  when the browser has the current page origin or one or more persisted
+  candidates for the active cluster profile. The selector MUST be keyboard
+  accessible and MUST identify each candidate by node name when available and
+  origin host as a fallback. On desktop it MUST appear as a direct dropdown
+  without a visible label at the top right of the page. The dropdown and its
+  menu MUST share a width determined by the widest candidate, within a usable
+  minimum and a viewport-safe maximum. On narrow screens it MUST remain within
+  the login form layout.
+- **REQ-PREAUTH-SOURCE**: Pre-auth candidates MUST be limited to the current
+  page origin and candidates already recorded in the browser's cluster-keyed
+  backend profile. The Web client MUST NOT add arbitrary operator-entered
+  origins, perform anonymous node-inventory discovery, or show candidates from
+  another stored cluster profile.
+- **REQ-PREAUTH-PROBE**: Before a pre-auth candidate becomes selectable, the
+  browser MUST perform the existing public checks for health, matching
+  `cluster_id`, and compatible API release profile. These checks MUST NOT send
+  the admin token. A failed or stale candidate MUST remain unselected and
+  MUST expose a retryable error without deleting the last known profile.
+  Immediately before each embedded-console token verification, the client MUST
+  repeat these public checks for the selected origin and its expected cluster.
+  A failed check or a change to the selected origin, cluster, or backend generation
+  during the check MUST prevent the credentialed request; the administrator
+  can retry or choose another candidate.
+- **REQ-PREAUTH-TARGET**: While the Login page is active, the selected
+  candidate MUST be the target for token verification and subsequent relative
+  `/api/*` requests in that tab. The login attempt MUST NOT mix the current
+  page origin and the selected candidate for authentication.
+- **REQ-PREAUTH-401**: A `401` or other structured authentication rejection
+  from the selected candidate MUST keep the Login page open, preserve the
+  selected candidate, avoid persisting the unverified token, and allow the
+  administrator to change candidate or edit the token.
+- **REQ-PREAUTH-RESTORE**: On a non-static-console cold start, the transport
+  MUST restore the persisted primary origin for the active cluster profile
+  before the first authenticated API request, provided the origin is a
+  canonical HTTPS origin recorded in that profile. If it cannot be reached,
+  the Login page MUST still offer the current page origin as an explicit
+  recovery choice. If that public probe proves a different cluster identity,
+  the client MUST discard the stale in-memory candidates, bind the current
+  tab to the probed cluster, and defer persistence until authenticated node
+  inventory hydration. If an already authenticated session proves that its
+  restored target belongs to a different cluster, the client MUST clear the
+  token, reset transport to the page or bootstrap recovery origin, and return
+  to Login before sending a credentialed request to that cluster.
+- **REQ-PREAUTH-PERSIST**: A pre-auth choice MUST remain session-local until
+  token verification succeeds. The selected origin MAY become the durable
+  primary backend only after successful authentication and an authenticated
+  current node inventory confirms that origin is registered. Cached candidates can have been
+  removed since their last authentication; public checks do not prove current membership.
+  A verification response MUST be accepted only if the origin, cluster, and backend generation
+  are unchanged since the request started.
+  When a verified login changes the token, the client MUST invalidate the prior authenticated
+  directory and retain only the verified pre-auth target in memory until a fresh inventory succeeds.
+  The previous cached profile MUST remain unchanged until that inventory is accepted; explicit
+  logout and cross-tab session changes continue to clear the previous session's directory.
+- **REQ-TOKEN-CONSISTENCY**: Nodes in one cluster MUST continue to use the
+  cluster admin-token contract. A token accepted by one healthy member but
+  rejected by another same-cluster member is an operator/deployment
+  consistency failure; the Web client MUST NOT work around it by introducing
+  per-node credentials or automatic retry on another node.
 
 ## Verification
 
@@ -154,10 +224,14 @@ ADR 0012 and does not alter this embedded-PWA contract.
   `primary-backend-switcher` browser test verifies that a listed origin is
   reachable when CSP and CORS agree and that an unlisted origin is blocked by
   the document policy.
-- **VER-CANDIDATE** covers: REQ-CANDIDATE. The command
-  `cd web && bun run test -- src/backend/primaryBackend.test.ts` verifies
-  health/cluster/compatibility ordering, the credential gate, inventory
-  membership, and stale-node removal.
+- **VER-CANDIDATE** covers: REQ-CANDIDATE. The following command verifies health,
+  cluster and compatibility ordering, the credential gate, inventory membership,
+  and stale-node removal:
+
+  ```sh
+  cd web && bun run test -- src/backend/primaryBackend.test.ts \
+    src/backend/primaryBackendCandidate.test.ts
+  ```
 - **VER-STATIC-POLICY** covers: REQ-STATIC-POLICY-STAGING and REQ-STATIC-POLICY-NODE-STATES.
   The browser smoke evidence plus this test
   command prove that a policy-id change is staged without activating a new
@@ -171,6 +245,8 @@ ADR 0012 and does not alter this embedded-PWA contract.
     src/offline/useStaticRuntimePolicy.test.tsx \
     src/backend/primaryBackend.test.ts
   ```
+- **VER-STATIC-NODE-STATES** covers: REQ-STATIC-POLICY-NODE-STATES.
+  The same browser smoke and unit tests exercise node-state exclusion, retirement and expiry.
 - **VER-NODE-DIRECTORY** covers: REQ-NODE-DIRECTORY. The authenticated node
   inventory and selector Storybook state verify real names, current-node
   marking, the static-policy gate, and the absence of the old generic
@@ -208,8 +284,35 @@ ADR 0012 and does not alter this embedded-PWA contract.
 - **VER-UI** covers: REQ-NAV. The Storybook suite
   `primary-backend-switcher.spec.ts` verifies right-edge control ordering,
   narrow-menu bounds, keyboard-accessible labels, and non-overlapping
-  AppShell controls. The approved controlled captures below are the visual
+  AppShell controls. Storybook interaction checks wait for backend identity
+  verification and authenticated page hydration before asserting controls.
+  The approved controlled captures below are the visual
   evidence set.
+- **VER-PREAUTH-SELECTOR** covers: REQ-PREAUTH-SELECTOR, REQ-PREAUTH-SOURCE.
+  Login-page and Storybook tests MUST cover keyboard
+  access, node-name/host labels, current-origin fallback, active-profile
+  filtering, and zero-candidate recovery.
+- **VER-PREAUTH-PROBE** covers: REQ-PREAUTH-PROBE. Transport and browser tests
+  MUST cover public health, cluster, and compatibility checks without an
+  Authorization header, plus retryable failures that do not delete cached
+  candidates.
+- **VER-PREAUTH-TARGET** covers: REQ-PREAUTH-TARGET. Login-page and browser
+  tests MUST prove that token verification and later relative API/SSE requests
+  use the selected origin for the active tab.
+- **VER-PREAUTH-401** covers: REQ-PREAUTH-401. Login-page tests MUST prove that
+  a structured authentication rejection keeps the page open, preserves the
+  selection, and does not persist the unverified token.
+- **VER-PREAUTH-RESTORE** covers: REQ-PREAUTH-RESTORE. Transport tests MUST
+  cover cold-start restoration of a canonical active-profile primary and the
+  current-page recovery fallback.
+- **VER-PREAUTH-PERSIST** covers: REQ-PREAUTH-PERSIST. Transport and browser
+  tests MUST prove that a pre-auth choice is session-local until authenticated
+  node-inventory hydration succeeds, after which the selected origin may be
+  persisted.
+- **VER-TOKEN-CONSISTENCY** covers: REQ-TOKEN-CONSISTENCY. Backend or
+  integration coverage MUST prove that a joined node receives the cluster
+  admin-token hash and that the Web recovery flow does not add per-node token
+  state.
 
 ## Visual Evidence
 
@@ -246,6 +349,61 @@ ADR 0012 and does not alter this embedded-PWA contract.
   evidence_note: verifies two-row layout, touch-sized controls, and right-edge ordering.
   image:
   ![Mobile header](./assets/app-shell-header-mobile-primary-right.png)
+
+- source_type: storybook_canvas
+  target_program: mock-only
+  capture_scope: browser-viewport
+  requested_viewport: 1280x900
+  viewport_strategy: storybook-viewport
+  margin_policy: trim_only
+  evidence_surface: page
+  surface_selector: N/A (full page)
+  target_selector: N/A (full page)
+  sensitive_exclusion: N/A
+  submission_gate: approved
+  story_id_or_title: Pages/LoginPage/PreAuthBackendRecovery
+  state: Login page with a known same-cluster backend candidate selected
+  evidence_note: verifies the desktop login page and content-sized node selector
+  without a synthetic evidence frame.
+  image:
+  ![Login pre-auth desktop](./assets/login-preauth-desktop.png)
+
+- source_type: storybook_canvas
+  target_program: mock-only
+  capture_scope: browser-viewport
+  requested_viewport: 1280x900
+  viewport_strategy: storybook-viewport
+  margin_policy: trim_only
+  evidence_surface: page
+  surface_selector: N/A (full page)
+  target_selector: N/A (full page)
+  sensitive_exclusion: N/A
+  submission_gate: approved
+  story_id_or_title: Pages/LoginPage/PreAuthBackendRecovery
+  state: Login page with the service-node menu open
+  evidence_note: verifies that the selector and menu share the width required by
+  their candidate contents and fit within the desktop viewport.
+  image:
+  ![Login pre-auth desktop menu](./assets/login-preauth-desktop-menu.png)
+
+- source_type: storybook_canvas
+  target_program: mock-only
+  capture_scope: browser-viewport
+  requested_viewport: 393x852
+  viewport_strategy: storybook-viewport
+  margin_policy: trim_only
+  evidence_surface: page
+  surface_selector: N/A (full page)
+  target_selector: N/A (full page)
+  sensitive_exclusion: N/A
+  submission_gate: approved
+  story_id_or_title: Pages/LoginPage/ZeroCandidates
+  state: Login page with current-page fallback and the service-node menu open
+  evidence_note: verifies the mobile selector, zero-candidate recovery state,
+  token form, error surface, and actions fit within the full viewport without
+  a synthetic evidence frame.
+  image:
+  ![Login pre-auth mobile](./assets/login-preauth-mobile.png)
 
 - source_type: storybook_canvas
   target_program: mock-only

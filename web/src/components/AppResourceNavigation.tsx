@@ -26,6 +26,8 @@ type AppResourceNavigationProps = {
 	compatibilityError: string | null;
 	compatibilityPending: boolean;
 	groups: AppNavigationGroup[];
+	backendOrigin?: string;
+	backendClusterId?: string | null;
 	localNodeId: string | null;
 	pathname: string;
 	search: string;
@@ -56,6 +58,8 @@ export function AppResourceNavigation({
 	compatibilityError,
 	compatibilityPending,
 	groups,
+	backendOrigin,
+	backendClusterId,
 	localNodeId,
 	pathname,
 	search,
@@ -78,6 +82,14 @@ export function AppResourceNavigation({
 	const nodesRequested = requestedResources.nodes || nodesActive;
 	const endpointsRequested = requestedResources.endpoints || endpointsActive;
 	const usersRequested = requestedResources.users || usersActive;
+	const backendIdentity =
+		backendOrigin !== undefined && backendClusterId
+			? [backendClusterId, backendOrigin]
+			: [];
+	const adminNodesQueryKey =
+		backendIdentity.length > 0
+			? ["adminNodes", adminToken, ...backendIdentity]
+			: ["adminNodes", adminToken];
 	const currentNodeDetailsTab = pathname.startsWith("/nodes/")
 		? new URLSearchParams(search).get("tab")
 		: null;
@@ -86,23 +98,30 @@ export function AppResourceNavigation({
 			? `?tab=${encodeURIComponent(currentNodeDetailsTab)}`
 			: "";
 	const adminNodes = useQuery({
-		queryKey: ["adminNodes", adminToken],
+		queryKey: adminNodesQueryKey,
 		enabled:
-			adminToken.length > 0 && nodesCapability.available && nodesRequested,
+			!compatibilityPending &&
+			adminToken.length > 0 &&
+			nodesCapability.available &&
+			nodesRequested,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 	const adminEndpoints = useQuery({
-		queryKey: ["adminEndpoints", adminToken],
+		queryKey: ["adminEndpoints", adminToken, ...backendIdentity],
 		enabled:
+			!compatibilityPending &&
 			adminToken.length > 0 &&
 			endpointsCapability.available &&
 			endpointsRequested,
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 	const adminUsers = useQuery({
-		queryKey: ["adminUsers", adminToken],
+		queryKey: ["adminUsers", adminToken, ...backendIdentity],
 		enabled:
-			adminToken.length > 0 && usersCapability.available && usersRequested,
+			!compatibilityPending &&
+			adminToken.length > 0 &&
+			usersCapability.available &&
+			usersRequested,
 		queryFn: ({ signal }) => fetchAdminUsers(adminToken, signal),
 	});
 

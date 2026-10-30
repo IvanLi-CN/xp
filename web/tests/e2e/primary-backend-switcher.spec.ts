@@ -3,6 +3,7 @@ import { type Page, expect, test } from "@playwright/test";
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 import { apiCapabilitiesFixture } from "./apiCapabilities";
 import { type AdminNode, setAdminToken, setupApiMocks } from "./helpers";
+import { statusEventsFixture } from "./statusEvents";
 
 function corsHeaders(origin: string) {
 	return {
@@ -167,7 +168,7 @@ test("switches API and SSE traffic to a verified recovery origin", async ({
 					"content-type": "text/event-stream",
 					"cache-control": "no-cache",
 				},
-				body: "event: hello\\ndata: {}\\n\\n",
+				body: statusEventsFixture(),
 			});
 			return;
 		}

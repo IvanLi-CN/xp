@@ -7,7 +7,14 @@ const { fetchNodes, fetchVersions } = vi.hoisted(() => ({
 	fetchNodes: vi.fn(),
 	fetchVersions: vi.fn(),
 }));
-vi.mock("@/api/adminNodes", () => ({ fetchAdminNodes: fetchNodes }));
+vi.mock("@/api/adminNodes", async (original) => ({
+	...(await original<typeof import("@/api/adminNodes")>()),
+	fetchAdminNodes: fetchNodes,
+}));
+vi.mock("./primaryBackend", async (original) => ({
+	...(await original<typeof import("./primaryBackend")>()),
+	readSwitchCandidateResource: () => fetchNodes(),
+}));
 vi.mock("@/api/adminNodeVersions", () => ({
 	fetchAdminNodeVersions: fetchVersions,
 }));
@@ -31,6 +38,9 @@ const node = {
 	node_id: fixtureCatalog.nodeId.fixture17(),
 	node_name: fixtureCatalog.nodeName.fixture18(),
 	api_base_url: fixtureCatalog.url.nodeA(),
+	access_host: fixtureCatalog.host.primary(),
+	quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+	quota_reset: fixtureCatalog.quota.resetNode(),
 };
 
 function setup() {
@@ -70,6 +80,7 @@ describe("backend directory refresh", () => {
 
 	it("initializes and loads the directory in a fresh authenticated session", async () => {
 		fetchNodes.mockResolvedValue({ items: [node] });
+		hydratePrimaryBackendProfile(clusterId);
 		const client = new QueryClient({
 			defaultOptions: { queries: { retry: false } },
 		});
@@ -99,6 +110,31 @@ describe("backend directory refresh", () => {
 		expect(
 			getPrimaryBackendSnapshot().candidates.map((item) => item.nodeId),
 		).toEqual([fixtureCatalog.nodeId.fixture17()]);
+	});
+
+	it("does not replace an embedded session cluster from unverified cluster info", async () => {
+		hydratePrimaryBackendProfile(clusterId);
+		const client = new QueryClient();
+		const wrapper = ({ children }: { children: ReactNode }) => (
+			<QueryClientProvider client={client}>{children}</QueryClientProvider>
+		);
+		renderHook(
+			() =>
+				useBackendDirectory({
+					adminToken: "test-token",
+					clusterId: fixtureCatalog.cluster.fixture95(),
+					primaryClusterId: clusterId,
+					primaryOrigin: window.location.origin,
+					runtimeOnline: false,
+					staticConsole: false,
+					runtimePolicyReady: true,
+					selectorOpen: false,
+					refreshRuntimePolicy: async () => ({ isSuccess: false }),
+				}),
+			{ wrapper },
+		);
+		expect(getPrimaryBackendSnapshot().clusterId).toBe(clusterId);
+		expect(fetchNodes).not.toHaveBeenCalled();
 	});
 
 	it("keeps the last successful list on failure and replaces it on recovery", async () => {

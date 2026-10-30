@@ -9,7 +9,15 @@ const { fetchNodes, fetchPolicy } = vi.hoisted(() => ({
 	fetchNodes: vi.fn(),
 	fetchPolicy: vi.fn(),
 }));
-vi.mock("@/api/adminNodes", () => ({ fetchAdminNodes: fetchNodes }));
+vi.mock("@/api/adminNodes", async (original) => ({
+	...(await original<typeof import("@/api/adminNodes")>()),
+	fetchAdminNodes: fetchNodes,
+}));
+vi.mock("./primaryBackend", async (original) => ({
+	...(await original<typeof import("./primaryBackend")>()),
+	readSwitchCandidateResource: (args: { path: string }) =>
+		args.path === "/api/admin/nodes" ? fetchNodes() : fetchPolicy(),
+}));
 vi.mock("@/api/adminNodeVersions", () => ({ fetchAdminNodeVersions: vi.fn() }));
 vi.mock("@/api/runtimePolicy", async (original) => ({
 	...(await original<typeof import("@/api/runtimePolicy")>()),
@@ -32,6 +40,9 @@ const node = {
 	node_id: fixtureCatalog.nodeId.fixture17(),
 	node_name: fixtureCatalog.nodeName.fixture18(),
 	api_base_url: fixtureCatalog.url.nodeA(),
+	access_host: fixtureCatalog.host.primary(),
+	quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+	quota_reset: fixtureCatalog.quota.resetNode(),
 };
 
 function setup(runtimePolicyReady = true) {
@@ -83,6 +94,7 @@ describe("static candidate revalidation", () => {
 			fetchPolicy.mockResolvedValue({
 				cluster_id: fixtureCatalog.cluster.fixture84(),
 				policy_id: "policy-new",
+				issued_at: new Date(Date.now() - 1_000).toISOString(),
 				expires_at: new Date(Date.now() + 60_000).toISOString(),
 				api_origins: state === "removed" ? [] : [origin],
 				node_states:
@@ -107,6 +119,7 @@ describe("static candidate revalidation", () => {
 		fetchPolicy.mockResolvedValue({
 			cluster_id: fixtureCatalog.cluster.fixture84(),
 			policy_id: "policy-new",
+			issued_at: new Date(Date.now() - 1_000).toISOString(),
 			expires_at: new Date(Date.now() + 60_000).toISOString(),
 			api_origins: [origin],
 			node_states: [{ origin, state: "allowed" }],

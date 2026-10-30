@@ -120,6 +120,9 @@ export function useApiCompatibility(
 	isOnline: boolean,
 	backendOrigin: string,
 	backendGeneration = 0,
+	beforeAuthenticatedRequest?: (
+		signal: AbortSignal,
+	) => Promise<boolean | undefined>,
 ) {
 	return useQuery({
 		queryKey: [
@@ -129,6 +132,8 @@ export function useApiCompatibility(
 			backendGeneration,
 		],
 		queryFn: async ({ signal }) => {
+			const ready = await beforeAuthenticatedRequest?.(signal);
+			if (ready === false) return null;
 			const compatibility = await fetchApiCompatibility({
 				adminToken: adminToken || undefined,
 				signal,

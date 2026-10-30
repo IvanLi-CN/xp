@@ -111,3 +111,21 @@ export function canonicalBackendOrigin(value: string): string | null {
 		return null;
 	}
 }
+
+export function rewriteRequest(
+	request: Request,
+	primaryOrigin: string,
+): Request {
+	const requestUrl = new URL(request.url, getPageOrigin());
+	if (!isApiUrl(requestUrl) || requestUrl.origin !== getPageOrigin()) {
+		return request;
+	}
+	if (!primaryOrigin || primaryOrigin === getPageOrigin()) {
+		return request;
+	}
+	const target = new URL(
+		requestUrl.pathname + requestUrl.search,
+		primaryOrigin,
+	);
+	return new Request(target, request);
+}

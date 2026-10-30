@@ -6,7 +6,6 @@ import {
 	applyDirectoryResponse,
 	beginDirectoryRequest,
 	canonicalBackendOrigin,
-	clearPrimaryBackendDirectory,
 	currentWebReleaseVersion,
 	getDirectorySessionEpoch,
 	getPrimaryBackendSnapshot,
@@ -20,7 +19,6 @@ import {
 	resetPrimaryBackendTransportForTests,
 	subscribePrimaryBackend,
 	switchPrimaryBackend,
-	verifyBackendCandidate,
 	withPrimaryBackendMutation,
 } from "./primaryBackend";
 
@@ -70,135 +68,6 @@ describe("primary backend transport", () => {
 		await window.fetch("/assets/broken.js");
 
 		expect(getPrimaryBackendSnapshot().state).toBe("ready");
-	});
-
-	it("does not send a token before the candidate cluster matches", async () => {
-		const requests: Array<{ url: string; authorization: string | null }> = [];
-		window.fetch = vi.fn((input, init) => {
-			const request = new Request(input, init);
-			requests.push({
-				url: request.url,
-				authorization: request.headers.get("Authorization"),
-			});
-			if (request.url.endsWith("/api/health")) {
-				return Promise.resolve(
-					new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
-				);
-			}
-			return Promise.resolve(
-				new Response(
-					JSON.stringify({ cluster_id: fixtureCatalog.cluster.fixture95() }),
-					{
-						status: 200,
-					},
-				),
-			);
-		}) as typeof window.fetch;
-		installPrimaryBackendTransport();
-
-		await expect(
-			verifyBackendCandidate({
-				origin: fixtureCatalog.url.secondaryApi(),
-				clusterId: fixtureCatalog.cluster.fixture84(),
-				adminToken: "secret-token",
-			}),
-		).rejects.toThrow("different cluster");
-		expect(requests).toHaveLength(2);
-		expect(requests.every((request) => request.authorization === null)).toBe(
-			true,
-		);
-	});
-
-	it("does not send a token if the session ends during public verification", async () => {
-		let finishCapabilities!: (response: Response) => void;
-		const requests: Request[] = [];
-		window.fetch = vi.fn((input, init) => {
-			const request = new Request(input, init);
-			requests.push(request);
-			if (request.url.endsWith("/api/health")) {
-				return Promise.resolve(new Response(JSON.stringify({ status: "ok" })));
-			}
-			if (request.url.endsWith("/api/cluster/info")) {
-				return Promise.resolve(
-					new Response(
-						JSON.stringify({ cluster_id: fixtureCatalog.cluster.fixture84() }),
-					),
-				);
-			}
-			return new Promise<Response>((resolve) => {
-				finishCapabilities = resolve;
-			});
-		}) as typeof window.fetch;
-		const pending = verifyBackendCandidate({
-			origin: fixtureCatalog.url.secondaryApi(),
-			clusterId: fixtureCatalog.cluster.fixture84(),
-			adminToken: "secret-token",
-		});
-		await vi.waitFor(() => expect(finishCapabilities).toBeDefined());
-		clearPrimaryBackendDirectory();
-		finishCapabilities(
-			new Response(JSON.stringify({ release_tag: "v3.22.0" })),
-		);
-		await expect(pending).rejects.toThrow("session changed");
-		expect(
-			requests.every((request) => !request.headers.has("Authorization")),
-		).toBe(true);
-	});
-
-	it("accepts a compatible registered candidate after authenticated inventory", async () => {
-		const requests: Array<{ url: string; authorization: string | null }> = [];
-		window.fetch = vi.fn((input, init) => {
-			const request = new Request(input, init);
-			requests.push({
-				url: request.url,
-				authorization: request.headers.get("Authorization"),
-			});
-			if (request.url.endsWith("/api/health")) {
-				return Promise.resolve(
-					new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
-				);
-			}
-			if (request.url.endsWith("/api/cluster/info")) {
-				return Promise.resolve(
-					new Response(
-						JSON.stringify({ cluster_id: fixtureCatalog.cluster.fixture84() }),
-						{
-							status: 200,
-						},
-					),
-				);
-			}
-			if (request.url.endsWith("/api/capabilities")) {
-				return Promise.resolve(
-					new Response(JSON.stringify({ release_tag: "v3.22.0" }), {
-						status: 200,
-					}),
-				);
-			}
-			return Promise.resolve(
-				new Response(
-					JSON.stringify({
-						items: [
-							{
-								node_id: fixtureCatalog.identifier.nodeSecondary(),
-								node_name: fixtureCatalog.identifier.nodeNameSecondary(),
-								api_base_url: fixtureCatalog.url.secondaryApi(),
-							},
-						],
-					}),
-					{ status: 200 },
-				),
-			);
-		}) as typeof window.fetch;
-		installPrimaryBackendTransport();
-
-		const candidate = await verifyBackendCandidate({
-			origin: fixtureCatalog.url.secondaryApi(),
-			clusterId: fixtureCatalog.cluster.fixture84(),
-			adminToken: "secret-token",
-		});
-		expect(candidate.nodeId).toBe(fixtureCatalog.identifier.nodeSecondary());
-		expect(requests.at(-1)?.authorization).toBe("Bearer secret-token");
 	});
 
 	it("removes stale nodes and falls back when the primary is removed", async () => {
@@ -593,6 +462,94 @@ describe("primary backend transport", () => {
 		);
 	});
 
+	it("rejects a switch when backend identity changes during the barrier", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		let resolveTransaction: (() => void) | undefined;
+		const transaction = withPrimaryBackendMutation(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveTransaction = resolve;
+				}),
+		);
+		await Promise.resolve();
+
+		const switchPromise = switchPrimaryBackend({
+			origin: fixtureCatalog.url.secondaryApi(),
+			nodeId: fixtureCatalog.identifier.nodeSecondary(),
+			nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+			verifiedAt: Date.now(),
+			lastError: null,
+		});
+		await Promise.resolve();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture95(), []);
+		resolveTransaction?.();
+		await transaction;
+
+		await expect(switchPromise).rejects.toThrow(
+			"Backend session changed during switching.",
+		);
+		expect(getPrimaryBackendSnapshot().clusterId).toBe(
+			fixtureCatalog.cluster.fixture95(),
+		);
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
+	});
+
+	it("waits for a mutation started in the switch continuation turn", async () => {
+		window.localStorage.clear();
+		resetPrimaryBackendTransportForTests();
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+			},
+			{
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
+			},
+		]);
+		const switchPromise = switchPrimaryBackend({
+			origin: fixtureCatalog.url.secondaryApi(),
+			nodeId: fixtureCatalog.identifier.nodeSecondary(),
+			nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
+			verifiedAt: Date.now(),
+			lastError: null,
+		});
+		let resolveTransaction: (() => void) | undefined;
+		const transaction = withPrimaryBackendMutation(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveTransaction = resolve;
+				}),
+		);
+		await Promise.resolve();
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			window.location.origin,
+		);
+		resolveTransaction?.();
+		await transaction;
+		await switchPromise;
+		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
+			fixtureCatalog.url.secondaryApi(),
+		);
+	});
+
 	it("rechecks the barrier when a subscriber starts a mutation during drain", async () => {
 		window.localStorage.clear();
 		resetPrimaryBackendTransportForTests();
@@ -759,10 +716,6 @@ describe("primary backend transport", () => {
 				api_base_url: fixtureCatalog.url.secondaryApi(),
 			},
 		]);
-		hydrateStaticRuntimePolicy(fixtureCatalog.cluster.fixture84(), [
-			fixtureCatalog.url.primaryApi(),
-			fixtureCatalog.url.secondaryApi(),
-		]);
 		expect(getPrimaryBackendSnapshot().state).toBe("switching");
 
 		resolveTransaction?.();
@@ -880,7 +833,7 @@ describe("primary backend transport", () => {
 				},
 			},
 		);
-		await Promise.resolve();
+		await vi.waitFor(() => expect(resolveRevalidation).toBeDefined());
 		resolveRevalidation?.(true);
 		await Promise.resolve();
 		expect(getPrimaryBackendSnapshot().pendingMutations).toBe(1);
