@@ -22,6 +22,9 @@ pub(super) fn deletion_state_digest(state: &PersistedNodeHistoryCache) -> anyhow
             &state.deleted_nodes,
         ),
     )?;
+    if !state.deletion_generations.is_empty() {
+        serde_json::to_writer(&mut writer, &state.deletion_generations)?;
+    }
     Ok(writer.0.finalize().into())
 }
 
@@ -81,6 +84,7 @@ impl NodeHistoryHandle {
                 visit(RepositoryHistoryDeletionMarker {
                     schema_id: schema.into(),
                     record_key: format!("node-history:node:{node}:").into_bytes(),
+                    generation: state.deletion_generation(true, node),
                     kind: RepositoryHistoryDeletionKind::Node(node.clone()),
                 })?;
             }
@@ -96,6 +100,7 @@ impl NodeHistoryHandle {
             visit(RepositoryHistoryDeletionMarker {
                 schema_id: "traffic.v1".into(),
                 record_key: format!("node-history:user:{user}:").into_bytes(),
+                generation: state.deletion_generation(false, user),
                 kind: RepositoryHistoryDeletionKind::User(user.clone()),
             })?;
         }
@@ -108,95 +113,53 @@ impl NodeHistoryHandle {
     pub async fn repository_deletion_markers(
         &self,
         destination_node_id: &str,
-    ) -> Vec<RepositoryHistoryDeletionMarker> {
-        let state = self.inner.read().await;
-        let node_ids = state
-            .pending_node_history_cleanup
-            .get(destination_node_id)
-            .into_iter()
-            .flat_map(|nodes| nodes.iter())
-            .chain(state.deleted_nodes.iter())
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let mut markers = node_ids
-            .into_iter()
-            .flat_map(|node_id| {
-                [
-                    "runtime.v1",
-                    "path_health.v1",
-                    "traffic.v1",
-                    "connections.v1",
-                    "ip_usage.v1",
-                ]
-                .into_iter()
-                .map(move |schema_id| RepositoryHistoryDeletionMarker {
-                    schema_id: schema_id.to_owned(),
-                    record_key: format!("node-history:node:{node_id}:").into_bytes(),
-                    kind: RepositoryHistoryDeletionKind::Node(node_id.clone()),
-                })
-            })
-            .collect::<Vec<_>>();
-        markers.extend(
-            state
-                .pending_user_traffic_cleanup
-                .get(destination_node_id)
-                .into_iter()
-                .flat_map(|users| users.iter())
-                .chain(state.deleted_users.iter())
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .map(|user_id| RepositoryHistoryDeletionMarker {
-                    schema_id: "traffic.v1".to_owned(),
-                    record_key: format!("node-history:user:{user_id}:").into_bytes(),
-                    kind: RepositoryHistoryDeletionKind::User(user_id.to_string()),
-                }),
-        );
+    ) -> anyhow::Result<Vec<RepositoryHistoryDeletionMarker>> {
+        let mut markers = Vec::new();
+        // Capture only durably committed deletion intent. Failure must stop source capture.
+        self.visit_repository_deletion_markers(destination_node_id, true, |marker| {
+            markers.push(marker);
+            Ok(())
+        })
+        .await?;
         markers.sort_by(|left, right| left.record_key.cmp(&right.record_key));
-        markers
-    }
-    pub async fn complete_repository_deletion_marker(
-        &self,
-        destination_node_id: &str,
-        marker: &RepositoryHistoryDeletionMarker,
-    ) {
-        match &marker.kind {
-            RepositoryHistoryDeletionKind::Node(node_id) => {
-                self.complete_node_history_cleanup(destination_node_id, node_id)
-                    .await;
-                let changed = {
-                    let mut state = self.inner.write().await;
-                    let changed = state.deleted_nodes.remove(node_id);
-                    if changed {
-                        state.bump_deletion_version();
-                    }
-                    changed
-                };
-                if changed {
-                    self.persist().await;
-                }
-            }
-            RepositoryHistoryDeletionKind::User(user_id) => {
-                self.complete_user_traffic_cleanup(destination_node_id, user_id)
-                    .await;
-                let changed = {
-                    let mut state = self.inner.write().await;
-                    let changed = state.deleted_users.remove(user_id);
-                    if changed {
-                        state.bump_deletion_version();
-                    }
-                    changed
-                };
-                if changed {
-                    self.persist().await;
-                }
-            }
-        }
+        Ok(markers)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn old_ack_preserves_reentered_deletion_after_restart() {
+        for node in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("node_history_cache.json");
+            let history = NodeHistoryHandle::new(path.clone());
+            if node {
+                history.clear_node("target").await.unwrap();
+            } else {
+                history.clear_user("target").await.unwrap();
+            }
+            let old = history.repository_deletion_markers("local").await.unwrap();
+            if node {
+                history.clear_node("target").await.unwrap();
+            } else {
+                history.clear_user("target").await.unwrap();
+            }
+            for marker in &old {
+                history
+                    .complete_repository_deletion_marker("local", marker)
+                    .await
+                    .unwrap();
+            }
+            drop(history);
+            let restored = NodeHistoryHandle::new(path);
+            let pending = restored.repository_deletion_markers("local").await.unwrap();
+            assert_eq!(pending.len(), if node { 5 } else { 1 });
+            assert_ne!(old, pending);
+        }
+    }
 
     async fn version(handle: &NodeHistoryHandle) -> u64 {
         handle
@@ -211,53 +174,71 @@ mod tests {
         let path = directory.path().join("node_history_cache.json");
         let history = NodeHistoryHandle::new(path.clone());
         assert_eq!(version(&history).await, 0);
-        history.queue_node_history_cleanup("local", "node-a").await;
+        history
+            .queue_node_history_cleanup("local", "node-a")
+            .await
+            .unwrap();
         assert_eq!(version(&history).await, 1);
-        history.queue_node_history_cleanup("local", "node-a").await;
-        assert_eq!(version(&history).await, 1);
+        history
+            .queue_node_history_cleanup("local", "node-a")
+            .await
+            .unwrap();
+        assert_eq!(version(&history).await, 2);
         history
             .complete_node_history_cleanup("local", "node-a")
-            .await;
-        assert_eq!(version(&history).await, 2);
-        history.queue_user_traffic_cleanup("local", "user-a").await;
+            .await
+            .unwrap();
         assert_eq!(version(&history).await, 3);
         history
-            .complete_user_traffic_cleanup("local", "user-a")
-            .await;
+            .queue_user_traffic_cleanup("local", "user-a")
+            .await
+            .unwrap();
         assert_eq!(version(&history).await, 4);
-        history.clear_node("node-a").await;
+        history
+            .complete_user_traffic_cleanup("local", "user-a")
+            .await
+            .unwrap();
         assert_eq!(version(&history).await, 5);
+        history.clear_node("node-a").await.unwrap();
+        assert_eq!(version(&history).await, 6);
         let marker = history
             .repository_deletion_markers("local")
             .await
+            .unwrap()
             .into_iter()
             .find(|marker| marker.target_node_id() == Some("node-a"))
             .unwrap();
         history
             .complete_repository_deletion_marker("local", &marker)
-            .await;
-        assert_eq!(version(&history).await, 6);
-        history.clear_user("user-a").await;
+            .await
+            .unwrap();
         assert_eq!(version(&history).await, 7);
+        history.clear_user("user-a").await.unwrap();
+        assert_eq!(version(&history).await, 8);
         let marker = history
             .repository_deletion_markers("local")
             .await
+            .unwrap()
             .into_iter()
             .find(|marker| marker.target_node_id().is_none())
             .unwrap();
         history
             .complete_repository_deletion_marker("local", &marker)
-            .await;
-        assert_eq!(version(&history).await, 8);
+            .await
+            .unwrap();
+        assert_eq!(version(&history).await, 9);
         drop(history);
-        assert_eq!(version(&NodeHistoryHandle::new(path)).await, 8);
+        assert_eq!(version(&NodeHistoryHandle::new(path)).await, 9);
     }
 
     #[tokio::test]
     async fn uncommitted_deletion_version_is_never_exported() {
         let directory = tempfile::tempdir().unwrap();
         let history = NodeHistoryHandle::new(directory.path().join("node_history_cache.json"));
-        history.queue_user_traffic_cleanup("local", "before").await;
+        history
+            .queue_user_traffic_cleanup("local", "before")
+            .await
+            .unwrap();
         assert_eq!(version(&history).await, 1);
         let connection =
             rusqlite::Connection::open(directory.path().join("history.sqlite3")).unwrap();
@@ -267,13 +248,16 @@ mod tests {
             WHEN NEW.key = 'node_history' BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
             )
             .unwrap();
-        history.queue_user_traffic_cleanup("local", "after").await;
         assert!(
             history
-                .visit_repository_deletion_markers("local", true, |_| Ok(()))
+                .queue_user_traffic_cleanup("local", "after")
                 .await
                 .is_err()
         );
+        assert_eq!(version(&history).await, 1);
+        let markers = history.repository_deletion_markers("local").await.unwrap();
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].record_key, b"node-history:user:before:");
         connection
             .execute_batch("DROP TRIGGER reject_deletion_version")
             .unwrap();
@@ -287,13 +271,9 @@ mod tests {
         let writer = history.clone();
         let task =
             tokio::spawn(async move { writer.queue_user_traffic_cleanup("local", "new").await });
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            while history.inner.read().await.deletion_version == 0 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
+        tokio::task::yield_now().await;
+        assert!(!task.is_finished());
+        assert_eq!(history.inner.read().await.deletion_version, 0);
         assert!(
             tokio::time::timeout(
                 std::time::Duration::from_millis(30),
@@ -303,7 +283,7 @@ mod tests {
             .is_err()
         );
         drop(guard);
-        task.await.unwrap();
+        task.await.unwrap().unwrap();
         assert_eq!(version(&history).await, 1);
     }
 
@@ -313,7 +293,10 @@ mod tests {
         let path = directory.path().join("node_history_cache.json");
         let first = NodeHistoryHandle::new(path.clone());
         let stale = NodeHistoryHandle::new(path.clone());
-        first.queue_user_traffic_cleanup("local", "first").await;
+        first
+            .queue_user_traffic_cleanup("local", "first")
+            .await
+            .unwrap();
         assert_eq!(version(&first).await, 1);
         assert!(
             stale
@@ -321,7 +304,12 @@ mod tests {
                 .await
                 .is_err()
         );
-        stale.queue_user_traffic_cleanup("local", "second").await;
+        assert!(
+            stale
+                .queue_user_traffic_cleanup("local", "second")
+                .await
+                .is_err()
+        );
         assert!(
             stale
                 .visit_repository_deletion_markers("local", true, |_| Ok(()))
@@ -332,7 +320,7 @@ mod tests {
         drop(stale);
         let restored = NodeHistoryHandle::new(path);
         assert_eq!(version(&restored).await, 1);
-        let markers = restored.repository_deletion_markers("local").await;
+        let markers = restored.repository_deletion_markers("local").await.unwrap();
         assert_eq!(markers.len(), 1);
         assert_eq!(markers[0].record_key, b"node-history:user:first:");
     }
@@ -344,7 +332,12 @@ mod tests {
         storage.write(NODE_HISTORY_KEY, b"unreadable").unwrap();
         let path = directory.path().join("node_history_cache.json");
         let history = NodeHistoryHandle::new(path.clone());
-        history.queue_user_traffic_cleanup("local", "new").await;
+        assert!(
+            history
+                .queue_user_traffic_cleanup("local", "new")
+                .await
+                .is_err()
+        );
         assert!(
             history
                 .visit_repository_deletion_markers("local", true, |_| Ok(()))

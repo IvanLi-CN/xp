@@ -359,6 +359,24 @@ impl RepositoryReplicaRuntime {
                     now_unix_seconds,
                     options.ready_repositories,
                 )?;
+                let (schema_id, _) = record.schema();
+                let generation = deletion_marker_generation(record);
+                let legacy_id = deletion_marker_id_parts(schema_id, record.record_key(), 0);
+                let prefix = format!("{legacy_id}:generation:");
+                self.snapshot
+                    .local_source
+                    .deletion_marker_keys
+                    .retain(|id, _| {
+                        if generation == 0 {
+                            return true;
+                        }
+                        if id == &legacy_id {
+                            return false;
+                        }
+                        id.strip_prefix(&prefix)
+                            .and_then(|value| value.parse::<u64>().ok())
+                            .is_none_or(|existing| existing >= generation)
+                    });
                 self.snapshot
                     .local_source
                     .deletion_marker_keys
@@ -573,6 +591,7 @@ impl RepositoryReplicaRuntime {
                 .get(&deletion_marker_id_parts(
                     &marker.schema_id,
                     &marker.record_key,
+                    marker.generation,
                 ))
                 .is_some_and(|key| self.tombstones.fully_acknowledged(key))
         }))
@@ -582,6 +601,7 @@ impl RepositoryReplicaRuntime {
         &mut self,
         markers: &[crate::node_history::RepositoryHistoryDeletionMarker],
     ) -> Result<(), RepositoryRuntimeError> {
+        let previous = self.snapshot.local_source.clone();
         let mut changed = false;
         for marker in markers {
             changed |= self
@@ -591,11 +611,13 @@ impl RepositoryReplicaRuntime {
                 .remove(&deletion_marker_id_parts(
                     &marker.schema_id,
                     &marker.record_key,
+                    marker.generation,
                 ))
                 .is_some();
         }
-        if changed {
-            self.persist_control_state()?;
+        if changed && let Err(error) = self.persist_control_state() {
+            self.snapshot.local_source = previous;
+            return Err(error);
         }
         Ok(())
     }
@@ -737,13 +759,33 @@ fn stream_for_wire(wire: &[u8]) -> String {
 
 fn deletion_marker_id(record: &SyncRecord) -> String {
     let (schema_id, _) = record.schema();
-    deletion_marker_id_parts(schema_id, record.record_key())
+    deletion_marker_id_parts(
+        schema_id,
+        record.record_key(),
+        deletion_marker_generation(record),
+    )
 }
 
-fn deletion_marker_id_parts(schema_id: &str, record_key: &[u8]) -> String {
-    format!("{schema_id}:{}", hex::encode(record_key))
+fn deletion_marker_generation(record: &SyncRecord) -> u64 {
+    serde_json::from_slice::<serde_json::Value>(record.payload_bytes())
+        .ok()
+        .and_then(|value| value["deletion_generation"].as_u64())
+        .unwrap_or(0)
+}
+
+fn deletion_marker_id_parts(schema_id: &str, record_key: &[u8], generation: u64) -> String {
+    let legacy = format!("{schema_id}:{}", hex::encode(record_key));
+    if generation == 0 {
+        legacy
+    } else {
+        format!("{legacy}:generation:{generation}")
+    }
 }
 
 #[cfg(test)]
 #[path = "source_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "source_deletion_generation_tests.rs"]
+mod deletion_generation_tests;

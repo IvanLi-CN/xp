@@ -65,6 +65,8 @@
   and resumes the committed generation after restart; a missing peer or changed binding retries.
   Without Ready peers, recovery scans the registered sources' version-bound deletion intent before
   replay. Later deletions follow the durable source delivery path when a repository becomes Ready.
+  Repeated deletion intents have durable generations bound to tombstones and cleanup ACKs; an older
+  ACK cannot clear a newer deletion. Deletion export counts complete JSON arrays in its page limit.
 
   SQLite releases idle WAL at normal reset with a 1 MiB retained-journal limit.
 

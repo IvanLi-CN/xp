@@ -545,7 +545,7 @@ async fn publish_local_history_segment(
             state
                 .node_history
                 .complete_repository_deletion_marker(&state.cluster.node_id, marker)
-                .await;
+                .await?;
         }
         let mut runtime = state.repository_replica.lock().await;
         repository_blocking(|| {

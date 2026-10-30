@@ -30,8 +30,14 @@ use crate::{
     xray,
 };
 
+#[cfg(test)]
+#[path = "node_history_deletion_intent_tests.rs"]
+mod deletion_intent_tests;
+
 #[path = "node_history_deletion_export.rs"]
 mod deletion_export;
+#[path = "node_history_deletions.rs"]
+mod deletions;
 #[path = "node_history_remote.rs"]
 mod remote;
 
@@ -99,6 +105,7 @@ pub struct NodeHistorySnapshot {
 pub struct RepositoryHistoryDeletionMarker {
     pub schema_id: String,
     pub record_key: Vec<u8>,
+    pub(crate) generation: u64,
     kind: RepositoryHistoryDeletionKind,
 }
 
@@ -434,6 +441,8 @@ struct PersistedNodeHistoryCache {
     deleted_users: BTreeSet<String>,
     #[serde(default)]
     deleted_nodes: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    deletion_generations: BTreeMap<String, u64>,
 }
 
 impl PersistedNodeHistoryCache {
@@ -451,6 +460,7 @@ impl PersistedNodeHistoryCache {
             pending_node_history_cleanup: BTreeMap::new(),
             deleted_users: BTreeSet::new(),
             deleted_nodes: BTreeSet::new(),
+            deletion_generations: BTreeMap::new(),
         }
     }
 }
@@ -469,7 +479,7 @@ impl NodeHistoryHandle {
         Self::new(config.data_dir.join("node_history_cache.json"))
     }
 
-    fn new(persistence_path: PathBuf) -> Self {
+    pub(crate) fn new(persistence_path: PathBuf) -> Self {
         let data_dir = persistence_path.parent().unwrap_or_else(|| Path::new("."));
         let history_storage = HistoryStorage::open(data_dir);
         let loaded = load_history_cache(&history_storage);
@@ -581,138 +591,6 @@ impl NodeHistoryHandle {
             state.nodes.insert(node_id.to_string(), record);
         }
         self.persist().await;
-    }
-
-    pub async fn clear_node(&self, node_id: &str) {
-        {
-            let mut state = self.inner.write().await;
-            state.bump_deletion_version();
-            state.deleted_nodes.insert(node_id.to_string());
-            state.nodes.remove(node_id);
-            state.pending_user_traffic_cleanup.remove(node_id);
-            state.pending_node_history_cleanup.remove(node_id);
-            for targets in state.pending_node_history_cleanup.values_mut() {
-                targets.remove(node_id);
-            }
-            state
-                .pending_node_history_cleanup
-                .retain(|_, targets| !targets.is_empty());
-        }
-        self.persist().await;
-    }
-
-    pub async fn clear_user(&self, user_id: &str) {
-        {
-            let mut state = self.inner.write().await;
-            state.bump_deletion_version();
-            state.deleted_users.insert(user_id.to_string());
-            for record in state.nodes.values_mut() {
-                record.user_traffic.remove(user_id);
-                record.user_traffic_users.remove(user_id);
-            }
-        }
-        self.persist().await;
-    }
-
-    pub async fn queue_user_traffic_cleanup(&self, node_id: &str, user_id: &str) {
-        let changed = {
-            let mut state = self.inner.write().await;
-            let changed = state
-                .pending_user_traffic_cleanup
-                .entry(node_id.to_string())
-                .or_default()
-                .insert(user_id.to_string());
-            if changed {
-                state.bump_deletion_version();
-            }
-            changed
-        };
-        if changed {
-            self.persist().await;
-        }
-    }
-
-    async fn pending_user_traffic_cleanup(&self, node_id: &str) -> Vec<String> {
-        let state = self.inner.read().await;
-        state
-            .pending_user_traffic_cleanup
-            .get(node_id)
-            .into_iter()
-            .flat_map(|users| users.iter().cloned())
-            .collect()
-    }
-
-    pub async fn complete_user_traffic_cleanup(&self, node_id: &str, user_id: &str) {
-        let changed = {
-            let mut state = self.inner.write().await;
-            let Some(users) = state.pending_user_traffic_cleanup.get_mut(node_id) else {
-                return;
-            };
-            let changed = users.remove(user_id);
-            if users.is_empty() {
-                state.pending_user_traffic_cleanup.remove(node_id);
-            }
-            if changed {
-                state.bump_deletion_version();
-            }
-            changed
-        };
-        if changed {
-            self.persist().await;
-        }
-    }
-
-    pub async fn queue_node_history_cleanup(&self, destination_node_id: &str, node_id: &str) {
-        let changed = {
-            let mut state = self.inner.write().await;
-            let changed = state
-                .pending_node_history_cleanup
-                .entry(destination_node_id.to_string())
-                .or_default()
-                .insert(node_id.to_string());
-            if changed {
-                state.bump_deletion_version();
-            }
-            changed
-        };
-        if changed {
-            self.persist().await;
-        }
-    }
-
-    async fn pending_node_history_cleanup(&self, destination_node_id: &str) -> Vec<String> {
-        let state = self.inner.read().await;
-        state
-            .pending_node_history_cleanup
-            .get(destination_node_id)
-            .into_iter()
-            .flat_map(|nodes| nodes.iter().cloned())
-            .collect()
-    }
-
-    pub async fn complete_node_history_cleanup(&self, destination_node_id: &str, node_id: &str) {
-        let changed = {
-            let mut state = self.inner.write().await;
-            let Some(nodes) = state
-                .pending_node_history_cleanup
-                .get_mut(destination_node_id)
-            else {
-                return;
-            };
-            let changed = nodes.remove(node_id);
-            if nodes.is_empty() {
-                state
-                    .pending_node_history_cleanup
-                    .remove(destination_node_id);
-            }
-            if changed {
-                state.bump_deletion_version();
-            }
-            changed
-        };
-        if changed {
-            self.persist().await;
-        }
     }
 
     pub async fn node_traffic_report(
@@ -2162,12 +2040,23 @@ async fn sync_remote_node_histories(
         }
         let peer = peer_target_from_node(&node, &endpoints);
 
-        for target_node_id in history.pending_node_history_cleanup(&node.node_id).await {
+        for (target_node_id, generation) in history
+            .pending_cleanup_generations(&node.node_id, true)
+            .await
+        {
             match remote::clear_node_history(client, auth, &peer, &target_node_id).await {
                 Ok(()) => {
-                    history
-                        .complete_node_history_cleanup(&node.node_id, &target_node_id)
-                        .await;
+                    if let Err(error) = history
+                        .complete_cleanup_generation(
+                            &node.node_id,
+                            &target_node_id,
+                            true,
+                            generation,
+                        )
+                        .await
+                    {
+                        warn!(%error, "persist node cleanup ACK; retry retained");
+                    }
                 }
                 Err(err) => {
                     warn!(
@@ -2180,12 +2069,18 @@ async fn sync_remote_node_histories(
             }
         }
 
-        for user_id in history.pending_user_traffic_cleanup(&node.node_id).await {
+        for (user_id, generation) in history
+            .pending_cleanup_generations(&node.node_id, false)
+            .await
+        {
             match remote::clear_user_traffic(client, auth, &peer, &user_id).await {
                 Ok(()) => {
-                    history
-                        .complete_user_traffic_cleanup(&node.node_id, &user_id)
-                        .await;
+                    if let Err(error) = history
+                        .complete_cleanup_generation(&node.node_id, &user_id, false, generation)
+                        .await
+                    {
+                        warn!(%error, "persist user cleanup ACK; retry retained");
+                    }
                 }
                 Err(err) => {
                     warn!(
@@ -2832,8 +2727,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("node_history_cache.json");
         let handle = NodeHistoryHandle::new(path.clone());
-        handle.queue_user_traffic_cleanup("node-a", "user-a").await;
-        handle.queue_node_history_cleanup("node-b", "node-a").await;
+        handle
+            .queue_user_traffic_cleanup("node-a", "user-a")
+            .await
+            .unwrap();
+        handle
+            .queue_node_history_cleanup("node-b", "node-a")
+            .await
+            .unwrap();
         assert_eq!(
             handle.pending_user_traffic_cleanup("node-a").await,
             vec!["user-a"]
@@ -2854,10 +2755,12 @@ mod tests {
         );
         reloaded
             .complete_user_traffic_cleanup("node-a", "user-a")
-            .await;
+            .await
+            .unwrap();
         reloaded
             .complete_node_history_cleanup("node-b", "node-a")
-            .await;
+            .await
+            .unwrap();
         assert!(
             reloaded
                 .pending_user_traffic_cleanup("node-a")
@@ -3222,7 +3125,7 @@ mod tests {
                 .await
                 .is_some()
         );
-        handle.clear_user("user-a").await;
+        handle.clear_user("user-a").await.unwrap();
         assert!(
             handle
                 .user_traffic_report("user-a", Some("node-a"), TrafficWindow::Hours24, second)
@@ -3249,7 +3152,7 @@ mod tests {
                 .await
                 .is_some()
         );
-        handle.clear_node("node-a").await;
+        handle.clear_node("node-a").await.unwrap();
         assert!(handle.snapshot("node-a").await.is_none());
     }
 
@@ -3260,7 +3163,7 @@ mod tests {
         let handle = NodeHistoryHandle::new(path.clone());
         let now = "2026-05-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
 
-        handle.clear_node("node-a").await;
+        handle.clear_node("node-a").await.unwrap();
         handle
             .replace_node_snapshot(
                 now,

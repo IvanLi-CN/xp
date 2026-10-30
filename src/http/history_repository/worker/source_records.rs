@@ -130,7 +130,7 @@ pub(super) async fn source_records(
     let deletion_markers = state
         .node_history
         .repository_deletion_markers(&state.cluster.node_id)
-        .await;
+        .await?;
     let pending_uptime_observations = state.uptime.pending(512).await?;
     let pending_uptime_capture_gaps = state.uptime.pending_capture_gaps(512).await?;
     let pending_resource_rollups = state.resource_monitoring.pending_rollups(64);
@@ -253,7 +253,7 @@ pub(super) async fn source_records(
             )?);
         }
     }
-    let records = source_records_with_deletions(
+    let records = source_records_with_deletion_generations(
         &state.cluster.node_id,
         now,
         deletion_markers
@@ -263,6 +263,7 @@ pub(super) async fn source_records(
                     marker.schema_id.clone(),
                     marker.record_key.clone(),
                     marker.target_node_id().map(str::to_owned),
+                    marker.generation,
                 )
             })
             .collect(),
@@ -357,15 +358,33 @@ pub(super) async fn source_records(
     })
 }
 
+#[cfg(test)]
 pub(super) fn source_records_with_deletions(
     node_id: &str,
     now: u64,
     deletion_markers: Vec<(String, Vec<u8>, Option<String>)>,
     live_records: Vec<SyncRecord>,
 ) -> anyhow::Result<Vec<SyncRecord>> {
+    source_records_with_deletion_generations(
+        node_id,
+        now,
+        deletion_markers
+            .into_iter()
+            .map(|(schema, key, target)| (schema, key, target, 0))
+            .collect(),
+        live_records,
+    )
+}
+
+pub(super) fn source_records_with_deletion_generations(
+    node_id: &str,
+    now: u64,
+    deletion_markers: Vec<(String, Vec<u8>, Option<String>, u64)>,
+    live_records: Vec<SyncRecord>,
+) -> anyhow::Result<Vec<SyncRecord>> {
     let mut tombstones = deletion_markers
         .into_iter()
-        .map(|(schema_id, record_key, target_node_id)| {
+        .map(|(schema_id, record_key, target_node_id, generation)| {
             let target_node_id = target_node_id.as_deref().unwrap_or(node_id);
             source_record_with_key_for_subject(
                 &schema_id,
@@ -373,7 +392,10 @@ pub(super) fn source_records_with_deletions(
                 target_node_id,
                 now,
                 record_key,
-                serde_json::json!({ "deleted_at_unix_seconds": now }),
+                serde_json::json!({
+                    "deleted_at_unix_seconds": now,
+                    "deletion_generation": generation,
+                }),
                 true,
             )
         })

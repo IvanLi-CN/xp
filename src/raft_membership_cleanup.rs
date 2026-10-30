@@ -66,14 +66,14 @@ pub async fn finalize_remove_node_cleanup_once(
     for tag in &operation.expected_endpoint_tags {
         cleanup.reconcile.request_remove_inbound(tag.clone());
     }
-    cleanup.node_history.clear_node(&node_id).await;
+    cleanup.node_history.clear_node(&node_id).await?;
     let cleanup_nodes = store.lock().await.list_nodes();
     for destination in cleanup_nodes {
         if destination.node_id != cleanup.local_node_id && destination.node_id != node_id {
             cleanup
                 .node_history
                 .queue_node_history_cleanup(&destination.node_id, &node_id)
-                .await;
+                .await?;
         }
     }
     cleanup.reconcile.request_full();

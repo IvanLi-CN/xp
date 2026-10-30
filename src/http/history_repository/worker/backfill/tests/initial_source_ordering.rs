@@ -19,6 +19,8 @@ use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
+#[path = "initial_source_budget.rs"]
+mod budget;
 #[path = "app_state.rs"]
 mod fixture;
 
@@ -222,12 +224,14 @@ async fn first_repository_waits_for_source_deletions_across_pages_outage_and_res
                 &exporter.cluster.node_id,
                 &format!("!unrelated-{index:03}"),
             )
-            .await;
+            .await
+            .unwrap();
     }
     exporter
         .node_history
         .queue_node_history_cleanup(&exporter.cluster.node_id, &state.cluster.node_id)
-        .await;
+        .await
+        .unwrap();
     let server = server(&state, exporter, "registered-source").await;
     let now = chrono::Utc::now().timestamp() as u64;
     let wire = stage_old_page(&state, now).await;
@@ -369,7 +373,7 @@ async fn stale_first_repository_receipts_original_then_delivers_later_deletion()
             .expect("source baseline");
     // A deletion after the terminal snapshot is normal asynchronous delivery, not a reason
     // to stall the original page or pretend that the earlier snapshot included it.
-    state.node_history.clear_user("keep").await;
+    state.node_history.clear_user("keep").await.unwrap();
     drop(state);
     let state = fixture::app_state(directory.path());
     let storage = HistoryStorage::open(directory.path());
@@ -559,7 +563,8 @@ async fn stale_first_repository_restarts_changed_multipage_source_after_restart(
         exporter
             .node_history
             .queue_node_history_cleanup("registered-source", &format!("z-existing-{index:03}"))
-            .await;
+            .await
+            .unwrap();
     }
     let server = server(&state, exporter, "registered-source").await;
     server.source.max_requests.store(1, Ordering::SeqCst);
@@ -581,7 +586,8 @@ async fn stale_first_repository_restarts_changed_multipage_source_after_restart(
         .exporter
         .node_history
         .queue_node_history_cleanup("registered-source", &state.cluster.node_id)
-        .await;
+        .await
+        .unwrap();
     drop(state);
     let state = fixture::app_state(directory.path());
     server
@@ -676,7 +682,8 @@ async fn stable_source_version_detects_insert_remove_aba_after_restart() {
         source
             .node_history
             .queue_node_history_cleanup(&source.cluster.node_id, &format!("z-existing-{index:03}"))
-            .await;
+            .await
+            .unwrap();
     }
     let first = initial_backfill_page_stable(&source, None, Some(128), true)
         .await
@@ -685,11 +692,13 @@ async fn stable_source_version_detects_insert_remove_aba_after_restart() {
     source
         .node_history
         .queue_node_history_cleanup(&source.cluster.node_id, "a-temporary")
-        .await;
+        .await
+        .unwrap();
     source
         .node_history
         .complete_node_history_cleanup(&source.cluster.node_id, "a-temporary")
-        .await;
+        .await
+        .unwrap();
     let current = initial_backfill_page_stable(&source, None, Some(128), true)
         .await
         .unwrap();
@@ -720,7 +729,8 @@ async fn historical_source_restarts_if_an_earlier_deletion_marker_is_added() {
         source
             .node_history
             .queue_node_history_cleanup(&source.cluster.node_id, &format!("z-existing-{index:03}"))
-            .await;
+            .await
+            .unwrap();
     }
     let first = initial_backfill_page_stable(&source, None, Some(128), true)
         .await
@@ -734,7 +744,8 @@ async fn historical_source_restarts_if_an_earlier_deletion_marker_is_added() {
     source
         .node_history
         .queue_node_history_cleanup(&source.cluster.node_id, "a-added")
-        .await;
+        .await
+        .unwrap();
     let error = initial_backfill_page_stable(&source, Some(cursor), Some(128), true)
         .await
         .expect_err("the old deletion snapshot must not advance");
@@ -771,7 +782,8 @@ async fn signed_source_deletion_snapshot_survives_restart_and_rejects_changed_ma
                 &exporter.cluster.node_id,
                 &format!("z-existing-{index:03}"),
             )
-            .await;
+            .await
+            .unwrap();
     }
     let server = server(&state, exporter, "source-a").await;
     let peer = {
@@ -822,7 +834,8 @@ async fn signed_source_deletion_snapshot_survives_restart_and_rejects_changed_ma
         .exporter
         .node_history
         .queue_node_history_cleanup(&server.source.exporter.cluster.node_id, "a-added")
-        .await;
+        .await
+        .unwrap();
     let path = format!("{endpoint}?page_size=128&stable_deletions=true&page_cursor={cursor}");
     assert!(
         super::super::repository_direct_request_body(

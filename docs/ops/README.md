@@ -921,6 +921,9 @@ Notes:
   atomically; a failure leaves the exact unacknowledged wires for retry.
   New-format in-flight wires clear only at the durable receive/apply ACK boundary; an old
   source-journal row is deleted only after a real ACK removes that exact segment.
+  Repeated deletions receive distinct durable generations. Old source or remote cleanup ACKs cannot
+  clear a later deletion; persistence failure retains the prior intent and reports failure.
+  Stable deletion pages include JSON brackets and separators in the page byte limit.
   For ready peers, one 5-second source cycle drains up to sixteen consecutive summary, repair, or
   tiered export pages per peer within a shared 15-second maintenance budget. The remaining budget is
   split among peers in stable order so a slow peer cannot starve later peers. The summary cursor and

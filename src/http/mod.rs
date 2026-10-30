@@ -3077,7 +3077,11 @@ async fn admin_internal_clear_local_user_traffic(
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
-    state.node_history.clear_user(&user_id).await;
+    state
+        .node_history
+        .clear_user(&user_id)
+        .await
+        .map_err(|error| ApiError::internal(format!("persist history deletion: {error}")))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -3944,7 +3948,11 @@ async fn admin_internal_clear_node_history(
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
-    state.node_history.clear_node(&node_id).await;
+    state
+        .node_history
+        .clear_node(&node_id)
+        .await
+        .map_err(|error| ApiError::internal(format!("persist history deletion: {error}")))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -7002,12 +7010,18 @@ async fn admin_delete_user(
     if !deleted {
         return Err(ApiError::not_found(format!("user not found: {user_id}")));
     }
-    state.node_history.clear_user(&user_id).await;
-    clear_user_history_on_cluster(&state, &user_id).await;
+    state
+        .node_history
+        .clear_user(&user_id)
+        .await
+        .map_err(|error| ApiError::internal(format!("persist history deletion: {error}")))?;
+    clear_user_history_on_cluster(&state, &user_id)
+        .await
+        .map_err(|error| ApiError::internal(format!("persist history deletion: {error}")))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
+async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) -> anyhow::Result<()> {
     let nodes = {
         let store = state.store.lock().await;
         store.list_nodes()
@@ -7018,9 +7032,10 @@ async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
             state
                 .node_history
                 .queue_user_traffic_cleanup(&node.node_id, user_id)
-                .await;
+                .await?;
         }
     }
+    Ok(())
 }
 
 #[derive(Serialize)]

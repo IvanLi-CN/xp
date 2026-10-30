@@ -93,15 +93,16 @@ pub(super) async fn page(
         };
         let candidate_bytes = serde_json::to_vec(&candidate)?.len();
         let page_bytes = serde_json::to_vec(&records)?.len();
-        if !records.is_empty()
-            && page_bytes.saturating_add(candidate_bytes) > MAX_INITIAL_BACKFILL_PAGE_BYTES
-        {
+        let next_bytes = page_bytes
+            .saturating_add(candidate_bytes)
+            .saturating_add(usize::from(!records.is_empty()));
+        if next_bytes > MAX_INITIAL_BACKFILL_PAGE_BYTES {
+            anyhow::ensure!(
+                !records.is_empty(),
+                "source deletion record exceeds page budget"
+            );
             break;
         }
-        anyhow::ensure!(
-            candidate_bytes <= MAX_INITIAL_BACKFILL_PAGE_BYTES,
-            "source deletion record exceeds page budget"
-        );
         records.push(candidate);
         after = Some(key.clone());
     }
