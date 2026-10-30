@@ -31,6 +31,7 @@ pub(super) async fn admin_create_endpoint(
             if let Some(xmux) = &mihomo_xmux {
                 xmux.validate().map_err(ApiError::invalid_request)?;
             }
+            let mihomo_xmux = mihomo_xmux.filter(|value| *value != Default::default());
             let transport = transport.unwrap_or(crate::protocol::VlessRealityTransport::Xhttp);
             let store = state.store.lock().await;
             if let Some(reality) = reality {

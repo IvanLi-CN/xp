@@ -6413,7 +6413,7 @@ async fn admin_patch_endpoint(
                 meta.transport = transport;
             }
             if let Some(xmux) = req.mihomo_xmux {
-                meta.mihomo_xmux = xmux;
+                meta.mihomo_xmux = xmux.filter(|value| *value != Default::default());
             }
             if meta.managed_default {
                 let desired_node = nodes

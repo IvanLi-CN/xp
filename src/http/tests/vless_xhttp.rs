@@ -42,6 +42,61 @@ async fn create_vless_defaults_to_xhttp_transport() {
 }
 
 #[tokio::test]
+async fn xmux_default_object_clears_custom_policy_on_create_and_patch() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+    let node_id = local_node_id(&app).await;
+    let default = serde_json::to_value(crate::protocol::MihomoXmuxConfig::default()).unwrap();
+    let created = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/endpoints",
+            json!({
+                "node_id": node_id, "kind": "vless_reality_vision_tcp", "port": 443,
+                "reality": xp_test_fixtures::endpoint_reality(), "mihomo_xmux": default
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::OK);
+    let endpoint = body_json(created).await;
+    assert!(endpoint["meta"].get("mihomo_xmux").is_none());
+    let path = format!(
+        "/api/admin/endpoints/{}",
+        endpoint["endpoint_id"].as_str().unwrap()
+    );
+    let custom = json!({
+        "max_connections": "2", "max_concurrency": "0",
+        "c_max_reuse_times": "0", "h_max_reusable_secs": "0", "h_keep_alive_period": -1
+    });
+    let updated = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PATCH",
+            &path,
+            json!({"mihomo_xmux":custom}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(updated.status(), StatusCode::OK);
+    let cleared = app
+        .oneshot(req_authed_json(
+            "PATCH",
+            &path,
+            json!({"mihomo_xmux":default}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cleared.status(), StatusCode::OK);
+    assert!(
+        body_json(cleared).await["meta"]
+            .get("mihomo_xmux")
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn xmux_creation_waits_for_membership_operation_gate() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
