@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "storage_source.rs"]
+mod storage_source;
+
 const PARTITION_SUMMARY_REBUILD_PAGE_SIZE: usize = 32;
 
 impl RepositoryReplicaRuntime {

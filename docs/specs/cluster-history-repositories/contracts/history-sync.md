@@ -61,6 +61,13 @@ original pending page only after its chain is complete; the records, page checkp
 collector ACK for its exact original IDs commit atomically. Missing predecessors are retried without
 inventing a permanent gap. Subsequent newly collected backfill pages use the independent stream.
 
+During this legacy predecessor recovery, each summary request includes the source node identity.
+The serving repository validates that identity and limits the returned segment-ID page to that
+source while retaining the existing tombstone/ordinary phase order, opaque cursor format, keyset
+continuation and metadata-only projection. Requests without the filter retain the unscoped summary
+for ordinary anti-entropy callers. Repair still returns full signed wires for the requested IDs, and
+the receiver keeps its existing source, epoch, stream, signature and predecessor-chain checks.
+
 When an expired repository has a pending legacy page and no Ready peer, it scans registered sources
 over signed public HTTPS before replay. The initial-backfill request uses `stable_deletions=true`;
 the response contains only deletion markers and a `deletion_snapshot` bound to the cluster, source

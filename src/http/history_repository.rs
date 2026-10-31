@@ -333,7 +333,6 @@ fn relay_frame_matches_source(
 ) -> bool {
     frame.sender_public_key() == source_keypair.public_key()
 }
-
 fn valid_repository_summary_cursor(cursor: &str) -> bool {
     let segment_id = cursor
         .strip_prefix("t:")
@@ -372,10 +371,11 @@ pub(super) async fn admin_internal_history_repository_summary(
         .repository_replica
         .lock()
         .await
-        .replication_summary_for_version(
+        .replication_summary_for_version_for_source(
             query.after_segment_id.as_deref(),
             query.deep_verification,
             query.summary_version,
+            query.source_node_id.as_ref().map(RepositoryNodeId::as_str),
         )
         .map_err(repository_error)?;
     // Encode while the permit is held; Axum's Json response defers serialization until body poll.

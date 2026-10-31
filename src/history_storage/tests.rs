@@ -2,6 +2,8 @@ use std::{fs, time::Duration};
 
 use super::*;
 
+#[path = "source_scoped_summary_tests.rs"]
+mod source_scoped_summary_tests;
 mod summary_blocks_tests;
 mod wal_retention_tests;
 

@@ -13,12 +13,33 @@ impl RepositoryReplicaRuntime {
         deep_verification: bool,
         requested_version: Option<u8>,
     ) -> Result<super::RepositoryReplicaSummary, RepositoryRuntimeError> {
-        let mut summary = self.replication_summary_after(after_segment_id, deep_verification)?;
+        self.replication_summary_for_version_for_source(
+            after_segment_id,
+            deep_verification,
+            requested_version,
+            None,
+        )
+    }
+
+    pub(crate) fn replication_summary_for_version_for_source(
+        &self,
+        after_segment_id: Option<&str>,
+        deep_verification: bool,
+        requested_version: Option<u8>,
+        source_node_id: Option<&str>,
+    ) -> Result<super::RepositoryReplicaSummary, RepositoryRuntimeError> {
+        let mut summary = self.replication_summary_after_for_source(
+            after_segment_id,
+            deep_verification,
+            source_node_id,
+        )?;
         if requested_version != Some(3) {
             summary.summary_version = 1;
             summary.sequence_blocks.clear();
-            summary.partitions_included =
-                deep_verification && after_segment_id.is_none() && self.partition_summaries_ready();
+            summary.partitions_included = source_node_id.is_none()
+                && deep_verification
+                && after_segment_id.is_none()
+                && self.partition_summaries_ready();
         }
         Ok(summary)
     }

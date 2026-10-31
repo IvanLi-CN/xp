@@ -1,0 +1,60 @@
+use super::*;
+
+#[test]
+fn preserves_phase_cursor_and_excludes_other_sources() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    storage
+        .upsert_repository_history_segments(&[
+            RepositoryHistorySegmentRow {
+                id: "source-a-ordinary".to_owned(),
+                closed_at_unix_seconds: 1,
+                contains_tombstone: false,
+                source_node_id: "source-a".to_owned(),
+                source_epoch: 1,
+                stream: "runtime".to_owned(),
+                first_sequence: 2,
+                payload: b"a-ordinary".to_vec(),
+            },
+            RepositoryHistorySegmentRow {
+                id: "source-a-tombstone".to_owned(),
+                closed_at_unix_seconds: 1,
+                contains_tombstone: true,
+                source_node_id: "source-a".to_owned(),
+                source_epoch: 1,
+                stream: "tombstone".to_owned(),
+                first_sequence: 1,
+                payload: b"a-tombstone".to_vec(),
+            },
+            RepositoryHistorySegmentRow {
+                id: "source-b-ordinary".to_owned(),
+                closed_at_unix_seconds: 1,
+                contains_tombstone: false,
+                source_node_id: "source-b".to_owned(),
+                source_epoch: 1,
+                stream: "runtime".to_owned(),
+                first_sequence: 1,
+                payload: b"b-ordinary".to_vec(),
+            },
+        ])
+        .unwrap();
+
+    let first = storage
+        .repository_history_segment_metadata_page_for_source(None, Some("source-a"), 1)
+        .unwrap();
+    assert_eq!(
+        first.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        ["source-a-tombstone"]
+    );
+    let second = storage
+        .repository_history_segment_metadata_page_for_source(
+            Some("t:source-a-tombstone"),
+            Some("source-a"),
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        second.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        ["source-a-ordinary"]
+    );
+}

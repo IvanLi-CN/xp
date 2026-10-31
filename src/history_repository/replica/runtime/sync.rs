@@ -16,6 +16,8 @@ use crate::state::history_repository::replica::{
 };
 
 mod gap_ledger;
+#[path = "sync_source.rs"]
+mod sync_source;
 use gap_ledger::{canonical_gaps, prioritize_full_ledger};
 
 pub(super) const MAX_REPAIR_SEGMENTS: usize = 64;

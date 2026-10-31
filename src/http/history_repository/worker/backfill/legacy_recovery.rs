@@ -298,14 +298,10 @@ async fn recover_legacy_original_page_step_inner(
     // storage error must propagate instead of attempting a CAS against the old checkpoint.
     let attempt: anyhow::Result<_> = async {
         if checkpoint.pending.is_empty() {
-            let path = checkpoint.cursor.as_ref().map_or_else(
-                || "/api/admin/_internal/history-repository/summary?deep_verification=false".into(),
-                |cursor| {
-                    format!(
-                        "/api/admin/_internal/history-repository/summary?after_segment_id={cursor}"
-                    )
-                },
-            );
+            let path = legacy_summary_path(
+                checkpoint.cursor.as_deref(),
+                source_identity.node_id().as_str(),
+            )?;
             let summary: RepositoryReplicaSummary =
                 request(state, &peer, Method::GET, &path, Vec::new()).await?;
             validate_summary(&summary, checkpoint.cursor.as_deref())?;
@@ -403,6 +399,25 @@ async fn recover_legacy_original_page_step_inner(
         }
     }
     Ok(LegacyRecoveryOutcome::InProgress)
+}
+
+fn legacy_summary_path(
+    after_segment_id: Option<&str>,
+    source_node_id: &str,
+) -> anyhow::Result<String> {
+    let mut url = reqwest::Url::parse(
+        "https://history.invalid/api/admin/_internal/history-repository/summary",
+    )?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("source_node_id", source_node_id);
+        match after_segment_id {
+            Some(cursor) => query.append_pair("after_segment_id", cursor),
+            None => query.append_pair("deep_verification", "false"),
+        };
+    }
+    let query = url.query().context("legacy summary URL has no query")?;
+    Ok(format!("{}?{query}", url.path()))
 }
 
 fn validate_summary(

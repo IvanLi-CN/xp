@@ -206,10 +206,20 @@ async fn response(
     } else {
         assert_eq!(method, Method::GET);
         assert!(uri.path().ends_with("/summary"));
-        let after = uri
-            .query()
-            .and_then(|query| query.strip_prefix("after_segment_id="));
-        let mut summary = runtime.replication_summary_after(after, false).unwrap();
+        let query_url = reqwest::Url::parse(&format!("https://peer.invalid{uri}")).unwrap();
+        let mut after = None;
+        let mut source_node_id = None;
+        for (key, value) in query_url.query_pairs() {
+            match key.as_ref() {
+                "after_segment_id" => after = Some(value.into_owned()),
+                "source_node_id" => source_node_id = Some(value.into_owned()),
+                _ => {}
+            }
+        }
+        let source_node_id = source_node_id.expect("legacy summary must be source-scoped");
+        let mut summary = runtime
+            .replication_summary_after_for_source(after.as_deref(), false, Some(&source_node_id))
+            .unwrap();
         if let Some(row) = &evidence {
             summary.segment_ids = vec![hex::encode(Sha256::digest(&row.wire))];
             summary.next_segment_id = None;

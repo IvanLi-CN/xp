@@ -100,6 +100,12 @@ degraded storage, `history_truncated`, a non-zero unexplained gap, or a changed 
 fails the
 complete-history claim.
 
+For a legacy predecessor page, the summary request must include the page source node ID. A healthy
+serving node should return only that source's segment IDs while preserving the opaque `t:`/`r:`
+cursor. If a trace shows unscoped summary requests or repeated enumeration of unrelated sources,
+the serving node is pre-fix; upgrade it before judging the recovery as stalled. Do not clear the
+checkpoint or unacknowledged journal rows.
+
 The status endpoint does not expose the local backfill page cursor or completion marker, so it
 cannot
 by itself prove terminal backfill progress or that a process restart replayed an interrupted page.
