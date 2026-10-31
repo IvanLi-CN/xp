@@ -32,6 +32,10 @@ use validation::{deserialize_initial_backfill_page, validate_peer_backfill_page}
 // pre-decode allocation bounded to four times the semantic page budget; typed validation below
 // still enforces the exact record and canonical-byte limits.
 const MAX_INITIAL_BACKFILL_WIRE_BYTES: usize = MAX_INITIAL_BACKFILL_PAGE_BYTES * 4;
+// Historical source export scans the source snapshot before returning a page. Keep the
+// receiver's per-request work comfortably below the 15-second direct-request budget while
+// retaining the protocol's 128-record upper bound for other recovery paths.
+const INITIAL_SOURCE_BACKFILL_PAGE_RECORDS: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InitialBackfillProgress {
@@ -403,6 +407,23 @@ async fn initial_history_source_peers(state: &AppState) -> Vec<MeshPeerTarget> {
         .collect()
 }
 
+fn initial_source_backfill_path(cursor: Option<&str>) -> String {
+    cursor.map_or_else(
+        || {
+            format!(
+                "/api/admin/_internal/history-repository/initial-backfill?page_size={}",
+                INITIAL_SOURCE_BACKFILL_PAGE_RECORDS
+            )
+        },
+        |cursor| {
+            format!(
+                "{}?page_cursor={cursor}&page_size={INITIAL_SOURCE_BACKFILL_PAGE_RECORDS}",
+                "/api/admin/_internal/history-repository/initial-backfill"
+            )
+        },
+    )
+}
+
 fn is_initial_history_source_peer(peer_node_id: &str, local_node_id: &str) -> bool {
     peer_node_id != local_node_id
 }
@@ -444,20 +465,7 @@ pub(super) async fn pull_peer_initial_history(
         state,
         peer,
         Method::GET,
-        &cursor.as_deref().map_or_else(
-            || {
-                format!(
-                    "/api/admin/_internal/history-repository/initial-backfill?page_size={}",
-                    MAX_INITIAL_BACKFILL_PAGE_RECORDS
-                )
-            },
-            |cursor| {
-                format!(
-                    "{}?page_cursor={cursor}&page_size={MAX_INITIAL_BACKFILL_PAGE_RECORDS}",
-                    "/api/admin/_internal/history-repository/initial-backfill"
-                )
-            },
-        ),
+        &initial_source_backfill_path(cursor.as_deref()),
         Vec::new(),
         MAX_INITIAL_BACKFILL_WIRE_BYTES,
     )
