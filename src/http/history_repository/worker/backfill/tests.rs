@@ -1,9 +1,9 @@
 use super::{
     HistoricalBackfillCollector, HistoricalBackfillPageCursor, HistoricalBackfillSortKey,
     InitialBackfillProgress, RepositoryInitialBackfillPage, RepositoryInitialBackfillRecord,
-    deserialize_initial_backfill_page, is_initial_history_source_peer,
-    next_historical_backfill_page_cursor, serialized_backfill_record_bytes,
-    validate_peer_backfill_page,
+    deserialize_initial_backfill_page, initial_source_backfill_path,
+    is_initial_history_source_peer, next_historical_backfill_page_cursor,
+    serialized_backfill_record_bytes, validate_peer_backfill_page,
 };
 use crate::history_sync::SyncRecord;
 use crate::state::history_repository::{
@@ -301,6 +301,18 @@ fn tick_progress_blocks_readiness_after_an_unavailable_peer_page() {
         .combine(InitialBackfillProgress::Complete);
 
     assert_eq!(progress, InitialBackfillProgress::Unavailable);
+}
+
+#[test]
+fn initial_source_backfill_uses_a_budgeted_page_size() {
+    assert_eq!(
+        initial_source_backfill_path(None),
+        "/api/admin/_internal/history-repository/initial-backfill?page_size=32"
+    );
+    assert_eq!(
+        initial_source_backfill_path(Some("cursor")),
+        "/api/admin/_internal/history-repository/initial-backfill?page_cursor=cursor&page_size=32"
+    );
 }
 
 #[test]
