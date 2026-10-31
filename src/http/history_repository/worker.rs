@@ -45,14 +45,12 @@ mod source_records;
 mod tests;
 #[cfg(test)]
 pub(super) use backfill::{
-    HistoricalBackfillCollector, HistoricalBackfillSortKey, peer_backfill_stream_for_record,
-    peer_backfill_stream_for_schema, should_restart_peer_backfill, source_stream_for_schema,
+    HistoricalBackfillCollector, HistoricalBackfillSortKey, catch_up_before_pending_local,
+    peer_backfill_stream_for_record, peer_backfill_stream_for_schema, should_restart_peer_backfill,
+    should_run_initial_catch_up, source_stream_for_schema,
 };
-pub(super) use backfill::{RepositoryInitialBackfillPage, initial_backfill_page};
-use backfill::{
-    backfill_initial_repository_from_local_history, catch_up_against_ready_repositories,
-    pull_peer_initial_history,
-};
+pub(super) use backfill::{RepositoryInitialBackfillPage, initial_backfill_page_stable};
+use backfill::{advance_initial_catch_up, pull_peer_initial_history};
 use blocking::{repository_blocking, repository_op};
 use convergence::update_local_replica_convergence;
 #[cfg(test)]
@@ -71,10 +69,12 @@ use repair::remove_unavailable_repair_segment_ids;
 #[cfg(test)]
 pub(super) use source::should_fanout_tombstone_acknowledgements;
 use source::{
-    receive_local_source_segment, receive_local_source_segments, repair_legacy_tombstone_metadata,
-    source_record, source_record_with_key, source_record_with_key_for_subject,
+    receive_local_source_segments, repair_legacy_tombstone_metadata, source_record,
+    source_record_with_key, source_record_with_key_for_subject,
 };
-use source_records::{SourceRecordBatch, source_records, source_records_with_deletions};
+#[cfg(test)]
+use source_records::source_records_with_deletions;
+use source_records::{SourceRecordBatch, source_records};
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
     legacy_segment_index::spawn(state.clone());
     sequence_summary::spawn(state.clone());
@@ -255,6 +255,13 @@ async fn publish_local_history_segment(
     let (segments, gaps) = {
         let mut runtime = state.repository_replica.lock().await;
         repository_blocking(|| -> Result<_, RepositoryRuntimeError> {
+            if let Some(version) = source_batch.deletion_snapshot_version {
+                runtime.reconcile_local_source_tombstones(
+                    &state.cluster.node_id,
+                    &source_batch.deletion_markers,
+                    version,
+                )?;
+            }
             let segments = if capture_paused {
                 // Load a page only when the in-memory replay window is empty.
                 let mut page = runtime.local_source_pending_segments_page_with_budget(
@@ -541,16 +548,8 @@ async fn publish_local_history_segment(
     })?;
     drop(runtime);
     if delivery_succeeded && acknowledgements_replicated && tombstones_fully_acknowledged {
-        for marker in &source_batch.deletion_markers {
-            state
-                .node_history
-                .complete_repository_deletion_marker(&state.cluster.node_id, marker)
-                .await;
-        }
-        let mut runtime = state.repository_replica.lock().await;
-        repository_blocking(|| {
-            runtime.complete_local_source_tombstones(&source_batch.deletion_markers)
-        })?;
+        source_delivery::complete_acked_source_deletions(state, &source_batch.deletion_markers)
+            .await?;
     }
     Ok(delivery_succeeded)
 }
@@ -611,16 +610,14 @@ async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyho
     if lifecycle != RepositoryLifecycle::Syncing {
         return Ok(());
     }
-    // Catch-up validates a bounded point in time. Once it completes, continuously arriving
-    // source segments must not reset the five-minute stability window: a busy cluster otherwise
-    // has no instant at which it can be exactly equal to an actively writing repository.
-    let catch_up = if !should_run_initial_catch_up(catch_up_completed) {
-        backfill::InitialBackfillProgress::Complete
-    } else if ready_repository_ids.is_empty() {
-        backfill_initial_repository_from_local_history(state, now).await?
-    } else {
-        catch_up_against_ready_repositories(state, now).await?
-    };
+    // Catch-up validates a bounded point in time without resetting the stability window.
+    let catch_up = advance_initial_catch_up(
+        state,
+        now,
+        catch_up_completed,
+        !ready_repository_ids.is_empty(),
+    )
+    .await?;
     match catch_up {
         backfill::InitialBackfillProgress::InProgress => Ok(()),
         backfill::InitialBackfillProgress::Complete => {
@@ -630,9 +627,6 @@ async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyho
             apply_local_catch_up_result(state, &node_id, now, false).await
         }
     }
-}
-fn should_run_initial_catch_up(catch_up_completed: bool) -> bool {
-    !catch_up_completed
 }
 async fn apply_local_catch_up_result(
     state: &AppState,
@@ -875,7 +869,7 @@ async fn replicate_peer(
                         }
                         let mut runtime = state.repository_replica.lock().await;
                         let receipt = repository_blocking(|| {
-                            runtime.receive_wire_from_repository_with_gaps(
+                            runtime.receive_repair_wire_from_repository_with_gaps(
                                 &state.cluster.cluster_id,
                                 &segment.identity,
                                 &segment.wire,

@@ -152,6 +152,29 @@
   work to the next replication tick. Deep partition mismatches after a segment repair drains mark
   the checkpoint for the single-authority tiered import. A fresh summary verification pass must
   complete before the member can enter the readiness window.
+- Wave 1 local baseline backfill now persists an exact in-flight wire page before applying it. The
+  backfill uses independent `<stream>-backfill-<source_node_id>` sequence/hash chains for schema
+  records and uses `tombstone-backfill-<source_node_id>` for tombstones, and does
+  not consume the live source outbox or allocate live source sequences. Restart resumes the stored
+  wires only after rechecking cluster binding, derived repository identity, segment ownership,
+  signature, epoch, stream, sequence and chain state. Wire receive, record/tombstone import, stream
+  state, page cursor and completion are committed together; failures restore the prior snapshot and
+  leave unacknowledged wires available. New-format pages clear their in-flight wires only at the
+  durable receive/apply ACK boundary; legacy snapshots without embedded wires validate the current
+  local identity, verify the original source-journal chain and defer ordinary source ACK deletion
+  while that page owns the rows. Recovery first imports known deletion evidence from Ready peers,
+  or from version-bound registered sources when no Ready peer exists. It persists bounded recovery
+  progress and retains the original page across failures and restarts. Original-stream receive,
+  checkpoint and real ACK commit atomically after that evidence is applied. Later source deletions
+  follow normal durable delivery. A collected page is discarded if its repository state changes
+  before apply. New pending pages persist their creation time; predecessor recovery uses bounded,
+  resumable retrieval.
+  The bounded page collector traverses every retained Mesh bucket instead of reusing the rotating
+  real-time sample window. Source collection
+  keeps mesh, IP and endpoint history working sets bounded.
+  Coverage includes separate-chain,
+  epoch reuse, restart hash-chain continuation, exact-wire retry, commit rollback, tombstone
+  protection and multi-segment page replay in `page_replay_tests.rs` and source-delivery tests.
 - Ready repository metadata is resolved independently for each member. A stale Ready member with
   no node metadata is retained in the aggregate and keeps catch-up incomplete, while available
   Ready peers continue their bounded pages; source delivery and history queries use the available
@@ -388,6 +411,8 @@
 
 - Signed preflight tests use catalog node IDs and reject auth, quorum or cluster-binding drift.
 - SQLite tests cover handoff rollback/restart, audited recovery, fingerprints and lease expiry.
+- User-deletion and node-removal interleaving tests use catalog fixtures and cover committed and
+  unsaved removals, saved-proof failures, retained peers, real ACK and restart recovery.
 
 ## Tiered keyset recovery
 

@@ -747,6 +747,7 @@ fn repository_counts_remain_exact_through_delete_retention_and_restart() {
             source_node_id: "source-a".to_owned(),
             source_epoch: 1,
             stream: "runtime".to_owned(),
+            source_stream: None,
             subject_node_id: "subject-a".to_owned(),
             observer_node_id: "observer-a".to_owned(),
             schema_id: "runtime.v1".to_owned(),

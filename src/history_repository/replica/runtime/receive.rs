@@ -1,49 +1,19 @@
 use super::*;
 
 mod batch;
+mod expiry;
+#[path = "receive/local_backfill_wire.rs"]
+mod local_backfill_wire;
+#[path = "receive/local_history_backfill.rs"]
+mod local_history_backfill;
+mod repair;
+mod stale_recovery;
 mod types;
+pub(super) use local_history_backfill::{
+    receive_local_history_backfill_page, tombstone_acknowledgements_for_segment,
+};
 pub(crate) use types::PendingRepositoryMutation;
 use types::RepositoryWireRequest;
-
-fn tombstone_acknowledgements_for_segment(
-    segment: &crate::history_sync::CanonicalSegment,
-    repository_id: &str,
-) -> Result<Vec<RepositoryTombstoneAcknowledgement>, RepositoryRuntimeError> {
-    let mut acknowledgements = Vec::new();
-    for (offset, record) in segment.records().iter().enumerate() {
-        if !record.is_tombstone() || !is_known_schema(record) {
-            continue;
-        }
-        let sequence = segment
-            .first_cursor()
-            .sequence()
-            .checked_add(
-                u64::try_from(offset).map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?,
-            )
-            .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
-        let (schema_id, schema_version) = record.schema();
-        let cursor = ReplicaCursor::new(
-            segment.first_cursor().source_node_id(),
-            segment.first_cursor().source_epoch(),
-            segment.first_cursor().stream(),
-            sequence,
-        )?;
-        acknowledgements.push(RepositoryTombstoneAcknowledgement {
-            key: ReplicaRecord::new(
-                &cursor,
-                record.subject_node_id(),
-                record.observer_node_id(),
-                schema_id,
-                schema_version,
-                record.record_key().to_vec(),
-                record.payload_bytes().to_vec(),
-            )?
-            .key(),
-            repository_id: repository_id.to_owned(),
-        });
-    }
-    Ok(acknowledgements)
-}
 
 impl RepositoryReplicaRuntime {
     pub(crate) fn receive_wire(
@@ -154,7 +124,7 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
-        self.receive_wire_from_repository_inner(
+        self.receive_wire_from_repository_inner_without_rebuild(
             RepositoryWireRequest {
                 cluster_id,
                 identity,
@@ -169,6 +139,8 @@ impl RepositoryReplicaRuntime {
                 retained_anchor_checkpoint: None,
             },
             None,
+            true,
+            true,
         )
     }
 
@@ -218,7 +190,7 @@ impl RepositoryReplicaRuntime {
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
             return Err(error);
         }
-        let result = self.receive_wire_from_repository_inner(
+        let result = self.receive_wire_from_repository_inner_without_rebuild(
             RepositoryWireRequest {
                 cluster_id,
                 identity,
@@ -233,6 +205,8 @@ impl RepositoryReplicaRuntime {
                 retained_anchor_checkpoint,
             },
             None,
+            true,
+            true,
         );
         match result {
             Ok(receipt) => Ok(receipt),
@@ -254,10 +228,12 @@ impl RepositoryReplicaRuntime {
         }
     }
 
-    fn receive_wire_from_repository_inner(
+    fn receive_wire_from_repository_inner_without_rebuild(
         &mut self,
         request: RepositoryWireRequest<'_>,
         mutation_sink: Option<&mut PendingRepositoryMutation>,
+        rebuild_if_stale: bool,
+        suppress_known_deletions: bool,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
         let RepositoryWireRequest {
             cluster_id,
@@ -272,7 +248,9 @@ impl RepositoryReplicaRuntime {
             allow_retained_sequence_gap,
             retained_anchor_checkpoint,
         } = request;
-        self.rebuild_if_stale(now_unix_seconds)?;
+        if rebuild_if_stale {
+            self.rebuild_if_stale(now_unix_seconds)?;
+        }
         self.refresh_capacity()?;
         let availability = self.snapshot.capacity.history_write_availability();
         if !availability.allows_history_writes() {
@@ -306,7 +284,18 @@ impl RepositoryReplicaRuntime {
         }
         self.tombstones
             .reconcile_ready_repositories(ready_repositories)?;
-        let expired_tombstones = self.expire_tombstones(now_unix_seconds)?;
+        let mut mutation = PendingRepositoryMutation {
+            target_repository_id: local_repository_id.to_owned(),
+            progress_at_unix_seconds: Some(now_unix_seconds),
+            ..PendingRepositoryMutation::default()
+        };
+        let expired_tombstones = match self.expire_tombstones(now_unix_seconds, &mut mutation) {
+            Ok(expired) => expired,
+            Err(error) => {
+                self.restore(&previous_receiver, previous_snapshot.clone())?;
+                return Err(error);
+            }
+        };
         if let Some(gap) = self.snapshot.gaps.iter().find(|gap| {
             gap.permanent
                 && gap.source_node_id == first_cursor.source_node_id()
@@ -314,38 +303,68 @@ impl RepositoryReplicaRuntime {
                 && gap.stream == first_cursor.stream()
                 && gap.last_sequence.checked_add(1) == Some(first_cursor.sequence())
         }) {
-            self.receiver
+            let result = self
+                .receiver
                 .as_mut()
                 .expect("receiver initialized")
-                .advance_declared_sequence_gap(
-                    first_cursor,
-                    gap.first_sequence,
-                    gap.last_sequence,
-                )?;
+                .advance_declared_sequence_gap(first_cursor, gap.first_sequence, gap.last_sequence);
+            if let Err(error) = result {
+                self.restore(&previous_receiver, previous_snapshot.clone())?;
+                return Err(error.into());
+            }
         }
         let retained_anchor_gap = if allow_retained_sequence_gap {
-            self.receiver
+            let watermark = self
+                .receiver
                 .as_ref()
                 .expect("receiver initialized")
-                .continuous_watermark(first_cursor)?
-                .and_then(|watermark| {
-                    let expected = watermark.sequence().checked_add(1)?;
-                    (first_cursor.sequence() > expected)
-                        .then_some((expected, first_cursor.sequence()))
-                })
+                .continuous_watermark(first_cursor);
+            let watermark = match watermark {
+                Ok(watermark) => watermark,
+                Err(error) => {
+                    self.restore(&previous_receiver, previous_snapshot.clone())?;
+                    return Err(error.into());
+                }
+            };
+            watermark.and_then(|watermark| {
+                let expected = watermark.sequence().checked_add(1)?;
+                (first_cursor.sequence() > expected).then_some((expected, first_cursor.sequence()))
+            })
         } else {
             None
         };
         let persisted_acceptance = if persisted_segment {
-            self.receiver
+            let result = self
+                .receiver
                 .as_ref()
                 .expect("receiver initialized")
-                .accept_persisted_duplicate(&segment, identity)?
+                .accept_persisted_duplicate(&segment, identity);
+            match result {
+                Ok(acceptance) => acceptance,
+                Err(error) => {
+                    self.restore(&previous_receiver, previous_snapshot.clone())?;
+                    return Err(error.into());
+                }
+            }
         } else {
             None
         };
         let acceptance = if let Some(acceptance) = persisted_acceptance {
             Ok(acceptance)
+        } else if suppress_known_deletions && (allow_retained_anchor || allow_retained_sequence_gap)
+        {
+            let tombstones = &self.tombstones;
+            self.receiver
+                .as_mut()
+                .expect("receiver initialized")
+                .accept_retained_historical(
+                    &segment,
+                    identity,
+                    allow_retained_sequence_gap,
+                    |cursor, record| {
+                        repair::is_known_deleted(tombstones, segment.canonical(), cursor, record)
+                    },
+                )
         } else if allow_retained_sequence_gap {
             self.receiver
                 .as_mut()
@@ -356,6 +375,14 @@ impl RepositoryReplicaRuntime {
                 .as_mut()
                 .expect("receiver initialized")
                 .accept_retained_anchor(&segment, identity)
+        } else if suppress_known_deletions {
+            let tombstones = &self.tombstones;
+            self.receiver
+                .as_mut()
+                .expect("receiver initialized")
+                .accept_historical(&segment, identity, |cursor, record| {
+                    repair::is_known_deleted(tombstones, segment.canonical(), cursor, record)
+                })
         } else {
             self.receiver
                 .as_mut()
@@ -388,7 +415,11 @@ impl RepositoryReplicaRuntime {
                         self.record_gap(segment.canonical(), true);
                     }
                     if (records_gap || expired_tombstones) && mutation_sink.is_none() {
-                        self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
+                        self.persist_or_restore_with_mutation(
+                            &previous_receiver,
+                            &previous_snapshot,
+                            mutation,
+                        )?;
                     }
                 }
                 return Err(error.into());
@@ -399,8 +430,14 @@ impl RepositoryReplicaRuntime {
             // still authoritative evidence that its covered cursor range is present locally.
             self.clear_repaired_gaps(segment.canonical());
             if mutation_sink.is_none() {
-                self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
-            } else {
+                self.persist_or_restore_with_mutation(
+                    &previous_receiver,
+                    &previous_snapshot,
+                    mutation,
+                )?;
+            } else if let Some(sink) = mutation_sink {
+                sink.expired_tombstones
+                    .append(&mut mutation.expired_tombstones);
                 self.snapshot.receiver = Some(
                     self.receiver
                         .as_ref()
@@ -430,17 +467,13 @@ impl RepositoryReplicaRuntime {
         if let Some(gap) = acceptance.gap() {
             self.record_epoch_rotation_gap(gap, segment.canonical().opened_at_unix_seconds());
         }
-        let mut mutation = PendingRepositoryMutation {
-            target_repository_id: local_repository_id.to_owned(),
-            progress_at_unix_seconds: Some(now_unix_seconds),
-            ..PendingRepositoryMutation::default()
-        };
         let tombstone_acknowledgements = match self.append_known_records(
             segment.canonical(),
             now_unix_seconds,
             ready_repositories,
             local_repository_id,
             &mut mutation,
+            suppress_known_deletions,
         ) {
             Ok(acknowledgements) => acknowledgements,
             Err(error) => {
@@ -453,7 +486,10 @@ impl RepositoryReplicaRuntime {
             return Err(error);
         }
         self.clear_repaired_gaps(segment.canonical());
-        self.record_source_received(segment.canonical(), now_unix_seconds)?;
+        if let Err(error) = self.record_source_received(segment.canonical(), now_unix_seconds) {
+            self.restore(&previous_receiver, previous_snapshot)?;
+            return Err(error);
+        }
         // A forward keyset cursor must survive continuous ingestion. New rows at or before the
         // completed cursor are handled by a bounded restart below; newer rows are reached by the
         // current pass without starving the rest of the retained window.
@@ -462,6 +498,8 @@ impl RepositoryReplicaRuntime {
         if let Some(sink) = mutation_sink {
             sink.records.append(&mut mutation.records);
             sink.tombstones.append(&mut mutation.tombstones);
+            sink.expired_tombstones
+                .append(&mut mutation.expired_tombstones);
             sink.segments.append(&mut mutation.segments);
             sink.applied_canonical_segments
                 .append(&mut mutation.applied_canonical_segments);
@@ -559,76 +597,109 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
         mutation: &mut PendingRepositoryMutation,
+        suppress_known_deletions: bool,
     ) -> Result<Vec<RepositoryTombstoneAcknowledgement>, RepositoryRuntimeError> {
         let mut acknowledgements = Vec::new();
-        for (offset, record) in segment.records().iter().enumerate() {
-            if !is_known_schema(record) {
-                continue;
-            }
-            let sequence = segment
-                .first_cursor()
-                .sequence()
-                .checked_add(
-                    u64::try_from(offset)
-                        .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?,
-                )
-                .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
-            let (schema_id, schema_version) = record.schema();
-            let cursor = ReplicaCursor::new(
-                segment.first_cursor().source_node_id(),
-                segment.first_cursor().source_epoch(),
-                segment.first_cursor().stream(),
-                sequence,
-            )?;
-            let replica_record = ReplicaRecord::new(
-                &cursor,
-                record.subject_node_id(),
-                record.observer_node_id(),
-                schema_id,
-                schema_version,
-                record.record_key().to_vec(),
-                record.payload_bytes().to_vec(),
-            )?;
-            let key = replica_record.key();
-            if record.is_tombstone() {
-                let target_stream = source_stream_for_schema(schema_id).ok_or_else(|| {
-                    RepositoryRuntimeError::Storage(format!(
-                        "tombstone schema has no target stream: {schema_id}"
-                    ))
-                })?;
-                let target_cursor = ReplicaCursor::new(
+        let passes = if suppress_known_deletions { 2 } else { 1 };
+        for pass in 0..passes {
+            for (offset, record) in segment.records().iter().enumerate() {
+                if suppress_known_deletions && record.is_tombstone() != (pass == 0) {
+                    continue;
+                }
+                if !is_known_schema(record) {
+                    continue;
+                }
+                let sequence = segment
+                    .first_cursor()
+                    .sequence()
+                    .checked_add(
+                        u64::try_from(offset)
+                            .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?,
+                    )
+                    .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
+                let (schema_id, schema_version) = record.schema();
+                let cursor = ReplicaCursor::new(
                     segment.first_cursor().source_node_id(),
                     segment.first_cursor().source_epoch(),
-                    target_stream,
+                    segment.first_cursor().stream(),
                     sequence,
                 )?;
-                let target_key = ReplicaRecord::new(
-                    &target_cursor,
+                let replica_record = ReplicaRecord::new(
+                    &cursor,
                     record.subject_node_id(),
                     record.observer_node_id(),
                     schema_id,
                     schema_version,
                     record.record_key().to_vec(),
                     record.payload_bytes().to_vec(),
-                )?
-                .key();
-                self.delete_records_for_tombstone(&target_key, mutation)?;
-                self.tombstones
-                    .tombstone(key, now_unix_seconds, ready_repositories)?;
-                if ready_repositories
-                    .iter()
-                    .any(|repository_id| repository_id == local_repository_id)
-                {
+                )?;
+                let key = replica_record.key();
+                if record.is_tombstone() {
+                    let target_stream = source_stream_for_schema(schema_id).ok_or_else(|| {
+                        RepositoryRuntimeError::Storage(format!(
+                            "tombstone schema has no target stream: {schema_id}"
+                        ))
+                    })?;
+                    let target_stream = super::error::backfill_target_stream(
+                        segment.first_cursor().stream(),
+                        target_stream,
+                    )?;
+                    let target_cursor = ReplicaCursor::new(
+                        segment.first_cursor().source_node_id(),
+                        segment.first_cursor().source_epoch(),
+                        &target_stream,
+                        sequence,
+                    )?;
+                    let target_key = ReplicaRecord::new(
+                        &target_cursor,
+                        record.subject_node_id(),
+                        record.observer_node_id(),
+                        schema_id,
+                        schema_version,
+                        record.record_key().to_vec(),
+                        record.payload_bytes().to_vec(),
+                    )?
+                    .key();
+                    self.delete_records_for_tombstone(&target_key, mutation)?;
+                    self.protect_tombstone_origin(&key, mutation)?;
                     self.tombstones
-                        .acknowledge(replica_record.key(), local_repository_id)?;
-                    acknowledgements.push(RepositoryTombstoneAcknowledgement {
-                        key: replica_record.key(),
-                        repository_id: local_repository_id.to_owned(),
-                    });
+                        .tombstone(key, now_unix_seconds, ready_repositories)?;
+                    if ready_repositories
+                        .iter()
+                        .any(|repository_id| repository_id == local_repository_id)
+                    {
+                        self.tombstones
+                            .acknowledge(replica_record.key(), local_repository_id)?;
+                        acknowledgements.push(RepositoryTombstoneAcknowledgement {
+                            key: replica_record.key(),
+                            repository_id: local_repository_id.to_owned(),
+                        });
+                    }
+                    // Query paths exclude this row. Its cursor lets a joining repository
+                    // reconstruct deletion protection after the signed repair cache expires.
+                    let stored = StoredRecord::from_record(
+                        segment.closed_at_unix_seconds(),
+                        now_unix_seconds,
+                        &cursor,
+                        record,
+                    );
+                    if self.uses_sqlite_history() {
+                        self.reset_partition_summary_cache();
+                        mutation.records.push(stored.sqlite_row()?);
+                    } else {
+                        self.snapshot.records.push(stored);
+                    }
+                    continue;
+                } else if !self.tombstones.allows(&key) {
+                    if suppress_known_deletions {
+                        // The signed segment is still stored and advances its verified stream.
+                        // Only the record dominated by a durable tombstone is omitted.
+                        continue;
+                    }
+                    return Err(RepositoryRuntimeError::Protocol(
+                        ProtocolError::ResurrectionPrevented,
+                    ));
                 }
-                // Query paths exclude this row, while the retained source cursor allows a joining
-                // repository to reconstruct deletion protection after the signed repair cache
-                // has expired.
                 let stored = StoredRecord::from_record(
                     segment.closed_at_unix_seconds(),
                     now_unix_seconds,
@@ -636,28 +707,11 @@ impl RepositoryReplicaRuntime {
                     record,
                 );
                 if self.uses_sqlite_history() {
-                    self.reset_partition_summary_cache();
+                    self.update_partition_summary_for_record(&stored)?;
                     mutation.records.push(stored.sqlite_row()?);
                 } else {
                     self.snapshot.records.push(stored);
                 }
-                continue;
-            } else if !self.tombstones.allows(&key) {
-                return Err(RepositoryRuntimeError::Protocol(
-                    ProtocolError::ResurrectionPrevented,
-                ));
-            }
-            let stored = StoredRecord::from_record(
-                segment.closed_at_unix_seconds(),
-                now_unix_seconds,
-                &cursor,
-                record,
-            );
-            if self.uses_sqlite_history() {
-                self.update_partition_summary_for_record(&stored)?;
-                mutation.records.push(stored.sqlite_row()?);
-            } else {
-                self.snapshot.records.push(stored);
             }
         }
         Ok(acknowledgements)
@@ -732,6 +786,7 @@ impl RepositoryReplicaRuntime {
                 source_node_id: key.source_node_id().to_owned(),
                 source_epoch: key.source_epoch(),
                 stream: key.stream().to_owned(),
+                source_stream: None,
                 subject_node_id: key.subject_node_id().to_owned(),
                 observer_node_id: key.observer_node_id().to_owned(),
                 schema_id: schema_id.to_owned(),
@@ -889,6 +944,7 @@ impl RepositoryReplicaRuntime {
         {
             return Ok(());
         }
+        self.ensure_no_local_backfill_inflight_for_rebuild()?;
         let cluster_id = self.snapshot.cluster_id.clone();
         let mut local_source = self.snapshot.local_source.clone();
         local_source.rotate_after_repository_rebuild()?;
@@ -915,57 +971,6 @@ impl RepositoryReplicaRuntime {
         self.receiver =
             cluster_id.map(|cluster_id| SegmentReceiver::for_cluster(cluster_id, known_schemas()));
         self.persist_control_state()
-    }
-
-    pub(super) fn expire_tombstones(
-        &mut self,
-        now_unix_seconds: u64,
-    ) -> Result<bool, RepositoryRuntimeError> {
-        let expired = self.tombstones.expire(now_unix_seconds);
-        let removed_tombstones = !expired.is_empty();
-        for key in expired {
-            let cursor = Cursor::new(
-                key.source_node_id(),
-                key.source_epoch(),
-                key.stream(),
-                key.sequence(),
-            )?;
-            let (schema_id, schema_version) = key.schema();
-            let record = SyncRecord::new(
-                key.subject_node_id(),
-                key.observer_node_id(),
-                schema_id,
-                schema_version,
-                key.record_key().to_vec(),
-                Vec::new(),
-                true,
-            );
-            if let Some(receiver) = self.receiver.as_mut() {
-                receiver.forget_tombstone(&cursor, &record);
-            }
-            self.snapshot
-                .records
-                .retain(|record| !record.matches_key(&key));
-            if self.uses_sqlite_history() {
-                let (schema_id, schema_version) = key.schema();
-                let result =
-                    self.storage
-                        .delete_repository_history_tombstone(&RepositoryHistoryTombstone {
-                            source_node_id: key.source_node_id().to_owned(),
-                            source_epoch: key.source_epoch(),
-                            stream: key.stream().to_owned(),
-                            subject_node_id: key.subject_node_id().to_owned(),
-                            observer_node_id: key.observer_node_id().to_owned(),
-                            schema_id: schema_id.to_owned(),
-                            schema_version,
-                            record_key: key.record_key().to_vec(),
-                            prefix: false,
-                        });
-                self.finish_storage_write(result)?;
-                self.snapshot.sequence_summary_blocks_complete = false;
-            }
-        }
-        Ok(removed_tombstones)
     }
 }
 

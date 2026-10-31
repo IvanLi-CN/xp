@@ -670,7 +670,7 @@ fn source_journal_ack_write_failure_preserves_pending_segment_for_retry() {
 }
 
 #[test]
-fn backfill_ack_write_failure_preserves_inflight_page_for_retry() {
+fn backfill_checkpoint_write_failure_preserves_inflight_page_for_retry() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = SigningKey::from_bytes(&[11; 32]);
     let source_identity = identity();
@@ -711,13 +711,13 @@ fn backfill_ack_write_failure_preserves_inflight_page_for_retry() {
             )
             .is_err()
     );
-    assert_eq!(runtime.local_source_pending_segments().len(), 1);
+    assert!(runtime.local_source_pending_segments().is_empty());
     assert!(
         runtime
             .local_history_backfill_inflight_checkpoint()
             .is_some()
     );
-    assert_eq!(storage.source_delivery_journal().unwrap().len(), 1);
+    assert!(storage.source_delivery_journal().unwrap().is_empty());
 
     storage
         .set_query_only_for_test(false)
@@ -733,7 +733,7 @@ fn backfill_ack_write_failure_preserves_inflight_page_for_retry() {
     assert!(
         runtime
             .local_history_backfill_inflight_checkpoint()
-            .is_some()
+            .is_none()
     );
     assert!(storage.source_delivery_journal().unwrap().is_empty());
 }

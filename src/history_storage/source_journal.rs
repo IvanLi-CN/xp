@@ -7,6 +7,13 @@ use super::*;
 #[path = "source_journal_write.rs"]
 mod source_journal_write;
 
+#[path = "source_journal_exact.rs"]
+mod source_journal_exact;
+
+#[cfg(test)]
+#[path = "tests/source_journal_exact_tests.rs"]
+mod source_journal_exact_tests;
+
 const SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE: i64 = 256;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_REPAIR_PAGES_PER_CYCLE: usize = 16;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS: usize = 20_000;
@@ -823,6 +830,7 @@ impl HistoryStorage {
             .transpose()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn acknowledge_source_delivery_journal(
         &self,
         ids: &[String],

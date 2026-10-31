@@ -80,12 +80,36 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - 初始追赶遇到不可达的 Ready peer 时，必须继续处理同一 tick 中其他可达的 Ready peer，但任何
   不可达或缺少节点元数据的 Ready peer 都会使本轮聚合结果保持未完成；在所有 Ready peer 都被
   覆盖前不得启动本地 ready 稳定窗口。失效成员仍保留在 Raft 并由状态/运维面报告，不能自动
-  删除、跳过其历史或伪造 ACK。
+  删除、跳过其历史或伪造 ACK。若本地仍有旧页且已有 Ready peer，必须先完成 Ready peer 的追赶，
+  再恢复本地旧页；Ready peer 未完成或不可达时不得导入该旧页或宣称追赶完成。
 - 初始 backfill 接收方必须先以不超过 4 倍语义页预算的 JSON wire body 上限读取响应，并在 typed
   record 解码前拒绝超过 128 条记录；随后执行与服务端相同的 128 条 / 192 KiB 页上限。历史源页
   使用 JSON 记录预算，Ready repository tiered 页使用发送方的 canonical segment 字节预算。接收方
   必须分别校验两种 opaque cursor 的长度、格式、单调前进和稳定 snapshot/export 状态；非法、回退
   或循环 cursor 不得写入 durable checkpoint。
+- 首个历史仓库基线回填必须使用独立的 backfill 签名流：普通 schema 流使用稳定的
+  `<stream>-backfill-<source_node_id>` 流名，tombstone 使用对应的
+  `tombstone-backfill-<source_node_id>` 流名，并由 backfill 自己的 stream state 维护。它不得
+  复用已经推进的实时 source sequence、实时 pending outbox 或实时 hash-chain head；若 live
+  source epoch 尚未建立，首个非空 backfill 页可以在同一 durable 初始化步骤建立该身份 epoch，
+  但不得推进 live sequence、outbox 或 hash-chain。
+- 升级前已排队在实时 source journal 中的旧页是例外：保留原签名 wire 和原始流坐标，先从已注册节点的
+  公网 HTTPS 接口分页取回并严格验证缺失前序，再沿原链接收旧页。恢复进度必须持久化并能在重启后继续；
+  前序签名段和记录必须完整保留，不能仅推进水位。旧页接收、页游标和覆盖原 ID 的真实 collector ACK
+  必须原子提交。旧页之后的新回填仍使用独立签名流。前序暂不可用时自动重试，不伪造 ACK 或永久 gap。
+- 本地 backfill 页必须在导入前持久化完整的签名 wire 集、segment IDs、backfill epoch、每条流的下一个
+  sequence/hash、page cursor 和 completed 标志。重启只能重放该精确 wire 集；重放前必须重新检查
+  cluster 归属、当前派生 repository identity、签名、source node、backfill epoch、流名、sequence
+  连续性和 predecessor hash 链。任何身份、归属、页尾、链或 cursor 不一致都 fail closed，并保留
+  未完成 checkpoint。
+- backfill wire 接收、已知记录导入、tombstone 处理、receiver watermark/stream state、page cursor
+  和完成状态必须作为一次原子持久变更提交；任一记录、签名、容量或 storage 写入失败都回滚整页。
+  新格式页只有 durable receive/apply ACK 与 checkpoint 一起成功后才能清除 in-flight wire；旧格式
+  source journal 只有真实 collector ACK 覆盖 exact segment ID 后才能删除原始签名段。部分 ACK 不得
+  推进 page cursor。旧格式页仍可从 source journal 恢复，但必须沿用同一 exact wire 与 ACK 边界。
+- 首次 backfill 保持有界顺序：每页最多 128 条、192 KiB canonical 数据，JSON body 最多为语义页
+  预算的 4 倍；cursor 只在页尾验证通过且原子提交成功后前进。内存中只允许保留当前有界页和其
+  checkpoint，不得因历史总量、重试次数或恢复次数增长。
 - Ready-tiered 排序、续页和接收校验统一使用 SQLite retention-start 五列 keyset。
 - 聚合桶起点不得被原始采样时间替代；wire 时间、payload 和 source 身份保持不变。
 - 新游标使用 `keyset_version=2`；带 after 的旧游标在查询前拒绝并通过既有有界幂等重启恢复。
@@ -95,6 +119,14 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   查询必须为 `partial`。
 - tombstone 必须先于受影响记录同步并阻止复活；同一 epoch 同一 sequence 出现两个有效不同 payload
   时隔离旧流并轮换 epoch。
+- 节点或用户前缀 tombstone 依据 subject、observer、schema 和 key 前缀覆盖不同 source/epoch；
+  exact tombstone 覆盖其目标流和对应 backfill 流。重放拦截与 SQLite 删除范围必须一致，
+  同一事务中先插入的受影响记录也必须被删除。
+  历史恢复和 repair 接收原签名 wire 时，已知 tombstone 覆盖的记录不得物化；其他记录正常导入，
+  签名链、水位、删除保护和真实 ACK 仍须原子持久化。普通实时接收保持严格拦截。
+- tombstone 的过期、receiver 状态、记录、检查点及相关 ACK 必须在同一持久事务中提交。
+  批次失败或重启前发生存储错误时，过期删除不得提前落盘。
+  过期只删除对应 source、epoch、stream 和 sequence 的标记；同键较新标记继续保护受影响记录。
 - repository summary 分页只投影 SQLite segment 的 `id` 与 tombstone phase metadata，用于生成
   segment IDs 和 continuation cursor；summary 不得读取或反序列化 payload。需要 wire 内容的
   repair/backfill 路径仍按既有完整 payload 查询执行，summary 的外部 JSON、分页顺序和 cursor
@@ -278,6 +310,23 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 5. 查询端点从最完整仓库读取；仓库不可用时切换到下一仓库；全部不可用时只返回本地当前窗口，
    并标记 `local_only`。
 
+### Initial repository backfill and restart
+
+首个仓库的本地历史与从其他节点导入的历史都先建立 backfill 专用的签名 segment 链，再进入
+普通 receiver。backfill stream state 与 live source state 分离；实时采集可以继续推进自己的
+sequence，不能改变已经排队的历史页。tombstone 使用对应的 backfill stream，仍先于受影响记录，
+并在 backfill 自己的页状态中保持顺序。
+
+恢复新格式页时，worker 只能读取 durable checkpoint 中的 exact wire、segment ID、页游标、completed
+标志和 stream state，并校验独立 backfill 流。恢复旧 source-journal 页时，保留原流并先逐段恢复可证明
+的前序。两种路径都必须验证 cluster、identity、签名、source、epoch、sequence 连续性及 hash-chain；
+验证或容量失败不得写入半页，也不得把 cursor 当成已完成。
+
+成功页的 wire 接收、记录/tombstone 导入、ACK、stream state 与 page checkpoint 一起提交。提交失败
+恢复到页前状态，未确认 wire 保留以便下一次重放；新格式页只有 durable receive/apply ACK 成功后才
+清除 in-flight wire，旧 source-journal 原文只有真实 ACK 覆盖 exact segment ID 后才可删除。重启后的
+重复 wire 必须走幂等接收，不得重复记录或分配新的 live sequence。
+
 ### Edge cases / errors
 
 - source 重建数据库或序号丢失时生成新 epoch；cursor 过期返回 earliest available 和 gap。临时
@@ -326,7 +375,32 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   无效聚合元信息不得被误判为未变化；原始行可合法地持久化空聚合范围。
 - legacy relay payload 仅保留接收边界的 wire 兼容性；repository worker 不构造、不发送
   relay 请求，也不得把公网传输失败误报为数据已持久化。
-- 仓库过期超过 tombstone horizon 必须清除并重建，不允许继续宣称 converged。
+- 仓库过期超过 tombstone horizon 时不得继续宣称 converged。存在未确认的旧格式本地页时，
+  必须保留原始数据；有 Ready peer 时先按原页和当前 peer 身份、地址及成员集合绑定恢复
+  generation，原子导入删除标记与进度，再验证并接收原签名链。失败或成员变化时保持可重试。
+  没有 Ready peer 时，有界扫描当前注册 source 的删除意图，绑定持久删除版本、source 身份
+  和成员集合；删除证据及分页进度原子提交。分页使用稳定删除快照，版本变化时重新扫描；
+  source 不提供可验证快照时保持可重试。扫描后新增删除由现有持久投递继续传播。
+  没有未确认旧页的过期仓库沿用现有重建合同。
+- 同一对象再次删除时，新删除意图必须获得持久且不同的 generation。source tombstone、
+  远端清理请求和 ACK 必须绑定对应 generation；旧 ACK 不得清除新意图或确认新 tombstone。
+  旧格式未带 generation 的意图保持兼容。持久化失败必须保留先前状态并向调用方报告失败。
+  真实 ACK 后先持久清理 source 回执映射，再完成删除意图；重启可重试剩余步骤。
+  旧版遗留的无主映射须根据持久删除版本有界收敛，不得删除未确认的 journal 段。
+  Source 删除意图按完整对象分批采集，每批最多 128 条标记并受字节预算约束；节点的五种 schema
+  必须一起采集，必要时拆成多个有序签名段。真实 ACK 与保留的持久意图驱动下一批，重启后继续重试。
+  不完整的采集页不得作为完整删除快照清理无主映射；采集或持久化失败必须回滚内存映射及水位。
+  用户删除在 Raft 提交之前必须持久准备删除对象和目标节点集合，但准备状态不得触发历史删除或投递。
+  准备后发生错误或重启时继续重试 Raft 删除；仅成功的已提交 Raft 响应可以激活本地删除及所有目标的清理任务，
+  不得将写盘失败后内存中的用户缺失当成提交证明。
+  节点移除的本地删除与所有目标清理任务也必须原子登记。真实仓库 ACK 不得清除尚未持久登记的目标。
+  已提交移除的节点必须同时从已激活和准备中的清理目标移除；准备任务即使不再有远端目标也必须保留。
+  远端节点的内存和持久化成员状态均确认移除前不得确认节点历史清理；激活用户清理时重新读取当前成员集合，
+  避免并发移除后重新引入旧目标。
+  在节点清理事务尚未执行时，只有保存的成员状态已不存在该节点且保存了对应移除操作，激活才能排除准备目标；
+  证据不足时保留该目标，存储读取失败时保留准备任务并重试。
+  降级到不支持准备状态的版本前，该节点的 `prepared_user_deletions` 必须为空。
+- 稳定删除快照分页按完整 JSON 数组大小限制页面，包含括号与分隔符；合法记录跨页后仍能继续恢复。
 
 ## Interfaces and Contracts
 
@@ -352,6 +426,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   永久缺口显式标记。
 - Given 公网 HTTPS peer 不可用，When replication 周期到达，Then 保留 durable checkpoint 或
   outbox，等待下一次有界重试；不得探测或打开历史 Mesh/Reverse relay。
+- Given 首个历史 backfill 页在 wire 接收、记录导入或 checkpoint 提交期间中断，When worker 重启，Then
+  只重放同一有界签名 wire 集，重新通过身份/归属/epoch/链校验，并在一次成功提交中恢复记录、ACK
+  与页游标；未确认段仍保留，不能把局部记录或单个 cursor 样本判为完成。
 - Given 查询仓库部分缺失，When 管理员读取历史，Then 返回 partial 及覆盖/水位/缺口信息，
   不伪装为 complete。
 - Given 磁盘可用空间低于 256 MiB，When 触发历史写入，Then 写入停止、容量状态 degraded，
@@ -375,6 +452,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - VER-JOURNAL-GAP-ORDER covers: REQ-JOURNAL-GAP-ORDER.
   Backpressure tests preserve the first pending segment's predecessor gap at the 64-gap limit;
   failed delivery leaves the durable gap cursor unchanged.
+- VER-JOURNAL-THROUGHPUT covers: REQ-JOURNAL-THROUGHPUT.
+  Two read-only status samples exactly 300 seconds apart calculate source-to-ACK and
+  repository-to-apply rates from durable counters in both segments and canonical bytes; both stages
+  must meet the 10x generated-rate gate, and pending depth alone cannot establish acceptance.
 
 ### Verification commands
 
@@ -452,6 +533,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 - [ADR 0002](../../adr/0002-history-synchronization-recovery-order.md)
 - [ADR 0019](../../adr/0019-history-handoff-completion-and-recovery-preflight.md)
+- [ADR 0030](../../adr/0030-recoverable-history-deletion-fanout.md)
 
 ## Recovery cluster preflight
 

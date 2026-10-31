@@ -56,6 +56,20 @@
   also uses only that public HTTPS path; a transport failure leaves the durable outbox pending for
   the next bounded retry and never opens a history Mesh relay.
 
+  A legacy initial-backfill page already queued in the live source journal retains its original
+  signed stream. Recovery verifies and durably imports missing predecessors over registered public
+  HTTPS before atomically accepting the original page, advancing its checkpoint and recording a real
+  ACK. New backfill pages use independent signed streams; unavailable predecessors remain retryable.
+  If a receiver is stale and a legacy page is pending, Ready peers first supply a deletion baseline
+  bound to the page, peer identities, addresses and membership. Recovery retains the original data
+  and resumes the committed generation after restart; a missing peer or changed binding retries.
+  Without Ready peers, recovery scans the registered sources' version-bound deletion intent before
+  replay. Later deletions follow the durable source delivery path when a repository becomes Ready.
+  Repeated deletion intents have durable generations bound to tombstones and cleanup ACKs; an older
+  ACK cannot clear a newer deletion. Deletion export counts complete JSON arrays in its page limit.
+  ACK completion removes receipt mappings before intent; a bounded version-checked scan reclaims
+  orphan mappings from older versions without changing unacknowledged journal rows.
+
   SQLite releases idle WAL at normal reset with a 1 MiB retained-journal limit.
 
   Active frames and readers remain safe; capacity admission still counts the full WAL.
@@ -75,6 +89,25 @@
   primary without changing the outbox or source epoch. Old metadata is rebuilt
   in place; predecessor rollback cannot consume v3-prefixed digests. Permanent gaps keep
   queries partial and replica convergence false even after retained-data verification.
+  Prefix tombstones block matching subject, observer, schema and key prefixes across sources and
+  epochs; exact tombstones protect the affected target and backfill streams. Repository transactions
+  apply deletions after record upserts so a batch cannot resurrect a record it also deletes.
+  Historical recovery and repair retain verified original wires while suppressing records covered by
+  known tombstones; ordinary live delivery continues to reject resurrection.
+  Source deletion capture uses bounded complete-intent batches, retains every node's five schema
+  markers together, and resumes from durable intent and real ACK after restart. Partial batches do
+  not authorize orphan-map cleanup; failed capture rolls back staged source state.
+  User deletion persists its full cleanup fanout as an inactive prepared operation before Raft
+  deletion; a five-second worker resumes it and activates all destinations atomically only after a
+  successful Raft response. Remove-node cleanup records every destination before the
+  membership operation completes.
+  Durable node removal also prunes active and prepared user-cleanup destinations; remote cleanup
+  retries until the receiving node's in-memory and saved membership both reflect removal.
+  Before pruning a prepared target at activation, the saved node set and matching saved removal
+  operation must both prove removal; unavailable proof preserves the target for later cleanup.
+  Before downgrading to a build without prepared-deletion recovery, the node must first drain its
+  `prepared_user_deletions` state.
+  Tombstone expiry is committed atomically with the corresponding receiver state and history writes.
   Repository runtime status reads exact record and segment counts from a durable singleton updated
   by insert/delete triggers in each history transaction; existing databases backfill it once at
   startup. Status requests do not traverse retained history tables and run off Tokio workers.

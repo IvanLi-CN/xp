@@ -47,6 +47,52 @@ records and validate the applicable opaque cursor family for length, format,
 forward progress, and stable snapshot/export state before persisting the next
 checkpoint. Malformed, regressing, or cycling cursors remain retryable failures.
 
+The first repository baseline uses a separate signed backfill chain. Schema records use a stable
+`<stream>-backfill-<source_node_id>` stream family; tombstones use the matching
+`tombstone-backfill-<source_node_id>` stream and the backfill page's independent stream state.
+Backfill does not consume or advance the live source outbox, live sequence head, or live hash-chain
+state. If the live source epoch is unset, the first non-empty page may durably initialize that
+identity epoch before creating its independent sequence chain; this is not a live sequence advance.
+
+A predecessor-format page already queued in the live source journal keeps its original signed
+stream. The worker retrieves missing predecessors from registered peers over signed public HTTPS,
+verifies and durably imports each bounded chain page, and resumes after a restart. It accepts the
+original pending page only after its chain is complete; the records, page checkpoint and genuine
+collector ACK for its exact original IDs commit atomically. Missing predecessors are retried without
+inventing a permanent gap. Subsequent newly collected backfill pages use the independent stream.
+
+When an expired repository has a pending legacy page and no Ready peer, it scans registered sources
+over signed public HTTPS before replay. The initial-backfill request uses `stable_deletions=true`;
+the response contains only deletion markers and a `deletion_snapshot` bound to the cluster, source
+identity, marker set and durable deletion version. Each continuation preserves that snapshot and the
+fixed observation time. A changed snapshot restarts the bounded export.
+A missing or invalid snapshot fails closed and remains retryable.
+Deletion evidence and page progress commit atomically against the current source membership.
+Later deletions use the normal durable source delivery path.
+The source assigns each repeated deletion a durable generation and binds it to the signed tombstone
+and acknowledgement. An older acknowledgement cannot discharge the newer generation. Remote cleanup
+only completes the generation sent in that request; a failed write retains prior intent.
+After a real ACK, the source persists receipt-mapping removal before completing deletion intent.
+An interrupted completion can safely retry. A bounded scan reconciles owned legacy orphan mappings
+against a durable versioned intent snapshot without changing journal rows or tombstone evidence.
+Unknown mappings, different sources and epochs ahead of the current watermark remain untouched.
+Deletion pages count the JSON array brackets and separators in the byte cap.
+
+Before applying a persisted local page, the receiver reloads the exact signed wires and checks the
+current cluster binding, derived repository identity, segment ownership, signature, source node,
+backfill epoch, stream suffix, expected sequence, and predecessor hash chain. The page's computed
+stream state must equal the checkpointed stream state. A mismatch, malformed wire, capacity failure,
+or storage error fails closed and leaves the page checkpoint and its original wires available for
+retry.
+
+Wire acceptance, record/tombstone import, receiver state, backfill stream state, page cursor, and
+completion are one durable mutation. A cursor is not advanced by a partially imported page.
+New-format wire IDs remain in the durable in-flight page until the receive/apply ACK and checkpoint
+commit succeeds; predecessor source-journal rows remain until a real collector ACK covers the exact
+ID.
+Only the matching durable boundary may remove them. Restart replay is exact and idempotent, so it
+cannot allocate new live sequences or duplicate imported records.
+
 Tiered exports use canonical retention-start keys; raw sample timestamps remain unchanged.
 
 - Order and continuation: `(observed_start, source_node_id, source_epoch, stream, sequence)`.
@@ -64,6 +110,18 @@ the earliest retained cursor and an explicit gap. Tombstones replicate before
 affected records and remain until every current ready repository acknowledges
 them plus the tombstone horizon. Anti-entropy exchanges partition summaries,
 repairs ranges first, then drills down.
+
+Prefix tombstones target matching subject, observer, schema and key prefix across sources and
+epochs. Exact tombstones also cover the corresponding target stream and backfill stream. Replay
+protection follows the same scope as SQLite deletion, and an atomic batch applies deletions after
+record upserts so a record from the same batch cannot reappear.
+Historical recovery and repair preserve the original verified wire, suppress only records covered by
+known durable tombstones, and atomically persist the remaining records, deletion state and receipt.
+Ordinary live delivery retains strict resurrection rejection.
+Tombstone expiry is committed with the receiver checkpoint and records; a failed batch preserves
+the prior durable tombstone and receiver state.
+Expiry identifies the exact source, epoch, stream and sequence; newer tombstones with the same key
+remain durable and continue to suppress matching records.
 
 SQLite repositories maintain v3 summaries in the existing `history.sqlite3`.
 
@@ -155,6 +213,14 @@ cover the bounded known union, no Recoverable Backlog remains, and the existing
 five-minute stability window completes. An agreed permanent gap does not block
 ready status, but it keeps replica convergence false and every affected query
 partial.
+
+For field acceptance, `ready` alone is not completion evidence. The operator must observe the
+bounded backfill checkpoint advance to its terminal page through exact-current-SHA test evidence or
+an authorized local checkpoint diagnostic, together with zero recoverable pending work and a stable
+repository status sample. The public status endpoint does not serialize the local backfill cursor;
+status samples alone cannot prove that checkpoint. Any permanent gap, `history_truncated`, missing
+peer runtime, or query quality of `partial`/`local_only` remains an explicit incomplete-history
+result.
 
 After a declared permanent gap, the first segment after the missing range is
 accepted as a new hash-chain head because the skipped segment hash is unknown;

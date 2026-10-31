@@ -209,34 +209,43 @@ impl PersistedTcpConnectionUsage {
         &self,
         node_id: &str,
     ) -> Vec<TcpConnectionUsageEndpointSeries> {
+        self.repository_samples_for_node_iter(node_id).collect()
+    }
+
+    pub fn repository_samples_for_node_iter<'a>(
+        &'a self,
+        node_id: &'a str,
+    ) -> impl Iterator<Item = TcpConnectionUsageEndpointSeries> + 'a {
         let Some(latest) = self.latest_minute_dt() else {
-            return Vec::new();
+            return Box::new(std::iter::empty())
+                as Box<dyn Iterator<Item = TcpConnectionUsageEndpointSeries>>;
         };
-        self.endpoints
-            .values()
-            .filter(|endpoint| endpoint.node_id == node_id)
-            .map(|endpoint| TcpConnectionUsageEndpointSeries {
-                endpoint_id: endpoint.endpoint_id.clone(),
-                endpoint_tag: endpoint.endpoint_tag.clone(),
-                port: endpoint.port,
-                series: (repository_start_index(
-                    latest,
-                    endpoint.first_observed_at.as_deref().and_then(parse_minute),
-                )..MINUTES_WINDOW)
-                    .map(|index| TcpConnectionUsageSeriesPoint {
-                        minute: rfc3339_minute(
-                            latest - Duration::minutes((MINUTES_WINDOW - 1 - index) as i64),
-                        ),
-                        count: endpoint
-                            .counts
-                            .get(index)
-                            .copied()
-                            .unwrap_or_default()
-                            .into(),
-                    })
-                    .collect(),
-            })
-            .collect()
+        Box::new(
+            self.endpoints
+                .values()
+                .filter(move |endpoint| endpoint.node_id == node_id)
+                .map(move |endpoint| TcpConnectionUsageEndpointSeries {
+                    endpoint_id: endpoint.endpoint_id.clone(),
+                    endpoint_tag: endpoint.endpoint_tag.clone(),
+                    port: endpoint.port,
+                    series: (repository_start_index(
+                        latest,
+                        endpoint.first_observed_at.as_deref().and_then(parse_minute),
+                    )..MINUTES_WINDOW)
+                        .map(|index| TcpConnectionUsageSeriesPoint {
+                            minute: rfc3339_minute(
+                                latest - Duration::minutes((MINUTES_WINDOW - 1 - index) as i64),
+                            ),
+                            count: endpoint
+                                .counts
+                                .get(index)
+                                .copied()
+                                .unwrap_or_default()
+                                .into(),
+                        })
+                        .collect(),
+                }),
+        )
     }
 
     pub fn normalize(

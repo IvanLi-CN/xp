@@ -3077,7 +3077,11 @@ async fn admin_internal_clear_local_user_traffic(
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
-    state.node_history.clear_user(&user_id).await;
+    state
+        .node_history
+        .clear_user(&user_id)
+        .await
+        .map_err(|error| ApiError::internal(format!("persist history deletion: {error}")))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -3944,7 +3948,26 @@ async fn admin_internal_clear_node_history(
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
-    state.node_history.clear_node(&node_id).await;
+    // Keep membership observation and history cleanup ordered against local user preparation.
+    // A failed Raft state save can leave an uncommitted in-memory removal, so require the saved
+    // snapshot to agree before discarding any prepared or active destination.
+    let store = state.store.lock().await;
+    let durable_absence = HistoryStorage::open(&state.config.data_dir)
+        .saved_state_lacks_node(&node_id)
+        .map_err(|error| ApiError::internal(format!("verify durable node removal: {error}")))?;
+    if store.get_node(&node_id).is_some() || !durable_absence {
+        return Err(ApiError::new(
+            "node_removal_pending",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "node removal has not reached durable local state; retry cleanup",
+        )
+        .with_detail("retryable", true));
+    }
+    state
+        .node_history
+        .clear_node(&node_id)
+        .await
+        .map_err(|error| ApiError::internal(format!("persist history deletion: {error}")))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -6989,38 +7012,86 @@ async fn admin_delete_user(
     Extension(state): Extension<AppState>,
     Path(user_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
+    let _deletion_guard = state.node_history.lock_user_deletion().await;
+    // A follower's local snapshot can be behind the leader. Do not misreport an absent user
+    // until a leader has confirmed a quorum-backed view.
+    let local_user_missing = {
+        let store = state.store.lock().await;
+        store.get_user(&user_id).is_none()
+    };
+    if local_user_missing
+        && !matches!(
+            tokio::time::timeout(Duration::from_secs(3), state.raft.ensure_linearizable()).await,
+            Ok(Ok(()))
+        )
+    {
+        return Err(ApiError::new(
+            "user_deletion_state_unavailable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "user state is not yet confirmed; retry on the current leader",
+        )
+        .with_detail("retryable", true));
+    }
+    // The local state lock orders the durable preparation before any committed deletion can
+    // become visible here. A prepared operation never removes history on its own.
+    {
+        let store = state.store.lock().await;
+        if store.get_user(&user_id).is_none() {
+            return Err(ApiError::not_found(format!("user not found: {user_id}")));
+        }
+        let destinations = store
+            .list_nodes()
+            .into_iter()
+            .filter(|node| node.node_id != state.cluster.node_id)
+            .map(|node| node.node_id)
+            .collect::<Vec<_>>();
+        state
+            .node_history
+            .prepare_user_deletion(&user_id, &destinations)
+            .await
+            .map_err(|error| ApiError::internal(format!("prepare history deletion: {error}")))?;
+    }
     let out = raft_write(
         &state,
         crate::state::DesiredStateCommand::DeleteUser {
             user_id: user_id.clone(),
         },
     )
-    .await?;
-    let crate::state::DesiredStateApplyResult::UserDeleted { deleted } = out else {
+    .await
+    .map_err(|error| {
+        tracing::warn!(
+            code = error.code,
+            status = %error.status,
+            "prepared user deletion awaits Raft"
+        );
+        ApiError::new(
+            "user_deletion_pending",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "user deletion is prepared and will retry when Raft is available",
+        )
+        .with_detail("retryable", true)
+    })?;
+    let crate::state::DesiredStateApplyResult::UserDeleted { .. } = out else {
         return Err(ApiError::internal("unexpected raft apply result"));
     };
-    if !deleted {
-        return Err(ApiError::not_found(format!("user not found: {user_id}")));
-    }
-    state.node_history.clear_user(&user_id).await;
-    clear_user_history_on_cluster(&state, &user_id).await;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
-    let nodes = {
+    // A recovery worker may already have applied this prepared deletion.
+    {
         let store = state.store.lock().await;
-        store.list_nodes()
-    };
-    let local_node_id = state.cluster.node_id.clone();
-    for node in &nodes {
-        if node.node_id != local_node_id {
-            state
-                .node_history
-                .queue_user_traffic_cleanup(&node.node_id, user_id)
-                .await;
-        }
+        state
+            .node_history
+            .activate_user_deletion_for_membership(&user_id, &store, &state.cluster.node_id)
+            .await
+            .map_err(|error| {
+                tracing::warn!(%error, "prepared user history deletion awaits storage");
+                ApiError::new(
+                    "user_deletion_pending",
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "user deletion is committed and history cleanup will retry",
+                )
+                .with_detail("retryable", true)
+            })?;
     }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Serialize)]

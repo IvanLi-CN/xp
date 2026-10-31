@@ -910,6 +910,50 @@ Notes:
   Malformed or regressing pages remain retryable failures and are never checkpointed.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
+- The first local history baseline uses a separate signed backfill stream family: schema records use
+  `<stream>-backfill-<source_node_id>` and tombstones use
+  `tombstone-backfill-<source_node_id>` with separate backfill state. This page never consumes or
+  advances the live source sequence, outbox or hash chain. If the live source epoch is unset, the
+  first backfill page durably initializes that identity epoch before creating its independent
+  sequence chain. A persisted page resumes only after XP rechecks the cluster binding and derived
+  repository identity. It also checks segment ownership, signature, source/epoch/stream, sequence
+  continuity and predecessor hash. Wire receive, record/tombstone import, ACK and page cursor commit
+  atomically; a failure leaves the exact unacknowledged wires for retry.
+  New-format in-flight wires clear only at the durable receive/apply ACK boundary; an old
+  source-journal row is deleted only after a real ACK removes that exact segment.
+  Repeated deletions receive distinct durable generations. Old source or remote cleanup ACKs cannot
+  clear a later deletion; persistence failure retains the prior intent and reports failure.
+  User deletion first persists a prepared operation with every known cleanup destination before
+  submitting the Raft deletion. The prepared operation does not remove history; a five-second
+  recovery worker retries the Raft operation when needed and atomically activates all destination
+  cleanups only after a successful committed Raft response. A failed activation remains prepared
+  for retry after restart; an in-memory absence after a failed save never activates cleanup.
+  An error after preparation does not cancel the requested deletion; it can complete when Raft and
+  storage become available again.
+  Pending preparations remain in the `node_history` snapshot in `history.sqlite3`; inspect XP logs
+  for `prepared user deletion is waiting for Raft` or `recover prepared user history deletion`
+  when progress stops. Restore Raft quorum or storage health and let the worker retry.
+  Before downgrading to an XP version that does not support prepared deletion recovery, confirm
+  that `prepared_user_deletions` is empty on the node; older versions do not preserve that field.
+  If a node has not observed the requested user and cannot confirm a quorum-backed leader view,
+  deletion returns a retryable `user_deletion_state_unavailable` response instead of guessing that
+  the user is absent. After preparation, `user_deletion_pending` means recovery will retry.
+  A remove-node operation atomically records its local and remote history cleanup after membership
+  removal; the Raft membership operation remains incomplete until that write succeeds.
+  Removed nodes are pruned from active and prepared user-cleanup destinations, while empty prepared
+  operations remain recoverable. A remote cleanup returns retryable `node_removal_pending` until
+  its local in-memory and saved membership both reflect the removal; restore Raft replication or
+  storage health and allow the existing cleanup retry to continue.
+  Before node-history cleanup runs, user-deletion activation excludes a prepared destination only
+  when the saved node set and matching saved removal operation both prove its removal. Missing
+  proof retains the destination; a storage error retains the prepared operation for retry.
+  Receipt mappings clear before acknowledged intent; interrupted completion retries safely.
+  A bounded version-checked scan reclaims legacy orphan mappings without deleting journal rows.
+  Source deletion capture takes bounded batches of complete deletion intents, retaining all five
+  schemas for a node together. Large node intents can use multiple signed segments. The durable
+  intent and real ACK determine the next batch after restart; a partial batch is never treated as
+  a complete snapshot for orphan cleanup. A capture or storage failure rolls back staged mappings.
+  Stable deletion pages include JSON brackets and separators in the page byte limit.
   For ready peers, one 5-second source cycle drains up to sixteen consecutive summary, repair, or
   tiered export pages per peer within a shared 15-second maintenance budget. The remaining budget is
   split among peers in stable order so a slow peer cannot starve later peers. The summary cursor and
@@ -962,9 +1006,12 @@ Notes:
   retention cannot remove the pending repair anchor during the handoff. No lease is extended by
   finalization; normal retention resumes after all bounded leases expire.
   Live source delivery, ordinary anti-entropy, and later repair pages still reject unobserved
-  sequence gaps; the one exception is a `history_truncated=true` response that proves the exact
-  non-permanent gap already recorded by a consumed recovery checkpoint. Do not bypass either
-  boundary by editing the checkpoint.
+  sequence gaps. A `history_truncated=true` response may prove the exact non-permanent gap already
+  recorded by a consumed recovery checkpoint. If no transient gap was recorded before a delayed
+  retry, continuation is allowed only when the authenticated response carries a matching
+  `retained_stream_boundaries` content digest and its first segment equals the source-declared
+  minimum retained sequence. Missing or changed boundary evidence remains blocked. Do not bypass
+  either boundary by editing the checkpoint.
   A stale retained-anchor marker is recovered in place through the signed local command during the
   approved maintenance window:
 
@@ -1063,6 +1110,38 @@ Notes:
   Tombstones accepted during `syncing` are persisted locally but their acknowledgement fanout is
   deferred until the member is Raft-`ready`, after which the existing durable acknowledgement page
   retries delivery to all cluster nodes.
+
+### US4 field acceptance: initial history backfill
+
+Use read-only, authenticated samples from the exact candidate release. Record the candidate SHA,
+node ID, configured `XP_DATA_DIR`, and collection time. Capture
+`GET /api/admin/history-repositories`
+on every configured repository node at the start and again after at least one five-minute interval;
+if a node is still `syncing`, continue at the normal lifecycle interval until it reaches a terminal
+observation. Preserve the response bodies as evidence rather than relying on a UI screenshot.
+
+For each `items[]` entry, verify that `runtime` is present, `storage_mode` is healthy SQLite,
+`source_delivery.pending_segments` is zero, every `summary_repairs[*].pending_count` is zero, and
+`history_truncated` is false before claiming a complete baseline. Cross-check a bounded history
+query
+for the same known subject/window: it must be `complete`, not `partial` or `local_only`, and the
+top-level response must have no unreachable repository member. A non-zero `gap_count` is an explicit
+gap finding; it may be an accepted `ready` state only when the gap is documented as permanent, while
+the corresponding history remains `partial` and `replica_converged=false`.
+
+The status response does not expose the local backfill page cursor or completion marker. Therefore
+these samples establish repository/API health and live-source drain only; they cannot by themselves
+prove that the backfill reached its terminal page. Pair them with exact-current-SHA backfill test
+evidence or a separately authorized local checkpoint diagnostic. Without that evidence, the field
+acceptance remains incomplete.
+
+Do not call the work complete from `ready` alone, one status sample, a zero pending count observed
+only once, a stable record count without page-cursor evidence, or a successful process restart
+without proving exact-wire replay. Missing runtime, `partial`, `local_only`, `history_truncated`,
+pending repair/backlog, degraded or unavailable storage, changed candidate SHA, or an unexplained
+permanent
+gap all fail the complete-history claim and must remain in the acceptance report.
+
 - Upgrades repair the legacy zero-time tombstone ledger in place on startup when its mutable
   metadata matches the fixed horizon. This changes only the control snapshot's ledger expiry; it
   does not rewrite signed history, cursors or hashes. Do not remove `history.sqlite3`, replace
