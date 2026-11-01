@@ -36,6 +36,16 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
                 first_sequence: 1,
                 payload: b"b-ordinary".to_vec(),
             },
+            RepositoryHistorySegmentRow {
+                id: "source-b-tombstone".to_owned(),
+                closed_at_unix_seconds: 1,
+                contains_tombstone: true,
+                source_node_id: "source-b".to_owned(),
+                source_epoch: 1,
+                stream: "tombstone".to_owned(),
+                first_sequence: 1,
+                payload: b"b-tombstone".to_vec(),
+            },
         ])
         .unwrap();
 
@@ -55,6 +65,36 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
         .unwrap();
     assert_eq!(
         second.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        ["source-a-ordinary"]
+    );
+
+    let restarted_from_other_source = storage
+        .repository_history_segment_metadata_page_for_source(
+            Some("t:source-b-tombstone"),
+            Some("source-a"),
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        restarted_from_other_source
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["source-a-tombstone"]
+    );
+
+    let restarted_from_stale_cursor = storage
+        .repository_history_segment_metadata_page_for_source(
+            Some("r:removed-segment"),
+            Some("source-a"),
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        restarted_from_stale_cursor
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
         ["source-a-ordinary"]
     );
 }

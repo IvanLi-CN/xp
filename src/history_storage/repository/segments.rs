@@ -324,6 +324,7 @@ fn segment_phase_with_row<T, F>(
 where
     F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
 {
+    let page_limit = limit;
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     if let Some(after_id) = after_id {
         let cursor = if let Some(source_node_id) = spec.source_node_id {
@@ -362,7 +363,12 @@ where
         .optional()
         .map_err(sqlite_error)?;
         let Some((cursor_source_node_id, source_epoch, stream, first_sequence, id)) = cursor else {
-            return Ok(Vec::new());
+            // A cursor from the old unscoped inventory, or a retained row removed after the
+            // checkpoint, cannot safely continue inside this source. Restart this bounded phase;
+            // callers reapply the returned wires idempotently without advancing the generation.
+            return segment_phase_with_row(
+                connection, tombstones, None, page_limit, spec, row_mapper,
+            );
         };
         let sql = if spec.source_node_id.is_some() {
             segment_phase_sql_for_source(spec.projection, spec.index_hint, true)
