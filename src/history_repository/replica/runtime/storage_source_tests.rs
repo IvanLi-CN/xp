@@ -97,6 +97,10 @@ fn snapshot_source_cursor_restarts_tombstones_first() {
         .stored_segments_page_for_source(Some("s:r:z-tombstone"), 1, Some("node-a"))
         .expect("restart mismatched snapshot page");
     assert_eq!(restarted[0].id, "z-tombstone");
+    let restarted_from_legacy = runtime
+        .stored_segments_page_for_source(Some("r:b-record"), 1, Some("node-a"))
+        .expect("restart legacy global cursor page");
+    assert_eq!(restarted_from_legacy[0].id, "z-tombstone");
 }
 
 #[test]

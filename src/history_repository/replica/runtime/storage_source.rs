@@ -46,6 +46,8 @@ impl RepositoryReplicaRuntime {
                     _ => (false, None),
                 }
             } else {
+                // An unscoped legacy cursor is not a safe position inside this source. Restart
+                // the source inventory from its tombstone-first bound, matching SQLite.
                 (false, None)
             };
             if limit == 0 {

@@ -134,6 +134,21 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
         ["source-a-tombstone"]
     );
 
+    let restarted_from_other_source_scoped = storage
+        .repository_history_segment_metadata_page_for_source(
+            Some("s:t:source-b-tombstone"),
+            Some("source-a"),
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        restarted_from_other_source_scoped
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["source-a-tombstone"]
+    );
+
     let restarted_from_stale_cursor = storage
         .repository_history_segment_metadata_page_for_source(
             Some("r:removed-segment"),
