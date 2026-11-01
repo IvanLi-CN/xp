@@ -281,13 +281,50 @@ where
         index_hint,
         source_node_id,
     };
-    let (tombstones, after_id, cursor_is_source_scoped) = match after_id {
+    let (mut tombstones, mut after_id, mut cursor_is_source_scoped) = match after_id {
         Some(cursor) if cursor.starts_with("s:t:") => (true, Some(&cursor[4..]), true),
         Some(cursor) if cursor.starts_with("s:r:") => (false, Some(&cursor[4..]), true),
         Some(cursor) if cursor.starts_with("t:") => (true, Some(&cursor[2..]), false),
         Some(cursor) if cursor.starts_with("r:") => (false, Some(&cursor[2..]), false),
         Some(_) | None => (true, None, false),
     };
+    if let Some(after_cursor) = after_id {
+        let cursor_matches = match source_node_id {
+            Some(source_node_id) => {
+                cursor_is_source_scoped
+                    && connection
+                        .query_row(
+                            "SELECT contains_tombstone
+                             FROM repository_history_segments
+                             WHERE id = ?1 AND source_node_id = ?2",
+                            params![after_cursor, source_node_id],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .is_some_and(|contains_tombstone| contains_tombstone == tombstones)
+            }
+            None => {
+                !cursor_is_source_scoped
+                    && connection
+                        .query_row(
+                            "SELECT contains_tombstone
+                             FROM repository_history_segments
+                             WHERE id = ?1",
+                            [after_cursor],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .is_some_and(|contains_tombstone| contains_tombstone == tombstones)
+            }
+        };
+        if !cursor_matches {
+            tombstones = true;
+            after_id = None;
+            cursor_is_source_scoped = true;
+        }
+    }
     let mut rows = segment_phase_with_row(
         connection,
         tombstones,

@@ -93,7 +93,7 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
         .repository_history_segment_metadata_page_for_source(
             Some("s:r:source-a-tombstone"),
             Some("source-a"),
-            1,
+            2,
         )
         .unwrap();
     assert_eq!(
@@ -101,7 +101,7 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
             .iter()
             .map(|row| row.id.as_str())
             .collect::<Vec<_>>(),
-        ["source-a-tombstone"]
+        ["source-a-tombstone", "source-a-ordinary"]
     );
 
     let restarted_from_retained_global_cursor = storage
@@ -138,7 +138,7 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
         .repository_history_segment_metadata_page_for_source(
             Some("r:removed-segment"),
             Some("source-a"),
-            1,
+            2,
         )
         .unwrap();
     assert_eq!(
@@ -146,6 +146,6 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
             .iter()
             .map(|row| row.id.as_str())
             .collect::<Vec<_>>(),
-        ["source-a-tombstone"]
+        ["source-a-tombstone", "source-a-ordinary"]
     );
 }

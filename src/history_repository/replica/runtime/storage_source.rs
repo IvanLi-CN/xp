@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 pub(super) fn segment_sync_cursor_parts(cursor: Option<&str>) -> (bool, &str, bool) {
     match cursor {
@@ -26,49 +27,58 @@ impl RepositoryReplicaRuntime {
         if !self.uses_sqlite_history() {
             let (cursor_tombstone_rank, after_id, cursor_is_source_scoped) =
                 segment_sync_cursor_parts(after_id);
-            let mut segments = self
-                .snapshot
-                .segments
-                .iter()
-                .filter(|segment| segment.identity.node_id().as_str() == source_node_id)
-                .cloned()
-                .map(|segment| {
-                    (
-                        segment_tombstone_rank(&segment),
-                        segment_cursor_order(&segment),
-                        segment,
-                    )
-                })
-                .collect::<Vec<_>>();
-            segments.sort_by(|(left_rank, left_order, _), (right_rank, right_order, _)| {
-                (left_rank, left_order).cmp(&(right_rank, right_order))
-            });
             let (after_tombstone_rank, after_order) = if cursor_is_source_scoped {
-                match segments
+                match self
+                    .snapshot
+                    .segments
                     .iter()
-                    .find(|(_, _, segment)| segment.id == after_id)
-                {
-                    Some((rank, order, _)) if *rank == cursor_tombstone_rank => {
-                        (cursor_tombstone_rank, Some(order.clone()))
+                    .filter(|segment| segment.identity.node_id().as_str() == source_node_id)
+                    .find(|segment| segment.id == after_id)
+                    .map(|segment| {
+                        (
+                            segment_tombstone_rank(segment),
+                            segment_cursor_order(segment),
+                        )
+                    }) {
+                    Some((rank, order)) if rank == cursor_tombstone_rank => {
+                        (cursor_tombstone_rank, Some(order))
                     }
                     _ => (false, None),
                 }
             } else {
                 (false, None)
             };
-            let mut segments = segments
-                .into_iter()
-                .filter(|(rank, order, _)| {
-                    after_order
-                        .as_ref()
-                        .map_or(*rank >= after_tombstone_rank, |after_order| {
-                            (rank, order) > (&after_tombstone_rank, after_order)
-                        })
-                })
-                .map(|(_, _, segment)| segment)
-                .collect::<Vec<_>>();
-            segments.truncate(limit);
-            return Ok(segments);
+            if limit == 0 {
+                return Ok(Vec::new());
+            }
+            let mut selected = BTreeMap::new();
+            for segment in self
+                .snapshot
+                .segments
+                .iter()
+                .filter(|segment| segment.identity.node_id().as_str() == source_node_id)
+            {
+                let rank = segment_tombstone_rank(segment);
+                let order = segment_cursor_order(segment);
+                let is_after_cursor = after_order
+                    .as_ref()
+                    .map_or(rank >= after_tombstone_rank, |cursor| {
+                        (rank, &order) > (after_tombstone_rank, cursor)
+                    });
+                if !is_after_cursor {
+                    continue;
+                }
+                selected.insert((rank, order), segment);
+                if selected.len() > limit {
+                    let last = selected
+                        .keys()
+                        .next_back()
+                        .cloned()
+                        .expect("bounded snapshot page is nonempty");
+                    selected.remove(&last);
+                }
+            }
+            return Ok(selected.into_values().cloned().collect());
         }
         self.storage
             .repository_history_segments_page_for_source(after_id, Some(source_node_id), limit)
