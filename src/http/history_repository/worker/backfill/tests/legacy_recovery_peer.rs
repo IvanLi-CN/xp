@@ -218,6 +218,7 @@ async fn response(
                 _ => {}
             }
         }
+        let source_scoped = source_node_id.is_some();
         let mut summary = if let Some(source_node_id) = source_node_id {
             runtime
                 .replication_summary_after_for_source(
@@ -243,7 +244,9 @@ async fn response(
         // keeping this regression small. Its cursor still seeks the actual durable inventory.
         if summary.segment_ids.len() > 3 {
             summary.segment_ids.truncate(3);
-            summary.next_segment_id = Some(format!("r:{}", summary.segment_ids.last().unwrap()));
+            let prefix = if source_scoped { "s:r:" } else { "r:" };
+            summary.next_segment_id =
+                Some(format!("{prefix}{}", summary.segment_ids.last().unwrap()));
         }
         if matches!(fault, Some(Fault::Cursor)) {
             summary.next_segment_id = Some("../../not-a-cursor".into());

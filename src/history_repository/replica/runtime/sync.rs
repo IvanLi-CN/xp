@@ -884,6 +884,14 @@ fn summary_segment_cursor(contains_tombstone: bool, id: &str) -> String {
     format!("{phase}:{id}")
 }
 
+pub(super) fn source_scoped_summary_segment_cursor(contains_tombstone: bool, id: &str) -> String {
+    format!("s:{}", summary_segment_cursor(contains_tombstone, id))
+}
+
+pub(super) fn source_scoped_segment_sync_cursor(segment: &super::StoredSegment) -> String {
+    format!("s:{}", segment_sync_cursor(segment))
+}
+
 pub(super) fn record_partition_summary(
     record: &super::StoredRecord,
 ) -> Result<RepositoryPartitionSummary, RepositoryRuntimeError> {

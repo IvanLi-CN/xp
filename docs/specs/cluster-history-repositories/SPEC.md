@@ -134,7 +134,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   seek；不得以 nullable cursor 或子查询包裹该范围，导致 SQLite 从 phase 起点重扫。
 - legacy predecessor recovery 的 summary 请求必须带 `source_node_id`。服务端只按该 source
   的 segment metadata 返回分页 ID，同时保持 tombstone/ordinary phase、opaque cursor、keyset
-  continuation 和 metadata-only 投影；未带过滤参数的 summary 继续保持原有全仓库语义。
+  continuation 和 metadata-only 投影。source-scoped continuation 使用 `s:t:`/`s:r:` opaque
+  cursor；旧的全局 `t:`/`r:` cursor、跨 source cursor 或已删除 cursor 必须从对应 phase
+  有界重启并依靠幂等导入收敛。未带过滤参数的 summary 继续保持原有全仓库语义。
   repair 仍返回完整签名 wire，接收方继续按 source、epoch、stream、签名和 predecessor
   hash-chain 校验；过滤不得放宽任何完整性检查。
 - ready repository 的初始回填可能只保留某条 source stream 的尾部 segment。若没有本地水位，

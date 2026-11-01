@@ -295,7 +295,8 @@ impl RepositoryReplicaRuntime {
         limit: usize,
     ) -> Result<Vec<StoredSegment>, RepositoryRuntimeError> {
         if !self.uses_sqlite_history() {
-            let (after_tombstone_rank, after_id) = segment_sync_cursor_parts(after_id);
+            let (after_tombstone_rank, after_id, _) =
+                storage_source::segment_sync_cursor_parts(after_id);
             let mut segments = self
                 .snapshot
                 .segments
@@ -812,14 +813,6 @@ fn partition_summary_cursor_order(
         cursor.stream.as_str(),
         cursor.sequence,
     )
-}
-
-fn segment_sync_cursor_parts(cursor: Option<&str>) -> (bool, &str) {
-    match cursor {
-        Some(cursor) if cursor.starts_with("t:") => (false, &cursor[2..]),
-        Some(cursor) if cursor.starts_with("r:") => (true, &cursor[2..]),
-        Some(_) | None => (false, ""),
-    }
 }
 
 pub(super) fn segment_tombstone_rank(segment: &StoredSegment) -> bool {

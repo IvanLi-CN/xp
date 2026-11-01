@@ -281,15 +281,18 @@ where
         index_hint,
         source_node_id,
     };
-    let (tombstones, after_id) = match after_id {
-        Some(cursor) if cursor.starts_with("t:") => (true, Some(&cursor[2..])),
-        Some(cursor) if cursor.starts_with("r:") => (false, Some(&cursor[2..])),
-        Some(_) | None => (true, None),
+    let (tombstones, after_id, cursor_is_source_scoped) = match after_id {
+        Some(cursor) if cursor.starts_with("s:t:") => (true, Some(&cursor[4..]), true),
+        Some(cursor) if cursor.starts_with("s:r:") => (false, Some(&cursor[4..]), true),
+        Some(cursor) if cursor.starts_with("t:") => (true, Some(&cursor[2..]), false),
+        Some(cursor) if cursor.starts_with("r:") => (false, Some(&cursor[2..]), false),
+        Some(_) | None => (true, None, false),
     };
     let mut rows = segment_phase_with_row(
         connection,
         tombstones,
         after_id,
+        cursor_is_source_scoped,
         limit,
         &spec,
         &mut row_mapper,
@@ -299,6 +302,7 @@ where
             connection,
             false,
             None,
+            true,
             limit - rows.len(),
             &spec,
             &mut row_mapper,
@@ -317,6 +321,7 @@ fn segment_phase_with_row<T, F>(
     connection: &Connection,
     tombstones: bool,
     after_id: Option<&str>,
+    cursor_is_source_scoped: bool,
     limit: usize,
     spec: &SegmentPageSpec<'_>,
     mut row_mapper: F,
@@ -327,6 +332,13 @@ where
     let page_limit = limit;
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     if let Some(after_id) = after_id {
+        if spec.source_node_id.is_some() && !cursor_is_source_scoped {
+            // Legacy t:/r: cursors came from the unscoped inventory. They are not a proof of
+            // source-scoped continuation, even when the retained row happens to share the source.
+            return segment_phase_with_row(
+                connection, tombstones, None, true, page_limit, spec, row_mapper,
+            );
+        }
         let cursor = if let Some(source_node_id) = spec.source_node_id {
             connection.query_row(
                 "SELECT source_node_id, source_epoch, stream, first_sequence, id
@@ -367,7 +379,7 @@ where
             // checkpoint, cannot safely continue inside this source. Restart this bounded phase;
             // callers reapply the returned wires idempotently without advancing the generation.
             return segment_phase_with_row(
-                connection, tombstones, None, page_limit, spec, row_mapper,
+                connection, tombstones, None, true, page_limit, spec, row_mapper,
             );
         };
         let sql = if spec.source_node_id.is_some() {

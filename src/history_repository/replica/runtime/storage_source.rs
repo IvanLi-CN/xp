@@ -1,5 +1,17 @@
 use super::*;
 
+pub(super) fn segment_sync_cursor_parts(cursor: Option<&str>) -> (bool, &str, bool) {
+    match cursor {
+        Some(cursor) if cursor.starts_with("s:t:") || cursor.starts_with("s:r:") => {
+            (cursor.starts_with("s:r:"), &cursor[4..], true)
+        }
+        Some(cursor) if cursor.starts_with("t:") || cursor.starts_with("r:") => {
+            (cursor.starts_with("r:"), &cursor[2..], false)
+        }
+        Some(_) | None => (false, "", false),
+    }
+}
+
 impl RepositoryReplicaRuntime {
     pub(crate) fn stored_segments_page_for_source(
         &self,
@@ -12,7 +24,8 @@ impl RepositoryReplicaRuntime {
         }
         let source_node_id = source_node_id.expect("source was checked above");
         if !self.uses_sqlite_history() {
-            let (after_tombstone_rank, after_id) = segment_sync_cursor_parts(after_id);
+            let (after_tombstone_rank, after_id, cursor_is_source_scoped) =
+                segment_sync_cursor_parts(after_id);
             let mut segments = self
                 .snapshot
                 .segments
@@ -32,7 +45,7 @@ impl RepositoryReplicaRuntime {
             });
             let after_order = segments
                 .iter()
-                .find(|(_, _, segment)| segment.id == after_id)
+                .find(|(_, _, segment)| cursor_is_source_scoped && segment.id == after_id)
                 .map(|(_, order, _)| order.clone());
             let mut segments = segments
                 .into_iter()

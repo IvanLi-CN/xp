@@ -334,10 +334,10 @@ fn relay_frame_matches_source(
     frame.sender_public_key() == source_keypair.public_key()
 }
 fn valid_repository_summary_cursor(cursor: &str) -> bool {
+    let cursor = cursor.strip_prefix("s:").unwrap_or(cursor);
     let segment_id = cursor
         .strip_prefix("t:")
-        .or_else(|| cursor.strip_prefix("r:"))
-        .unwrap_or(cursor);
+        .unwrap_or(cursor.strip_prefix("r:").unwrap_or(cursor));
     segment_id.len() == 64 && segment_id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 

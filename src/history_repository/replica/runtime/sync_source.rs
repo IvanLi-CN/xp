@@ -17,7 +17,14 @@ impl RepositoryReplicaRuntime {
             )?
             .into_iter()
             .map(|segment| SummarySegment {
-                cursor: summary_segment_cursor(segment.contains_tombstone, &segment.id),
+                cursor: if source_node_id.is_some() {
+                    super::source_scoped_summary_segment_cursor(
+                        segment.contains_tombstone,
+                        &segment.id,
+                    )
+                } else {
+                    super::summary_segment_cursor(segment.contains_tombstone, &segment.id)
+                },
                 id: segment.id,
             })
             .collect()
@@ -25,7 +32,11 @@ impl RepositoryReplicaRuntime {
             self.stored_segments_page_for_source(after_segment_id, page_limit, source_node_id)?
                 .into_iter()
                 .map(|segment| SummarySegment {
-                    cursor: segment_sync_cursor(&segment),
+                    cursor: if source_node_id.is_some() {
+                        super::source_scoped_segment_sync_cursor(&segment)
+                    } else {
+                        super::segment_sync_cursor(&segment)
+                    },
                     id: segment.id,
                 })
                 .collect()

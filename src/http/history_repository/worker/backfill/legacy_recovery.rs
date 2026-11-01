@@ -48,6 +48,7 @@ fn valid_id(id: &str) -> bool {
     id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 fn valid_cursor(cursor: &str) -> bool {
+    let cursor = cursor.strip_prefix("s:").unwrap_or(cursor);
     valid_id(
         cursor
             .strip_prefix("t:")
@@ -557,6 +558,7 @@ mod tests {
     #[test]
     fn cursor_validation_is_bounded_and_rejects_non_ids() {
         assert!(valid_cursor(&format!("r:{}", "a".repeat(64))));
+        assert!(valid_cursor(&format!("s:r:{}", "a".repeat(64))));
         assert!(!valid_cursor("../../prefix"));
         assert!(!valid_cursor(&"a".repeat(1024)));
     }

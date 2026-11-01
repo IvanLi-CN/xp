@@ -58,7 +58,7 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
     );
     let second = storage
         .repository_history_segment_metadata_page_for_source(
-            Some("t:source-a-tombstone"),
+            Some("s:t:source-a-tombstone"),
             Some("source-a"),
             1,
         )
@@ -66,6 +66,21 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
     assert_eq!(
         second.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
         ["source-a-ordinary"]
+    );
+
+    let restarted_from_retained_global_cursor = storage
+        .repository_history_segment_metadata_page_for_source(
+            Some("t:source-a-tombstone"),
+            Some("source-a"),
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        restarted_from_retained_global_cursor
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["source-a-tombstone"]
     );
 
     let restarted_from_other_source = storage
