@@ -749,39 +749,6 @@ fn upsert_repository_history_record(
         .map_err(sqlite_error)
 }
 
-fn upsert_repository_history_segment(
-    transaction: &rusqlite::Transaction<'_>,
-    row: &RepositoryHistorySegmentRow,
-) -> Result<()> {
-    transaction
-        .execute(
-            "INSERT INTO repository_history_segments
-                (id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
-                 first_sequence, payload)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT(id) DO UPDATE SET
-               closed_at = excluded.closed_at,
-               contains_tombstone = excluded.contains_tombstone,
-               source_node_id = excluded.source_node_id,
-               source_epoch = excluded.source_epoch,
-               stream = excluded.stream,
-               first_sequence = excluded.first_sequence,
-               payload = excluded.payload",
-            params![
-                row.id,
-                i64::try_from(row.closed_at_unix_seconds).unwrap_or(i64::MAX),
-                row.contains_tombstone,
-                row.source_node_id,
-                i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
-                row.stream,
-                i64::try_from(row.first_sequence).unwrap_or(i64::MAX),
-                row.payload,
-            ],
-        )
-        .map(|_| ())
-        .map_err(sqlite_error)
-}
-
 fn delete_repository_history_for_tombstone(
     connection: &rusqlite::Transaction<'_>,
     tombstone: &RepositoryHistoryTombstone,

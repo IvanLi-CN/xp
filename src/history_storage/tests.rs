@@ -207,10 +207,10 @@ fn external_repository_history_fails_closed_when_count_migration_fails() {
              DROP TRIGGER repository_history_records_count_delete;
              DROP TRIGGER repository_history_segments_count_insert;
              DROP TRIGGER repository_history_segments_count_delete;
-             DROP TRIGGER repository_history_segment_revision_insert;
-             DROP TRIGGER repository_history_segment_revision_delete;
-             DROP TRIGGER repository_history_segment_revision_update;
-             DROP TRIGGER repository_history_segment_revision_move;
+             DROP TRIGGER IF EXISTS repository_history_segment_revision_insert;
+             DROP TRIGGER IF EXISTS repository_history_segment_revision_delete;
+             DROP TRIGGER IF EXISTS repository_history_segment_revision_update;
+             DROP TRIGGER IF EXISTS repository_history_segment_revision_move;
              DROP TABLE repository_history_segment_revisions;
              DROP TABLE repository_history_counts;",
         )
@@ -793,10 +793,10 @@ fn repository_counts_initialize_from_existing_history_on_upgrade() {
                  DROP TRIGGER repository_history_records_count_delete;
                  DROP TRIGGER repository_history_segments_count_insert;
                  DROP TRIGGER repository_history_segments_count_delete;
-                 DROP TRIGGER repository_history_segment_revision_insert;
-                 DROP TRIGGER repository_history_segment_revision_delete;
-                 DROP TRIGGER repository_history_segment_revision_update;
-                 DROP TRIGGER repository_history_segment_revision_move;
+                 DROP TRIGGER IF EXISTS repository_history_segment_revision_insert;
+                 DROP TRIGGER IF EXISTS repository_history_segment_revision_delete;
+                 DROP TRIGGER IF EXISTS repository_history_segment_revision_update;
+                 DROP TRIGGER IF EXISTS repository_history_segment_revision_move;
                  DROP TABLE repository_history_segment_revisions;
                  DROP TABLE repository_history_counts;
                  INSERT INTO repository_history_records (

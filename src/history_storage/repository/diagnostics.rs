@@ -109,6 +109,10 @@ impl HistoryStorage {
                 [i64::try_from(record_end_unix_seconds).unwrap_or(i64::MAX)],
             )
             .map_err(sqlite_error)?;
+        super::super::counts::bump_repository_history_segment_revisions_for_expired_segments(
+            &transaction,
+            segment_closed_at_unix_seconds,
+        )?;
         transaction
             .execute(
                 "DELETE FROM repository_history_segments WHERE closed_at < ?1",

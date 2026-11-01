@@ -1,4 +1,83 @@
+use std::collections::BTreeSet;
+
 use super::*;
+
+pub(super) fn bump_repository_history_segment_revisions(
+    transaction: &rusqlite::Transaction<'_>,
+    source_node_ids: &BTreeSet<String>,
+) -> Result<()> {
+    for source_node_id in source_node_ids {
+        transaction
+            .execute(
+                "INSERT INTO repository_history_segment_revisions (source_node_id, revision)
+                 VALUES (?1, 1)
+                 ON CONFLICT(source_node_id) DO UPDATE SET revision = revision + 1",
+                [source_node_id],
+            )
+            .map_err(sqlite_error)?;
+    }
+    Ok(())
+}
+
+pub(super) fn bump_repository_history_segment_revisions_for_expired_segments(
+    transaction: &rusqlite::Transaction<'_>,
+    closed_at_unix_seconds: u64,
+) -> Result<()> {
+    let closed_at = i64::try_from(closed_at_unix_seconds).unwrap_or(i64::MAX);
+    transaction
+        .execute(
+            "UPDATE repository_history_segment_revisions
+                SET revision = revision + 1
+              WHERE EXISTS (
+                  SELECT 1
+                    FROM repository_history_segments
+                   WHERE repository_history_segments.source_node_id =
+                         repository_history_segment_revisions.source_node_id
+                     AND closed_at < ?1
+              )",
+            [closed_at],
+        )
+        .map_err(sqlite_error)?;
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO repository_history_segment_revisions
+                (source_node_id, revision)
+             SELECT source_node_id, 1
+               FROM repository_history_segments
+              WHERE closed_at < ?1",
+            [closed_at],
+        )
+        .map_err(sqlite_error)?;
+    Ok(())
+}
+
+pub(super) fn bump_repository_history_segment_revisions_for_all_segments(
+    transaction: &rusqlite::Transaction<'_>,
+) -> Result<()> {
+    transaction
+        .execute(
+            "UPDATE repository_history_segment_revisions
+                SET revision = revision + 1
+              WHERE EXISTS (
+                  SELECT 1
+                    FROM repository_history_segments
+                   WHERE repository_history_segments.source_node_id =
+                         repository_history_segment_revisions.source_node_id
+              )",
+            [],
+        )
+        .map_err(sqlite_error)?;
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO repository_history_segment_revisions
+                (source_node_id, revision)
+             SELECT source_node_id, 1
+               FROM repository_history_segments",
+            [],
+        )
+        .map_err(sqlite_error)?;
+    Ok(())
+}
 
 pub(super) fn ensure_repository_history_counts(connection: &mut Connection) -> Result<()> {
     let transaction = connection.transaction().map_err(sqlite_error)?;
@@ -52,6 +131,14 @@ pub(super) fn ensure_repository_history_counts(connection: &mut Connection) -> R
         .map_err(sqlite_error)?;
     transaction
         .execute_batch(
+            "DROP TRIGGER IF EXISTS repository_history_segment_revision_insert;
+             DROP TRIGGER IF EXISTS repository_history_segment_revision_delete;
+             DROP TRIGGER IF EXISTS repository_history_segment_revision_update;
+             DROP TRIGGER IF EXISTS repository_history_segment_revision_move;",
+        )
+        .map_err(sqlite_error)?;
+    transaction
+        .execute_batch(
             "CREATE TRIGGER IF NOT EXISTS repository_history_records_count_insert
                  AFTER INSERT ON repository_history_records
                  BEGIN
@@ -75,47 +162,6 @@ pub(super) fn ensure_repository_history_counts(connection: &mut Connection) -> R
                  BEGIN
                      UPDATE repository_history_counts
                         SET segment_count = segment_count - 1 WHERE id = 1;
-                 END;
-             CREATE TRIGGER IF NOT EXISTS repository_history_segment_revision_insert
-                 AFTER INSERT ON repository_history_segments
-                 BEGIN
-                     INSERT INTO repository_history_segment_revisions (source_node_id, revision)
-                     VALUES (NEW.source_node_id, 1)
-                     ON CONFLICT(source_node_id) DO UPDATE SET revision = revision + 1;
-                 END;
-             CREATE TRIGGER IF NOT EXISTS repository_history_segment_revision_delete
-                 AFTER DELETE ON repository_history_segments
-                 BEGIN
-                     INSERT INTO repository_history_segment_revisions (source_node_id, revision)
-                     VALUES (OLD.source_node_id, 1)
-                     ON CONFLICT(source_node_id) DO UPDATE SET revision = revision + 1;
-                 END;
-             CREATE TRIGGER IF NOT EXISTS repository_history_segment_revision_update
-                 AFTER UPDATE OF closed_at, contains_tombstone, source_node_id, source_epoch,
-                     stream, first_sequence, payload ON repository_history_segments
-                 WHEN OLD.source_node_id = NEW.source_node_id
-                      AND (OLD.closed_at IS NOT NEW.closed_at
-                           OR OLD.contains_tombstone IS NOT NEW.contains_tombstone
-                           OR OLD.source_epoch IS NOT NEW.source_epoch
-                           OR OLD.stream IS NOT NEW.stream
-                           OR OLD.first_sequence IS NOT NEW.first_sequence
-                           OR OLD.payload IS NOT NEW.payload)
-                 BEGIN
-                     INSERT INTO repository_history_segment_revisions (source_node_id, revision)
-                     VALUES (NEW.source_node_id, 1)
-                     ON CONFLICT(source_node_id) DO UPDATE SET revision = revision + 1;
-                 END;
-             CREATE TRIGGER IF NOT EXISTS repository_history_segment_revision_move
-                 AFTER UPDATE OF closed_at, contains_tombstone, source_node_id, source_epoch,
-                     stream, first_sequence, payload ON repository_history_segments
-                 WHEN OLD.source_node_id <> NEW.source_node_id
-                 BEGIN
-                     INSERT INTO repository_history_segment_revisions (source_node_id, revision)
-                     VALUES (OLD.source_node_id, 1)
-                     ON CONFLICT(source_node_id) DO UPDATE SET revision = revision + 1;
-                     INSERT INTO repository_history_segment_revisions (source_node_id, revision)
-                     VALUES (NEW.source_node_id, 1)
-                     ON CONFLICT(source_node_id) DO UPDATE SET revision = revision + 1;
                  END;",
         )
         .map_err(sqlite_error)?;

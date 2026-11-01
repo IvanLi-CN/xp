@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use super::*;
 
 const FULL_SEGMENT_PROJECTION: &str = concat!(
@@ -25,9 +27,19 @@ impl HistoryStorage {
             }
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
+        let mut changed_sources = BTreeSet::new();
         for row in rows {
-            upsert_repository_history_segment(&transaction, row)?;
+            if let Some(change) = upsert_repository_history_segment(&transaction, row)? {
+                changed_sources.insert(row.source_node_id.clone());
+                if let Some(previous_source_node_id) = change.previous_source_node_id {
+                    changed_sources.insert(previous_source_node_id);
+                }
+            }
         }
+        super::super::counts::bump_repository_history_segment_revisions(
+            &transaction,
+            &changed_sources,
+        )?;
         transaction.commit().map_err(sqlite_error)?;
         maintain_sqlite(connection)
     }
