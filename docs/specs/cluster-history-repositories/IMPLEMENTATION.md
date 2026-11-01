@@ -210,9 +210,10 @@
 - Legacy predecessor recovery adds the source node identity to each summary request. SQLite applies
   that predicate through the existing phase/keyset index, so a first historical page does not scan
   unrelated repository sources. Source-scoped continuation cursors use the opaque `s:t:`/`s:r:`
-  form; legacy unscoped `t:`/`r:` cursors, cross-source cursors, and stale cursors restart the
-  bounded phase and rely on idempotent wire import. A missing filter remains the unscoped summary
-  path for existing anti-entropy callers.
+  form; legacy unscoped `t:`/`r:` cursors, cross-source cursors, stale cursors, and phase-mismatched
+  cursors discard the cursor, restart from the source's tombstone-first bound, and rely on
+  idempotent wire import. A missing filter remains the unscoped summary path for existing
+  anti-entropy callers.
 - When a serving repository confirms an expired permanent sequence gap, the receiver advances
   its cursor without inventing the skipped segment hash. The first segment after that range
   establishes a new hash-chain head, and subsequent segments resume ordinary continuity checks.

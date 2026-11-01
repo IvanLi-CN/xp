@@ -394,9 +394,9 @@ where
         };
         if cursor_contains_tombstone != tombstones {
             // A phase prefix is bound to the row that produced it. A mismatched prefix is not a
-            // safe keyset position; restart this bounded phase instead of skipping rows.
+            // safe keyset position; restart the source inventory from its tombstone-first bound.
             return segment_phase_with_row(
-                connection, tombstones, None, true, page_limit, spec, row_mapper,
+                connection, true, None, true, page_limit, spec, row_mapper,
             );
         }
         let sql = if spec.source_node_id.is_some() {
