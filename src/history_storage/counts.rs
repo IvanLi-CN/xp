@@ -19,6 +19,66 @@ pub(super) fn bump_repository_history_segment_revisions(
     Ok(())
 }
 
+pub(super) fn bump_repository_history_segment_revisions_for_expired_segments(
+    transaction: &rusqlite::Transaction<'_>,
+    closed_at_unix_seconds: u64,
+) -> Result<()> {
+    let closed_at = i64::try_from(closed_at_unix_seconds).unwrap_or(i64::MAX);
+    transaction
+        .execute(
+            "UPDATE repository_history_segment_revisions
+                SET revision = revision + 1
+              WHERE EXISTS (
+                  SELECT 1
+                    FROM repository_history_segments
+                   WHERE repository_history_segments.source_node_id =
+                         repository_history_segment_revisions.source_node_id
+                     AND closed_at < ?1
+              )",
+            [closed_at],
+        )
+        .map_err(sqlite_error)?;
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO repository_history_segment_revisions
+                (source_node_id, revision)
+             SELECT source_node_id, 1
+               FROM repository_history_segments
+              WHERE closed_at < ?1",
+            [closed_at],
+        )
+        .map_err(sqlite_error)?;
+    Ok(())
+}
+
+pub(super) fn bump_repository_history_segment_revisions_for_all_segments(
+    transaction: &rusqlite::Transaction<'_>,
+) -> Result<()> {
+    transaction
+        .execute(
+            "UPDATE repository_history_segment_revisions
+                SET revision = revision + 1
+              WHERE EXISTS (
+                  SELECT 1
+                    FROM repository_history_segments
+                   WHERE repository_history_segments.source_node_id =
+                         repository_history_segment_revisions.source_node_id
+              )",
+            [],
+        )
+        .map_err(sqlite_error)?;
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO repository_history_segment_revisions
+                (source_node_id, revision)
+             SELECT source_node_id, 1
+               FROM repository_history_segments",
+            [],
+        )
+        .map_err(sqlite_error)?;
+    Ok(())
+}
+
 pub(super) fn ensure_repository_history_counts(connection: &mut Connection) -> Result<()> {
     let transaction = connection.transaction().map_err(sqlite_error)?;
     #[cfg(test)]

@@ -275,3 +275,43 @@ fn source_scoped_revision_batches_changes_and_ignores_idempotent_replays() {
         4
     );
 }
+
+#[test]
+fn retention_revision_update_handles_many_sources_in_one_transaction() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let runtime = load(temporary.path());
+    let segments = (0..512)
+        .map(|index| RepositoryHistorySegmentRow {
+            id: format!("segment-{index}"),
+            closed_at_unix_seconds: 1,
+            contains_tombstone: false,
+            source_node_id: format!("source-{index}"),
+            source_epoch: 1,
+            stream: "runtime".to_owned(),
+            first_sequence: 1,
+            payload: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_segments(&segments)
+        .expect("many source segments");
+
+    runtime
+        .storage
+        .replace_repository_history_records_and_prune(&[], &[], 0, 2, b"{}")
+        .expect("prune many source segments");
+    assert_eq!(
+        runtime.storage.repository_history_segment_count().unwrap(),
+        0
+    );
+    for index in 0..512 {
+        assert_eq!(
+            runtime
+                .storage
+                .repository_history_segment_revision(&format!("source-{index}"))
+                .expect("revision after many source prune"),
+            2
+        );
+    }
+}

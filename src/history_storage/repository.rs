@@ -703,23 +703,13 @@ impl HistoryStorage {
             return Ok(());
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        let changed_sources = {
-            let mut statement = transaction
-                .prepare("SELECT DISTINCT source_node_id FROM repository_history_segments")
-                .map_err(sqlite_error)?;
-            statement
-                .query_map([], |row| row.get::<_, String>(0))
-                .map_err(sqlite_error)?
-                .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()
-                .map_err(sqlite_error)?
-        };
+        super::counts::bump_repository_history_segment_revisions_for_all_segments(&transaction)?;
         transaction
             .execute("DELETE FROM repository_history_records", [])
             .map_err(sqlite_error)?;
         transaction
             .execute("DELETE FROM repository_history_segments", [])
             .map_err(sqlite_error)?;
-        super::counts::bump_repository_history_segment_revisions(&transaction, &changed_sources)?;
         transaction.commit().map_err(sqlite_error)?;
         maintain_sqlite(connection)
     }
