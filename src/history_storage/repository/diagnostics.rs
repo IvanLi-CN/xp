@@ -60,6 +60,22 @@ impl HistoryStorage {
         self.repository_history_count("repository_history_segments", caller_class)
     }
 
+    pub(crate) fn repository_history_segment_revision(&self) -> Result<u64> {
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Ok(0);
+        };
+        let revision = connection
+            .query_row(
+                "SELECT segment_revision FROM repository_history_counts WHERE id = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(sqlite_error)?;
+        u64::try_from(revision)
+            .map_err(|_| HistoryStorageError("invalid repository segment revision".to_owned()))
+    }
+
     pub(crate) fn replace_repository_history_records_and_prune(
         &self,
         removed: &[RepositoryHistoryRecordRow],

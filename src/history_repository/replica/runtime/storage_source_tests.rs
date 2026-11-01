@@ -6,6 +6,7 @@ use crate::{
         identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
         replica::RepositoryRuntimeError,
     },
+    state::history_storage::RepositoryHistorySegmentRow,
 };
 use ed25519_dalek::SigningKey;
 
@@ -114,4 +115,55 @@ fn source_scoped_cursor_requires_a_source_filter() {
         error,
         RepositoryRuntimeError::Protocol(ProtocolError::CursorIdentityMismatch)
     ));
+}
+
+#[test]
+fn source_scoped_summary_restarts_after_history_revision_changes() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let runtime = load(temporary.path());
+    runtime
+        .storage
+        .upsert_repository_history_segments(&[RepositoryHistorySegmentRow {
+            id: "ordinary".to_owned(),
+            closed_at_unix_seconds: 1,
+            contains_tombstone: false,
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 1,
+            stream: "runtime".to_owned(),
+            first_sequence: 1,
+            payload: Vec::new(),
+        }])
+        .expect("ordinary segment");
+    let revision = runtime
+        .storage
+        .repository_history_segment_revision()
+        .expect("initial segment revision")
+        .to_string();
+    runtime
+        .storage
+        .upsert_repository_history_segments(&[RepositoryHistorySegmentRow {
+            id: "tombstone".to_owned(),
+            closed_at_unix_seconds: 2,
+            contains_tombstone: true,
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 1,
+            stream: "tombstone".to_owned(),
+            first_sequence: 0,
+            payload: Vec::new(),
+        }])
+        .expect("new tombstone segment");
+
+    let summary = runtime
+        .replication_summary_after_for_source_with_revision(
+            Some("s:r:ordinary"),
+            false,
+            Some("node-a"),
+            Some(&revision),
+        )
+        .expect("restarted source summary");
+    assert_eq!(summary.segment_ids, ["tombstone", "ordinary"]);
+    assert_ne!(
+        summary.source_summary_revision.as_deref(),
+        Some(revision.as_str())
+    );
 }

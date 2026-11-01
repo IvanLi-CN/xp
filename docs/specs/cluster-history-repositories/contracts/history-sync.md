@@ -64,7 +64,11 @@ inventing a permanent gap. Subsequent newly collected backfill pages use the ind
 During this legacy predecessor recovery, each summary request includes the source node identity.
 The serving repository validates that identity and limits the returned segment-ID page to that
 source while retaining the existing tombstone/ordinary phase order, opaque cursor format, keyset
-continuation and metadata-only projection. Requests without the filter retain the unscoped summary
+continuation and metadata-only projection. Each source-scoped response also carries a
+`source_summary_revision`; the recovery checkpoint echoes it on the next page request. A changed
+revision discards the after cursor and restarts the source from its tombstone-first boundary, so a
+concurrent tombstone cannot be hidden behind an ordinary-phase keyset cursor. The revision is
+durable with the cursor across restart. Requests without the filter retain the unscoped summary
 for ordinary anti-entropy callers. Repair still returns full signed wires for the requested IDs, and
 the receiver keeps its existing source, epoch, stream, signature and predecessor-chain checks.
 

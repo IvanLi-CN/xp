@@ -11,4 +11,6 @@ pub(crate) struct RepositorySummaryQuery {
     #[serde(default)]
     pub(super) deep_verification: bool,
     pub(super) summary_version: Option<u8>,
+    #[serde(default)]
+    pub(super) source_summary_revision: Option<String>,
 }

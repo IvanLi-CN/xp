@@ -28,10 +28,28 @@ impl RepositoryReplicaRuntime {
         requested_version: Option<u8>,
         source_node_id: Option<&str>,
     ) -> Result<super::RepositoryReplicaSummary, RepositoryRuntimeError> {
-        let mut summary = self.replication_summary_after_for_source(
+        self.replication_summary_for_version_for_source_with_revision(
+            after_segment_id,
+            deep_verification,
+            requested_version,
+            source_node_id,
+            None,
+        )
+    }
+
+    pub(crate) fn replication_summary_for_version_for_source_with_revision(
+        &self,
+        after_segment_id: Option<&str>,
+        deep_verification: bool,
+        requested_version: Option<u8>,
+        source_node_id: Option<&str>,
+        source_summary_revision: Option<&str>,
+    ) -> Result<super::RepositoryReplicaSummary, RepositoryRuntimeError> {
+        let mut summary = self.replication_summary_after_for_source_with_revision(
             after_segment_id,
             deep_verification,
             source_node_id,
+            source_summary_revision,
         )?;
         if requested_version != Some(3) {
             summary.summary_version = 1;

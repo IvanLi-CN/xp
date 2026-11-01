@@ -19,7 +19,6 @@ mod gap_ledger;
 #[path = "sync_source.rs"]
 mod sync_source;
 use gap_ledger::{canonical_gaps, prioritize_full_ledger};
-
 pub(super) const MAX_REPAIR_SEGMENTS: usize = 64;
 pub(super) const MAX_REPAIR_GAPS: usize = 64;
 const MAX_RELAY_TARGETS: usize = 64;
@@ -27,12 +26,14 @@ const MAX_COLLECTION_SOURCES: usize = 4_096;
 const MAX_TOMBSTONE_ACKNOWLEDGEMENTS_PER_CYCLE: usize = 64;
 const MAX_RETAINED_PARTITION_SUMMARIES: usize = 1_024;
 const COLLECTION_STALE_SECONDS: u64 = 5 * 60;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositoryReplicaSummary {
     pub(crate) segment_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) next_segment_id: Option<String>,
+    /// Source-scoped pages restart when this serving inventory revision changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source_summary_revision: Option<String>,
     /// Daily verification is over signed source-stream ranges, not opaque segment ids.
     pub(crate) partitions: Vec<RepositoryPartitionSummary>,
     #[serde(default)]
@@ -46,7 +47,6 @@ pub(crate) struct RepositoryReplicaSummary {
     #[serde(default, skip_serializing_if = "is_false")]
     pub(crate) history_truncated: bool,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RepositoryReplicaGap {
     pub(crate) source_node_id: String,
@@ -60,7 +60,6 @@ pub(crate) struct RepositoryReplicaGap {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) reason: Option<String>,
 }
-
 #[derive(Debug)]
 pub(crate) struct RelayRepairPage {
     pub(crate) batch: RepositoryRepairBatch,
@@ -402,6 +401,7 @@ impl RepositoryReplicaRuntime {
             last_verified_unix_seconds: self.snapshot.last_verified_unix_seconds,
             history_truncated: self.snapshot.history_truncated,
             next_segment_id,
+            source_summary_revision: None,
         })
     }
 

@@ -13,10 +13,30 @@ pub(super) fn ensure_repository_history_counts(connection: &mut Connection) -> R
             "CREATE TABLE IF NOT EXISTS repository_history_counts (
                  id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
                  record_count INTEGER NOT NULL CHECK (record_count >= 0),
-                 segment_count INTEGER NOT NULL CHECK (segment_count >= 0)
+                 segment_count INTEGER NOT NULL CHECK (segment_count >= 0),
+                 segment_revision INTEGER NOT NULL CHECK (segment_revision >= 0)
              );",
         )
         .map_err(sqlite_error)?;
+    let columns = {
+        let mut statement = transaction
+            .prepare("PRAGMA table_info(repository_history_counts)")
+            .map_err(sqlite_error)?;
+        statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(sqlite_error)?
+            .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()
+            .map_err(sqlite_error)?
+    };
+    if !columns.contains("segment_revision") {
+        transaction
+            .execute(
+                "ALTER TABLE repository_history_counts
+                 ADD COLUMN segment_revision INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(sqlite_error)?;
+    }
     let initialized = transaction
         .query_row(
             "SELECT 1 FROM repository_history_counts WHERE id = 1",
@@ -29,10 +49,12 @@ pub(super) fn ensure_repository_history_counts(connection: &mut Connection) -> R
     if !initialized {
         transaction
             .execute(
-                "INSERT INTO repository_history_counts (id, record_count, segment_count)
+                "INSERT INTO repository_history_counts
+                    (id, record_count, segment_count, segment_revision)
                  SELECT 1,
                         (SELECT COUNT(*) FROM repository_history_records),
-                        (SELECT COUNT(*) FROM repository_history_segments)",
+                        (SELECT COUNT(*) FROM repository_history_segments),
+                        0",
                 [],
             )
             .map_err(sqlite_error)?;
@@ -62,6 +84,25 @@ pub(super) fn ensure_repository_history_counts(connection: &mut Connection) -> R
                  BEGIN
                      UPDATE repository_history_counts
                         SET segment_count = segment_count - 1 WHERE id = 1;
+                 END;
+             CREATE TRIGGER IF NOT EXISTS repository_history_segments_revision_insert
+                 AFTER INSERT ON repository_history_segments
+                 BEGIN
+                     UPDATE repository_history_counts
+                        SET segment_revision = segment_revision + 1 WHERE id = 1;
+                 END;
+             CREATE TRIGGER IF NOT EXISTS repository_history_segments_revision_delete
+                 AFTER DELETE ON repository_history_segments
+                 BEGIN
+                     UPDATE repository_history_counts
+                        SET segment_revision = segment_revision + 1 WHERE id = 1;
+                 END;
+             CREATE TRIGGER IF NOT EXISTS repository_history_segments_revision_update
+                 AFTER UPDATE OF closed_at, contains_tombstone, source_node_id, source_epoch,
+                     stream, first_sequence, payload ON repository_history_segments
+                 BEGIN
+                     UPDATE repository_history_counts
+                        SET segment_revision = segment_revision + 1 WHERE id = 1;
                  END;",
         )
         .map_err(sqlite_error)?;

@@ -370,11 +370,12 @@ pub(super) async fn admin_internal_history_repository_summary(
         .repository_replica
         .lock()
         .await
-        .replication_summary_for_version_for_source(
+        .replication_summary_for_version_for_source_with_revision(
             query.after_segment_id.as_deref(),
             query.deep_verification,
             query.summary_version,
             query.source_node_id.as_ref().map(RepositoryNodeId::as_str),
+            query.source_summary_revision.as_deref(),
         )
         .map_err(repository_error)?;
     // Encode while the permit is held; Axum's Json response defers serialization until body poll.
