@@ -336,7 +336,7 @@ where
             // Legacy t:/r: cursors came from the unscoped inventory. They are not a proof of
             // source-scoped continuation, even when the retained row happens to share the source.
             return segment_phase_with_row(
-                connection, tombstones, None, true, page_limit, spec, row_mapper,
+                connection, true, None, true, page_limit, spec, row_mapper,
             );
         }
         let cursor = if let Some(source_node_id) = spec.source_node_id {
@@ -386,10 +386,11 @@ where
         )) = cursor
         else {
             // A cursor from the old unscoped inventory, or a retained row removed after the
-            // checkpoint, cannot safely continue inside this source. Restart this bounded phase;
-            // callers reapply the returned wires idempotently without advancing the generation.
+            // checkpoint, cannot safely continue inside this source. Restart the source inventory
+            // from its tombstone-first bound; callers reapply returned wires idempotently without
+            // advancing the generation.
             return segment_phase_with_row(
-                connection, tombstones, None, true, page_limit, spec, row_mapper,
+                connection, true, None, true, page_limit, spec, row_mapper,
             );
         };
         if cursor_contains_tombstone != tombstones {

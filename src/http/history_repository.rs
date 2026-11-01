@@ -347,11 +347,10 @@ pub(super) async fn admin_internal_history_repository_summary(
     Query(query): Query<RepositorySummaryQuery>,
 ) -> Result<Response, ApiError> {
     ensure_syncing_or_ready_repository_sender(&state, internal).await?;
-    if query
-        .after_segment_id
-        .as_deref()
-        .is_some_and(|cursor| !valid_repository_summary_cursor(cursor))
-    {
+    if query.after_segment_id.as_deref().is_some_and(|cursor| {
+        !valid_repository_summary_cursor(cursor)
+            || (query.source_node_id.is_none() && cursor.starts_with("s:"))
+    }) {
         return Err(ApiError::invalid_request(
             "invalid repository summary cursor",
         ));

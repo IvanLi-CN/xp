@@ -7,6 +7,13 @@ impl RepositoryReplicaRuntime {
         deep_verification: bool,
         source_node_id: Option<&str>,
     ) -> Result<RepositoryReplicaSummary, RepositoryRuntimeError> {
+        if source_node_id.is_none()
+            && after_segment_id.is_some_and(|cursor| cursor.starts_with("s:"))
+        {
+            return Err(RepositoryRuntimeError::Protocol(
+                crate::history_sync::ProtocolError::CursorIdentityMismatch,
+            ));
+        }
         self.require_legacy_segment_cursor_index()?;
         let page_limit = super::super::REPLICATION_SEGMENT_PAGE_SIZE.saturating_add(1);
         let mut segments: Vec<SummarySegment> = if self.uses_sqlite_history() {

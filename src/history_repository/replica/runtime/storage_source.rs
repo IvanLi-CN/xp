@@ -24,7 +24,7 @@ impl RepositoryReplicaRuntime {
         }
         let source_node_id = source_node_id.expect("source was checked above");
         if !self.uses_sqlite_history() {
-            let (after_tombstone_rank, after_id, cursor_is_source_scoped) =
+            let (cursor_tombstone_rank, after_id, cursor_is_source_scoped) =
                 segment_sync_cursor_parts(after_id);
             let mut segments = self
                 .snapshot
@@ -43,10 +43,19 @@ impl RepositoryReplicaRuntime {
             segments.sort_by(|(left_rank, left_order, _), (right_rank, right_order, _)| {
                 (left_rank, left_order).cmp(&(right_rank, right_order))
             });
-            let after_order = segments
-                .iter()
-                .find(|(_, _, segment)| cursor_is_source_scoped && segment.id == after_id)
-                .map(|(_, order, _)| order.clone());
+            let (after_tombstone_rank, after_order) = if cursor_is_source_scoped {
+                match segments
+                    .iter()
+                    .find(|(_, _, segment)| segment.id == after_id)
+                {
+                    Some((rank, order, _)) if *rank == cursor_tombstone_rank => {
+                        (cursor_tombstone_rank, Some(order.clone()))
+                    }
+                    _ => (false, None),
+                }
+            } else {
+                (false, None)
+            };
             let mut segments = segments
                 .into_iter()
                 .filter(|(rank, order, _)| {
@@ -91,3 +100,7 @@ impl RepositoryReplicaRuntime {
             .collect()
     }
 }
+
+#[cfg(test)]
+#[path = "storage_source_tests.rs"]
+mod storage_source_tests;

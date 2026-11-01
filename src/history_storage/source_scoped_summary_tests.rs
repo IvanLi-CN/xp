@@ -146,6 +146,6 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
             .iter()
             .map(|row| row.id.as_str())
             .collect::<Vec<_>>(),
-        ["source-a-ordinary"]
+        ["source-a-tombstone"]
     );
 }
