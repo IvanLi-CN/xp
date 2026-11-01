@@ -100,6 +100,18 @@ degraded storage, `history_truncated`, a non-zero unexplained gap, or a changed 
 fails the
 complete-history claim.
 
+For a legacy predecessor page, the summary request must include the page source node ID. A healthy
+serving node should return only that source's segment IDs while preserving the opaque `s:t:`/`s:r:`
+cursor. Legacy unscoped `t:`/`r:` cursors are accepted only for compatibility. A stale,
+cross-source, or phase-mismatched cursor is discarded and the source-scoped reader restarts from
+the tombstone-first bound; a changed `source_summary_revision` causes the same restart when the
+serving inventory changes during pagination. After bounded unstable reads, the summary fails
+closed and the checkpoint remains retryable. This is safe because wire import is idempotent. If a
+trace shows
+unscoped summary requests or repeated enumeration of unrelated sources, the serving node is
+pre-fix; upgrade it before judging the recovery as stalled. Do not clear the checkpoint or
+unacknowledged journal rows.
+
 The status endpoint does not expose the local backfill page cursor or completion marker, so it
 cannot
 by itself prove terminal backfill progress or that a process restart replayed an interrupted page.

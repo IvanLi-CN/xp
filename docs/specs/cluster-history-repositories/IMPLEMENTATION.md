@@ -207,6 +207,16 @@
   because its summary request times out, keep the serving repository's public HTTPS endpoint healthy
   and let the next lifecycle retry resume the persisted catch-up; do not restart the source or
   delete its backlog as a recovery shortcut.
+- Legacy predecessor recovery adds the source node identity to each summary request. SQLite applies
+  that predicate through the existing phase/keyset index, so a first historical page does not scan
+  unrelated repository sources. Source-scoped continuation cursors use the opaque `s:t:`/`s:r:`
+  form; legacy unscoped `t:`/`r:` cursors, cross-source cursors, stale cursors, and phase-mismatched
+  cursors discard the cursor, restart from the source's tombstone-first bound, and rely on
+  idempotent wire import. Responses carry a source inventory revision that the legacy recovery
+  checkpoint echoes; a changed revision restarts the bounded page from that same tombstone-first
+  bound, including after a concurrent tombstone write. A bounded unstable read fails closed and
+  leaves the recovery checkpoint retryable. A missing filter remains the unscoped summary path for
+  existing anti-entropy callers.
 - When a serving repository confirms an expired permanent sequence gap, the receiver advances
   its cursor without inventing the skipped segment hash. The first segment after that range
   establishes a new hash-chain head, and subsequent segments resume ordinary continuity checks.

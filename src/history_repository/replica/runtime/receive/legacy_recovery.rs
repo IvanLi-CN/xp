@@ -44,6 +44,8 @@ pub(crate) struct LegacyRecoveryState {
     pub(crate) cursor: Option<String>,
     pub(crate) pending: Vec<String>,
     pub(crate) next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source_summary_revision: Option<String>,
     pub(crate) retry_after: u64,
     pub(crate) apply_position: u64,
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -317,6 +319,7 @@ impl RepositoryReplicaRuntime {
             cursor: None,
             pending: Vec::new(),
             next_cursor: None,
+            source_summary_revision: None,
             retry_after: 0,
             apply_position: 0,
             tombstone_apply_position: 0,

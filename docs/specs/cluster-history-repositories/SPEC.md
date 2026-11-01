@@ -132,6 +132,18 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   repair/backfill 路径仍按既有完整 payload 查询执行，summary 的外部 JSON、分页顺序和 cursor
   语义保持不变。continuation 先由 opaque segment ID 解析五个持久排序键，再以行值范围继续
   seek；不得以 nullable cursor 或子查询包裹该范围，导致 SQLite 从 phase 起点重扫。
+- legacy predecessor recovery 的 summary 请求必须带 `source_node_id`。服务端只按该 source
+  的 segment metadata 返回分页 ID，同时保持 tombstone/ordinary phase、opaque cursor、keyset
+  continuation 和 metadata-only 投影。source-scoped continuation 使用 `s:t:`/`s:r:` opaque
+  cursor；旧的全局 `t:`/`r:` cursor、跨 source cursor、已删除 cursor 或 phase 不匹配的
+  cursor 必须丢弃游标并从 source 的 tombstone-first 有界起点重启，依靠幂等导入收敛。未带
+  过滤参数的 summary 继续保持原有全仓库语义。每个 source-scoped page 还返回当前
+  `source_summary_revision`，恢复 checkpoint 必须在续页请求中回传；revision 变化时服务端
+  丢弃 after cursor 并从该 source 的 tombstone-first 边界重启，避免并发新增 tombstone 被普通
+  阶段游标越过。revision 连续变化超过有界重试次数时必须失败关闭并保留 checkpoint，由后续
+  worker 重试；该 revision 与 summary cursor 一起持久化，重启后仍可重试。
+  repair 仍返回完整签名 wire，接收方继续按 source、epoch、stream、签名和 predecessor
+  hash-chain 校验；过滤不得放宽任何完整性检查。
 - ready repository 的初始回填可能只保留某条 source stream 的尾部 segment。若没有本地水位，
   非零首段必须携带已签名的 predecessor hash，初始回填专用接收路径才可以把它作为 retained
   anchor 持久化。若本地已有该 stream 的连续水位，且 repair 明确携带

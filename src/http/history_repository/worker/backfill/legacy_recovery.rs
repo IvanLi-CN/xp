@@ -48,12 +48,13 @@ fn valid_id(id: &str) -> bool {
     id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 fn valid_cursor(cursor: &str) -> bool {
-    valid_id(
-        cursor
-            .strip_prefix("t:")
-            .or_else(|| cursor.strip_prefix("r:"))
-            .unwrap_or(cursor),
-    )
+    let segment_id = cursor
+        .strip_prefix("s:t:")
+        .or_else(|| cursor.strip_prefix("s:r:"))
+        .or_else(|| cursor.strip_prefix("t:"))
+        .or_else(|| cursor.strip_prefix("r:"))
+        .unwrap_or(cursor);
+    valid_id(segment_id)
 }
 
 /// At most eight bounded requests/apply transactions within ten seconds per maintenance tick.
@@ -291,6 +292,7 @@ async fn recover_legacy_original_page_step_inner(
         checkpoint.cursor = None;
         checkpoint.pending.clear();
         checkpoint.next_cursor = None;
+        checkpoint.source_summary_revision = None;
         let mut runtime = state.repository_replica.lock().await;
         blocking(|| runtime.legacy_recovery_update_scan(&previous, &checkpoint))?;
     }
@@ -298,14 +300,11 @@ async fn recover_legacy_original_page_step_inner(
     // storage error must propagate instead of attempting a CAS against the old checkpoint.
     let attempt: anyhow::Result<_> = async {
         if checkpoint.pending.is_empty() {
-            let path = checkpoint.cursor.as_ref().map_or_else(
-                || "/api/admin/_internal/history-repository/summary?deep_verification=false".into(),
-                |cursor| {
-                    format!(
-                        "/api/admin/_internal/history-repository/summary?after_segment_id={cursor}"
-                    )
-                },
-            );
+            let path = legacy_summary_path(
+                checkpoint.cursor.as_deref(),
+                source_identity.node_id().as_str(),
+                checkpoint.source_summary_revision.as_deref(),
+            )?;
             let summary: RepositoryReplicaSummary =
                 request(state, &peer, Method::GET, &path, Vec::new()).await?;
             validate_summary(&summary, checkpoint.cursor.as_deref())?;
@@ -341,6 +340,7 @@ async fn recover_legacy_original_page_step_inner(
             next.cursor = None;
             next.pending.clear();
             next.next_cursor = None;
+            next.source_summary_revision = None;
             next.retry_after = now.saturating_add(RETRY_SECONDS);
             let mut runtime = state.repository_replica.lock().await;
             blocking(|| runtime.legacy_recovery_update_scan(&checkpoint, &next))
@@ -355,10 +355,12 @@ async fn recover_legacy_original_page_step_inner(
             next.after_peer = next.peer_id.take();
             next.peer_url_hash = None;
             next.cursor = None;
+            next.source_summary_revision = None;
             next.retry_after = now.saturating_add(RETRY_SECONDS);
         } else {
             next.pending = summary.segment_ids;
             next.next_cursor = summary.next_segment_id;
+            next.source_summary_revision = summary.source_summary_revision;
         }
         let mut runtime = state.repository_replica.lock().await;
         blocking(|| runtime.legacy_recovery_update_scan(&checkpoint, &next))?;
@@ -383,6 +385,7 @@ async fn recover_legacy_original_page_step_inner(
                 next.cursor = None;
                 next.pending.clear();
                 next.next_cursor = None;
+                next.source_summary_revision = None;
                 next.retry_after = now.saturating_add(RETRY_SECONDS);
                 blocking(|| runtime.legacy_recovery_update_scan(&checkpoint, &next))?;
                 tracing::debug!(peer=%peer.node_id,error=%error,"legacy evidence rejected");
@@ -397,6 +400,7 @@ async fn recover_legacy_original_page_step_inner(
                 next.after_peer = next.peer_id.take();
                 next.peer_url_hash = None;
                 next.cursor = None;
+                next.source_summary_revision = None;
                 next.retry_after = now.saturating_add(RETRY_SECONDS);
             }
             blocking(|| runtime.legacy_recovery_update_scan(&received, &next))?;
@@ -405,12 +409,43 @@ async fn recover_legacy_original_page_step_inner(
     Ok(LegacyRecoveryOutcome::InProgress)
 }
 
+fn legacy_summary_path(
+    after_segment_id: Option<&str>,
+    source_node_id: &str,
+    source_summary_revision: Option<&str>,
+) -> anyhow::Result<String> {
+    let mut url = reqwest::Url::parse(
+        "https://history.invalid/api/admin/_internal/history-repository/summary",
+    )?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("source_node_id", source_node_id);
+        match after_segment_id {
+            Some(cursor) => query.append_pair("after_segment_id", cursor),
+            None => query.append_pair("deep_verification", "false"),
+        };
+        if let Some(revision) = source_summary_revision {
+            query.append_pair("source_summary_revision", revision);
+        }
+    }
+    let query = url.query().context("legacy summary URL has no query")?;
+    Ok(format!("{}?{query}", url.path()))
+}
+
 fn validate_summary(
     summary: &RepositoryReplicaSummary,
     current: Option<&str>,
 ) -> anyhow::Result<()> {
     let mut seen = BTreeSet::new();
     if summary.segment_ids.len() > 256
+        || summary
+            .source_summary_revision
+            .as_deref()
+            .is_some_and(|revision| {
+                revision.is_empty()
+                    || revision.len() > 128
+                    || !revision.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            })
         || summary
             .segment_ids
             .iter()
@@ -542,6 +577,8 @@ mod tests {
     #[test]
     fn cursor_validation_is_bounded_and_rejects_non_ids() {
         assert!(valid_cursor(&format!("r:{}", "a".repeat(64))));
+        assert!(valid_cursor(&format!("s:r:{}", "a".repeat(64))));
+        assert!(!valid_cursor(&format!("s:{}", "a".repeat(64))));
         assert!(!valid_cursor("../../prefix"));
         assert!(!valid_cursor(&"a".repeat(1024)));
     }

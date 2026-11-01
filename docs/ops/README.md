@@ -969,6 +969,11 @@ Notes:
   restart the source, run `VACUUM`,
   clear the
   database, or delete unacknowledged backlog as a workaround.
+  During legacy predecessor recovery, the worker sends `source_node_id` with every summary request.
+  The serving node filters only the segment-ID inventory for that source through the existing
+  phase/keyset index; the opaque cursor and full signed-wire repair validation remain unchanged.
+  This prevents a first recovery page from spending its bounded retry budget enumerating unrelated
+  repository sources. A missing filter is retained only for ordinary unscoped anti-entropy.
   During initial catch-up, an unavailable or stale Ready member does not block other Ready members
   from receiving their public pages, but it keeps the aggregate catch-up incomplete. The node does
   not start its readiness window until every Ready member has been covered. Keep stale membership

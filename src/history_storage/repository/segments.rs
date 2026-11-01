@@ -39,18 +39,28 @@ impl HistoryStorage {
         after_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<RepositoryHistorySegmentRow>> {
+        self.repository_history_segments_page_for_source(after_id, None, limit)
+    }
+
+    pub(crate) fn repository_history_segments_page_for_source(
+        &self,
+        after_id: Option<&str>,
+        source_node_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<RepositoryHistorySegmentRow>> {
         let mut backend = self.lock_backend();
         let connection = match &mut *backend {
             Backend::Sqlite(connection) => connection,
             Backend::Unavailable(error) => return Err(error.clone()),
             Backend::Json => return Ok(Vec::new()),
         };
-        segment_page(
+        segment_page_for_source(
             connection,
             after_id,
             limit,
             FULL_SEGMENT_PROJECTION,
             None,
+            source_node_id,
             segment_row,
         )
     }
@@ -60,18 +70,28 @@ impl HistoryStorage {
         after_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<RepositoryHistorySegmentMetadataRow>> {
+        self.repository_history_segment_metadata_page_for_source(after_id, None, limit)
+    }
+
+    pub(crate) fn repository_history_segment_metadata_page_for_source(
+        &self,
+        after_id: Option<&str>,
+        source_node_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<RepositoryHistorySegmentMetadataRow>> {
         let mut backend = self.lock_backend();
         let connection = match &mut *backend {
             Backend::Sqlite(connection) => connection,
             Backend::Unavailable(error) => return Err(error.clone()),
             Backend::Json => return Ok(Vec::new()),
         };
-        segment_page(
+        segment_page_for_source(
             connection,
             after_id,
             limit,
             "id, contains_tombstone",
             Some("INDEXED BY repository_history_segments_sync_order_v2"),
+            source_node_id,
             metadata_segment_row,
         )
     }
@@ -244,29 +264,74 @@ impl HistoryStorage {
     }
 }
 
-fn segment_page<T, F>(
+fn segment_page_for_source<T, F>(
     connection: &Connection,
     after_id: Option<&str>,
     limit: usize,
     projection: &str,
     index_hint: Option<&str>,
+    source_node_id: Option<&str>,
     mut row_mapper: F,
 ) -> Result<Vec<T>>
 where
     F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
 {
-    let (tombstones, after_id) = match after_id {
-        Some(cursor) if cursor.starts_with("t:") => (true, Some(&cursor[2..])),
-        Some(cursor) if cursor.starts_with("r:") => (false, Some(&cursor[2..])),
-        Some(_) | None => (true, None),
+    let spec = SegmentPageSpec {
+        projection,
+        index_hint,
+        source_node_id,
     };
+    let (mut tombstones, mut after_id, mut cursor_is_source_scoped) = match after_id {
+        Some(cursor) if cursor.starts_with("s:t:") => (true, Some(&cursor[4..]), true),
+        Some(cursor) if cursor.starts_with("s:r:") => (false, Some(&cursor[4..]), true),
+        Some(cursor) if cursor.starts_with("t:") => (true, Some(&cursor[2..]), false),
+        Some(cursor) if cursor.starts_with("r:") => (false, Some(&cursor[2..]), false),
+        Some(_) | None => (true, None, false),
+    };
+    if let Some(after_cursor) = after_id {
+        let cursor_matches = match source_node_id {
+            Some(source_node_id) => {
+                cursor_is_source_scoped
+                    && connection
+                        .query_row(
+                            "SELECT contains_tombstone
+                             FROM repository_history_segments
+                             WHERE id = ?1 AND source_node_id = ?2",
+                            params![after_cursor, source_node_id],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .is_some_and(|contains_tombstone| contains_tombstone == tombstones)
+            }
+            None => {
+                !cursor_is_source_scoped
+                    && connection
+                        .query_row(
+                            "SELECT contains_tombstone
+                             FROM repository_history_segments
+                             WHERE id = ?1",
+                            [after_cursor],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .is_some_and(|contains_tombstone| contains_tombstone == tombstones)
+            }
+        };
+        if !cursor_matches {
+            tombstones = true;
+            after_id = None;
+            cursor_is_source_scoped = true;
+        }
+    }
     let mut rows = segment_phase_with_row(
         connection,
         tombstones,
         after_id,
+        cursor_is_source_scoped,
         limit,
-        projection,
-        index_hint,
+        &spec,
         &mut row_mapper,
     )?;
     if tombstones && rows.len() < limit {
@@ -274,54 +339,112 @@ where
             connection,
             false,
             None,
+            true,
             limit - rows.len(),
-            projection,
-            index_hint,
+            &spec,
             &mut row_mapper,
         )?);
     }
     Ok(rows)
 }
 
+struct SegmentPageSpec<'a> {
+    projection: &'a str,
+    index_hint: Option<&'a str>,
+    source_node_id: Option<&'a str>,
+}
+
 fn segment_phase_with_row<T, F>(
     connection: &Connection,
     tombstones: bool,
     after_id: Option<&str>,
+    cursor_is_source_scoped: bool,
     limit: usize,
-    projection: &str,
-    index_hint: Option<&str>,
+    spec: &SegmentPageSpec<'_>,
     mut row_mapper: F,
 ) -> Result<Vec<T>>
 where
     F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
 {
+    let page_limit = limit;
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     if let Some(after_id) = after_id {
-        let Some((source_node_id, source_epoch, stream, first_sequence, id)) = connection
-            .query_row(
-                "SELECT source_node_id, source_epoch, stream, first_sequence, id
+        if spec.source_node_id.is_some() && !cursor_is_source_scoped {
+            // Legacy t:/r: cursors came from the unscoped inventory. They are not a proof of
+            // source-scoped continuation, even when the retained row happens to share the source.
+            return segment_phase_with_row(
+                connection, true, None, true, page_limit, spec, row_mapper,
+            );
+        }
+        let cursor = if let Some(source_node_id) = spec.source_node_id {
+            connection.query_row(
+                "SELECT source_node_id, contains_tombstone, source_epoch, stream, first_sequence, id
+                 FROM repository_history_segments
+                 WHERE id = ?1 AND source_node_id = ?2",
+                params![after_id, source_node_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+        } else {
+            connection.query_row(
+                "SELECT source_node_id, contains_tombstone, source_epoch, stream, first_sequence, id
                  FROM repository_history_segments
                  WHERE id = ?1",
                 [after_id],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, String>(4)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
                     ))
                 },
             )
-            .optional()
-            .map_err(sqlite_error)?
+        }
+        .optional()
+        .map_err(sqlite_error)?;
+        let Some((
+            cursor_source_node_id,
+            cursor_contains_tombstone,
+            source_epoch,
+            stream,
+            first_sequence,
+            id,
+        )) = cursor
         else {
-            return Ok(Vec::new());
+            // A cursor from the old unscoped inventory, or a retained row removed after the
+            // checkpoint, cannot safely continue inside this source. Restart the source inventory
+            // from its tombstone-first bound; callers reapply returned wires idempotently without
+            // advancing the generation.
+            return segment_phase_with_row(
+                connection, true, None, true, page_limit, spec, row_mapper,
+            );
         };
-        let sql = segment_phase_sql(projection, index_hint, true);
+        if cursor_contains_tombstone != tombstones {
+            // A phase prefix is bound to the row that produced it. A mismatched prefix is not a
+            // safe keyset position; restart the source inventory from its tombstone-first bound.
+            return segment_phase_with_row(
+                connection, true, None, true, page_limit, spec, row_mapper,
+            );
+        }
+        let sql = if spec.source_node_id.is_some() {
+            segment_phase_sql_for_source(spec.projection, spec.index_hint, true)
+        } else {
+            segment_phase_sql(spec.projection, spec.index_hint, true)
+        };
         let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
-        let rows = statement
-            .query_map(
+        let rows = if let Some(source_node_id) = spec.source_node_id {
+            statement.query_map(
                 params![
                     tombstones,
                     source_node_id,
@@ -333,17 +456,38 @@ where
                 ],
                 &mut row_mapper,
             )
-            .map_err(sqlite_error)?;
+        } else {
+            statement.query_map(
+                params![
+                    tombstones,
+                    cursor_source_node_id,
+                    source_epoch,
+                    stream,
+                    first_sequence,
+                    id,
+                    limit
+                ],
+                &mut row_mapper,
+            )
+        }
+        .map_err(sqlite_error)?;
         return rows
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(sqlite_error);
     }
 
-    let sql = segment_phase_sql(projection, index_hint, false);
+    let sql = if spec.source_node_id.is_some() {
+        segment_phase_sql_for_source(spec.projection, spec.index_hint, false)
+    } else {
+        segment_phase_sql(spec.projection, spec.index_hint, false)
+    };
     let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
-    let rows = statement
-        .query_map(params![tombstones, limit], &mut row_mapper)
-        .map_err(sqlite_error)?;
+    let rows = if let Some(source_node_id) = spec.source_node_id {
+        statement.query_map(params![tombstones, source_node_id, limit], &mut row_mapper)
+    } else {
+        statement.query_map(params![tombstones, limit], &mut row_mapper)
+    }
+    .map_err(sqlite_error)?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
         .map_err(sqlite_error)
 }
@@ -374,6 +518,37 @@ pub(crate) fn segment_phase_sql(
          ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
                   id ASC
          LIMIT ?2"
+    )
+}
+
+fn segment_phase_sql_for_source(
+    projection: &str,
+    index_hint: Option<&str>,
+    continuation: bool,
+) -> String {
+    let index_hint = index_hint.unwrap_or_default();
+    if continuation {
+        return format!(
+            "SELECT {projection}
+             FROM repository_history_segments {index_hint}
+             WHERE contains_tombstone = ?1
+               AND source_node_id = ?2
+               AND (source_node_id, source_epoch, stream, first_sequence, id)
+                   > (?2, ?3, ?4, ?5, ?6)
+             ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
+                      id ASC
+             LIMIT ?7"
+        );
+    }
+
+    format!(
+        "SELECT {projection}
+         FROM repository_history_segments {index_hint}
+         WHERE contains_tombstone = ?1
+           AND source_node_id = ?2
+         ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
+                  id ASC
+         LIMIT ?3"
     )
 }
 

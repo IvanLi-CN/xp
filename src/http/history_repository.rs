@@ -333,11 +333,10 @@ fn relay_frame_matches_source(
 ) -> bool {
     frame.sender_public_key() == source_keypair.public_key()
 }
-
 fn valid_repository_summary_cursor(cursor: &str) -> bool {
-    let segment_id = cursor
-        .strip_prefix("t:")
-        .or_else(|| cursor.strip_prefix("r:"))
+    let segment_id = ["s:t:", "s:r:", "t:", "r:"]
+        .into_iter()
+        .find_map(|prefix| cursor.strip_prefix(prefix))
         .unwrap_or(cursor);
     segment_id.len() == 64 && segment_id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -348,11 +347,10 @@ pub(super) async fn admin_internal_history_repository_summary(
     Query(query): Query<RepositorySummaryQuery>,
 ) -> Result<Response, ApiError> {
     ensure_syncing_or_ready_repository_sender(&state, internal).await?;
-    if query
-        .after_segment_id
-        .as_deref()
-        .is_some_and(|cursor| !valid_repository_summary_cursor(cursor))
-    {
+    if query.after_segment_id.as_deref().is_some_and(|cursor| {
+        !valid_repository_summary_cursor(cursor)
+            || (query.source_node_id.is_none() && cursor.starts_with("s:"))
+    }) {
         return Err(ApiError::invalid_request(
             "invalid repository summary cursor",
         ));
@@ -372,10 +370,12 @@ pub(super) async fn admin_internal_history_repository_summary(
         .repository_replica
         .lock()
         .await
-        .replication_summary_for_version(
+        .replication_summary_for_version_for_source_with_revision(
             query.after_segment_id.as_deref(),
             query.deep_verification,
             query.summary_version,
+            query.source_node_id.as_ref().map(RepositoryNodeId::as_str),
+            query.source_summary_revision.as_deref(),
         )
         .map_err(repository_error)?;
     // Encode while the permit is held; Axum's Json response defers serialization until body poll.

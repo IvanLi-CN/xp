@@ -30,6 +30,7 @@ struct PeerState {
     cluster: String,
     sender: String,
     target: String,
+    require_source_scoped_summary: bool,
     fault: Arc<Mutex<Option<Fault>>>,
     request_log: Arc<Mutex<Vec<String>>>,
     evidence: Arc<Mutex<Option<RepositoryReplicaSegment>>>,
@@ -73,6 +74,7 @@ impl Peer {
             cluster: state.cluster.cluster_id.clone(),
             sender: state.cluster.node_id.clone(),
             target: "registered-syncing-peer".into(),
+            require_source_scoped_summary: !wires.is_empty(),
             fault: Arc::new(Mutex::new(None)),
             request_log: Arc::new(Mutex::new(Vec::new())),
             evidence: Arc::new(Mutex::new(None)),
@@ -206,10 +208,34 @@ async fn response(
     } else {
         assert_eq!(method, Method::GET);
         assert!(uri.path().ends_with("/summary"));
-        let after = uri
-            .query()
-            .and_then(|query| query.strip_prefix("after_segment_id="));
-        let mut summary = runtime.replication_summary_after(after, false).unwrap();
+        let query_url = reqwest::Url::parse(&format!("https://peer.invalid{uri}")).unwrap();
+        let mut after = None;
+        let mut source_node_id = None;
+        for (key, value) in query_url.query_pairs() {
+            match key.as_ref() {
+                "after_segment_id" => after = Some(value.into_owned()),
+                "source_node_id" => source_node_id = Some(value.into_owned()),
+                _ => {}
+            }
+        }
+        let source_scoped = source_node_id.is_some();
+        let mut summary = if let Some(source_node_id) = source_node_id {
+            runtime
+                .replication_summary_after_for_source(
+                    after.as_deref(),
+                    false,
+                    Some(&source_node_id),
+                )
+                .unwrap()
+        } else {
+            assert!(
+                !state.require_source_scoped_summary,
+                "legacy summary must be source-scoped"
+            );
+            runtime
+                .replication_summary_after(after.as_deref(), false)
+                .unwrap()
+        };
         if let Some(row) = &evidence {
             summary.segment_ids = vec![hex::encode(Sha256::digest(&row.wire))];
             summary.next_segment_id = None;
@@ -218,7 +244,9 @@ async fn response(
         // keeping this regression small. Its cursor still seeks the actual durable inventory.
         if summary.segment_ids.len() > 3 {
             summary.segment_ids.truncate(3);
-            summary.next_segment_id = Some(format!("r:{}", summary.segment_ids.last().unwrap()));
+            let prefix = if source_scoped { "s:r:" } else { "r:" };
+            summary.next_segment_id =
+                Some(format!("{prefix}{}", summary.segment_ids.last().unwrap()));
         }
         if matches!(fault, Some(Fault::Cursor)) {
             summary.next_segment_id = Some("../../not-a-cursor".into());
