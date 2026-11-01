@@ -17,6 +17,16 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
                 payload: b"a-ordinary".to_vec(),
             },
             RepositoryHistorySegmentRow {
+                id: "source-a-ordinary-2".to_owned(),
+                closed_at_unix_seconds: 1,
+                contains_tombstone: false,
+                source_node_id: "source-a".to_owned(),
+                source_epoch: 1,
+                stream: "runtime".to_owned(),
+                first_sequence: 3,
+                payload: b"a-ordinary-2".to_vec(),
+            },
+            RepositoryHistorySegmentRow {
                 id: "source-a-tombstone".to_owned(),
                 closed_at_unix_seconds: 1,
                 contains_tombstone: true,
@@ -65,6 +75,32 @@ fn preserves_phase_cursor_and_excludes_other_sources() {
         .unwrap();
     assert_eq!(
         second.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        ["source-a-ordinary"]
+    );
+    let third = storage
+        .repository_history_segment_metadata_page_for_source(
+            Some("s:r:source-a-ordinary"),
+            Some("source-a"),
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        third.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        ["source-a-ordinary-2"]
+    );
+
+    let restarted_from_mismatched_phase = storage
+        .repository_history_segment_metadata_page_for_source(
+            Some("s:r:source-a-tombstone"),
+            Some("source-a"),
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        restarted_from_mismatched_phase
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
         ["source-a-ordinary"]
     );
 

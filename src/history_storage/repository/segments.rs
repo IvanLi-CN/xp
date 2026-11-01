@@ -341,40 +341,50 @@ where
         }
         let cursor = if let Some(source_node_id) = spec.source_node_id {
             connection.query_row(
-                "SELECT source_node_id, source_epoch, stream, first_sequence, id
+                "SELECT source_node_id, contains_tombstone, source_epoch, stream, first_sequence, id
                  FROM repository_history_segments
                  WHERE id = ?1 AND source_node_id = ?2",
                 params![after_id, source_node_id],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, String>(4)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
                     ))
                 },
             )
         } else {
             connection.query_row(
-                "SELECT source_node_id, source_epoch, stream, first_sequence, id
+                "SELECT source_node_id, contains_tombstone, source_epoch, stream, first_sequence, id
                  FROM repository_history_segments
                  WHERE id = ?1",
                 [after_id],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, String>(4)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
                     ))
                 },
             )
         }
         .optional()
         .map_err(sqlite_error)?;
-        let Some((cursor_source_node_id, source_epoch, stream, first_sequence, id)) = cursor else {
+        let Some((
+            cursor_source_node_id,
+            cursor_contains_tombstone,
+            source_epoch,
+            stream,
+            first_sequence,
+            id,
+        )) = cursor
+        else {
             // A cursor from the old unscoped inventory, or a retained row removed after the
             // checkpoint, cannot safely continue inside this source. Restart this bounded phase;
             // callers reapply the returned wires idempotently without advancing the generation.
@@ -382,6 +392,13 @@ where
                 connection, tombstones, None, true, page_limit, spec, row_mapper,
             );
         };
+        if cursor_contains_tombstone != tombstones {
+            // A phase prefix is bound to the row that produced it. A mismatched prefix is not a
+            // safe keyset position; restart this bounded phase instead of skipping rows.
+            return segment_phase_with_row(
+                connection, tombstones, None, true, page_limit, spec, row_mapper,
+            );
+        }
         let sql = if spec.source_node_id.is_some() {
             segment_phase_sql_for_source(spec.projection, spec.index_hint, true)
         } else {
