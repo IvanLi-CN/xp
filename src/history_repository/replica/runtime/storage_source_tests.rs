@@ -136,14 +136,35 @@ fn source_scoped_summary_restarts_after_history_revision_changes() {
         .expect("ordinary segment");
     let revision = runtime
         .storage
-        .repository_history_segment_revision()
+        .repository_history_segment_revision("node-a")
         .expect("initial segment revision")
         .to_string();
     runtime
         .storage
         .upsert_repository_history_segments(&[RepositoryHistorySegmentRow {
-            id: "tombstone".to_owned(),
+            id: "other-source".to_owned(),
             closed_at_unix_seconds: 2,
+            contains_tombstone: false,
+            source_node_id: "node-b".to_owned(),
+            source_epoch: 1,
+            stream: "runtime".to_owned(),
+            first_sequence: 1,
+            payload: Vec::new(),
+        }])
+        .expect("unrelated source segment");
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_segment_revision("node-a")
+            .expect("source revision after unrelated write")
+            .to_string(),
+        revision
+    );
+    runtime
+        .storage
+        .upsert_repository_history_segments(&[RepositoryHistorySegmentRow {
+            id: "tombstone".to_owned(),
+            closed_at_unix_seconds: 3,
             contains_tombstone: true,
             source_node_id: "node-a".to_owned(),
             source_epoch: 1,

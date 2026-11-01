@@ -1,6 +1,8 @@
 use super::*;
 use sha2::{Digest as _, Sha256};
 
+const MAX_SOURCE_SUMMARY_ATTEMPTS: usize = 3;
+
 impl RepositoryReplicaRuntime {
     pub(crate) fn replication_summary_after_for_source(
         &self,
@@ -84,20 +86,25 @@ impl RepositoryReplicaRuntime {
                         .collect())
                 }
             };
-        let mut segments = load_page(page_after)?;
-        let mut source_summary_revision = source_node_id
-            .map(|source| self.source_summary_revision(source))
-            .transpose()?;
-        if source_node_id.is_some() && initial_source_summary_revision != source_summary_revision {
-            // A write crossed the page read. Discard that page and retry from the source's
-            // tombstone-first boundary so a new tombstone cannot be hidden behind an ordinary
-            // cursor.
-            page_after = None;
-            segments = load_page(page_after)?;
-            source_summary_revision = source_node_id
+        let mut page_revision = initial_source_summary_revision;
+        let mut attempts = 0;
+        let (mut segments, source_summary_revision) = loop {
+            attempts += 1;
+            let segments = load_page(page_after)?;
+            let observed_revision = source_node_id
                 .map(|source| self.source_summary_revision(source))
                 .transpose()?;
-        }
+            if source_node_id.is_none() || page_revision == observed_revision {
+                break (segments, observed_revision);
+            }
+            if attempts >= MAX_SOURCE_SUMMARY_ATTEMPTS {
+                return Err(RepositoryRuntimeError::Storage(
+                    "source summary changed during a bounded retry".to_owned(),
+                ));
+            }
+            page_revision = observed_revision;
+            page_after = None;
+        };
         let has_next_page = segments.len() > super::super::REPLICATION_SEGMENT_PAGE_SIZE;
         segments.truncate(super::super::REPLICATION_SEGMENT_PAGE_SIZE);
         let next_segment_id = if has_next_page {
@@ -153,7 +160,7 @@ impl RepositoryReplicaRuntime {
         if self.uses_sqlite_history() {
             return self
                 .storage
-                .repository_history_segment_revision()
+                .repository_history_segment_revision(source_node_id)
                 .map(|revision| revision.to_string())
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()));
         }

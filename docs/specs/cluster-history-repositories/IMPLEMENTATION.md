@@ -214,8 +214,9 @@
   cursors discard the cursor, restart from the source's tombstone-first bound, and rely on
   idempotent wire import. Responses carry a source inventory revision that the legacy recovery
   checkpoint echoes; a changed revision restarts the bounded page from that same tombstone-first
-  bound, including after a concurrent tombstone write. A missing filter remains the unscoped
-  summary path for existing anti-entropy callers.
+  bound, including after a concurrent tombstone write. A bounded unstable read fails closed and
+  leaves the recovery checkpoint retryable. A missing filter remains the unscoped summary path for
+  existing anti-entropy callers.
 - When a serving repository confirms an expired permanent sequence gap, the receiver advances
   its cursor without inventing the skipped segment hash. The first segment after that range
   establishes a new hash-chain head, and subsequent segments resume ordinary continuity checks.

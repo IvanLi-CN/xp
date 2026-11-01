@@ -140,7 +140,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   过滤参数的 summary 继续保持原有全仓库语义。每个 source-scoped page 还返回当前
   `source_summary_revision`，恢复 checkpoint 必须在续页请求中回传；revision 变化时服务端
   丢弃 after cursor 并从该 source 的 tombstone-first 边界重启，避免并发新增 tombstone 被普通
-  阶段游标越过。该 revision 与 summary cursor 一起持久化，重启后仍可重试。
+  阶段游标越过。revision 连续变化超过有界重试次数时必须失败关闭并保留 checkpoint，由后续
+  worker 重试；该 revision 与 summary cursor 一起持久化，重启后仍可重试。
   repair 仍返回完整签名 wire，接收方继续按 source、epoch、stream、签名和 predecessor
   hash-chain 校验；过滤不得放宽任何完整性检查。
 - ready repository 的初始回填可能只保留某条 source stream 的尾部 segment。若没有本地水位，
