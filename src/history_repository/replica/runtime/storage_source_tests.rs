@@ -188,3 +188,90 @@ fn source_scoped_summary_restarts_after_history_revision_changes() {
         Some(revision.as_str())
     );
 }
+
+#[test]
+fn source_scoped_revision_batches_changes_and_ignores_idempotent_replays() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let runtime = load(temporary.path());
+    let first = RepositoryHistorySegmentRow {
+        id: "first".to_owned(),
+        closed_at_unix_seconds: 1,
+        contains_tombstone: false,
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 1,
+        stream: "runtime".to_owned(),
+        first_sequence: 1,
+        payload: Vec::new(),
+    };
+    runtime
+        .storage
+        .upsert_repository_history_segments(std::slice::from_ref(&first))
+        .expect("initial segment");
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_segment_revision("node-a")
+            .expect("initial revision"),
+        1
+    );
+
+    runtime
+        .storage
+        .upsert_repository_history_segments(std::slice::from_ref(&first))
+        .expect("idempotent segment");
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_segment_revision("node-a")
+            .expect("revision after idempotent replay"),
+        1
+    );
+
+    let second = RepositoryHistorySegmentRow {
+        id: "second".to_owned(),
+        closed_at_unix_seconds: 2,
+        first_sequence: 2,
+        ..first.clone()
+    };
+    let third = RepositoryHistorySegmentRow {
+        id: "third".to_owned(),
+        closed_at_unix_seconds: 3,
+        first_sequence: 3,
+        ..first
+    };
+    runtime
+        .storage
+        .upsert_repository_history_segments(&[second, third])
+        .expect("batched segments");
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_segment_revision("node-a")
+            .expect("revision after batched replay"),
+        2
+    );
+
+    runtime
+        .storage
+        .replace_repository_history_records_and_prune(&[], &[], 0, 2, b"{}")
+        .expect("prune history");
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_segment_revision("node-a")
+            .expect("revision after prune"),
+        3
+    );
+
+    runtime
+        .storage
+        .clear_repository_history()
+        .expect("clear history");
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_segment_revision("node-a")
+            .expect("revision after clear"),
+        4
+    );
+}

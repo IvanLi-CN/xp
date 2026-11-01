@@ -114,6 +114,64 @@ pub(crate) struct RepositoryHistorySegmentRow {
     pub(crate) payload: Vec<u8>,
 }
 
+#[derive(Debug)]
+struct RepositoryHistorySegmentChange {
+    previous_source_node_id: Option<String>,
+}
+
+fn upsert_repository_history_segment(
+    transaction: &rusqlite::Transaction<'_>,
+    row: &RepositoryHistorySegmentRow,
+) -> Result<Option<RepositoryHistorySegmentChange>> {
+    let previous_source_node_id = transaction
+        .query_row(
+            "SELECT source_node_id FROM repository_history_segments WHERE id = ?1",
+            [&row.id],
+            |existing| existing.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let changed = transaction
+        .execute(
+            "INSERT INTO repository_history_segments
+                (id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
+                 first_sequence, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+               closed_at = excluded.closed_at,
+               contains_tombstone = excluded.contains_tombstone,
+               source_node_id = excluded.source_node_id,
+               source_epoch = excluded.source_epoch,
+               stream = excluded.stream,
+               first_sequence = excluded.first_sequence,
+               payload = excluded.payload
+             WHERE closed_at IS NOT excluded.closed_at
+                OR contains_tombstone IS NOT excluded.contains_tombstone
+                OR source_node_id IS NOT excluded.source_node_id
+                OR source_epoch IS NOT excluded.source_epoch
+                OR stream IS NOT excluded.stream
+                OR first_sequence IS NOT excluded.first_sequence
+                OR payload IS NOT excluded.payload",
+            params![
+                row.id,
+                i64::try_from(row.closed_at_unix_seconds).unwrap_or(i64::MAX),
+                row.contains_tombstone,
+                row.source_node_id,
+                i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
+                row.stream,
+                i64::try_from(row.first_sequence).unwrap_or(i64::MAX),
+                row.payload,
+            ],
+        )
+        .map_err(sqlite_error)?;
+    if changed == 0 {
+        return Ok(None);
+    }
+    Ok(Some(RepositoryHistorySegmentChange {
+        previous_source_node_id,
+    }))
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct RepositoryHistorySegmentMetadataRow {
     pub(crate) id: String,
@@ -352,35 +410,35 @@ impl HistoryStorage {
             .iter()
             .cloned()
             .collect::<std::collections::BTreeMap<_, _>>();
+        let mut changed_sources = std::collections::BTreeSet::new();
         let mut applied_segments = 0_u64;
         let mut applied_bytes = 0_u64;
         let mut scope_counts = std::collections::BTreeMap::<(String, String), (u64, u64)>::new();
         for row in &mutation.segments {
-            let was_present = transaction
-                .query_row(
-                    "SELECT 1 FROM repository_history_segments WHERE id = ?1",
-                    [&row.id],
-                    |_| Ok(()),
-                )
-                .optional()
-                .map_err(sqlite_error)?
-                .is_some();
-            upsert_repository_history_segment(&transaction, row)?;
-            if !was_present && canonical_bytes_by_id.contains_key(&row.id) {
-                applied_segments = applied_segments.checked_add(1).ok_or_else(|| {
-                    HistoryStorageError("applied segment count overflow".to_owned())
-                })?;
-                let canonical_bytes = canonical_bytes_by_id[&row.id];
-                applied_bytes = applied_bytes
-                    .checked_add(canonical_bytes)
-                    .ok_or_else(|| HistoryStorageError("applied byte count overflow".to_owned()))?;
-                let entry = scope_counts
-                    .entry((row.source_node_id.clone(), row.stream.clone()))
-                    .or_default();
-                entry.0 = entry.0.saturating_add(1);
-                entry.1 = entry.1.saturating_add(canonical_bytes);
+            if let Some(change) = upsert_repository_history_segment(&transaction, row)? {
+                let is_insert = change.previous_source_node_id.is_none();
+                changed_sources.insert(row.source_node_id.clone());
+                if let Some(previous_source_node_id) = change.previous_source_node_id {
+                    changed_sources.insert(previous_source_node_id);
+                }
+                if is_insert && canonical_bytes_by_id.contains_key(&row.id) {
+                    applied_segments = applied_segments.checked_add(1).ok_or_else(|| {
+                        HistoryStorageError("applied segment count overflow".to_owned())
+                    })?;
+                    let canonical_bytes = canonical_bytes_by_id[&row.id];
+                    applied_bytes =
+                        applied_bytes.checked_add(canonical_bytes).ok_or_else(|| {
+                            HistoryStorageError("applied byte count overflow".to_owned())
+                        })?;
+                    let entry = scope_counts
+                        .entry((row.source_node_id.clone(), row.stream.clone()))
+                        .or_default();
+                    entry.0 = entry.0.saturating_add(1);
+                    entry.1 = entry.1.saturating_add(canonical_bytes);
+                }
             }
         }
+        super::counts::bump_repository_history_segment_revisions(&transaction, &changed_sources)?;
         if applied_segments > 0 {
             let applied_at = mutation.progress_at_unix_seconds.or_else(|| {
                 mutation
@@ -645,12 +703,23 @@ impl HistoryStorage {
             return Ok(());
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
+        let changed_sources = {
+            let mut statement = transaction
+                .prepare("SELECT DISTINCT source_node_id FROM repository_history_segments")
+                .map_err(sqlite_error)?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(sqlite_error)?
+                .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()
+                .map_err(sqlite_error)?
+        };
         transaction
             .execute("DELETE FROM repository_history_records", [])
             .map_err(sqlite_error)?;
         transaction
             .execute("DELETE FROM repository_history_segments", [])
             .map_err(sqlite_error)?;
+        super::counts::bump_repository_history_segment_revisions(&transaction, &changed_sources)?;
         transaction.commit().map_err(sqlite_error)?;
         maintain_sqlite(connection)
     }

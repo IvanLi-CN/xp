@@ -101,6 +101,23 @@ impl HistoryStorage {
             ));
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
+        let changed_sources = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT DISTINCT source_node_id
+                     FROM repository_history_segments
+                     WHERE closed_at < ?1",
+                )
+                .map_err(sqlite_error)?;
+            statement
+                .query_map(
+                    [i64::try_from(segment_closed_at_unix_seconds).unwrap_or(i64::MAX)],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(sqlite_error)?
+                .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()
+                .map_err(sqlite_error)?
+        };
         replace_repository_history_records_in_transaction(&transaction, removed, retained)?;
         transaction
             .execute(
@@ -115,6 +132,10 @@ impl HistoryStorage {
                 [i64::try_from(segment_closed_at_unix_seconds).unwrap_or(i64::MAX)],
             )
             .map_err(sqlite_error)?;
+        super::super::counts::bump_repository_history_segment_revisions(
+            &transaction,
+            &changed_sources,
+        )?;
         write_snapshot(&transaction, REPOSITORY_REPLICA_KEY, control_payload)?;
         transaction.commit().map_err(sqlite_error)?;
         #[cfg(test)]
