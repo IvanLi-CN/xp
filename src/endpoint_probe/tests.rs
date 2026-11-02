@@ -188,6 +188,7 @@ fn probe_child_dies_when_probe_parent_is_killed() {
     struct ProcessGuard {
         supervisor_pid: libc::pid_t,
         owner_pid: Option<libc::pid_t>,
+        worker_pid: Option<libc::pid_t>,
     }
 
     impl Drop for ProcessGuard {
@@ -195,6 +196,11 @@ fn probe_child_dies_when_probe_parent_is_killed() {
             if let Some(owner_pid) = self.owner_pid {
                 unsafe {
                     libc::kill(owner_pid, libc::SIGKILL);
+                }
+            }
+            if let Some(worker_pid) = self.worker_pid {
+                unsafe {
+                    libc::kill(worker_pid, libc::SIGKILL);
                 }
             }
             if self.supervisor_pid > 0 {
@@ -223,6 +229,7 @@ fn probe_child_dies_when_probe_parent_is_killed() {
     let mut guard = ProcessGuard {
         supervisor_pid,
         owner_pid: None,
+        worker_pid: None,
     };
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -244,7 +251,7 @@ fn probe_child_dies_when_probe_parent_is_killed() {
     };
     guard.owner_pid = Some(owner_pid);
 
-    let _worker_pid = loop {
+    let worker_pid = loop {
         if let Some(pid) = fs::read_to_string(&worker_path)
             .ok()
             .and_then(|value| value.trim().parse::<libc::pid_t>().ok())
@@ -260,6 +267,7 @@ fn probe_child_dies_when_probe_parent_is_killed() {
         );
         thread::sleep(Duration::from_millis(10));
     };
+    guard.worker_pid = Some(worker_pid);
 
     assert_eq!(unsafe { libc::kill(owner_pid, libc::SIGKILL) }, 0);
 
@@ -276,6 +284,7 @@ fn probe_child_dies_when_probe_parent_is_killed() {
     };
     guard.supervisor_pid = 0;
     guard.owner_pid = None;
+    guard.worker_pid = None;
 
     assert!(supervisor_status.success(), "probe supervisor failed");
     assert_eq!(
