@@ -26,6 +26,18 @@ Optional target:
 
 The endpoint latency shown in UI is derived from the **first required target** (stable and comparable).
 
+## Probe child-process lifecycle
+
+The temporary Xray process used by the probe is configured to terminate when its Rust child handle
+is dropped. On Linux it also receives `PR_SET_PDEATHSIG=SIGKILL`, so an XP crash or OOM kill cannot
+leave the probe Xray process running after its parent has exited. This is required on low-memory
+nodes because orphaned probe processes can consume the same memory budget as the supervised XP
+process and cause repeated recovery failures.
+
+If a node was affected before this protection was installed, the existing orphaned probe processes
+must be removed during explicit node maintenance; deploying the fix does not retroactively remove
+running processes.
+
 ## Managed VLESS canary probe
 
 Managed VLESS endpoints also expose an immediate **Canary /generate_204** probe in the endpoint detail

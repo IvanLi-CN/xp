@@ -35,6 +35,9 @@ use crate::{
     state::{DesiredStateCommand, EndpointProbeAppendSample},
 };
 
+mod child_process;
+use child_process::configure_probe_child;
+
 pub const PROBE_USER_ID: &str = "user_probe";
 const PROBE_USER_DISPLAY_NAME: &str = "probe";
 
@@ -1058,14 +1061,16 @@ async fn probe_via_xray_socks(
         });
     }
 
-    let mut child = match Command::new(&xray_bin)
+    let mut command = Command::new(&xray_bin);
+    command
         .arg("run")
         .arg("-c")
         .arg(&config_path)
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-    {
+        .stderr(std::process::Stdio::null());
+    configure_probe_child(&mut command);
+
+    let mut child = match command.spawn() {
         Ok(child) => child,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let _ = std::fs::remove_dir_all(&tmp_dir);

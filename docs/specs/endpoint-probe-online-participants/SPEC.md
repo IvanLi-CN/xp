@@ -51,6 +51,8 @@ None
 - endpoint probe history 必须暴露 participant 计数；旧 `expected_nodes` 字段作为兼容别名保留一版。
 - legacy 24h 数据在新版本部署后必须立即按“同小时样本 union”恢复合理分母，不要求等待 24 小时自然刷满。
 - live run 页面聚合状态时，只能把 requested/progress 节点算作参与节点；`busy` / `not_found` / 传输错误节点不得进入分母。
+- probe runner 临时启动的 Xray 子进程必须绑定 XP runner 生命周期：子进程句柄释放时终止子进程，Linux
+  并设置 `PR_SET_PDEATHSIG=SIGKILL` 且校验父进程身份，避免 XP 异常退出后遗留探测进程继续消耗节点内存。
 
 ## 功能 / 行为规格
 
@@ -91,6 +93,8 @@ None
   按名称排序的节点详情链接，hover 与可访问名称仍可取得完整 ID。
 - Given 历史 sample 的节点已不存在或节点清单请求失败，When 查看 stats 或 live run 页面，Then 页面显示回退 ID，
   且不把名称解析失败升级为页面错误。
+- Given XP 在 probe runner 持有临时 Xray 子进程期间异常退出或被 OOM kill，When 操作系统回收 XP，Then 临时
+  Xray 子进程也必须退出，不得遗留为独立进程继续运行。
 
 ## 测试与验证
 
