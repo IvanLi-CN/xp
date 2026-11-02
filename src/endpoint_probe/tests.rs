@@ -62,18 +62,26 @@ fn probe_child_parent_death_helper() {
         return;
     };
 
-    let mut command = tokio::process::Command::new("sleep");
-    command.arg("60");
-    super::configure_probe_child(&mut command);
-    let child = match command.spawn() {
-        Ok(child) => child,
-        Err(_) => unsafe { libc::_exit(111) },
-    };
-    let worker_pid = child.id().expect("worker pid");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()
+        .expect("tokio runtime");
+    let worker_pid = runtime.block_on(async {
+        let mut command = tokio::process::Command::new("sleep");
+        command.arg("60");
+        super::configure_probe_child(&mut command);
+        let child = match command.spawn() {
+            Ok(child) => child,
+            Err(_) => unsafe { libc::_exit(111) },
+        };
+        let worker_pid = child.id().expect("worker pid");
+        std::mem::forget(child);
+        worker_pid
+    });
+    drop(runtime);
     if std::fs::write(pid_path, worker_pid.to_string()).is_err() {
         unsafe { libc::_exit(112) };
     }
-    std::mem::forget(child);
     loop {
         unsafe {
             libc::pause();
@@ -96,6 +104,18 @@ fn probe_child_dies_when_probe_parent_is_killed() {
         worker_pid: Option<libc::pid_t>,
     }
 
+    struct ChildSubreaperGuard {
+        previous: libc::c_int,
+    }
+
+    impl Drop for ChildSubreaperGuard {
+        fn drop(&mut self) {
+            unsafe {
+                libc::prctl(libc::PR_SET_CHILD_SUBREAPER, self.previous);
+            }
+        }
+    }
+
     impl Drop for ProcessGuard {
         fn drop(&mut self) {
             if self.owner_pid > 0 {
@@ -107,6 +127,7 @@ fn probe_child_dies_when_probe_parent_is_killed() {
             if let Some(worker_pid) = self.worker_pid {
                 unsafe {
                     libc::kill(worker_pid, libc::SIGKILL);
+                    libc::waitpid(worker_pid, std::ptr::null_mut(), 0);
                 }
             }
         }
@@ -120,6 +141,25 @@ fn probe_child_dies_when_probe_parent_is_killed() {
 
     let temp = tempfile::tempdir().expect("tempdir");
     let pid_path = temp.path().join("probe-child.pid");
+    let mut previous_subreaper = 0;
+    assert_eq!(
+        unsafe {
+            libc::prctl(
+                libc::PR_GET_CHILD_SUBREAPER,
+                &mut previous_subreaper as *mut libc::c_int,
+            )
+        },
+        0,
+        "read child subreaper state"
+    );
+    assert_eq!(
+        unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1) },
+        0,
+        "enable child subreaper"
+    );
+    let _subreaper = ChildSubreaperGuard {
+        previous: previous_subreaper,
+    };
     let mut owner = Command::new(std::env::current_exe().expect("test executable"))
         .arg("--exact")
         .arg("endpoint_probe::tests::probe_child_parent_death_helper")
@@ -162,7 +202,19 @@ fn probe_child_dies_when_probe_parent_is_killed() {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         match process_state(worker_pid) {
-            None | Some('Z') => break,
+            None => {
+                guard.worker_pid = None;
+                break;
+            }
+            Some('Z') => {
+                assert_eq!(
+                    unsafe { libc::waitpid(worker_pid, std::ptr::null_mut(), 0) },
+                    worker_pid,
+                    "reap probe child"
+                );
+                guard.worker_pid = None;
+                break;
+            }
             Some(_) if Instant::now() >= deadline => {
                 panic!("probe child survived its parent");
             }
