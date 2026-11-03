@@ -357,12 +357,12 @@ pub(super) async fn forward_endpoint_mutation(
         .map_err(|error| add_forward_request_id(map_mesh_forward_error(error), &request_id))?;
     let status =
         StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-    let body = response.bytes().await.map_err(|error| {
+    let body = response.bytes().await.map_err(|_error| {
         add_forward_request_id(
             ApiError::new(
                 "raft_write_outcome_unknown",
                 StatusCode::BAD_GATEWAY,
-                format!("leader endpoint mutation response could not be read: {error}"),
+                "leader endpoint mutation response could not be verified",
             ),
             &request_id,
         )
@@ -373,12 +373,12 @@ pub(super) async fn forward_endpoint_mutation(
             &request_id,
         ));
     }
-    serde_json::from_slice(&body).map(Json).map_err(|error| {
+    serde_json::from_slice(&body).map(Json).map_err(|_error| {
         add_forward_request_id(
             ApiError::new(
                 "raft_write_outcome_unknown",
                 StatusCode::BAD_GATEWAY,
-                format!("leader endpoint mutation response was invalid: {error}"),
+                "leader endpoint mutation response could not be verified",
             ),
             &request_id,
         )
@@ -449,6 +449,7 @@ fn forward_error(status: StatusCode, body: &[u8]) -> ApiError {
         "internal" => "internal",
         _ => "raft_write_outcome_unknown",
     };
+    let status = forwarded_error_status(raw_code, status);
     let message = forwarded_error_message(raw_code, envelope.error.message);
     let details = envelope
         .error
@@ -475,6 +476,20 @@ fn forward_error(status: StatusCode, body: &[u8]) -> ApiError {
     ApiError::with_details(code, status, message, details)
 }
 
+fn forwarded_error_status(code: &str, status: StatusCode) -> StatusCode {
+    match code {
+        "invalid_request"
+        | "not_found"
+        | "conflict"
+        | "revision_conflict"
+        | "coordinated_upgrade_required"
+        | "leader_unavailable" => status,
+        "raft_write_not_dispatched" => StatusCode::SERVICE_UNAVAILABLE,
+        "timeout" => StatusCode::GATEWAY_TIMEOUT,
+        _ => StatusCode::BAD_GATEWAY,
+    }
+}
+
 fn forwarded_error_message(code: &str, message: String) -> String {
     match code {
         "invalid_request"
@@ -489,6 +504,8 @@ fn forwarded_error_message(code: &str, message: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    use axum::http::StatusCode;
+
     use super::{forwarded_error_message, should_abort_endpoint_mutation_error};
 
     #[test]
@@ -507,6 +524,10 @@ mod tests {
                 "raw /private/path: permission denied".to_owned()
             ),
             "leader endpoint mutation failed; inspect the structured error details"
+        );
+        assert_eq!(
+            super::forwarded_error_status("unrecognized", StatusCode::BAD_REQUEST),
+            StatusCode::BAD_GATEWAY
         );
     }
 }
