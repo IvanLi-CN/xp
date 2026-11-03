@@ -408,9 +408,13 @@ fn forward_error(status: StatusCode, body: &[u8]) -> ApiError {
         "invalid_request" => "invalid_request",
         "not_found" => "not_found",
         "conflict" => "conflict",
+        "revision_conflict" => "revision_conflict",
         "coordinated_upgrade_required" => "coordinated_upgrade_required",
         "leader_unavailable" => "leader_unavailable",
+        "raft_write_not_dispatched" => "raft_write_not_dispatched",
         "raft_write_outcome_unknown" => "raft_write_outcome_unknown",
+        "timeout" => "timeout",
+        "internal" => "internal",
         _ => "raft_write_outcome_unknown",
     };
     ApiError::new(code, status, envelope.error.message)
