@@ -453,8 +453,13 @@ fn forward_error(status: StatusCode, body: &[u8]) -> ApiError {
                     | "retryable"
                     | "support_id"
                     | "target"
+                    | "target_node_id"
                     | "remote_status"
                     | "manual_retry_required"
+                    | "manual_retry_warning"
+                    | "cause"
+                    | "failure_layer"
+                    | "attempted_path"
             )
         })
         .collect();
