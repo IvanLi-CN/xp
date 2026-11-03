@@ -265,11 +265,11 @@ pub(super) async fn admin_internal_endpoint_mutation(
             },
         )
         .await
-        .map_err(|error| {
+        .map_err(|_error| {
             ApiError::new(
                 "raft_write_outcome_unknown",
                 StatusCode::BAD_GATEWAY,
-                format!("endpoint mutation result could not be verified: {error}"),
+                "endpoint mutation result could not be verified; it may already be applied",
             )
         })?;
     Ok((StatusCode::OK, Json(response)))
@@ -350,29 +350,46 @@ pub(super) async fn forward_endpoint_mutation(
         Some("application/json".to_owned()),
         Duration::from_secs(12),
         false,
-        request_id,
+        request_id.clone(),
     )
     .await?;
-    let response = response.map_err(map_mesh_forward_error)?;
+    let response = response
+        .map_err(|error| add_forward_request_id(map_mesh_forward_error(error), &request_id))?;
     let status =
         StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let body = response.bytes().await.map_err(|error| {
-        ApiError::new(
-            "raft_write_outcome_unknown",
-            StatusCode::BAD_GATEWAY,
-            format!("leader endpoint mutation response could not be read: {error}"),
+        add_forward_request_id(
+            ApiError::new(
+                "raft_write_outcome_unknown",
+                StatusCode::BAD_GATEWAY,
+                format!("leader endpoint mutation response could not be read: {error}"),
+            ),
+            &request_id,
         )
     })?;
     if !status.is_success() {
-        return Err(forward_error(status, &body));
+        return Err(add_forward_request_id(
+            forward_error(status, &body),
+            &request_id,
+        ));
     }
     serde_json::from_slice(&body).map(Json).map_err(|error| {
-        ApiError::new(
-            "raft_write_outcome_unknown",
-            StatusCode::BAD_GATEWAY,
-            format!("leader endpoint mutation response was invalid: {error}"),
+        add_forward_request_id(
+            ApiError::new(
+                "raft_write_outcome_unknown",
+                StatusCode::BAD_GATEWAY,
+                format!("leader endpoint mutation response was invalid: {error}"),
+            ),
+            &request_id,
         )
     })
+}
+
+fn add_forward_request_id(mut error: ApiError, request_id: &str) -> ApiError {
+    if error.code() == "raft_write_outcome_unknown" {
+        error = error.with_detail("request_id", request_id);
+    }
+    error
 }
 
 fn map_mesh_forward_error(error: MeshRequestError) -> ApiError {
@@ -432,17 +449,7 @@ fn forward_error(status: StatusCode, body: &[u8]) -> ApiError {
         "internal" => "internal",
         _ => "raft_write_outcome_unknown",
     };
-    let message = match raw_code {
-        "invalid_request"
-        | "not_found"
-        | "conflict"
-        | "revision_conflict"
-        | "coordinated_upgrade_required"
-        | "leader_unavailable"
-        | "raft_write_not_dispatched"
-        | "raft_write_outcome_unknown" => envelope.error.message,
-        _ => "leader endpoint mutation failed; inspect the structured error details".to_owned(),
-    };
+    let message = forwarded_error_message(raw_code, envelope.error.message);
     let details = envelope
         .error
         .details
@@ -468,9 +475,21 @@ fn forward_error(status: StatusCode, body: &[u8]) -> ApiError {
     ApiError::with_details(code, status, message, details)
 }
 
+fn forwarded_error_message(code: &str, message: String) -> String {
+    match code {
+        "invalid_request"
+        | "not_found"
+        | "conflict"
+        | "revision_conflict"
+        | "coordinated_upgrade_required"
+        | "leader_unavailable" => message,
+        _ => "leader endpoint mutation failed; inspect the structured error details".to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::should_abort_endpoint_mutation_error;
+    use super::{forwarded_error_message, should_abort_endpoint_mutation_error};
 
     #[test]
     fn unknown_raft_result_keeps_idempotency_pending() {
@@ -478,5 +497,16 @@ mod tests {
             "raft_write_outcome_unknown"
         ));
         assert!(should_abort_endpoint_mutation_error("invalid_request"));
+    }
+
+    #[test]
+    fn forwarded_unknown_error_message_is_sanitized() {
+        assert_eq!(
+            forwarded_error_message(
+                "raft_write_outcome_unknown",
+                "raw /private/path: permission denied".to_owned()
+            ),
+            "leader endpoint mutation failed; inspect the structured error details"
+        );
     }
 }
