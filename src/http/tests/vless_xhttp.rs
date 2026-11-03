@@ -1,4 +1,8 @@
 use super::*;
+use axum::{
+    body::Body,
+    http::{Method, Request, Uri},
+};
 use pretty_assertions::assert_eq;
 
 async fn local_node_id(app: &axum::Router) -> String {
@@ -135,7 +139,7 @@ async fn xmux_creation_waits_for_membership_operation_gate() {
 }
 
 #[tokio::test]
-async fn xmux_creation_on_follower_fails_closed() {
+async fn xmux_creation_without_leader_fails_closed() {
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
@@ -174,8 +178,80 @@ async fn xmux_creation_on_follower_fails_closed() {
         ))
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        body_json(response).await["error"]["code"],
+        "leader_unavailable"
+    );
     assert!(store.lock().await.list_endpoints().is_empty());
+}
+
+#[tokio::test]
+async fn signed_internal_xmux_mutation_is_idempotent() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .expect("cluster CA key");
+    let body = serde_json::to_vec(&json!({
+        "operation": "create",
+        "request": {
+            "kind": "vless_reality_vision_tcp",
+            "node_id": cluster.node_id.clone(),
+            "port": 443,
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "mihomo_xmux": {
+                "max_connections": "2", "max_concurrency": "0",
+                "c_max_reuse_times": "0", "h_max_reusable_secs": "0",
+                "h_keep_alive_period": -1
+            }
+        }
+    }))
+    .unwrap();
+    let uri: Uri = "/api/admin/_internal/endpoints/mutation".parse().unwrap();
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        &cluster.cluster_id,
+        &cluster.node_id,
+        &cluster.node_id,
+        "xmux-internal-test",
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        &ca_key_pem,
+        &ca_pem,
+        &Method::POST,
+        &uri,
+        Some("application/json"),
+        &body,
+        &context,
+        &mut headers,
+    )
+    .unwrap();
+    headers.insert("content-type", "application/json".parse().unwrap());
+
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri(uri.clone())
+        .body(Body::from(body.clone()))
+        .unwrap();
+    *request.headers_mut() = headers.clone();
+    let first = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let endpoint_id = body_json(first).await["endpoint_id"].clone();
+
+    let mut retry = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .body(Body::from(body))
+        .unwrap();
+    *retry.headers_mut() = headers;
+    let second = app.oneshot(retry).await.unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    assert_eq!(body_json(second).await["endpoint_id"], endpoint_id);
 }
 
 #[tokio::test]

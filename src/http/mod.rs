@@ -150,8 +150,11 @@ mod node_versions;
 mod service_monitors;
 mod version_check;
 mod web_assets;
-use endpoint_create::admin_create_endpoint;
-use endpoint_requests::{CreateEndpointRequest, PatchEndpointRequest, deserialize_optional_string};
+use endpoint_create::{admin_create_endpoint, admin_internal_endpoint_mutation};
+use endpoint_requests::{
+    CreateEndpointRequest, EndpointMutationForwardRequest, PatchEndpointRequest,
+    deserialize_optional_string,
+};
 use version_check::{VersionCheckCache, api_version_check};
 use {browser_cors::browser_cors, capabilities::api_capabilities};
 #[derive(Clone)]
@@ -1080,6 +1083,10 @@ pub fn build_router_with_mesh_telemetry(
         .route(
             "/_internal/raft/client-write",
             post(admin_internal_raft_client_write),
+        )
+        .route(
+            "/_internal/endpoints/mutation",
+            post(admin_internal_endpoint_mutation),
         )
         .route("/_internal/capabilities", get(admin_internal_capabilities))
         .route(
@@ -6295,8 +6302,34 @@ async fn admin_internal_endpoint_probe_run_events(
 
 async fn admin_patch_endpoint(
     Extension(state): Extension<AppState>,
+    headers: HeaderMap,
     Path(endpoint_id): Path<String>,
     ApiJson(req): ApiJson<PatchEndpointRequest>,
+) -> Result<Json<Endpoint>, ApiError> {
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(crate::id::new_ulid_string);
+    if req.mihomo_xmux.is_some() && !is_leader(&raft_metrics(&state)) {
+        return endpoint_create::forward_endpoint_mutation(
+            &state,
+            EndpointMutationForwardRequest::Patch {
+                endpoint_id,
+                request: req,
+            },
+            request_id,
+        )
+        .await;
+    }
+    admin_patch_endpoint_local(state, endpoint_id, req).await
+}
+
+async fn admin_patch_endpoint_local(
+    state: AppState,
+    endpoint_id: String,
+    req: PatchEndpointRequest,
 ) -> Result<Json<Endpoint>, ApiError> {
     let _xmux_guard = if let Some(xmux) = &req.mihomo_xmux {
         if let Some(xmux) = xmux {

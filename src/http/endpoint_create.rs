@@ -1,8 +1,29 @@
 use super::*;
+use crate::control_plane_mesh::MeshRequestError;
+use crate::http::endpoint_requests::EndpointMutationForwardRequest;
+use crate::internal_auth::InternalRoute;
+use std::time::Duration;
 
 pub(super) async fn admin_create_endpoint(
     Extension(state): Extension<AppState>,
+    headers: HeaderMap,
     ApiJson(req): ApiJson<CreateEndpointRequest>,
+) -> Result<Json<Endpoint>, ApiError> {
+    let request_id = request_id_from_headers(&headers);
+    if create_contains_xmux(&req) && !super::is_leader(&super::raft_metrics(&state)) {
+        return forward_endpoint_mutation(
+            &state,
+            EndpointMutationForwardRequest::Create { request: req },
+            request_id,
+        )
+        .await;
+    }
+    admin_create_endpoint_local(state, req).await
+}
+
+async fn admin_create_endpoint_local(
+    state: AppState,
+    req: CreateEndpointRequest,
 ) -> Result<Json<Endpoint>, ApiError> {
     let _xmux_guard = if matches!(
         &req,
@@ -135,4 +156,262 @@ pub(super) async fn admin_create_endpoint(
     .await?;
     state.reconcile.request_full();
     Ok(Json(endpoint))
+}
+
+pub(super) async fn admin_internal_endpoint_mutation(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    ApiJson(request): ApiJson<EndpointMutationForwardRequest>,
+) -> Result<(StatusCode, Json<Endpoint>), ApiError> {
+    let Some(Extension(internal)) = internal else {
+        return Err(ApiError::unauthorized("internal auth required"));
+    };
+    let Some(verified) = internal.verified.as_ref() else {
+        return Err(ApiError::unauthorized("internal auth required"));
+    };
+    if verified.context.route != InternalRoute::MeshV2
+        || verified.context.target_id != state.cluster.node_id
+    {
+        return Err(ApiError::unauthorized("endpoint mutation route is invalid"));
+    }
+    if !is_current_member(&state, &verified.context.sender_id) {
+        return Err(ApiError::unauthorized(
+            "endpoint mutation sender is not a cluster member",
+        ));
+    }
+    if !super::is_leader(&super::raft_metrics(&state)) {
+        return Err(ApiError::new(
+            "leader_unavailable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "endpoint mutation leader is no longer available",
+        ));
+    }
+    let request_id = verified.context.request_id.clone();
+    let idempotency_request = IdempotencyRequest {
+        sender_id: verified.context.sender_id.clone(),
+        semantic_sha256: verified.idempotency_sha256.clone(),
+    };
+    match state
+        .internal_idempotency
+        .begin(&request_id, &idempotency_request)
+        .await
+        .map_err(|error| ApiError::internal(format!("read endpoint mutation ledger: {error}")))?
+    {
+        IdempotencyBegin::Existing(stored) => {
+            let endpoint = serde_json::from_value(stored.body).map_err(|error| {
+                ApiError::internal(format!("decode stored endpoint mutation: {error}"))
+            })?;
+            return Ok((
+                StatusCode::from_u16(stored.status).unwrap_or(StatusCode::OK),
+                Json(endpoint),
+            ));
+        }
+        IdempotencyBegin::InFlight => {
+            return Err(ApiError::new(
+                "raft_write_outcome_unknown",
+                StatusCode::CONFLICT,
+                "endpoint mutation is already in flight",
+            ));
+        }
+        IdempotencyBegin::Mismatch => {
+            return Err(ApiError::new(
+                "idempotency_request_mismatch",
+                StatusCode::CONFLICT,
+                "internal request id is already bound to a different request",
+            ));
+        }
+        IdempotencyBegin::Full => {
+            return Err(ApiError::new(
+                "idempotency_ledger_full",
+                StatusCode::TOO_MANY_REQUESTS,
+                "internal idempotency ledger is full; retry after active records expire",
+            ));
+        }
+        IdempotencyBegin::New => {}
+    }
+    let result = match request {
+        EndpointMutationForwardRequest::Create { request } => {
+            admin_create_endpoint_local(state.clone(), request).await
+        }
+        EndpointMutationForwardRequest::Patch {
+            endpoint_id,
+            request,
+        } => super::admin_patch_endpoint_local(state.clone(), endpoint_id, request).await,
+    };
+    let response = match result {
+        Ok(Json(endpoint)) => endpoint,
+        Err(error) => {
+            state
+                .internal_idempotency
+                .abort(&request_id, &idempotency_request)
+                .await
+                .map_err(|abort_error| {
+                    ApiError::internal(format!("abort endpoint mutation ledger: {abort_error}"))
+                })?;
+            return Err(error);
+        }
+    };
+    state
+        .internal_idempotency
+        .finish(
+            &request_id,
+            &idempotency_request,
+            StoredResult {
+                status: StatusCode::OK.as_u16(),
+                body: serde_json::to_value(&response)
+                    .map_err(|error| ApiError::internal(error.to_string()))?,
+            },
+        )
+        .await
+        .map_err(|error| ApiError::internal(format!("persist endpoint mutation: {error}")))?;
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn create_contains_xmux(request: &CreateEndpointRequest) -> bool {
+    matches!(
+        request,
+        CreateEndpointRequest::VlessRealityVisionTcp {
+            mihomo_xmux: Some(_),
+            ..
+        }
+    )
+}
+
+fn request_id_from_headers(headers: &HeaderMap) -> String {
+    headers
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(crate::id::new_ulid_string)
+}
+
+fn is_current_member(state: &AppState, node_id: &str) -> bool {
+    let node_id = match crate::raft::types::raft_node_id_from_ulid(node_id) {
+        Ok(node_id) => node_id,
+        Err(_) => return false,
+    };
+    super::raft_metrics(state)
+        .membership_config
+        .nodes()
+        .any(|(id, _)| *id == node_id)
+}
+
+async fn leader_node(state: &AppState) -> Option<Node> {
+    let leader_id = super::raft_metrics(state).current_leader?;
+    let store = state.store.lock().await;
+    store.list_nodes().into_iter().find(|node| {
+        crate::raft::types::raft_node_id_from_ulid(&node.node_id)
+            .ok()
+            .is_some_and(|node_id| node_id == leader_id)
+    })
+}
+
+pub(super) async fn forward_endpoint_mutation(
+    state: &AppState,
+    request: EndpointMutationForwardRequest,
+    request_id: String,
+) -> Result<Json<Endpoint>, ApiError> {
+    let Some(node) = leader_node(state).await else {
+        return Err(ApiError::new(
+            "leader_unavailable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no cluster leader is currently available",
+        ));
+    };
+    if node.node_id == state.cluster.node_id {
+        return Err(ApiError::new(
+            "leader_unavailable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "cluster leadership changed; retry the endpoint mutation",
+        ));
+    }
+    let body =
+        serde_json::to_vec(&request).map_err(|error| ApiError::internal(error.to_string()))?;
+    let response = super::mesh::send_mesh_internal_request_raw(
+        state,
+        &state.mesh_client,
+        &node,
+        Method::POST,
+        "/api/admin/_internal/endpoints/mutation".to_owned(),
+        body,
+        Some("application/json".to_owned()),
+        Duration::from_secs(12),
+        false,
+        request_id,
+    )
+    .await?;
+    let response = response.map_err(map_mesh_forward_error)?;
+    let status =
+        StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let body = response.bytes().await.map_err(|error| {
+        ApiError::new(
+            "raft_write_outcome_unknown",
+            StatusCode::BAD_GATEWAY,
+            error.to_string(),
+        )
+    })?;
+    if !status.is_success() {
+        return Err(forward_error(status, &body));
+    }
+    serde_json::from_slice(&body).map(Json).map_err(|error| {
+        ApiError::new(
+            "raft_write_outcome_unknown",
+            StatusCode::BAD_GATEWAY,
+            error.to_string(),
+        )
+    })
+}
+
+fn map_mesh_forward_error(error: MeshRequestError) -> ApiError {
+    match error {
+        MeshRequestError::PreDispatchAuth(_)
+        | MeshRequestError::PreDispatchTimeout
+        | MeshRequestError::InvalidTarget(_) => ApiError::new(
+            "leader_unavailable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "cluster leader is unavailable",
+        ),
+        MeshRequestError::CircuitOpen {
+            dispatched: false, ..
+        } => ApiError::new(
+            "leader_unavailable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "cluster leader is unavailable",
+        ),
+        _ => ApiError::new(
+            "raft_write_outcome_unknown",
+            StatusCode::BAD_GATEWAY,
+            error.to_string(),
+        ),
+    }
+}
+
+fn forward_error(status: StatusCode, body: &[u8]) -> ApiError {
+    #[derive(Deserialize)]
+    struct Envelope {
+        error: ErrorBody,
+    }
+    #[derive(Deserialize)]
+    struct ErrorBody {
+        code: String,
+        message: String,
+    }
+    let Ok(envelope) = serde_json::from_slice::<Envelope>(body) else {
+        return ApiError::new(
+            "raft_write_outcome_unknown",
+            StatusCode::BAD_GATEWAY,
+            "leader returned an invalid endpoint mutation response",
+        );
+    };
+    let code = match envelope.error.code.as_str() {
+        "invalid_request" => "invalid_request",
+        "not_found" => "not_found",
+        "conflict" => "conflict",
+        "coordinated_upgrade_required" => "coordinated_upgrade_required",
+        "leader_unavailable" => "leader_unavailable",
+        "raft_write_outcome_unknown" => "raft_write_outcome_unknown",
+        _ => "raft_write_outcome_unknown",
+    };
+    ApiError::new(code, status, envelope.error.message)
 }

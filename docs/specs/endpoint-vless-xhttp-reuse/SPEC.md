@@ -75,8 +75,11 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 - 混合版本期间必须阻止不支持该合同的节点静默覆盖配置或返回不一致的订阅；启用自定义设置前必须验证所有 Raft 成员具备能力，且不得有活动中的成员变更，不满足时明确拒绝。
   保存与成员变更互斥；存在自定义配置时，缺少能力声明的旧版加入请求必须拒绝。
   恢复 absent 节点或 stale learner 时必须验证目标节点的 XMUX 能力，并在恢复协调器重放时保持该验证结果。
-  自定义设置的创建、变更和清除必须在当前 leader 上执行；leader 变化时拒绝或报告结果未知，不能转发至旧版 leader。
-  leader 在持有成员操作锁后必须先取得线性一致的状态，再检查成员操作与加入兼容性。
+  任意集群节点都可以作为 XMUX create/PATCH/clear 的 HTTP 写入口；follower 必须转发原始请求到
+  当前 leader，不得根据本地陈旧 endpoint 组装 XMUX 命令或先行 apply。只有 leader 可以读取最新
+  endpoint、持有成员操作锁、取得线性一致状态、检查成员操作与加入兼容性、执行 capability 校验并
+  提交 Raft。leader 变化时不得重放到旧 leader：无 leader 返回 `leader_unavailable`，已派发但没有
+  可验证响应返回 `raft_write_outcome_unknown`。
 - `mihomo_xmux: null` 显式移除自定义配置并恢复原默认值。
   降级到不支持该合同的 XP 之前，必须逐个移除所有接入点的自定义配置，并核实整个集群已收敛；旧版软件无法保护新增 metadata。
 - XHTTP Raw URI 必须使用 Mihomo v1.19.29 可解析的 `type=xhttp` 与 `extra.xmux`；
