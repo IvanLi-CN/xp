@@ -181,7 +181,7 @@ mod tests {
     fn forward_patch_preserves_omitted_and_explicit_null_xmux() {
         let omitted: PatchEndpointRequest = serde_json::from_value(serde_json::json!({})).unwrap();
         let omitted = serde_json::to_value(EndpointMutationForwardRequest::Patch {
-            endpoint_id: "endpoint-1".to_owned(),
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
             request: omitted,
         })
         .unwrap();
@@ -190,7 +190,7 @@ mod tests {
         let explicit_null: PatchEndpointRequest =
             serde_json::from_value(serde_json::json!({"mihomo_xmux": null})).unwrap();
         let explicit_null = serde_json::to_value(EndpointMutationForwardRequest::Patch {
-            endpoint_id: "endpoint-1".to_owned(),
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
             request: explicit_null,
         })
         .unwrap();
