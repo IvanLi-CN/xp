@@ -235,6 +235,24 @@ impl ApiError {
     pub fn gateway_timeout(message: impl Into<String>) -> Self {
         Self::new("timeout", StatusCode::GATEWAY_TIMEOUT, message)
     }
+
+    pub(crate) fn code(&self) -> &'static str {
+        self.code
+    }
+
+    pub(crate) fn with_details(
+        code: &'static str,
+        status: StatusCode,
+        message: impl Into<String>,
+        details: Map<String, Value>,
+    ) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            status,
+            details,
+        }
+    }
     pub fn too_many_requests(message: impl Into<String>) -> Self {
         Self::new("auth_busy", StatusCode::TOO_MANY_REQUESTS, message)
     }

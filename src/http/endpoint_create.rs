@@ -241,13 +241,15 @@ pub(super) async fn admin_internal_endpoint_mutation(
     let response = match result {
         Ok(Json(endpoint)) => endpoint,
         Err(error) => {
-            state
-                .internal_idempotency
-                .abort(&request_id, &idempotency_request)
-                .await
-                .map_err(|abort_error| {
-                    ApiError::internal(format!("abort endpoint mutation ledger: {abort_error}"))
-                })?;
+            if should_abort_endpoint_mutation_error(error.code()) {
+                state
+                    .internal_idempotency
+                    .abort(&request_id, &idempotency_request)
+                    .await
+                    .map_err(|abort_error| {
+                        ApiError::internal(format!("abort endpoint mutation ledger: {abort_error}"))
+                    })?;
+            }
             return Err(error);
         }
     };
@@ -263,8 +265,18 @@ pub(super) async fn admin_internal_endpoint_mutation(
             },
         )
         .await
-        .map_err(|error| ApiError::internal(format!("persist endpoint mutation: {error}")))?;
+        .map_err(|error| {
+            ApiError::new(
+                "raft_write_outcome_unknown",
+                StatusCode::BAD_GATEWAY,
+                format!("endpoint mutation result could not be verified: {error}"),
+            )
+        })?;
     Ok((StatusCode::OK, Json(response)))
+}
+
+fn should_abort_endpoint_mutation_error(code: &str) -> bool {
+    code != "raft_write_outcome_unknown"
 }
 
 fn create_contains_xmux(request: &CreateEndpointRequest) -> bool {
@@ -348,7 +360,7 @@ pub(super) async fn forward_endpoint_mutation(
         ApiError::new(
             "raft_write_outcome_unknown",
             StatusCode::BAD_GATEWAY,
-            error.to_string(),
+            format!("leader endpoint mutation response could not be read: {error}"),
         )
     })?;
     if !status.is_success() {
@@ -358,7 +370,7 @@ pub(super) async fn forward_endpoint_mutation(
         ApiError::new(
             "raft_write_outcome_unknown",
             StatusCode::BAD_GATEWAY,
-            error.to_string(),
+            format!("leader endpoint mutation response was invalid: {error}"),
         )
     })
 }
@@ -382,7 +394,7 @@ fn map_mesh_forward_error(error: MeshRequestError) -> ApiError {
         _ => ApiError::new(
             "raft_write_outcome_unknown",
             StatusCode::BAD_GATEWAY,
-            error.to_string(),
+            "leader endpoint mutation result could not be verified",
         ),
     }
 }
@@ -396,6 +408,8 @@ fn forward_error(status: StatusCode, body: &[u8]) -> ApiError {
     struct ErrorBody {
         code: String,
         message: String,
+        #[serde(default)]
+        details: Map<String, Value>,
     }
     let Ok(envelope) = serde_json::from_slice::<Envelope>(body) else {
         return ApiError::new(
@@ -404,7 +418,8 @@ fn forward_error(status: StatusCode, body: &[u8]) -> ApiError {
             "leader returned an invalid endpoint mutation response",
         );
     };
-    let code = match envelope.error.code.as_str() {
+    let raw_code = envelope.error.code.as_str();
+    let code = match raw_code {
         "invalid_request" => "invalid_request",
         "not_found" => "not_found",
         "conflict" => "conflict",
@@ -417,5 +432,44 @@ fn forward_error(status: StatusCode, body: &[u8]) -> ApiError {
         "internal" => "internal",
         _ => "raft_write_outcome_unknown",
     };
-    ApiError::new(code, status, envelope.error.message)
+    let message = match raw_code {
+        "invalid_request"
+        | "not_found"
+        | "conflict"
+        | "revision_conflict"
+        | "coordinated_upgrade_required"
+        | "leader_unavailable" => envelope.error.message,
+        _ => "leader endpoint mutation failed; inspect the structured error details".to_owned(),
+    };
+    let details = envelope
+        .error
+        .details
+        .into_iter()
+        .filter(|(key, _)| {
+            matches!(
+                key.as_str(),
+                "dispatch_state"
+                    | "confidence"
+                    | "retryable"
+                    | "support_id"
+                    | "target"
+                    | "remote_status"
+                    | "manual_retry_required"
+            )
+        })
+        .collect();
+    ApiError::with_details(code, status, message, details)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_abort_endpoint_mutation_error;
+
+    #[test]
+    fn unknown_raft_result_keeps_idempotency_pending() {
+        assert!(!should_abort_endpoint_mutation_error(
+            "raft_write_outcome_unknown"
+        ));
+        assert!(should_abort_endpoint_mutation_error("invalid_request"));
+    }
 }
