@@ -6,6 +6,7 @@ pub(crate) struct PendingRepositoryMutation {
     pub(crate) progress_at_unix_seconds: Option<u64>,
     pub(crate) records: Vec<RepositoryHistoryRecordRow>,
     pub(crate) tombstones: Vec<RepositoryHistoryTombstone>,
+    pub(crate) expired_tombstones: Vec<RepositoryExpiredTombstone>,
     pub(crate) segments: Vec<RepositoryHistorySegmentRow>,
     pub(crate) applied_canonical_segments: Vec<(String, u64)>,
 }
@@ -17,6 +18,7 @@ impl PendingRepositoryMutation {
             progress_at_unix_seconds: self.progress_at_unix_seconds,
             records: self.records,
             tombstones: self.tombstones,
+            expired_tombstones: self.expired_tombstones,
             segments: self.segments,
             applied_canonical_segments: self.applied_canonical_segments,
         }

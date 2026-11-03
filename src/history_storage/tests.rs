@@ -2,6 +2,8 @@ use std::{fs, time::Duration};
 
 use super::*;
 
+#[path = "source_scoped_summary_tests.rs"]
+mod source_scoped_summary_tests;
 mod summary_blocks_tests;
 mod wal_retention_tests;
 
@@ -205,6 +207,11 @@ fn external_repository_history_fails_closed_when_count_migration_fails() {
              DROP TRIGGER repository_history_records_count_delete;
              DROP TRIGGER repository_history_segments_count_insert;
              DROP TRIGGER repository_history_segments_count_delete;
+             DROP TRIGGER IF EXISTS repository_history_segment_revision_insert;
+             DROP TRIGGER IF EXISTS repository_history_segment_revision_delete;
+             DROP TRIGGER IF EXISTS repository_history_segment_revision_update;
+             DROP TRIGGER IF EXISTS repository_history_segment_revision_move;
+             DROP TABLE repository_history_segment_revisions;
              DROP TABLE repository_history_counts;",
         )
         .unwrap();
@@ -747,6 +754,7 @@ fn repository_counts_remain_exact_through_delete_retention_and_restart() {
             source_node_id: "source-a".to_owned(),
             source_epoch: 1,
             stream: "runtime".to_owned(),
+            source_stream: None,
             subject_node_id: "subject-a".to_owned(),
             observer_node_id: "observer-a".to_owned(),
             schema_id: "runtime.v1".to_owned(),
@@ -785,6 +793,11 @@ fn repository_counts_initialize_from_existing_history_on_upgrade() {
                  DROP TRIGGER repository_history_records_count_delete;
                  DROP TRIGGER repository_history_segments_count_insert;
                  DROP TRIGGER repository_history_segments_count_delete;
+                 DROP TRIGGER IF EXISTS repository_history_segment_revision_insert;
+                 DROP TRIGGER IF EXISTS repository_history_segment_revision_delete;
+                 DROP TRIGGER IF EXISTS repository_history_segment_revision_update;
+                 DROP TRIGGER IF EXISTS repository_history_segment_revision_move;
+                 DROP TABLE repository_history_segment_revisions;
                  DROP TABLE repository_history_counts;
                  INSERT INTO repository_history_records (
                      source_node_id, source_epoch, stream, sequence, subject_node_id,

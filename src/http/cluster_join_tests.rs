@@ -650,6 +650,12 @@ async fn cluster_join_returns_bootstrap_before_learner_catch_up() {
         "{}",
         String::from_utf8_lossy(&response_body)
     );
+    let response_json: Value = serde_json::from_slice(&response_body).unwrap();
+    assert_eq!(
+        response_json["xp_admin_token_hash"],
+        test_admin_token_hash(),
+        "join bootstrap must carry the cluster admin-token hash"
+    );
 
     let retry = app
         .oneshot(req_authed_json(

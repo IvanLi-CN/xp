@@ -14,6 +14,8 @@ pub(super) struct HistoricalBackfillPageCursor {
     pub(super) after: HistoricalBackfillSortKey,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) snapshot_end_unix_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) deletion_snapshot: Option<String>,
 }
 
 impl HistoricalBackfillSortKey {
@@ -47,6 +49,7 @@ impl HistoricalBackfillPageCursor {
         Ok(Self {
             after: serde_json::from_value(value)?,
             snapshot_end_unix_seconds: None,
+            deletion_snapshot: None,
         })
     }
 }

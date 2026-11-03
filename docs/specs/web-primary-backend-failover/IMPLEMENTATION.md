@@ -4,7 +4,7 @@
 
 ## Current Status
 
-- Implementation: complete
+- Implementation: complete for pre-auth primary-backend recovery
 - Lifecycle: active
 - Delivery: fast-track
 
@@ -72,9 +72,73 @@
   the static EdgeOne deployment gate. The image and GitHub Release jobs depend on the public static
   smoke gate; the protected static rollback workflow reuses only verified release archives.
 
+- The Login page now exposes a same-cluster service-node selector backed by public health,
+  cluster, and compatibility probes that never send the admin token.
+- On desktop the login selector sits at the top right, with its button and menu sized to the
+  widest candidate; on mobile it remains in the login form. A selected node is shown by name
+  when available and by host otherwise.
+- Pre-auth selection is session-local, respects the existing mutation barrier, and routes token
+  verification plus subsequent relative API/SSE requests through the selected origin.
+- Cold-start transport restores a canonical persisted primary origin when it is still present in
+  the active profile, while the current page origin remains an explicit recovery candidate.
+- A current-origin probe that proves the persisted cluster identity is stale rebinds only the
+  current tab to the new cluster and discards old candidates before authentication; the new
+  profile remains non-durable until authenticated inventory hydration.
+- The authenticated AppShell waits for a current-mount public cluster identity before sending
+  token-bearing compatibility traffic; its inventory query is cluster-keyed and only matching
+  inventory can hydrate or persist the active profile. All token-bearing inventory requests also
+  require that same origin-and-cluster public-readiness gate.
+- Returning from offline mode forces a fresh public identity probe before protected requests are
+  enabled again; a background re-probe for the same identity keeps the active editor mounted.
+- A legacy authenticated session without a saved cluster identity clears unbound query data and
+  establishes the initial identity only from the current page origin before protected requests.
+- Authenticated resource cache identities use stable cluster/origin values rather than the volatile
+  in-memory generation, so a same-target reload can recover offline data while an actual target
+  change still invalidates the cache; the release compatibility snapshot remains scoped to its
+  backend origin for offline fallback.
+- Offline snapshot reads ignore expired values without deleting their shared storage entry, so a
+  stale read in one tab cannot delete a newer snapshot written by another. Replacement writes and
+  session-boundary cleanup continue to manage the stored entry.
+- An authenticated public probe that proves a different cluster is treated as a credential
+  boundary: the token is cleared, the current transport is reset to its page/bootstrap recovery
+  origin, and the UI returns to Login before any credentialed request is sent to the new cluster.
+  Backend generation changes cancel and remove in-memory and persisted offline query caches, and
+  logout resets static policy transport so a later login cannot reuse a stale target.
+- The authenticated Home dashboard binds admin-token verification to the starting origin, cluster,
+  and backend generation; a node switch during verification cannot persist the token.
+- App resource-navigation queries are gated on public backend readiness and include the selected
+  cluster and origin in their identity, so stale protected navigation cannot start across a
+  backend identity boundary.
+- A mutation-barrier switch rechecks the cluster identity and backend generation before committing;
+  a target verified for an obsolete identity is rejected instead of becoming primary.
+- The authenticated backend switcher remains available while public identity readiness is unresolved
+  so a healthy recorded backend can recover the session; each candidate still passes a public probe
+  before token-bearing inventory verification, and login-link verification locks the selector, token
+  form, and clear action against concurrent manual submissions.
+- Login-page probe completions are epoch-bound so a probe from a discarded cluster cannot mark a
+  candidate ready after a stale-profile rebind.
+- Login verification responses are bound to the starting origin, cluster identity, and backend
+  generation; selector interaction is disabled while verification is in flight.
+- Successful authenticated node-inventory hydration is the persistence gate for a new primary;
+  authentication rejection keeps the login page and unverified token out of local storage.
+- A verified login that changes the token resets the directory session epoch and policy.
+  It retains only the verified pre-auth target in memory. The cached profile remains unchanged
+  until the new authenticated inventory succeeds. Explicit logout and cross-tab session changes
+  still clear it.
+- Each login submission repeats the selected target's public probe immediately before sending the
+  token and respects the existing mutation barrier; static-console login links keep the bootstrap
+  transport and failed probes remain retryable without dropping candidates.
+- Vitest, Storybook interaction, Playwright browser, and the cluster join token-hash regression
+  coverage are recorded in the specification verification matrix.
+
+The remaining work for this topic is governed by the repository delivery flow and the live PR
+checks; no server-side authentication protocol or deployment behavior changed.
+
 ## References
 
 - `./SPEC.md`
 - `./HISTORY.md`
 - `../../adr/0011-cross-origin-primary-backend-for-embedded-pwa.md`
 - `../../adr/0012-edgeone-static-web-console.md`
+- `../../adr/0013-authenticated-node-directory-for-static-console.md`
+- `../../adr/0029-pre-auth-primary-backend-recovery.md`

@@ -1,7 +1,9 @@
 use super::*;
 mod expired_repair;
 mod handoff_selection;
+pub(super) mod protected;
 mod summary_repair;
+pub(super) mod tombstones;
 use crate::state::history_repository::replica::{
     InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, InitialPeerTieredHandoff,
     RetainedAnchorCheckpointUpdate, SummaryRepairDiagnosticUpdate, SummaryRepairResult,
@@ -9,6 +11,7 @@ use crate::state::history_repository::replica::{
 #[cfg(test)]
 use handoff_selection::can_schedule_tiered_handoff;
 use handoff_selection::select_tiered_handoff;
+use protected::completed_repair_response;
 use std::future::Future;
 use summary_repair::{
     classify_summary_repair_error, record_summary_repair_attempt, record_summary_repair_error,
@@ -82,30 +85,6 @@ async fn request_repair_page(
     .await
 }
 
-fn completed_repair_response(
-    checkpoint: &InitialPeerBackfillCheckpoint,
-    remaining: BTreeSet<String>,
-) -> CompletedRepairResponse {
-    let page_complete = remaining.is_empty();
-    let summary_cursor = page_complete
-        .then(|| checkpoint.summary_pending_next_cursor.clone())
-        .flatten();
-    let summary_complete =
-        page_complete && summary_cursor.is_none() && !checkpoint.summary_pending_revisit_cursor;
-    CompletedRepairResponse {
-        summary_cursor,
-        pending_segment_ids: remaining.into_iter().collect(),
-        pending_next_cursor: (!page_complete)
-            .then(|| checkpoint.summary_pending_next_cursor.clone())
-            .flatten(),
-        summary_complete,
-        // The wire-bounded response has been consumed even if it left IDs for
-        // the next request, whose content has a distinct response identity.
-        response_complete: true,
-        allowance_complete: page_complete,
-    }
-}
-
 pub(crate) async fn catch_up_against_ready_repositories(
     state: &AppState,
     now: u64,
@@ -114,6 +93,16 @@ pub(crate) async fn catch_up_against_ready_repositories(
         super::ready_repository_peers_for_catch_up(state).await?;
     if peers.is_empty() {
         return Ok(InitialBackfillProgress::Unavailable);
+    }
+    if tombstones::exists(state)? {
+        let progress = tombstones::before_local(state, now).await?;
+        if progress != InitialBackfillProgress::Complete {
+            return Ok(progress);
+        }
+        if tombstones::local_pending(state).await {
+            return Ok(InitialBackfillProgress::InProgress);
+        }
+        tombstones::after_local(state, now).await?;
     }
     {
         let mut runtime = state.repository_replica.lock().await;
@@ -200,11 +189,12 @@ pub(crate) async fn catch_up_against_ready_repositories(
         }
         return Ok(InitialBackfillProgress::InProgress);
     }
-    Ok(ready_peer_catch_up_result(
-        peer_progress,
-        missing_metadata,
-        tiered_progress,
-    ))
+    let progress = ready_peer_catch_up_result(peer_progress, missing_metadata, tiered_progress);
+    if progress == InitialBackfillProgress::Complete {
+        tombstones::finish_records(state, deadline).await
+    } else {
+        Ok(progress)
+    }
 }
 
 fn remaining_peer_page_budget(pages_consumed: usize) -> usize {
@@ -417,7 +407,7 @@ async fn advance_ready_peer_catch_up_page(
             format!("/api/admin/_internal/history-repository/summary?after_segment_id={cursor}")
         },
     );
-    let remote_summary: RepositoryReplicaSummary =
+    let mut remote_summary: RepositoryReplicaSummary =
         match repository_direct_request(state, peer, Method::GET, &path, Vec::new()).await {
             Ok(summary) => summary,
             Err(error) if error.is_transport() => {
@@ -451,6 +441,11 @@ async fn advance_ready_peer_catch_up_page(
                 return Err(error.into());
             }
         };
+    if protected::refreshed_filter_gaps(state, &mut remote_summary.gaps).await?
+        && remote_summary.gaps.is_empty()
+    {
+        remote_summary.history_truncated = false;
+    }
     let (
         requires_repair,
         missing_segment_ids,
@@ -680,6 +675,9 @@ async fn repair_ready_peer_catch_up_page(
         };
         response_id = validate_repair_response(state, peer, now, &repair).await?;
     }
+    if protected::refreshed_filter_gaps(state, &mut repair.gaps).await? && repair.gaps.is_empty() {
+        repair.history_truncated = false;
+    }
     let mut remaining = pending.clone();
     if repair.segments.is_empty() {
         if repair.unavailable_segment_ids.is_empty() {
@@ -726,6 +724,9 @@ async fn repair_ready_peer_catch_up_page(
                 repair
                     .segments
                     .iter()
+                    .filter(|segment| {
+                        !protected::wire_is_protected(state, &segment.wire).unwrap_or(true)
+                    })
                     .map(|segment| runtime.tiered_handoff_for_sequence_gap(&segment.wire)),
             ) {
                 Ok(tiered_handoff) => tiered_handoff,
@@ -814,6 +815,13 @@ async fn repair_ready_peer_catch_up_page(
     let repair_gaps = repair.gaps;
     let mut retained_anchor_streams = checkpoint.retained_anchor_streams.clone();
     for (index, segment) in repair.segments.into_iter().enumerate() {
+        if protected::wire_is_protected(state, &segment.wire)? {
+            if !protected::receive(state, &segment, &repair_gaps, now, ready_repository_ids).await?
+            {
+                return Ok(InitialBackfillProgress::InProgress);
+            }
+            continue;
+        }
         let identity_valid = match super::super::super::identity_is_valid_for_history_replay(
             state,
             &segment.identity,

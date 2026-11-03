@@ -4,6 +4,52 @@ use crate::http::endpoint_requests::EndpointMutationForwardRequest;
 use crate::internal_auth::InternalRoute;
 use std::time::Duration;
 
+impl ApiError {
+    pub(crate) fn code(&self) -> &'static str {
+        self.code
+    }
+
+    pub(crate) fn with_details(
+        code: &'static str,
+        status: StatusCode,
+        message: impl Into<String>,
+        details: Map<String, Value>,
+    ) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            status,
+            details,
+        }
+    }
+}
+
+pub(super) async fn admin_patch_endpoint(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    Path(endpoint_id): Path<String>,
+    ApiJson(req): ApiJson<PatchEndpointRequest>,
+) -> Result<Json<Endpoint>, ApiError> {
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(crate::id::new_ulid_string);
+    if req.mihomo_xmux.is_some() && !super::is_leader(&super::raft_metrics(&state)) {
+        return forward_endpoint_mutation(
+            &state,
+            EndpointMutationForwardRequest::Patch {
+                endpoint_id,
+                request: req,
+            },
+            request_id,
+        )
+        .await;
+    }
+    super::admin_patch_endpoint_local(state, endpoint_id, req).await
+}
+
 pub(super) async fn admin_create_endpoint(
     Extension(state): Extension<AppState>,
     headers: HeaderMap,

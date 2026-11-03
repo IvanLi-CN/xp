@@ -35,6 +35,7 @@ fn missing_segment_page_reports_when_summary_page_exceeds_repair_budget() {
     let summary = RepositoryReplicaSummary {
         segment_ids: (0_u16..256).map(|id| format!("segment-{id:03}")).collect(),
         next_segment_id: Some("next-page".to_owned()),
+        source_summary_revision: None,
         partitions: Vec::new(),
         summary_version: 1,
         sequence_blocks: Vec::new(),

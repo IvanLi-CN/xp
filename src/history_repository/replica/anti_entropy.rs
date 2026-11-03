@@ -18,6 +18,10 @@ const MAX_PERMANENT_GAPS: usize = 64;
 const MAX_RECORD_BYTES: usize = 256 * 1024;
 const MAX_TOMBSTONE_READY_REPOSITORIES: usize = 4_096;
 
+#[cfg(test)]
+#[path = "anti_entropy/receipt_tests.rs"]
+mod receipt_tests;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReplicaWork {
     None,
@@ -294,8 +298,8 @@ pub(crate) struct ReplicaRecordKey {
     source_node_id: String,
     source_epoch: u64,
     stream: String,
-    #[serde(default)]
-    sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sequence: Option<u64>,
     subject_node_id: String,
     observer_node_id: String,
     schema_id: String,
@@ -317,6 +321,10 @@ impl ReplicaRecordKey {
     }
 
     pub(crate) fn sequence(&self) -> u64 {
+        self.sequence.unwrap_or_default()
+    }
+
+    pub(crate) fn known_sequence(&self) -> Option<u64> {
         self.sequence
     }
 
@@ -367,7 +375,7 @@ impl ReplicaRecord {
                 source_node_id: cursor.source_node_id.clone(),
                 source_epoch: cursor.source_epoch,
                 stream: cursor.stream.clone(),
-                sequence: cursor.sequence,
+                sequence: Some(cursor.sequence),
                 subject_node_id,
                 observer_node_id,
                 schema_id,
@@ -408,6 +416,23 @@ pub(crate) struct TombstoneLedgerCheckpoint {
 struct TombstoneCheckpointEntry {
     key: ReplicaRecordKey,
     state: TombstoneState,
+}
+
+fn exact_tombstone_targets_stream(tombstone: &ReplicaRecordKey, key: &ReplicaRecordKey) -> bool {
+    let Some(base) = super::runtime::source_stream_for_schema(&tombstone.schema_id) else {
+        return false;
+    };
+    let target = if let Some(source) = tombstone.stream.strip_prefix("tombstone-backfill-") {
+        if source.is_empty() {
+            return false;
+        }
+        format!("{base}-backfill-{source}")
+    } else if !tombstone.stream.contains("-backfill-") {
+        base.to_owned()
+    } else {
+        return false;
+    };
+    key.stream == target || key.stream == format!("{target}-backfill-{}", tombstone.source_node_id)
 }
 
 impl Default for TombstoneLedger {
@@ -477,25 +502,52 @@ impl TombstoneLedger {
             .get_mut(&key)
             .ok_or(ReplicaError::TombstoneMissing)?;
         if state.ready_repositories.contains(repository_id) {
+            if state.acknowledgements.len() >= MAX_TOMBSTONE_READY_REPOSITORIES
+                && !state.acknowledgements.contains(repository_id)
+            {
+                return Err(ReplicaError::RepositoryBacklogFull);
+            }
             state.acknowledgements.insert(repository_id.to_owned());
         }
         Ok(())
     }
 
+    pub(crate) fn tombstone_blocks(tombstone: &ReplicaRecordKey, key: &ReplicaRecordKey) -> bool {
+        (tombstone.record_key.ends_with(b":")
+            || (tombstone.record_key == key.record_key
+                && (exact_tombstone_targets_stream(tombstone, key)
+                    || (tombstone.source_node_id == key.source_node_id
+                        && tombstone.source_epoch == key.source_epoch
+                        && tombstone.stream == key.stream)
+                    || (super::runtime::source_stream_for_schema(&tombstone.schema_id).is_none()
+                        && tombstone.source_node_id == key.source_node_id
+                        && tombstone.source_epoch == key.source_epoch))))
+            && tombstone.subject_node_id == key.subject_node_id
+            && tombstone.observer_node_id == key.observer_node_id
+            && tombstone.schema_id == key.schema_id
+            && tombstone.schema_version == key.schema_version
+            && (tombstone.record_key == key.record_key
+                || (tombstone.record_key.ends_with(b":")
+                    && key.record_key.starts_with(&tombstone.record_key)))
+    }
+
     pub(crate) fn allows(&self, key: &ReplicaRecordKey) -> bool {
-        !self.entries.keys().any(|tombstone| {
-            // Tombstones are emitted on their own stream, but they only apply to the
-            // producer epoch that emitted them. Do not let an identical record from another
-            // source become collateral damage.
-            tombstone.source_node_id == key.source_node_id
-                && tombstone.source_epoch == key.source_epoch
-                && tombstone.subject_node_id == key.subject_node_id
-                && tombstone.observer_node_id == key.observer_node_id
-                && tombstone.schema_id == key.schema_id
-                && tombstone.schema_version == key.schema_version
-                && (tombstone.record_key == key.record_key
-                    || (tombstone.record_key.ends_with(b":")
-                        && key.record_key.starts_with(&tombstone.record_key)))
+        !self
+            .entries
+            .keys()
+            .any(|tombstone| Self::tombstone_blocks(tombstone, key))
+    }
+
+    pub(crate) fn contains_same_tombstone(&self, key: &ReplicaRecordKey) -> bool {
+        self.entries.keys().any(|other| {
+            other.source_node_id == key.source_node_id
+                && other.source_epoch == key.source_epoch
+                && other.stream == key.stream
+                && other.subject_node_id == key.subject_node_id
+                && other.observer_node_id == key.observer_node_id
+                && other.schema_id == key.schema_id
+                && other.schema_version == key.schema_version
+                && other.record_key == key.record_key
         })
     }
 
@@ -583,9 +635,8 @@ impl TombstoneLedger {
                 .ready_repositories
                 .retain(|repository| current.contains(repository));
             state.ready_repositories.extend(current.iter().cloned());
-            state
-                .acknowledgements
-                .retain(|repository| current.contains(repository));
+            // Ready membership changes the outstanding obligations, not genuine receipts.
+            // In particular, a syncing local replica can already have durably applied deletion.
         }
         Ok(())
     }
@@ -612,6 +663,11 @@ impl TombstoneLedger {
         }
         let mut entries = BTreeMap::new();
         for entry in checkpoint.entries {
+            if entry.state.ready_repositories.len() > MAX_TOMBSTONE_READY_REPOSITORIES
+                || entry.state.acknowledgements.len() > MAX_TOMBSTONE_READY_REPOSITORIES
+            {
+                return Err(ReplicaError::RepositoryBacklogFull);
+            }
             if entries.insert(entry.key, entry.state).is_some() {
                 return Err(ReplicaError::TombstoneBacklogFull);
             }

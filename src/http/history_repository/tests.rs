@@ -9,6 +9,13 @@ fn repository_summary_cursor_accepts_phase_and_legacy_segment_ids() {
     assert!(valid_repository_summary_cursor(&segment_id));
     assert!(valid_repository_summary_cursor(&format!("t:{segment_id}")));
     assert!(valid_repository_summary_cursor(&format!("r:{segment_id}")));
+    assert!(valid_repository_summary_cursor(&format!(
+        "s:t:{segment_id}"
+    )));
+    assert!(valid_repository_summary_cursor(&format!(
+        "s:r:{segment_id}"
+    )));
+    assert!(!valid_repository_summary_cursor(&format!("s:{segment_id}")));
     assert!(!valid_repository_summary_cursor(&format!("x:{segment_id}")));
     assert!(!valid_repository_summary_cursor("t:not-a-segment-id"));
 }

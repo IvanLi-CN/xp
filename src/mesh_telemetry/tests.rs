@@ -97,6 +97,28 @@ async fn history_source_snapshot_rotates_peers_larger_than_one_source_window() {
 }
 
 #[tokio::test]
+async fn history_source_snapshot_limits_output_for_many_peers() {
+    let temp = tempfile::tempdir().unwrap();
+    let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+    {
+        let mut state = telemetry.state.lock().await;
+        for index in 0..10_000 {
+            let peer_id = format!("peer-{index:05}");
+            state.persisted.peers.insert(
+                peer_id.clone(),
+                MeshPeerTelemetry {
+                    peer_id,
+                    ..Default::default()
+                },
+            );
+        }
+    }
+    let snapshot = telemetry.history_source_snapshot(16, 1, 32 * 1024).await;
+    assert_eq!(snapshot.peers.len(), 16);
+    assert!(serde_json::to_vec(&snapshot).unwrap().len() <= 32 * 1024);
+}
+
+#[tokio::test]
 async fn history_source_snapshot_bounds_large_variable_fields_before_serialization() {
     let temp = tempfile::tempdir().unwrap();
     let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();

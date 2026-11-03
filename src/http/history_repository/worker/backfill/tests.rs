@@ -1,9 +1,9 @@
 use super::{
     HistoricalBackfillCollector, HistoricalBackfillPageCursor, HistoricalBackfillSortKey,
     InitialBackfillProgress, RepositoryInitialBackfillPage, RepositoryInitialBackfillRecord,
-    deserialize_initial_backfill_page, is_initial_history_source_peer,
-    next_historical_backfill_page_cursor, serialized_backfill_record_bytes,
-    validate_peer_backfill_page,
+    deserialize_initial_backfill_page, initial_source_backfill_path,
+    is_initial_history_source_peer, next_historical_backfill_page_cursor,
+    serialized_backfill_record_bytes, validate_peer_backfill_page,
 };
 use crate::history_sync::SyncRecord;
 use crate::state::history_repository::{
@@ -84,6 +84,7 @@ fn legacy_tiered_cursor(sequence: u64) -> String {
 #[test]
 fn peer_backfill_rejects_an_oversized_record_page() {
     let page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: (0..=MAX_INITIAL_BACKFILL_PAGE_RECORDS)
             .map(|_| backfill_record(String::new()))
             .collect(),
@@ -111,6 +112,7 @@ fn peer_backfill_rejects_record_overflow_before_record_decode() {
 #[test]
 fn peer_backfill_rejects_a_page_over_the_byte_budget() {
     let page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: vec![backfill_record("x".repeat(MAX_INITIAL_BACKFILL_PAGE_BYTES))],
         next_page_cursor: None,
     };
@@ -121,6 +123,7 @@ fn peer_backfill_rejects_a_page_over_the_byte_budget() {
 #[test]
 fn peer_backfill_rejects_a_malformed_or_regressing_cursor() {
     let page = |next_page_cursor| RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: Vec::new(),
         next_page_cursor,
     };
@@ -135,6 +138,7 @@ fn peer_backfill_rejects_a_malformed_or_regressing_cursor() {
             record_key: b"key-10".to_vec(),
         },
         snapshot_end_unix_seconds: Some(100),
+        deletion_snapshot: None,
     };
     let regressing = HistoricalBackfillPageCursor {
         after: HistoricalBackfillSortKey {
@@ -143,6 +147,7 @@ fn peer_backfill_rejects_a_malformed_or_regressing_cursor() {
             record_key: b"key-9".to_vec(),
         },
         snapshot_end_unix_seconds: Some(100),
+        deletion_snapshot: None,
     };
     let cursor = regressing.encode().expect("cursor encoding");
     let previous_cursor = previous.encode().expect("cursor encoding");
@@ -162,8 +167,10 @@ fn peer_backfill_rejects_a_cursor_beyond_the_historical_page_tail() {
             record_key: b"later".to_vec(),
         },
         snapshot_end_unix_seconds: None,
+        deletion_snapshot: None,
     };
     let page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: vec![record],
         next_page_cursor: Some(cursor.encode().expect("cursor encoding")),
     };
@@ -190,6 +197,7 @@ fn peer_backfill_accepts_a_tiered_phase_transition_cursor() {
     let previous = cursor("tombstones");
     let next = cursor("records");
     let page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: Vec::new(),
         next_page_cursor: Some(next),
     };
@@ -199,6 +207,7 @@ fn peer_backfill_accepts_a_tiered_phase_transition_cursor() {
 #[test]
 fn peer_backfill_rejects_a_tiered_page_that_replays_before_the_previous_cursor() {
     let page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: vec![tiered_backfill_record(1), tiered_backfill_record(3)],
         next_page_cursor: Some(tiered_cursor("records", Some(3))),
     };
@@ -210,6 +219,7 @@ fn peer_backfill_rejects_a_tiered_page_that_replays_before_the_previous_cursor()
 #[test]
 fn peer_backfill_rejects_a_tiered_cursor_regression_to_legacy_format() {
     let page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: vec![tiered_backfill_record(2)],
         next_page_cursor: Some(legacy_tiered_cursor(2)),
     };
@@ -221,6 +231,7 @@ fn peer_backfill_rejects_a_tiered_cursor_regression_to_legacy_format() {
 #[test]
 fn peer_backfill_rejects_an_empty_tiered_page_with_an_after_cursor() {
     let page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: Vec::new(),
         next_page_cursor: Some(tiered_cursor("records", Some(1))),
     };
@@ -231,6 +242,7 @@ fn peer_backfill_rejects_an_empty_tiered_page_with_an_after_cursor() {
 #[test]
 fn peer_backfill_rejects_records_with_a_phase_transition_cursor() {
     let page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: vec![tiered_backfill_record(1)],
         next_page_cursor: Some(tiered_cursor("records", None)),
     };
@@ -243,6 +255,7 @@ fn peer_backfill_accepts_the_final_tombstone_page_before_records_phase() {
     let mut tombstone = tiered_backfill_record(1);
     tombstone.tombstone = true;
     let page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: vec![tombstone],
         next_page_cursor: Some(tiered_cursor("records", None)),
     };
@@ -259,6 +272,7 @@ fn peer_backfill_uses_canonical_budget_for_tiered_records() {
     record.stream = Some("runtime".to_owned());
     record.sequence = Some(1);
     let page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: vec![record],
         next_page_cursor: None,
     };
@@ -287,6 +301,18 @@ fn tick_progress_blocks_readiness_after_an_unavailable_peer_page() {
         .combine(InitialBackfillProgress::Complete);
 
     assert_eq!(progress, InitialBackfillProgress::Unavailable);
+}
+
+#[test]
+fn initial_source_backfill_uses_a_budgeted_page_size() {
+    assert_eq!(
+        initial_source_backfill_path(None),
+        "/api/admin/_internal/history-repository/initial-backfill?page_size=32"
+    );
+    assert_eq!(
+        initial_source_backfill_path(Some("cursor")),
+        "/api/admin/_internal/history-repository/initial-backfill?page_cursor=cursor&page_size=32"
+    );
 }
 
 #[test]
@@ -474,6 +500,7 @@ fn peer_backfill_uses_aggregate_bucket_key_without_rewriting_observation_time() 
     value["after"]["observed_start_unix_seconds"] = json!(100);
     let next = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&value).expect("cursor"));
     let mut page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records,
         next_page_cursor: Some(next),
     };
@@ -499,8 +526,21 @@ fn peer_backfill_rejects_keyset_version_downgrade() {
         .expect("object")
         .remove("keyset_version");
     let page = RepositoryInitialBackfillPage {
+        deletion_snapshot: None,
         records: vec![tiered_backfill_record(1)],
         next_page_cursor: Some(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&next).expect("cursor"))),
     };
     assert!(validate_peer_backfill_page(&page, Some(&previous), "cluster-a").is_err());
 }
+
+#[path = "tests/local_history.rs"]
+mod local_history;
+
+#[path = "tests/lifecycle_continuation.rs"]
+mod lifecycle_continuation;
+
+#[path = "tests/initial_source_ordering.rs"]
+mod initial_source_ordering;
+
+#[path = "tests/ready_tombstones.rs"]
+pub(super) mod ready_tombstones;

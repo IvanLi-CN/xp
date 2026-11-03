@@ -2,9 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchAdminNodeVersions } from "@/api/adminNodeVersions";
-import { type AdminNodesResponse, fetchAdminNodes } from "@/api/adminNodes";
+import {
+	type AdminNodesResponse,
+	AdminNodesResponseSchema,
+	fetchAdminNodes,
+} from "@/api/adminNodes";
 import type { RuntimePolicy } from "@/api/runtimePolicy";
-import { fetchRuntimePolicy } from "@/api/runtimePolicy";
+import { RuntimePolicySchema } from "@/api/runtimePolicy";
 import { readAppliedRuntimePolicyId } from "@/offline/runtimePolicySession";
 import {
 	STATIC_BOOTSTRAP_ORIGIN,
@@ -19,6 +23,7 @@ import {
 	hydrateBackendVersions,
 	hydratePrimaryBackendProfile,
 	hydrateStaticRuntimePolicy,
+	readSwitchCandidateResource,
 } from "./primaryBackend";
 
 export function useBackendDirectory(args: {
@@ -107,13 +112,19 @@ export function useBackendDirectory(args: {
 	const nodeVersionsUpdatedAt = nodeVersions.dataUpdatedAt;
 	useEffect(() => {
 		if (
+			args.staticConsole &&
 			args.adminToken &&
 			args.clusterId &&
 			args.clusterId !== args.primaryClusterId
 		) {
 			hydratePrimaryBackendProfile(args.clusterId);
 		}
-	}, [args.adminToken, args.clusterId, args.primaryClusterId]);
+	}, [
+		args.adminToken,
+		args.clusterId,
+		args.primaryClusterId,
+		args.staticConsole,
+	]);
 	useEffect(() => {
 		const clusterId = args.clusterId;
 		if (
@@ -183,10 +194,13 @@ export function useBackendDirectory(args: {
 			if (args.staticConsole) {
 				let policy: RuntimePolicy;
 				try {
-					policy = await fetchRuntimePolicy(
-						args.adminToken,
-						undefined,
-						candidate.origin,
+					policy = RuntimePolicySchema.parse(
+						await readSwitchCandidateResource({
+							origin: candidate.origin,
+							clusterId: args.clusterId,
+							adminToken: args.adminToken,
+							path: "/api/admin/console/runtime-policy",
+						}),
 					);
 				} catch {
 					return false;
@@ -232,10 +246,13 @@ export function useBackendDirectory(args: {
 			let inventory: AdminNodesResponse;
 			const serial = beginDirectoryRequest();
 			try {
-				inventory = await fetchAdminNodes(
-					args.adminToken,
-					undefined,
-					candidate.origin,
+				inventory = AdminNodesResponseSchema.parse(
+					await readSwitchCandidateResource({
+						origin: candidate.origin,
+						clusterId: args.clusterId,
+						adminToken: args.adminToken,
+						path: "/api/admin/nodes",
+					}),
 				);
 			} catch {
 				recordDirectoryFailure(serial);

@@ -285,7 +285,7 @@ fn local_history_backfill_acknowledgement_and_checkpoint_restart_together() {
 }
 
 #[test]
-fn local_history_backfill_rejects_a_page_before_partial_stream_enqueue() {
+fn local_history_backfill_is_independent_of_live_source_backlog() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
     let identity = identity(&key);
@@ -312,8 +312,8 @@ fn local_history_backfill_rejects_a_page_before_partial_stream_enqueue() {
     assert_eq!(backfill.len(), 1);
     assert_ne!(backfill[0].wire, unrelated_live.wire);
     runtime
-        .acknowledge_local_source_segment(&backfill[0].wire)
-        .expect("drain historical segment");
+        .acknowledge_local_source_segment_and_checkpoint_backfill(&backfill[0].wire, None, false)
+        .expect("checkpoint historical segment");
 
     for sequence in 0..8 {
         runtime
@@ -326,16 +326,16 @@ fn local_history_backfill_rejects_a_page_before_partial_stream_enqueue() {
             )
             .expect("fill traffic outbox");
     }
-    assert!(matches!(
-        runtime.queue_local_history_backfill_segments(
+    let next_backfill = runtime
+        .queue_local_history_backfill_segments(
             "cluster-a",
             identity,
             &key,
             vec![record(b"historical-after-backpressure", false)],
             1_100,
-        ),
-        Err(RepositoryRuntimeError::StateLimitExceeded)
-    ));
+        )
+        .expect("queue backfill behind a live backlog");
+    assert_eq!(next_backfill.len(), 1);
     assert_eq!(runtime.local_source_pending_segments().len(), 2);
 }
 

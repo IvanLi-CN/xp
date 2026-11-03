@@ -2,6 +2,25 @@ use super::super::RepositorySyncRequest;
 use super::*;
 use crate::state::history_repository::replica::RepositorySyncReceipt;
 
+pub(super) async fn complete_acked_source_deletions(
+    state: &AppState,
+    markers: &[crate::node_history::RepositoryHistoryDeletionMarker],
+) -> anyhow::Result<()> {
+    if markers.is_empty() {
+        return Ok(());
+    }
+    let mut runtime = state.repository_replica.lock().await;
+    repository_blocking(|| runtime.complete_local_source_tombstones(markers))?;
+    drop(runtime);
+    for marker in markers {
+        state
+            .node_history
+            .complete_repository_deletion_marker(&state.cluster.node_id, marker)
+            .await?;
+    }
+    Ok(())
+}
+
 pub(super) fn avoid_local_source_fallback(
     selected_repository_id: String,
     primary_repository_id: &str,

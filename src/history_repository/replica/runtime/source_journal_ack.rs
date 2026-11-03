@@ -132,8 +132,16 @@ impl RepositoryReplicaRuntime {
         if delivered_wires.is_empty() {
             return Ok(());
         }
+        let delivered_wires = delivered_wires
+            .iter()
+            .copied()
+            .filter(|wire| !self.legacy_local_history_backfill_owns_wire(wire))
+            .collect::<Vec<_>>();
+        if delivered_wires.is_empty() {
+            return Ok(());
+        }
         let previous_snapshot = self.snapshot.clone();
-        for delivered_wire in delivered_wires {
+        for delivered_wire in &delivered_wires {
             match self.remove_local_source_pending_segment(delivered_wire) {
                 Ok(true) => {}
                 Ok(false) => {

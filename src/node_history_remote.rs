@@ -1,10 +1,35 @@
+use super::{NodeHistoryHandle, NodeHistorySnapshot, PersistedNodeHistoryRecord};
 use anyhow::Context;
 
 use crate::{
     control_plane_mesh::{MeshAwareHttpClient, MeshPeerTarget, MeshRequest},
     internal_auth::InternalRoute,
-    node_history::NodeHistorySnapshot,
 };
+
+impl PersistedNodeHistoryRecord {
+    fn repository_snapshot(&self) -> NodeHistorySnapshot {
+        NodeHistorySnapshot {
+            node_id: self.node_id.clone(),
+            last_synced_at: self.last_synced_at.clone(),
+            last_sync_error: self.last_sync_error.clone(),
+            daily_traffic: self.daily_traffic.values().cloned().collect(),
+            daily_component_status: self.daily_component_status.values().cloned().collect(),
+            component_status_events: self.component_status_events.clone(),
+            traffic: Some(self.traffic_rollup.clone()),
+            user_traffic_users: Vec::new(),
+        }
+    }
+}
+
+impl NodeHistoryHandle {
+    pub async fn repository_snapshot(&self, node_id: &str) -> Option<NodeHistorySnapshot> {
+        let state = self.inner.read().await;
+        state
+            .nodes
+            .get(node_id)
+            .map(PersistedNodeHistoryRecord::repository_snapshot)
+    }
+}
 
 pub(super) struct RemoteSyncAuth<'a> {
     cluster_id: &'a str,

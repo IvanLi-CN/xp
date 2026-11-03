@@ -1,6 +1,7 @@
 use crate::history_sync::SyncRecord;
+#[cfg(test)]
+use crate::state::history_repository::control::RepositoryLifecycle;
 use crate::state::history_repository::replica::{RepositoryReplicaGap, RepositoryReplicaSegment};
-use crate::state::history_repository::{control::RepositoryLifecycle, identity::RepositoryNodeId};
 use std::{future::Future, time::Duration};
 
 use super::super::AppState;
@@ -93,18 +94,13 @@ pub(super) fn spawn_local_source_worker(state: AppState) {
     });
 }
 
-pub(super) async fn local_repository_lifecycle(
-    state: &AppState,
-) -> anyhow::Result<RepositoryLifecycle> {
-    let store = state.store.lock().await;
-    let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
-    Ok(store
-        .state()
-        .repository_membership
-        .as_ref()
-        .and_then(|membership| membership.repository(&node_id))
-        .map(|member| *member.lifecycle())
-        .unwrap_or(RepositoryLifecycle::Syncing))
+pub(super) async fn local_history_backfill_inflight(state: &AppState) -> bool {
+    state
+        .repository_replica
+        .lock()
+        .await
+        .local_history_backfill_inflight_checkpoint()
+        .is_some()
 }
 
 pub(super) async fn repair_legacy_tombstone_metadata(
@@ -116,39 +112,9 @@ pub(super) async fn repair_legacy_tombstone_metadata(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn should_fanout_tombstone_acknowledgements(lifecycle: RepositoryLifecycle) -> bool {
     lifecycle == RepositoryLifecycle::Ready
-}
-
-pub(super) async fn receive_local_source_segment(
-    state: &AppState,
-    segment: &RepositoryReplicaSegment,
-    gaps: &[RepositoryReplicaGap],
-    ready_repository_ids: &[String],
-    now: u64,
-) -> anyhow::Result<()> {
-    let mut runtime = state.repository_replica.lock().await;
-    let receipt = super::repository_blocking(|| {
-        runtime.receive_wire_from_repository_with_gaps(
-            &state.cluster.cluster_id,
-            &segment.identity,
-            &segment.wire,
-            gaps,
-            now,
-            ready_repository_ids,
-            &state.cluster.node_id,
-        )
-    })?;
-    drop(runtime);
-    if should_fanout_tombstone_acknowledgements(local_repository_lifecycle(state).await?)
-        && !receipt.tombstone_acknowledgements().is_empty()
-    {
-        tracing::debug!(
-            count = receipt.tombstone_acknowledgements().len(),
-            "history tombstone acknowledgement fanout deferred to replication worker"
-        );
-    }
-    Ok(())
 }
 
 pub(super) async fn receive_local_source_segments(

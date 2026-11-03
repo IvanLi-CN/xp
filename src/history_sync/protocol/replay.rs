@@ -2,6 +2,52 @@ use super::{Acceptance, Acknowledgement, Cursor, ProtocolError, SignedSegment, S
 use crate::state::history_repository::identity::RepositoryNodeIdentity;
 
 impl super::SegmentReceiver {
+    /// The actual continuous receipt tip and signed boundary hash. A retained anchor alone
+    /// cannot prove that earlier ordinary records were ever received.
+    pub(crate) fn continuous_watermark_with_hash(
+        &self,
+        cursor: &Cursor,
+    ) -> Result<Option<(Cursor, [u8; 32])>, ProtocolError> {
+        self.streams
+            .get(&cursor.stream_key())
+            .filter(|progress| progress.epoch == cursor.source_epoch)
+            .map(|progress| {
+                if !progress.hash_chain_verified || !progress.previous_hash_verified() {
+                    return Err(ProtocolError::HashChainMismatch);
+                }
+                Ok((progress.watermark(cursor)?, progress.last_segment_hash))
+            })
+            .transpose()
+    }
+
+    /// Trusted recovery must first verify the complete original chain through this exact tip.
+    /// This does not advance or rewind the receiver and cannot mint a future acknowledgement.
+    pub(crate) fn accept_verified_history_duplicate(
+        &self,
+        segment: &SignedSegment,
+        identity: &RepositoryNodeIdentity,
+        tip: &Cursor,
+        tip_hash: [u8; 32],
+    ) -> Result<Acceptance, ProtocolError> {
+        segment.verify_identity(identity)?;
+        let first = segment.canonical.first_cursor();
+        if self.expected_cluster_id != segment.canonical.cluster_id {
+            return Err(ProtocolError::ClusterMismatch);
+        }
+        if first.stream_key() != tip.stream_key()
+            || first.source_epoch != tip.source_epoch
+            || segment.canonical.last_cursor.sequence > tip.sequence
+            || self.continuous_watermark_with_hash(tip)? != Some((tip.clone(), tip_hash))
+        {
+            return Err(ProtocolError::HashChainMismatch);
+        }
+        Ok(Acceptance::Duplicate {
+            acknowledgement: Acknowledgement {
+                watermark: tip.clone(),
+            },
+        })
+    }
+
     /// Return an idempotent acknowledgement for a segment already committed by the repository.
     ///
     /// A retained anchor deliberately leaves its hash chain unverified. In that state the normal

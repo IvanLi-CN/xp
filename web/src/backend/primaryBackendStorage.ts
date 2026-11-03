@@ -1,5 +1,12 @@
 import { isDemoRuntime } from "../demo/runtimeMode";
-import type { BackendProfile } from "./primaryBackendModel";
+import {
+	type BackendProfile,
+	type PrimaryBackendSnapshot,
+	STATIC_BOOTSTRAP_ORIGIN,
+	canonicalBackendOrigin,
+	displayNodeName,
+	getPageOrigin,
+} from "./primaryBackendModel";
 
 export type StoredProfiles = {
 	activeClusterId?: string;
@@ -27,4 +34,36 @@ export function writeStoredProfiles(value: StoredProfiles, isStatic: boolean) {
 	} catch {
 		// Private browsing and quota errors must not make the console unusable.
 	}
+}
+
+export function readInitialState(isStatic: boolean): PrimaryBackendSnapshot {
+	const stored = readStoredProfiles(isStatic);
+	const active = stored.activeClusterId
+		? stored.profiles?.[stored.activeClusterId]
+		: undefined;
+	const pageOrigin = getPageOrigin();
+	const storedPrimary = canonicalBackendOrigin(active?.primaryOrigin ?? "");
+	const storedCandidateOrigins = new Set(
+		(active?.candidates ?? [])
+			.map((candidate) => canonicalBackendOrigin(candidate.origin))
+			.filter((origin): origin is string => Boolean(origin)),
+	);
+	return {
+		clusterId: stored.activeClusterId ?? null,
+		primaryOrigin: isStatic
+			? STATIC_BOOTSTRAP_ORIGIN
+			: storedPrimary && storedCandidateOrigins.has(storedPrimary)
+				? storedPrimary
+				: pageOrigin,
+		candidates:
+			active?.candidates?.map((candidate) => ({
+				...candidate,
+				nodeName: displayNodeName(candidate.nodeName, candidate.origin),
+			})) ?? [],
+		generation: 0,
+		state: "ready",
+		pendingMutations: 0,
+		unknownMutationCount: 0,
+		lastSwitchTimedOut: false,
+	};
 }

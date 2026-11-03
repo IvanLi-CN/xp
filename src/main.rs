@@ -618,6 +618,13 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         cluster_ca_pem.clone(),
         mesh_client.clone(),
     );
+    let _node_history_deletion_recovery_task =
+        xp::node_history::spawn_node_history_deletion_recovery_worker(
+            cluster.node_id.clone(),
+            store.clone(),
+            node_history.clone(),
+            raft_facade.clone(),
+        );
 
     let probe_secret = cluster_ca_key_pem_required.clone();
     let endpoint_probe = xp::endpoint_probe::spawn_endpoint_probe_worker(

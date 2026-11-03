@@ -2,8 +2,8 @@ use super::source::MAX_SOURCE_PAYLOAD_BYTES;
 use super::*;
 
 const MAX_SOURCE_SUMMARY_ITEMS: usize = 64;
-const MAX_PATH_HEALTH_SOURCE_PEERS: usize = 16;
-const MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER: usize = 1;
+pub(super) const MAX_PATH_HEALTH_SOURCE_PEERS: usize = 16;
+pub(super) const MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER: usize = 1;
 
 pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::Result<()> {
     const MAX_PAGES_PER_CYCLE: usize = 16;
@@ -60,6 +60,7 @@ fn source_collector_repository_ids(
 pub(super) struct SourceRecordBatch {
     records: Option<Vec<SyncRecord>>,
     pub(super) deletion_markers: Vec<crate::node_history::RepositoryHistoryDeletionMarker>,
+    pub(super) deletion_snapshot_version: Option<u64>,
     pub(super) uptime_observation_ids: Vec<String>,
     pub(super) uptime_capture_gap_ids: Vec<String>,
     pub(super) resource_rollup_buckets: Vec<i64>,
@@ -71,6 +72,7 @@ impl SourceRecordBatch {
         Self {
             records: Some(Vec::new()),
             deletion_markers: Vec::new(),
+            deletion_snapshot_version: None,
             uptime_observation_ids: Vec::new(),
             uptime_capture_gap_ids: Vec::new(),
             resource_rollup_buckets: Vec::new(),
@@ -127,10 +129,10 @@ pub(super) async fn source_records(
             MAX_SOURCE_PAYLOAD_BYTES,
         )
         .await;
-    let deletion_markers = state
+    let (deletion_snapshot_version, deletion_markers) = state
         .node_history
-        .repository_deletion_markers(&state.cluster.node_id)
-        .await;
+        .repository_deletion_capture_page(&state.cluster.node_id, &state.cluster.cluster_id)
+        .await?;
     let pending_uptime_observations = state.uptime.pending(512).await?;
     let pending_uptime_capture_gaps = state.uptime.pending_capture_gaps(512).await?;
     let pending_resource_rollups = state.resource_monitoring.pending_rollups(64);
@@ -253,7 +255,7 @@ pub(super) async fn source_records(
             )?);
         }
     }
-    let records = source_records_with_deletions(
+    let records = source_records_with_deletion_generations(
         &state.cluster.node_id,
         now,
         deletion_markers
@@ -263,6 +265,7 @@ pub(super) async fn source_records(
                     marker.schema_id.clone(),
                     marker.record_key.clone(),
                     marker.target_node_id().map(str::to_owned),
+                    marker.generation,
                 )
             })
             .collect(),
@@ -344,6 +347,7 @@ pub(super) async fn source_records(
     Ok(SourceRecordBatch {
         records: Some(records),
         deletion_markers,
+        deletion_snapshot_version,
         uptime_observation_ids: pending_uptime_observations
             .into_iter()
             .map(|pending| pending.id)
@@ -357,15 +361,33 @@ pub(super) async fn source_records(
     })
 }
 
+#[cfg(test)]
 pub(super) fn source_records_with_deletions(
     node_id: &str,
     now: u64,
     deletion_markers: Vec<(String, Vec<u8>, Option<String>)>,
     live_records: Vec<SyncRecord>,
 ) -> anyhow::Result<Vec<SyncRecord>> {
+    source_records_with_deletion_generations(
+        node_id,
+        now,
+        deletion_markers
+            .into_iter()
+            .map(|(schema, key, target)| (schema, key, target, 0))
+            .collect(),
+        live_records,
+    )
+}
+
+pub(super) fn source_records_with_deletion_generations(
+    node_id: &str,
+    now: u64,
+    deletion_markers: Vec<(String, Vec<u8>, Option<String>, u64)>,
+    live_records: Vec<SyncRecord>,
+) -> anyhow::Result<Vec<SyncRecord>> {
     let mut tombstones = deletion_markers
         .into_iter()
-        .map(|(schema_id, record_key, target_node_id)| {
+        .map(|(schema_id, record_key, target_node_id, generation)| {
             let target_node_id = target_node_id.as_deref().unwrap_or(node_id);
             source_record_with_key_for_subject(
                 &schema_id,
@@ -373,7 +395,10 @@ pub(super) fn source_records_with_deletions(
                 target_node_id,
                 now,
                 record_key,
-                serde_json::json!({ "deleted_at_unix_seconds": now }),
+                serde_json::json!({
+                    "deleted_at_unix_seconds": now,
+                    "deletion_generation": generation,
+                }),
                 true,
             )
         })

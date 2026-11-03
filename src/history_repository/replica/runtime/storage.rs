@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "storage_source.rs"]
+mod storage_source;
+
 const PARTITION_SUMMARY_REBUILD_PAGE_SIZE: usize = 32;
 
 impl RepositoryReplicaRuntime {
@@ -223,6 +226,7 @@ impl RepositoryReplicaRuntime {
                 .map(StoredRecord::sqlite_row)
                 .collect::<Result<Vec<_>, _>>()?,
             tombstones: Vec::new(),
+            expired_tombstones: Vec::new(),
             segments: self
                 .snapshot
                 .segments
@@ -291,7 +295,8 @@ impl RepositoryReplicaRuntime {
         limit: usize,
     ) -> Result<Vec<StoredSegment>, RepositoryRuntimeError> {
         if !self.uses_sqlite_history() {
-            let (after_tombstone_rank, after_id) = segment_sync_cursor_parts(after_id);
+            let (after_tombstone_rank, after_id, _) =
+                storage_source::segment_sync_cursor_parts(after_id);
             let mut segments = self
                 .snapshot
                 .segments
@@ -810,14 +815,6 @@ fn partition_summary_cursor_order(
     )
 }
 
-fn segment_sync_cursor_parts(cursor: Option<&str>) -> (bool, &str) {
-    match cursor {
-        Some(cursor) if cursor.starts_with("t:") => (false, &cursor[2..]),
-        Some(cursor) if cursor.starts_with("r:") => (true, &cursor[2..]),
-        Some(_) | None => (false, ""),
-    }
-}
-
 pub(super) fn segment_tombstone_rank(segment: &StoredSegment) -> bool {
     SignedSegment::from_wire(&segment.wire).map_or(true, |signed| {
         !signed
@@ -876,6 +873,10 @@ impl StoredRecord {
     }
 
     pub(crate) fn matches_key(&self, key: &super::ReplicaRecordKey) -> bool {
+        key.known_sequence() == Some(self.sequence) && self.matches_tombstone_identity(key)
+    }
+
+    pub(crate) fn matches_tombstone_identity(&self, key: &super::ReplicaRecordKey) -> bool {
         let (schema_id, schema_version) = key.schema();
         self.source_node_id == key.source_node_id()
             && self.source_epoch == key.source_epoch()
@@ -890,7 +891,8 @@ impl StoredRecord {
 
     pub(crate) fn matches_tombstone_key(&self, key: &ReplicaRecordKey, prefix: bool) -> bool {
         let (schema_id, schema_version) = key.schema();
-        (prefix || self.stream == key.stream())
+        let backfill_stream = format!("{}-backfill-{}", key.stream(), key.source_node_id());
+        (prefix || self.stream == key.stream() || self.stream == backfill_stream)
             && self.subject_node_id == key.subject_node_id()
             && self.observer_node_id == key.observer_node_id()
             && self.schema_id == schema_id

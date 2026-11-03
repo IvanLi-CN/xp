@@ -199,51 +199,51 @@ impl PersistedInboundIpUsage {
     pub fn latest_minute_dt(&self) -> Option<DateTime<Utc>> {
         self.latest_minute.as_deref().and_then(parse_minute)
     }
-
-    /// Repository bootstrap omits unobserved leading minutes but retains zeroes after the first
-    /// known IP, preventing newly monitored nodes from backfilling synthetic history.
     pub fn repository_samples_for_node(&self, node_id: &str) -> Vec<InboundIpUsageSeriesPoint> {
         let Some(latest) = self.latest_minute_dt() else {
             return Vec::new();
         };
-        let records = self
+        let memberships = self
             .memberships
             .values()
-            .filter(|membership| membership.node_id == node_id)
+            .filter(|membership| membership.node_id == node_id);
+        let mut first_observed = None;
+        let mut has_records = false;
+        for record in memberships
+            .clone()
             .flat_map(|membership| membership.ips.values())
-            .collect::<Vec<_>>();
-        if records.is_empty() {
+        {
+            has_records = true;
+            let observed = parse_minute(&record.first_seen_at);
+            if first_observed.is_none_or(|current| observed.is_some_and(|value| value < current)) {
+                first_observed = observed;
+            }
+        }
+        if !has_records {
             return Vec::new();
         }
-        let first_observed = records
-            .iter()
-            .filter_map(|record| parse_minute(&record.first_seen_at))
-            .min();
         let start_index = repository_start_index(latest, first_observed);
-
-        (start_index..MINUTES_WINDOW)
-            .map(|index| {
-                let count = records
-                    .iter()
-                    .filter(|record| {
-                        extract_window_flags(&record.bitmap, index, 1)
-                            .first()
-                            .copied()
-                            .unwrap_or(false)
-                    })
-                    .count()
-                    .try_into()
-                    .unwrap_or(u32::MAX);
-                InboundIpUsageSeriesPoint {
-                    minute: rfc3339_minute(
-                        latest - Duration::minutes((MINUTES_WINDOW - 1 - index) as i64),
-                    ),
-                    count,
+        let mut counts = vec![0u32; MINUTES_WINDOW - start_index];
+        for record in memberships.flat_map(|membership| membership.ips.values()) {
+            for (offset, count) in counts.iter_mut().enumerate() {
+                if get_bit(&record.bitmap, start_index + offset) {
+                    *count = count.saturating_add(1);
                 }
+            }
+        }
+
+        counts
+            .into_iter()
+            .enumerate()
+            .map(|(offset, count)| InboundIpUsageSeriesPoint {
+                minute: rfc3339_minute(
+                    latest
+                        - Duration::minutes((MINUTES_WINDOW - 1 - (start_index + offset)) as i64),
+                ),
+                count,
             })
             .collect()
     }
-
     fn collect_known_geo_by_ip_surviving_shift(
         &self,
         shift: usize,

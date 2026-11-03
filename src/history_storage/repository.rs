@@ -2,7 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 mod diagnostics;
+#[cfg(test)]
+#[path = "tests/expired_tombstone_tests.rs"]
+mod expired_tombstone_tests;
+mod original_backfill;
 mod segments;
+mod stale_recovery_storage;
 mod summary;
 #[cfg(test)]
 pub(crate) use segments::segment_phase_sql;
@@ -82,12 +87,19 @@ pub(crate) struct RepositoryHistoryTombstone {
     pub(crate) source_node_id: String,
     pub(crate) source_epoch: u64,
     pub(crate) stream: String,
+    pub(crate) source_stream: Option<String>,
     pub(crate) subject_node_id: String,
     pub(crate) observer_node_id: String,
     pub(crate) schema_id: String,
     pub(crate) schema_version: u32,
     pub(crate) record_key: Vec<u8>,
     pub(crate) prefix: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RepositoryExpiredTombstone {
+    pub(crate) tombstone: RepositoryHistoryTombstone,
+    pub(crate) sequence: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +112,64 @@ pub(crate) struct RepositoryHistorySegmentRow {
     pub(crate) stream: String,
     pub(crate) first_sequence: u64,
     pub(crate) payload: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct RepositoryHistorySegmentChange {
+    previous_source_node_id: Option<String>,
+}
+
+fn upsert_repository_history_segment(
+    transaction: &rusqlite::Transaction<'_>,
+    row: &RepositoryHistorySegmentRow,
+) -> Result<Option<RepositoryHistorySegmentChange>> {
+    let previous_source_node_id = transaction
+        .query_row(
+            "SELECT source_node_id FROM repository_history_segments WHERE id = ?1",
+            [&row.id],
+            |existing| existing.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let changed = transaction
+        .execute(
+            "INSERT INTO repository_history_segments
+                (id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
+                 first_sequence, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+               closed_at = excluded.closed_at,
+               contains_tombstone = excluded.contains_tombstone,
+               source_node_id = excluded.source_node_id,
+               source_epoch = excluded.source_epoch,
+               stream = excluded.stream,
+               first_sequence = excluded.first_sequence,
+               payload = excluded.payload
+             WHERE closed_at IS NOT excluded.closed_at
+                OR contains_tombstone IS NOT excluded.contains_tombstone
+                OR source_node_id IS NOT excluded.source_node_id
+                OR source_epoch IS NOT excluded.source_epoch
+                OR stream IS NOT excluded.stream
+                OR first_sequence IS NOT excluded.first_sequence
+                OR payload IS NOT excluded.payload",
+            params![
+                row.id,
+                i64::try_from(row.closed_at_unix_seconds).unwrap_or(i64::MAX),
+                row.contains_tombstone,
+                row.source_node_id,
+                i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
+                row.stream,
+                i64::try_from(row.first_sequence).unwrap_or(i64::MAX),
+                row.payload,
+            ],
+        )
+        .map_err(sqlite_error)?;
+    if changed == 0 {
+        return Ok(None);
+    }
+    Ok(Some(RepositoryHistorySegmentChange {
+        previous_source_node_id,
+    }))
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +188,8 @@ pub(crate) struct RepositoryCommitOutcome {
 /// accepted rows, a deleted payload, or an orphaned segment behind.
 #[derive(Debug, Default)]
 pub(crate) struct RepositoryReplicaMutation {
+    /// Exact tombstone rows expired by the receiver before this mutation's new records.
+    pub(crate) expired_tombstones: Vec<RepositoryExpiredTombstone>,
     pub(crate) target_repository_id: String,
     /// Wall-clock time of the receiver commit. Historical segment timestamps are only a
     /// fallback for legacy callers; throughput windows must measure processing time.
@@ -301,6 +373,15 @@ impl HistoryStorage {
         mutation: RepositoryReplicaMutation,
         control_payload: &[u8],
     ) -> Result<RepositoryCommitOutcome> {
+        self.commit_repository_replica_mutation_with(mutation, control_payload, |_| Ok(()))
+    }
+
+    fn commit_repository_replica_mutation_with(
+        &self,
+        mutation: RepositoryReplicaMutation,
+        control_payload: &[u8],
+        extra: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<()>,
+    ) -> Result<RepositoryCommitOutcome> {
         #[cfg(test)]
         let fail_maintenance = self
             .fail_maintenance_after_commit
@@ -312,46 +393,52 @@ impl HistoryStorage {
             ));
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        for tombstone in &mutation.tombstones {
-            delete_repository_history_for_tombstone(&transaction, tombstone)?;
+        extra(&transaction)?;
+        for tombstone in &mutation.expired_tombstones {
+            delete_expired_tombstone(&transaction, tombstone)?;
         }
         for row in &mutation.records {
             upsert_repository_history_record(&transaction, row)?;
+        }
+        // A batch can contain a record followed by its tombstone. Apply the deletes after all
+        // upserts so an older record cannot be reinserted in the same atomic transaction.
+        for tombstone in &mutation.tombstones {
+            delete_repository_history_for_tombstone(&transaction, tombstone)?;
         }
         let canonical_bytes_by_id = mutation
             .applied_canonical_segments
             .iter()
             .cloned()
             .collect::<std::collections::BTreeMap<_, _>>();
+        let mut changed_sources = std::collections::BTreeSet::new();
         let mut applied_segments = 0_u64;
         let mut applied_bytes = 0_u64;
         let mut scope_counts = std::collections::BTreeMap::<(String, String), (u64, u64)>::new();
         for row in &mutation.segments {
-            let was_present = transaction
-                .query_row(
-                    "SELECT 1 FROM repository_history_segments WHERE id = ?1",
-                    [&row.id],
-                    |_| Ok(()),
-                )
-                .optional()
-                .map_err(sqlite_error)?
-                .is_some();
-            upsert_repository_history_segment(&transaction, row)?;
-            if !was_present && canonical_bytes_by_id.contains_key(&row.id) {
-                applied_segments = applied_segments.checked_add(1).ok_or_else(|| {
-                    HistoryStorageError("applied segment count overflow".to_owned())
-                })?;
-                let canonical_bytes = canonical_bytes_by_id[&row.id];
-                applied_bytes = applied_bytes
-                    .checked_add(canonical_bytes)
-                    .ok_or_else(|| HistoryStorageError("applied byte count overflow".to_owned()))?;
-                let entry = scope_counts
-                    .entry((row.source_node_id.clone(), row.stream.clone()))
-                    .or_default();
-                entry.0 = entry.0.saturating_add(1);
-                entry.1 = entry.1.saturating_add(canonical_bytes);
+            if let Some(change) = upsert_repository_history_segment(&transaction, row)? {
+                let is_insert = change.previous_source_node_id.is_none();
+                changed_sources.insert(row.source_node_id.clone());
+                if let Some(previous_source_node_id) = change.previous_source_node_id {
+                    changed_sources.insert(previous_source_node_id);
+                }
+                if is_insert && canonical_bytes_by_id.contains_key(&row.id) {
+                    applied_segments = applied_segments.checked_add(1).ok_or_else(|| {
+                        HistoryStorageError("applied segment count overflow".to_owned())
+                    })?;
+                    let canonical_bytes = canonical_bytes_by_id[&row.id];
+                    applied_bytes =
+                        applied_bytes.checked_add(canonical_bytes).ok_or_else(|| {
+                            HistoryStorageError("applied byte count overflow".to_owned())
+                        })?;
+                    let entry = scope_counts
+                        .entry((row.source_node_id.clone(), row.stream.clone()))
+                        .or_default();
+                    entry.0 = entry.0.saturating_add(1);
+                    entry.1 = entry.1.saturating_add(canonical_bytes);
+                }
             }
         }
+        super::counts::bump_repository_history_segment_revisions(&transaction, &changed_sources)?;
         if applied_segments > 0 {
             let applied_at = mutation.progress_at_unix_seconds.or_else(|| {
                 mutation
@@ -413,6 +500,7 @@ impl HistoryStorage {
         Ok(affected)
     }
 
+    #[cfg(test)]
     pub(crate) fn delete_repository_history_tombstone(
         &self,
         tombstone: &RepositoryHistoryTombstone,
@@ -424,10 +512,9 @@ impl HistoryStorage {
         connection
             .execute(
                 "DELETE FROM repository_history_records
-                 WHERE source_node_id = ?1 AND source_epoch = ?2 AND stream = ?3
-                   AND subject_node_id = ?4 AND observer_node_id = ?5
-                   AND schema_id = ?6 AND schema_version = ?7 AND record_key = ?8
-                   AND is_tombstone = 1",
+                 WHERE source_node_id=?1 AND source_epoch=?2 AND stream=?3
+                   AND subject_node_id=?4 AND observer_node_id=?5 AND schema_id=?6
+                   AND schema_version=?7 AND record_key=?8 AND is_tombstone=1",
                 params![
                     tombstone.source_node_id,
                     durable_i64(tombstone.source_epoch, "source epoch")?,
@@ -616,6 +703,7 @@ impl HistoryStorage {
             return Ok(());
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
+        super::counts::bump_repository_history_segment_revisions_for_all_segments(&transaction)?;
         transaction
             .execute("DELETE FROM repository_history_records", [])
             .map_err(sqlite_error)?;
@@ -625,6 +713,67 @@ impl HistoryStorage {
         transaction.commit().map_err(sqlite_error)?;
         maintain_sqlite(connection)
     }
+}
+
+fn delete_expired_tombstone(
+    connection: &Connection,
+    expired: &RepositoryExpiredTombstone,
+) -> Result<usize> {
+    // Expiration always removes the exact stored tombstone, even for a prefix deletion.
+    let tombstone = &expired.tombstone;
+    let removed = if let Some(sequence) = expired.sequence {
+        connection
+            .execute(
+                "DELETE FROM repository_history_records
+         WHERE source_node_id = ?1 AND source_epoch = ?2 AND stream = ?3
+           AND subject_node_id = ?4 AND observer_node_id = ?5
+           AND schema_id = ?6 AND schema_version = ?7 AND record_key = ?8
+           AND is_tombstone = 1 AND sequence = ?9",
+                params![
+                    tombstone.source_node_id,
+                    durable_i64(tombstone.source_epoch, "source epoch")?,
+                    tombstone.stream,
+                    tombstone.subject_node_id,
+                    tombstone.observer_node_id,
+                    tombstone.schema_id,
+                    i64::from(tombstone.schema_version),
+                    tombstone.record_key,
+                    durable_i64(sequence, "expired tombstone sequence")?
+                ],
+            )
+            .map_err(sqlite_error)?
+    } else {
+        0
+    };
+    if removed == 0 {
+        // Old checkpoints may omit the sequence. Do not guess which later row is the expired
+        // event, or silently leave it exportable after removing its ledger entry.
+        let other_sequence = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM repository_history_records
+                 WHERE source_node_id=?1 AND source_epoch=?2 AND stream=?3
+                   AND subject_node_id=?4 AND observer_node_id=?5 AND schema_id=?6
+                   AND schema_version=?7 AND record_key=?8 AND is_tombstone=1)",
+                params![
+                    tombstone.source_node_id,
+                    durable_i64(tombstone.source_epoch, "source epoch")?,
+                    tombstone.stream,
+                    tombstone.subject_node_id,
+                    tombstone.observer_node_id,
+                    tombstone.schema_id,
+                    i64::from(tombstone.schema_version),
+                    tombstone.record_key,
+                ],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(sqlite_error)?;
+        if other_sequence {
+            return Err(HistoryStorageError(
+                "expired tombstone sequence is ambiguous".into(),
+            ));
+        }
+    }
+    Ok(removed)
 }
 
 fn replace_repository_history_records_in_transaction(

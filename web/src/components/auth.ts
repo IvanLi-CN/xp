@@ -9,8 +9,11 @@ import { clearServiceWorkerRuntimePolicy } from "../offline/serviceWorkerPolicy"
 
 export const ADMIN_TOKEN_STORAGE_KEY = "xp_admin_token";
 
-function clearSessionState(): void {
-	clearPrimaryBackendDirectory({ clearProfiles: true });
+function clearSessionState(retainVerifiedPreAuthTarget = false): void {
+	clearPrimaryBackendDirectory({
+		clearProfiles: !retainVerifiedPreAuthTarget,
+		retainVerifiedPreAuthTarget,
+	});
 	clearAppliedRuntimePolicyId();
 	clearServiceWorkerRuntimePolicy();
 }
@@ -36,8 +39,12 @@ export function readAdminToken(): string {
 	}
 }
 
-export function writeAdminToken(token: string): void {
-	if (readAdminToken() !== token) clearSessionState();
+export function writeAdminToken(
+	token: string,
+	options: { retainVerifiedPreAuthTarget?: boolean } = {},
+): void {
+	if (readAdminToken() !== token)
+		clearSessionState(options.retainVerifiedPreAuthTarget);
 	if (isDemoRuntime()) {
 		setDemoAuthentication(token.length > 0);
 		return;

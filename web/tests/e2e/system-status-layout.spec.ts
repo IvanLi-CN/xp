@@ -214,9 +214,10 @@ test("shows a retryable error for an empty response without retrying in a loop",
 	await setAdminToken(page);
 	await setupApiMocks(page, { mockStatusEvents: false });
 	let requestCount = 0;
+	let returnEmpty = true;
 	await page.route("**/api/admin/mesh/status", async (route) => {
 		requestCount += 1;
-		if (requestCount <= 2) {
+		if (returnEmpty) {
 			await route.fulfill({
 				status: 200,
 				contentType: "application/json",
@@ -241,6 +242,7 @@ test("shows a retryable error for an empty response without retrying in a loop",
 	await page.waitForTimeout(250);
 	expect(requestCount).toBe(initialRequestCount);
 
+	returnEmpty = false;
 	await page.getByRole("button", { name: "Retry" }).click();
 	await expect(
 		page.getByRole("heading", { name: "System status", exact: true }),
@@ -285,6 +287,7 @@ test("shows node runtime retry and recovers after the request succeeds", async (
 	const node = state.nodes[0];
 	if (!node) throw new Error("Fixture node is missing");
 	let runtimeRequestCount = 0;
+	let returnEmpty = true;
 	await page.route(
 		`**/api/admin/nodes/${node.node_id}/runtime*`,
 		async (route) => {
@@ -294,15 +297,7 @@ test("shows node runtime retry and recovers after the request succeeds", async (
 				return;
 			}
 			runtimeRequestCount += 1;
-			if (runtimeRequestCount <= 2) {
-				await route.fulfill({
-					status: 200,
-					contentType: "application/json",
-					body: "",
-				});
-				return;
-			}
-			if (runtimeRequestCount > 3) {
+			if (returnEmpty) {
 				await route.fulfill({
 					status: 200,
 					contentType: "application/json",
@@ -344,11 +339,13 @@ test("shows node runtime retry and recovers after the request succeeds", async (
 	const initialRequestCount = runtimeRequestCount;
 	expect(initialRequestCount).toBeGreaterThanOrEqual(1);
 	expect(initialRequestCount).toBeLessThanOrEqual(2);
+	returnEmpty = false;
 	await page.getByRole("button", { name: "Retry" }).click();
 	await expect(
 		page.getByRole("button", { name: "Refresh runtime" }),
 	).toBeVisible();
 	expect(runtimeRequestCount).toBe(initialRequestCount + 1);
+	returnEmpty = true;
 	await page.getByRole("button", { name: "Refresh runtime" }).click();
 	await expect(
 		page.getByRole("alert").filter({ hasText: "Runtime refresh failed" }),

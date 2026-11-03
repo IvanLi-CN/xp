@@ -6,6 +6,62 @@ use crate::state::history_storage::{
     HistoryStorage, RepositoryHistoryRecordRow, RepositoryHistorySegmentRow,
 };
 
+#[tokio::test]
+async fn deleting_absent_user_does_not_create_a_prepared_deletion() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, _) = app_with(&tmp, ReconcileHandle::noop());
+    let response = app
+        .oneshot(req_authed("DELETE", "/api/admin/users/missing-user"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let history =
+        crate::node_history::NodeHistoryHandle::new(tmp.path().join("node_history_cache.json"));
+    assert!(
+        history
+            .repository_deletion_markers("local")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn user_deletion_does_not_commit_when_history_intent_cannot_be_saved() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    let response = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/admin/users",
+            json!({"display_name": "delete intent"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let user_id = body_json(response).await["user_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let connection = rusqlite::Connection::open(tmp.path().join("history.sqlite3")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_delete_intent BEFORE INSERT ON history_snapshots
+         WHEN NEW.key = 'node_history' BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+        )
+        .unwrap();
+    let response = app
+        .oneshot(req_authed("DELETE", &format!("/api/admin/users/{user_id}")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        store.lock().await.get_user(&user_id).is_some(),
+        "failed intent persistence must not commit the Raft deletion"
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn signed_internal_history_status_does_not_stall_health_on_single_worker() {
     let tmp = tempfile::tempdir().expect("temporary directory");

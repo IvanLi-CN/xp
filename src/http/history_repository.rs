@@ -38,9 +38,11 @@ const MAX_REPAIR_REQUEST_IDS: usize = 64;
 const REPOSITORY_ED25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-ed25519-v1\0";
 const REPOSITORY_X25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-x25519-v1\0";
 pub(super) mod gaps;
+mod initial_backfill_query;
 pub(crate) mod recovery;
 pub(crate) mod recovery_preflight;
 mod worker;
+use initial_backfill_query::RepositoryInitialBackfillQuery;
 pub(crate) use worker::spawn_repository_replica_worker;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,13 +58,6 @@ pub(super) struct RepositoryHistoryQuery {
     schema_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct RepositoryInitialBackfillQuery {
-    #[serde(default)]
-    page_cursor: Option<String>,
-    #[serde(default)]
-    page_size: Option<usize>,
-}
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ReplaceRepositoryMembershipRequest {
@@ -258,10 +253,15 @@ pub(super) async fn admin_internal_initial_history_repository_backfill(
     Query(query): Query<RepositoryInitialBackfillQuery>,
 ) -> Result<Json<worker::RepositoryInitialBackfillPage>, ApiError> {
     ensure_cluster_sender(&state, internal).await?;
-    worker::initial_backfill_page(&state, query.page_cursor.as_deref(), query.page_size)
-        .await
-        .map(Json)
-        .map_err(|error| ApiError::invalid_request(error.to_string()))
+    worker::initial_backfill_page_stable(
+        &state,
+        query.page_cursor.as_deref(),
+        query.page_size,
+        query.stable_deletions,
+    )
+    .await
+    .map(Json)
+    .map_err(|error| ApiError::invalid_request(error.to_string()))
 }
 
 fn repository_identity_matches_sender(identity: &RepositoryNodeIdentity, sender_id: &str) -> bool {
@@ -333,11 +333,10 @@ fn relay_frame_matches_source(
 ) -> bool {
     frame.sender_public_key() == source_keypair.public_key()
 }
-
 fn valid_repository_summary_cursor(cursor: &str) -> bool {
-    let segment_id = cursor
-        .strip_prefix("t:")
-        .or_else(|| cursor.strip_prefix("r:"))
+    let segment_id = ["s:t:", "s:r:", "t:", "r:"]
+        .into_iter()
+        .find_map(|prefix| cursor.strip_prefix(prefix))
         .unwrap_or(cursor);
     segment_id.len() == 64 && segment_id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -348,11 +347,10 @@ pub(super) async fn admin_internal_history_repository_summary(
     Query(query): Query<RepositorySummaryQuery>,
 ) -> Result<Response, ApiError> {
     ensure_syncing_or_ready_repository_sender(&state, internal).await?;
-    if query
-        .after_segment_id
-        .as_deref()
-        .is_some_and(|cursor| !valid_repository_summary_cursor(cursor))
-    {
+    if query.after_segment_id.as_deref().is_some_and(|cursor| {
+        !valid_repository_summary_cursor(cursor)
+            || (query.source_node_id.is_none() && cursor.starts_with("s:"))
+    }) {
         return Err(ApiError::invalid_request(
             "invalid repository summary cursor",
         ));
@@ -372,10 +370,12 @@ pub(super) async fn admin_internal_history_repository_summary(
         .repository_replica
         .lock()
         .await
-        .replication_summary_for_version(
+        .replication_summary_for_version_for_source_with_revision(
             query.after_segment_id.as_deref(),
             query.deep_verification,
             query.summary_version,
+            query.source_node_id.as_ref().map(RepositoryNodeId::as_str),
+            query.source_summary_revision.as_deref(),
         )
         .map_err(repository_error)?;
     // Encode while the permit is held; Axum's Json response defers serialization until body poll.

@@ -11,6 +11,8 @@ struct RepositoryInitialBackfillWirePage {
     records: Vec<Box<serde_json::value::RawValue>>,
     #[serde(default)]
     next_page_cursor: Option<String>,
+    #[serde(default)]
+    deletion_snapshot: Option<String>,
 }
 
 pub(super) fn deserialize_initial_backfill_page(
@@ -28,6 +30,7 @@ pub(super) fn deserialize_initial_backfill_page(
     Ok(RepositoryInitialBackfillPage {
         records,
         next_page_cursor: wire.next_page_cursor,
+        deletion_snapshot: wire.deletion_snapshot,
     })
 }
 
@@ -139,9 +142,16 @@ fn validate_peer_backfill_cursor(
             && (next_cursor.after <= previous_cursor.after
                 || (previous_cursor.snapshot_end_unix_seconds.is_some()
                     && next_cursor.snapshot_end_unix_seconds
-                        != previous_cursor.snapshot_end_unix_seconds))
+                        != previous_cursor.snapshot_end_unix_seconds)
+                || (previous_cursor.deletion_snapshot.is_some()
+                    && next_cursor.deletion_snapshot != previous_cursor.deletion_snapshot))
         {
             anyhow::bail!("peer history backfill page cursor did not advance");
+        }
+        if page.deletion_snapshot.is_some()
+            && next_cursor.deletion_snapshot != page.deletion_snapshot
+        {
+            anyhow::bail!("peer history deletion snapshot does not match continuation");
         }
         if is_tiered_page || page.records.is_empty() {
             anyhow::bail!("peer history backfill cursor does not match page records");
@@ -232,6 +242,18 @@ pub(super) fn validate_peer_backfill_page(
     previous_cursor_encoded: Option<&str>,
     cluster_id: &str,
 ) -> anyhow::Result<()> {
+    if let Some(snapshot) = page.deletion_snapshot.as_deref()
+        && !valid_source_deletion_snapshot(snapshot)
+    {
+        anyhow::bail!("invalid source deletion snapshot");
+    }
+    if let Some(previous) = previous_cursor_encoded
+        && let Ok(previous) = HistoricalBackfillPageCursor::decode(previous)
+        && previous.deletion_snapshot.is_some()
+        && previous.deletion_snapshot != page.deletion_snapshot
+    {
+        anyhow::bail!("source deletion snapshot changed or was omitted");
+    }
     if page.records.len() > MAX_INITIAL_BACKFILL_PAGE_RECORDS {
         anyhow::bail!("peer history backfill page exceeds record limit");
     }
@@ -283,4 +305,19 @@ pub(super) fn validate_peer_backfill_page(
         page,
         is_tiered_page,
     )
+}
+
+fn valid_source_deletion_snapshot(snapshot: &str) -> bool {
+    let Some((version, digest)) = snapshot
+        .strip_prefix("v2:")
+        .and_then(|rest| rest.split_once(':'))
+    else {
+        return false;
+    };
+    !version.is_empty()
+        && version.bytes().all(|byte| byte.is_ascii_digit())
+        && !(version.starts_with('0') && version != "0")
+        && version.parse::<u64>().is_ok_and(|value| value != u64::MAX)
+        && digest.len() == 64
+        && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
 }

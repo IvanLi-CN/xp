@@ -1,4 +1,5 @@
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
+import type { QueryClient } from "@tanstack/react-query";
 import type { PersistQueryClientProviderProps } from "@tanstack/react-query-persist-client";
 import localforage from "localforage";
 
@@ -53,6 +54,17 @@ const basePersister = createAsyncStoragePersister({
 	throttleTime: 1_000,
 });
 
+let persistenceEpoch = 0;
+let persistenceQueue: Promise<void> = Promise.resolve();
+let pendingClient: { epoch: number; client: PersistedQueryCache } | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function enqueuePersistence(operation: () => Promise<void>): Promise<void> {
+	const next = persistenceQueue.then(operation, operation);
+	persistenceQueue = next.catch(() => undefined);
+	return next;
+}
+
 type PersistedQuery = {
 	queryHash?: string;
 	queryKey?: readonly unknown[];
@@ -91,35 +103,44 @@ export function mergePersistedQueries(
 
 const persister: PersistQueryClientProviderProps["persistOptions"]["persister"] =
 	{
-		persistClient: async (client) => {
-			try {
-				const previous = (await basePersister.restoreClient()) as
-					| PersistedQueryCache
-					| undefined;
-				await basePersister.persistClient(
-					mergePersistedQueries(
-						client as PersistedQueryCache,
-						previous,
-					) as Parameters<typeof basePersister.persistClient>[0],
-				);
-			} catch {
-				// Some test and private-browsing environments do not expose IndexedDB.
-				// Offline persistence should degrade silently instead of crashing the app.
-			}
+		persistClient: (client) => {
+			pendingClient = {
+				epoch: persistenceEpoch,
+				client: client as PersistedQueryCache,
+			};
+			if (persistTimer !== null) return;
+			persistTimer = setTimeout(() => {
+				persistTimer = null;
+				const pending = pendingClient;
+				pendingClient = null;
+				if (!pending) return;
+				void enqueuePersistence(async () => {
+					const { epoch, client } = pending;
+					if (epoch !== persistenceEpoch) return;
+					const previous = (await basePersister.restoreClient()) as
+						| PersistedQueryCache
+						| undefined;
+					if (epoch !== persistenceEpoch) return;
+					await storage.setItem(
+						PERSISTED_QUERY_STORAGE_KEY,
+						JSON.stringify(mergePersistedQueries(client, previous)),
+					);
+				}).catch(() => undefined);
+			}, 1_000);
 		},
 		restoreClient: async () => {
+			const epoch = persistenceEpoch;
 			try {
-				return await basePersister.restoreClient();
+				await persistenceQueue;
+				if (epoch !== persistenceEpoch) return undefined;
+				const restored = await basePersister.restoreClient();
+				return epoch === persistenceEpoch ? restored : undefined;
 			} catch {
 				return undefined;
 			}
 		},
 		removeClient: async () => {
-			try {
-				await basePersister.removeClient();
-			} catch {
-				// Ignore cleanup failures when persistence is unavailable.
-			}
+			await clearPersistedQueryCache();
 		},
 	};
 
@@ -139,6 +160,30 @@ export function createPersistOptions(): PersistQueryClientProviderProps["persist
 				query.state.status === "success" && shouldPersistQuery(query.queryKey),
 		},
 	};
+}
+
+export async function clearPersistedQueryCache(): Promise<void> {
+	persistenceEpoch += 1;
+	if (persistTimer !== null) clearTimeout(persistTimer);
+	persistTimer = null;
+	pendingClient = null;
+	await enqueuePersistence(async () => {
+		try {
+			await basePersister.removeClient();
+		} catch {
+			// Offline persistence is an enhancement, not a hard dependency.
+		}
+		try {
+			await offlineSnapshotStorage.clear();
+		} catch {
+			// Offline persistence is an enhancement, not a hard dependency.
+		}
+	});
+}
+
+export function clearBackendQueryCache(queryClient: QueryClient): void {
+	queryClient.removeQueries();
+	void clearPersistedQueryCache();
 }
 
 type PersistedQuerySnapshot = {
@@ -180,6 +225,10 @@ export function isPersistedQueryCacheFresh(
 export async function readPersistedQuerySnapshot<T>(
 	queryKey: readonly unknown[],
 ): Promise<{ data: T | undefined; dataUpdatedAt: number | null }> {
+	const epoch = persistenceEpoch;
+	const empty = { data: undefined, dataUpdatedAt: null };
+	await persistenceQueue;
+	if (epoch !== persistenceEpoch) return empty;
 	try {
 		const snapshotKey = JSON.stringify(queryKey);
 		const snapshot = await offlineSnapshotStorage.getItem<{
@@ -188,6 +237,7 @@ export async function readPersistedQuerySnapshot<T>(
 			buildId?: string;
 			storedAt?: number;
 		}>(snapshotKey);
+		if (epoch !== persistenceEpoch) return empty;
 		if (
 			snapshot &&
 			isPersistedQuerySnapshotFresh(snapshot, __XP_WEB_BUILD_ID__)
@@ -197,7 +247,8 @@ export async function readPersistedQuerySnapshot<T>(
 				dataUpdatedAt: snapshot.dataUpdatedAt ?? null,
 			};
 		}
-		if (snapshot) await offlineSnapshotStorage.removeItem(snapshotKey);
+		// Other tabs may write this key between an IndexedDB read and delete.
+		// Ignore stale data; a fresh write or session cleanup replaces it safely.
 	} catch {
 		// Fall through to the shared persisted query cache.
 	}
@@ -210,6 +261,7 @@ export async function readPersistedQuerySnapshot<T>(
 	} catch {
 		return { data: undefined, dataUpdatedAt: null };
 	}
+	if (epoch !== persistenceEpoch) return empty;
 	if (!raw) {
 		return { data: undefined, dataUpdatedAt: null };
 	}
@@ -250,12 +302,16 @@ export async function writePersistedQuerySnapshot<T>(
 	data: T,
 	dataUpdatedAt: number,
 ): Promise<void> {
+	const epoch = persistenceEpoch;
 	try {
-		await offlineSnapshotStorage.setItem(JSON.stringify(queryKey), {
-			data,
-			dataUpdatedAt,
-			buildId: __XP_WEB_BUILD_ID__,
-			storedAt: snapshotStoredAt(dataUpdatedAt),
+		await enqueuePersistence(async () => {
+			if (epoch !== persistenceEpoch) return;
+			await offlineSnapshotStorage.setItem(JSON.stringify(queryKey), {
+				data,
+				dataUpdatedAt,
+				buildId: __XP_WEB_BUILD_ID__,
+				storedAt: snapshotStoredAt(dataUpdatedAt),
+			});
 		});
 	} catch {
 		// Offline persistence is an enhancement, not a hard dependency.

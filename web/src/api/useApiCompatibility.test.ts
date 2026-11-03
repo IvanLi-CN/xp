@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { renderHook, waitFor } from "@testing-library/react";
+import { type ReactNode, createElement } from "react";
+import { describe, expect, it, vi } from "vitest";
 
 import { resolveApiCompatibility } from "./apiCompatibility";
 import {
@@ -6,6 +9,7 @@ import {
 	getApiRouteState,
 	persistCompatibility,
 	readPersistedCompatibility,
+	useApiCompatibility,
 } from "./useApiCompatibility";
 
 describe("API capability state", () => {
@@ -32,6 +36,35 @@ describe("API capability state", () => {
 		expect(state.reason).toMatch(/admin\.mesh/);
 	});
 
+	it("does not send a token-bearing compatibility request after identity changes", async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+		const queryClient = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		});
+		const wrapper = ({ children }: { children: ReactNode }) =>
+			createElement(QueryClientProvider, { client: queryClient }, children);
+		const beforeAuthenticatedRequest = vi.fn().mockResolvedValue(false);
+
+		const { result } = renderHook(
+			() =>
+				useApiCompatibility(
+					"unverified-token",
+					true,
+					"https://primary.example",
+					0,
+					beforeAuthenticatedRequest,
+				),
+			{ wrapper },
+		);
+
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+		expect(beforeAuthenticatedRequest).toHaveBeenCalledOnce();
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(result.current.data).toBeNull();
+		queryClient.clear();
+		vi.unstubAllGlobals();
+	});
 	it("does not expose a write route absent from the selected server profile", () => {
 		const compatibility = resolveApiCompatibility({
 			releaseTag: "v3.22.5",

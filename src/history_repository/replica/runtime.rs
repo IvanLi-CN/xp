@@ -22,7 +22,7 @@ use crate::{
             },
         },
         history_storage::{
-            HistoryStorageDiagnosticOperation, REPOSITORY_REPLICA_KEY,
+            HistoryStorageDiagnosticOperation, REPOSITORY_REPLICA_KEY, RepositoryExpiredTombstone,
             RepositoryHistoryCompactionCursor, RepositoryHistoryRecordRow,
             RepositoryHistorySegmentRow, RepositoryHistoryTombstone, RepositoryReplicaMutation,
         },
@@ -33,6 +33,7 @@ use super::{
     ReplicaCursor, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey, TombstoneLedger,
     TombstoneLedgerCheckpoint,
 };
+use local_history_backfill::LocalHistoryBackfillInFlight;
 use paths::PeerDirectPathState;
 use source::LocalSourceState;
 
@@ -79,6 +80,7 @@ const KNOWN_SCHEMAS: [(&str, u32); 8] = [
     (crate::resource_monitoring::RESOURCE_HISTORY_SCHEMA, 1),
     ("tombstone.v1", 1),
 ];
+type LocalHistoryBackfillStreamState = BTreeMap<String, (u64, Option<[u8; 32]>)>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositorySyncReceipt {
@@ -275,6 +277,10 @@ pub(crate) struct RepositoryReplicaSnapshot {
     #[serde(default)]
     local_history_backfill_cursor: Option<String>,
     #[serde(default)]
+    local_history_backfill_epoch: u64,
+    #[serde(default)]
+    local_history_backfill_stream_state: LocalHistoryBackfillStreamState,
+    #[serde(default)]
     local_history_backfill_inflight: Option<LocalHistoryBackfillInFlight>,
     #[serde(default)]
     legacy_segment_cursor_index_after_id: Option<String>,
@@ -337,6 +343,8 @@ impl Default for RepositoryReplicaSnapshot {
             deep_verified_peer_ids: BTreeSet::new(),
             local_history_backfill_completed: false,
             local_history_backfill_cursor: None,
+            local_history_backfill_epoch: 0,
+            local_history_backfill_stream_state: BTreeMap::new(),
             local_history_backfill_inflight: None,
             legacy_segment_cursor_index_after_id: None,
             legacy_segment_cursor_index_complete: false,
@@ -354,13 +362,6 @@ impl Default for RepositoryReplicaSnapshot {
             sequence_summary_migration_complete: false,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LocalHistoryBackfillInFlight {
-    page_cursor: Option<String>,
-    completed: bool,
-    segment_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -923,6 +924,7 @@ mod legacy_cursor_tests;
 #[cfg(test)]
 #[path = "runtime/legacy_relay_tests.rs"]
 mod legacy_relay_tests;
+mod local_history_backfill;
 mod paths;
 mod query;
 mod receive;
@@ -957,6 +959,12 @@ mod duplicate_gap_tests;
 #[path = "runtime/repair_selection_tests.rs"]
 mod repair_selection_tests;
 #[cfg(test)]
+#[path = "runtime/retention_integrity_tests.rs"]
+mod retention_integrity_tests;
+#[cfg(test)]
+#[path = "runtime/retention_tests.rs"]
+mod retention_tests;
+#[cfg(test)]
 #[path = "runtime/sqlite_order_tests.rs"]
 mod sqlite_order_tests;
 #[path = "runtime/sync_page.rs"]
@@ -972,23 +980,17 @@ mod sync_tests;
 mod tests;
 
 #[cfg(test)]
-#[path = "runtime/retention_tests.rs"]
-mod retention_tests;
-
+#[path = "runtime/page_replay_tests.rs"]
+mod page_replay_tests;
 #[cfg(test)]
-#[path = "runtime/retention_integrity_tests.rs"]
-mod retention_integrity_tests;
-
+#[path = "runtime/peer_backfill_tests.rs"]
+mod peer_backfill_tests;
 #[cfg(test)]
 #[path = "runtime/repair_batch_tests.rs"]
 mod repair_batch_tests;
 #[cfg(test)]
 #[path = "runtime/repair_tests.rs"]
 mod repair_tests;
-
-#[cfg(test)]
-#[path = "runtime/page_replay_tests.rs"]
-mod page_replay_tests;
 
 #[cfg(test)]
 #[path = "runtime/query_budget_tests.rs"]

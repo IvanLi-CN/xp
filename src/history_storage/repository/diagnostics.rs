@@ -60,6 +60,24 @@ impl HistoryStorage {
         self.repository_history_count("repository_history_segments", caller_class)
     }
 
+    pub(crate) fn repository_history_segment_revision(&self, source_node_id: &str) -> Result<u64> {
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Ok(0);
+        };
+        let revision = connection
+            .query_row(
+                "SELECT revision FROM repository_history_segment_revisions
+                 WHERE source_node_id = ?1",
+                [source_node_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        u64::try_from(revision.unwrap_or(0))
+            .map_err(|_| HistoryStorageError("invalid repository segment revision".to_owned()))
+    }
+
     pub(crate) fn replace_repository_history_records_and_prune(
         &self,
         removed: &[RepositoryHistoryRecordRow],
@@ -91,6 +109,10 @@ impl HistoryStorage {
                 [i64::try_from(record_end_unix_seconds).unwrap_or(i64::MAX)],
             )
             .map_err(sqlite_error)?;
+        super::super::counts::bump_repository_history_segment_revisions_for_expired_segments(
+            &transaction,
+            segment_closed_at_unix_seconds,
+        )?;
         transaction
             .execute(
                 "DELETE FROM repository_history_segments WHERE closed_at < ?1",

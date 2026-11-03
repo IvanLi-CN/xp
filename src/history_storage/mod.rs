@@ -26,6 +26,7 @@ pub(crate) const REPOSITORY_REPLICA_KEY: &str = "repository_replica";
 mod counts;
 mod metrics;
 mod metrics_migration;
+mod node_history_guard;
 mod repository;
 mod source_journal;
 mod source_journal_ack;
@@ -38,8 +39,8 @@ pub(crate) use metrics::{RepositoryDeliveryMetrics, SourceDeliveryAttempt};
 use repository::segment_phase_sql;
 #[allow(unused_imports)]
 pub(crate) use repository::{
-    RepositoryHistoryCompactionCursor, RepositoryHistoryCoverage, RepositoryHistoryRecordRow,
-    RepositoryHistorySegmentMetadataRow, RepositoryHistorySegmentRow,
+    RepositoryExpiredTombstone, RepositoryHistoryCompactionCursor, RepositoryHistoryCoverage,
+    RepositoryHistoryRecordRow, RepositoryHistorySegmentMetadataRow, RepositoryHistorySegmentRow,
     RepositoryHistorySequenceSummaryBlock, RepositoryHistoryTombstone, RepositoryReplicaMutation,
 };
 #[allow(unused_imports)]
@@ -748,39 +749,6 @@ fn upsert_repository_history_record(
         .map_err(sqlite_error)
 }
 
-fn upsert_repository_history_segment(
-    transaction: &rusqlite::Transaction<'_>,
-    row: &RepositoryHistorySegmentRow,
-) -> Result<()> {
-    transaction
-        .execute(
-            "INSERT INTO repository_history_segments
-                (id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
-                 first_sequence, payload)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT(id) DO UPDATE SET
-               closed_at = excluded.closed_at,
-               contains_tombstone = excluded.contains_tombstone,
-               source_node_id = excluded.source_node_id,
-               source_epoch = excluded.source_epoch,
-               stream = excluded.stream,
-               first_sequence = excluded.first_sequence,
-               payload = excluded.payload",
-            params![
-                row.id,
-                i64::try_from(row.closed_at_unix_seconds).unwrap_or(i64::MAX),
-                row.contains_tombstone,
-                row.source_node_id,
-                i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
-                row.stream,
-                i64::try_from(row.first_sequence).unwrap_or(i64::MAX),
-                row.payload,
-            ],
-        )
-        .map(|_| ())
-        .map_err(sqlite_error)
-}
-
 fn delete_repository_history_for_tombstone(
     connection: &rusqlite::Transaction<'_>,
     tombstone: &RepositoryHistoryTombstone,
@@ -790,16 +758,13 @@ fn delete_repository_history_for_tombstone(
     } else {
         "record_key = ?6"
     };
-    let stream_predicate = if tombstone.prefix {
-        "1 = 1"
-    } else {
-        "stream = ?1"
-    };
+    let backfill_stream = format!("{}-backfill-{}", tombstone.stream, tombstone.source_node_id);
     connection
         .execute(
             &format!(
                 "DELETE FROM repository_history_records
-                 WHERE {stream_predicate}
+                 WHERE (?8 OR stream = ?1 OR stream = ?7
+                        OR (stream = ?9 AND source_node_id = ?10 AND source_epoch = ?11))
                    AND subject_node_id = ?2 AND observer_node_id = ?3
                    AND schema_id = ?4 AND schema_version = ?5 AND {key_predicate}
                    AND is_tombstone = 0"
@@ -811,6 +776,11 @@ fn delete_repository_history_for_tombstone(
                 tombstone.schema_id,
                 i64::from(tombstone.schema_version),
                 tombstone.record_key,
+                backfill_stream,
+                tombstone.prefix,
+                tombstone.source_stream,
+                tombstone.source_node_id,
+                i64::try_from(tombstone.source_epoch).unwrap_or(i64::MAX),
             ],
         )
         .map_err(sqlite_error)
