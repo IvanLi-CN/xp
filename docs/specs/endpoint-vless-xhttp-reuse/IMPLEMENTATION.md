@@ -14,6 +14,11 @@
 - Xray SplitHTTP proto、dynamic inbound 与 transport-specific user flow 已接入。
 - Mihomo YAML/URI 覆盖 Clash、direct、chain 与 system provider。
 - API capability、创建/PATCH 和管理 Web advanced control 支持按接入点配置 XMUX；成员升级与加入能力受到保护。
+  携带 `mihomo_xmux` 的 create/PATCH/clear 请求可从任意成员进入：follower 通过签名 Mesh V2
+  `/api/admin/_internal/endpoints/mutation` 转发原始请求，leader 重新读取最新 endpoint 并执行
+  capability、成员操作锁、线性一致性和条件写入检查后提交一次 Raft。转发使用
+  `InternalIdempotencyLedger` 复用完成响应，in-flight、digest 冲突、无 leader 和未知结果均 fail closed；
+  普通 endpoint 写入继续使用 `ForwardingRaftFacade`。
 - 官方 Mihomo v1.19.29 已接受脱敏 XHTTP fixture；真实 Xray Reality + Mihomo E2E 已验证
   预热后 64 个并发代理请求共享一条外部 TCP，断链后自动以第二条连接恢复。
 

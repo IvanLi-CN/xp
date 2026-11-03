@@ -150,7 +150,9 @@ mod node_versions;
 mod service_monitors;
 mod version_check;
 mod web_assets;
-use endpoint_create::admin_create_endpoint;
+use endpoint_create::{
+    admin_create_endpoint, admin_internal_endpoint_mutation, admin_patch_endpoint,
+};
 use endpoint_requests::{CreateEndpointRequest, PatchEndpointRequest, deserialize_optional_string};
 use version_check::{VersionCheckCache, api_version_check};
 use {browser_cors::browser_cors, capabilities::api_capabilities};
@@ -232,6 +234,7 @@ impl ApiError {
     pub fn gateway_timeout(message: impl Into<String>) -> Self {
         Self::new("timeout", StatusCode::GATEWAY_TIMEOUT, message)
     }
+
     pub fn too_many_requests(message: impl Into<String>) -> Self {
         Self::new("auth_busy", StatusCode::TOO_MANY_REQUESTS, message)
     }
@@ -1080,6 +1083,10 @@ pub fn build_router_with_mesh_telemetry(
         .route(
             "/_internal/raft/client-write",
             post(admin_internal_raft_client_write),
+        )
+        .route(
+            "/_internal/endpoints/mutation",
+            post(admin_internal_endpoint_mutation),
         )
         .route("/_internal/capabilities", get(admin_internal_capabilities))
         .route(
@@ -6316,10 +6323,10 @@ async fn admin_internal_endpoint_probe_run_events(
     ))
 }
 
-async fn admin_patch_endpoint(
-    Extension(state): Extension<AppState>,
-    Path(endpoint_id): Path<String>,
-    ApiJson(req): ApiJson<PatchEndpointRequest>,
+async fn admin_patch_endpoint_local(
+    state: AppState,
+    endpoint_id: String,
+    req: PatchEndpointRequest,
 ) -> Result<Json<Endpoint>, ApiError> {
     let _xmux_guard = if let Some(xmux) = &req.mihomo_xmux {
         if let Some(xmux) = xmux {

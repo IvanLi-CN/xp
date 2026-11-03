@@ -21,6 +21,9 @@
 - 短 ID 轮换和托管接入点更新使用条件快照，防止旧快照丢弃并发保存的客户端策略。
 - leader 在一致性屏障之后检查加入兼容性；Raft 应用仅客户端策略变化时不请求重建 inbound。
 - 恢复已离开的节点时也验证其 XMUX 能力，防止旧节点绕过加入保护。
+- XMUX 写入口改为 leader-aware：follower 只转发保留省略/null 语义的原始 create/PATCH/clear 请求，
+  leader 重新读取状态并完成 capability、成员操作和线性一致性检查后提交；签名 Mesh V2 mutation
+  handler 以内部幂等账本复用完成响应，并将 leader 切换、无 leader 或未确认响应分类为结构化错误。
 
 ## References
 

@@ -23,7 +23,7 @@ pub(super) use liveness::{
     admin_internal_mesh_health, admin_internal_reverse_probe, spawn_reverse_link_probe_worker,
 };
 pub(super) use preflight::{admin_internal_mesh_preflight, run_mesh_enable_preflight};
-pub(super) use stream_request::send_mesh_internal_stream_read;
+pub(super) use stream_request::{send_mesh_internal_request_raw, send_mesh_internal_stream_read};
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
     generated_at: String,

@@ -27,7 +27,7 @@ pub(crate) async fn send_mesh_internal_stream_read(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn send_mesh_internal_request_raw(
+pub(crate) async fn send_mesh_internal_request_raw(
     state: &AppState,
     client: &MeshAwareHttpClient,
     node: &Node,
