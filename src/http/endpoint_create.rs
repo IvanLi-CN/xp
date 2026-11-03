@@ -438,7 +438,9 @@ fn forward_error(status: StatusCode, body: &[u8]) -> ApiError {
         | "conflict"
         | "revision_conflict"
         | "coordinated_upgrade_required"
-        | "leader_unavailable" => envelope.error.message,
+        | "leader_unavailable"
+        | "raft_write_not_dispatched"
+        | "raft_write_outcome_unknown" => envelope.error.message,
         _ => "leader endpoint mutation failed; inspect the structured error details".to_owned(),
     };
     let details = envelope
