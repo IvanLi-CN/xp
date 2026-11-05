@@ -1,5 +1,8 @@
 #![cfg_attr(xp_missing_web_dist, allow(dead_code, unused_imports))]
 
+#[cfg(all(xp_missing_web_dist, not(test)))]
+compile_error!("missing web/dist/index.html; run `cd web && bun run build`");
+
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -101,7 +104,7 @@ async fn reconcile_managed_defaults_with_startup_retries(
     }
 }
 
-#[cfg(xp_missing_web_dist)]
+#[cfg(all(xp_missing_web_dist, test))]
 fn main() -> Result<()> {
     anyhow::bail!("missing web/dist/index.html; run `cd web && bun run build`");
 }
