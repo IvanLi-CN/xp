@@ -49,6 +49,14 @@ jobs:
       - name: build embedded web assets
         run: cd web && bun install --frozen-lockfile && bun run build
       - run: cargo test
+      - name: test embedded web asset routes
+        run: |
+          cargo test --lib \
+            http::tests::ui_serves_index_at_root_and_embedded_assets -- --ignored
+          cargo test --lib \
+            http::tests::ui_serves_favicon_and_manifest -- --ignored
+          cargo test --lib \
+            http::tests::platform_assets::ui_serves_versioned_icon_manifest -- --ignored
       - name: cache receipt
         if: env.CACHE_PHASE != 'normal'
         run: |

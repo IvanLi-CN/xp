@@ -919,6 +919,7 @@ async fn set_bootstrap_node_access_host(store: &Arc<Mutex<JsonSnapshotStore>>, a
 }
 
 #[tokio::test]
+#[ignore = "requires generated web/dist assets"]
 async fn ui_serves_index_at_root_and_embedded_assets() {
     let tmp = TempDir::new().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
@@ -1008,6 +1009,7 @@ async fn ui_serves_index_at_root_and_embedded_assets() {
 }
 
 #[tokio::test]
+#[ignore = "requires generated web/dist assets"]
 async fn ui_serves_favicon_and_manifest() {
     let tmp = TempDir::new().unwrap();
     let app = app(&tmp);

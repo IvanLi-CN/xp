@@ -1,5 +1,4 @@
-#[cfg(xp_missing_web_dist)]
-compile_error!("missing web/dist/index.html; run `cd web && bun run build`");
+#![cfg_attr(xp_missing_web_dist, allow(dead_code, unused_imports))]
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
@@ -102,6 +101,12 @@ async fn reconcile_managed_defaults_with_startup_retries(
     }
 }
 
+#[cfg(xp_missing_web_dist)]
+fn main() -> Result<()> {
+    anyhow::bail!("missing web/dist/index.html; run `cd web && bun run build`");
+}
+
+#[cfg(not(xp_missing_web_dist))]
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
