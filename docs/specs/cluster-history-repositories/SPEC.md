@@ -69,7 +69,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   `--apply --yes` 使用当前节点身份签名后持久化本地物理数据库/WAL 写入准入配额。
   其他节点身份不得修改本节点配额；Web/Bearer 管理员不获得此操作权限。
   容器没有 xp.env 时必须指定 `--data-dir /var/lib/xp/data`。
-  systemd、OpenRC、Docker/Compose 重启保留配额，通过既有容量同步发布到 Raft。
+  systemd、OpenRC、Docker/Compose 重启保留本机写入准入配额，runtime capacity 报告实际保护值。
+  现有 Raft Capacity patch 仅同步用量和文件系统可用空间，保留 member.capacity 的配置配额；
+  本机配额不同不得触发重复的用量空写入，不得宣称该 patch 已修改集群配置配额。
   下调不删除已保留历史或未 ACK outbox；已用空间达到新配额时停止新增历史写入。
   配额是事务前准入，不能充当文件系统硬上限；外部体积要求须为 WAL、SHM 和事务预留余量。
   例如总文件不得超过十进制 10 GB 时可设为 9,000,000,000 字节，不能把默认 10 GiB 当作 10 GB。
