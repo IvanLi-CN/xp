@@ -926,8 +926,11 @@ Notes:
   Only the local node's signed identity may set its quota; a remote member or administrator
   Bearer token cannot do so. The command does not edit SQLite directly or evict retained history
   or unacknowledged outbox rows. A quota below current usage stops new history writes.
-  systemd, OpenRC and Docker/Compose preserve this setting across restart and publish capacity
-  through normal Raft-backed capacity synchronization. Default 10 GiB is 10,737,418,240 bytes,
+  systemd, OpenRC and Docker/Compose preserve this local admission setting across restart.
+  Runtime capacity reports the enforced local quota. The existing Raft runtime patch publishes
+  usage and free space only; `member.capacity.quota_bytes` retains its configured value. A local
+  quota difference alone must not trigger repeated usage-only writes. Default 10 GiB is
+  10,737,418,240 bytes,
   exceeding decimal 10 GB. Reserve headroom for WAL/SHM and an admitted transaction when choosing
   a value below an external size limit; this is an admission guard, not an OS hard quota.
 - Do not delete WAL, manually checkpoint, run full `VACUUM`, or raise quota to bypass the guard.

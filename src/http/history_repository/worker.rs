@@ -46,6 +46,8 @@ const READY_STABILITY_WINDOW: Duration = Duration::from_secs(5 * 60);
 const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0";
 mod backfill;
 mod blocking;
+mod capacity_sync;
+use capacity_sync::sync_local_repository_capacity;
 mod convergence;
 mod deep_repair;
 mod direct;
@@ -638,39 +640,6 @@ async fn publish_local_history_segment(
     Ok(delivery_succeeded)
 }
 
-async fn sync_local_repository_capacity(state: &AppState) -> anyhow::Result<()> {
-    let mut runtime = state.repository_replica.lock().await;
-    let capacity = repository_blocking(|| runtime.runtime_capacity())?;
-    drop(runtime);
-    let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
-    let capacity_is_current = {
-        let store = state.store.lock().await;
-        store
-            .state()
-            .repository_membership
-            .as_ref()
-            .and_then(|membership| membership.repository(&node_id))
-            .is_none_or(|member| member.capacity() == &capacity)
-    };
-    if capacity_is_current {
-        return Ok(());
-    }
-    super::super::raft_write(
-        state,
-        crate::state::DesiredStateCommand::UpdateRepositoryMemberRuntime(
-            RepositoryMemberRuntimePatch {
-                node_id: node_id.as_str().to_owned(),
-                update: RepositoryMemberRuntimeUpdate::Capacity {
-                    used_bytes: capacity.used_bytes(),
-                    filesystem_available_bytes: capacity.filesystem_available_bytes(),
-                },
-            },
-        ),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("write local history repository capacity to Raft"))?;
-    Ok(())
-}
 async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyhow::Result<()> {
     repair_legacy_tombstone_metadata(state, now).await?;
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;

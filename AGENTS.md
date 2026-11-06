@@ -83,8 +83,10 @@
   The root-operated `xp-ops xp history-repository-quota --quota-bytes BYTES` command previews a
   local physical database/WAL admission quota; persistence requires `--apply --yes` and a request
   signed by that same node. Containers without xp.env use `--data-dir /var/lib/xp/data`.
-  systemd, OpenRC and Docker/Compose preserve the quota across restart and publish capacity through
-  the normal Raft-backed capacity sync. Lowering quota never evicts retained history or outbox rows;
+  systemd, OpenRC and Docker/Compose preserve this local admission quota across restart. The
+  existing Raft capacity patch publishes usage and free space only; it preserves the configured
+  membership quota. Runtime capacity is authoritative for the local guard. Lowering quota never
+  evicts retained history or outbox rows;
   at or above quota, new history writes stop. Reserve WAL/transaction headroom below an external
   file-size limit: this admission setting is not an operating-system filesystem hard quota.
 
