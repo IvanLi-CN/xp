@@ -276,6 +276,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     sleep(Duration::from_secs(1)).await;
     let baseline_rss = read_process_rss_bytes(pid);
     let mut peak_pss_kib = read_pss(pid).expect("read source journal XP PSS").total_kib;
+    eprintln!("source journal baseline PSS {:?}", read_pss(pid));
     let mut cpu_percentages = Vec::with_capacity(JOURNAL_THROUGHPUT_SAMPLE_SECONDS as usize);
     let mut max_read_bytes = 0_u64;
     let mut max_rss_delta = 0_u64;
@@ -287,7 +288,10 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     let sampler = tokio::spawn(async move {
         while !sampled_stop.load(Ordering::Relaxed) {
             if let Some(sample) = read_pss(pid) {
-                sampled_pss_peak.fetch_max(sample.total_kib, Ordering::Relaxed);
+                let previous = sampled_pss_peak.fetch_max(sample.total_kib, Ordering::Relaxed);
+                if sample.total_kib > previous.saturating_add(1024) {
+                    eprintln!("source journal PSS growth {sample:?}");
+                }
             }
             sleep(Duration::from_millis(5)).await;
         }

@@ -1100,6 +1100,8 @@ Notes:
   History summary maintenance uses canonical v3 metadata in the existing database.
 
   - V3 peers explicitly request `summary_version=3`; predecessors keep v1 fallback.
+  - Signed membership capabilities never wait for the history replica lock.
+    A busy replica withholds only its optional ready-summary capability.
   - The five-second worker rebuilds bounded pages without copying history or resetting progress.
   - The last dirty-block page publishes completion without requiring an idle tick.
   - Ready local standbys stay eligible; failed standbys retry the HTTPS primary next cycle.
