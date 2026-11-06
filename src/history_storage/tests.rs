@@ -2,6 +2,7 @@ use std::{fs, time::Duration};
 
 use super::*;
 
+mod node_history_latency_tests;
 mod payload_encoding_tests;
 #[path = "source_scoped_summary_tests.rs"]
 mod source_scoped_summary_tests;

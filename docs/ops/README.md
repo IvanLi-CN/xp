@@ -1173,6 +1173,12 @@ Notes:
   decision. The workflow checks out the exact target SHA, builds the generated Web shell from that
   SHA, and uploads the raw workload log plus a v2 attestation. The owner must then create a signed
   evidence commit containing exactly those two files before dispatching the release workflow.
+  musl 节点的修复候选使用 `candidate_target=x86_64-unknown-linux-musl` 和已授权的
+  `build_version` 运行同一门禁。流程以 Linux 原生 musl 工具链构建候选、验证大型格式化
+  Node History JSON 的删除版本读取耗时，并用该候选执行资源工作负载；下载
+  `measured-candidate-<run-id>` 中的二进制，核验 source/target、版本和 SHA256 后部署。
+  GNU 测量结果不能替代另行本地交叉构建的 musl 候选；这条路径不发布 release，
+  部署仍须满足正式升级或已明确授权的候选例外。
   Retained partition mismatches after segment repair drains trigger the same single-authority
   tiered import followed by a fresh deep summary pass; the member cannot enter `ready` while that
   verification remains unresolved.
