@@ -159,6 +159,9 @@
   Both pages merge with the checkpoint atomically without rearming the generation.
   Tiered handoff completion snapshots the receiver watermark in the same history transaction as
   its permanent gap, completed range and generation consumption; failed commits restore all state.
+  Initial-source baseline prioritization applies only to configured repository members. Ordinary
+  source nodes and former repositories keep replaying their own durable outbox when a new node
+  joins; missing repository-import checkpoints on those sources must never suspend source delivery.
   Signed recovery may finish an exactly audited predecessor partial commit while arming a new
   generation; dry-run exposes the proposed watermark repair and remains read-only. Final export
   pages retain the existing 15-minute lease until natural expiry to protect the repair handoff.

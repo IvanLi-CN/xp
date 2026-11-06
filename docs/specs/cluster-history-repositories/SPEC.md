@@ -75,6 +75,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   例如总文件不得超过十进制 10 GB 时可设为 9,000,000,000 字节，不能把默认 10 GiB 当作 10 GB。
 - 仓库保存 7 天分钟级、随后 90 天五分钟级、随后小时级，默认最长两年；
   普通节点的既有窗口不变。
+- 初始源回填优先级只适用于当前配置的仓库成员。普通源节点和已退出仓库的节点不承担
+  全部 peer baseline 导入；新节点加入后缺少此类 checkpoint 不得暂停其持久化 outbox 投递。
+  systemd、OpenRC、Docker/Compose 发送端一致，不伪造完成 checkpoint 或绕过缺口检查。
 - 每条流使用 `(source_node_id, source_epoch, stream, sequence)` 单调游标；
   发现洞或新 epoch 时报告 gap，不跳过连续水位。
 - segment 上限为 1000 条、192 KiB canonical uncompressed 或一分钟；

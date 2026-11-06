@@ -481,6 +481,22 @@ async fn initial_history_source_peers(
 pub(super) async fn initial_history_source_backfill_pending(state: &AppState) -> bool {
     let nodes = {
         let store = state.store.lock().await;
+        // Only configured repositories import every source's baseline. Normal sources and
+        // former repositories must keep replaying their own durable outbox after a fresh join.
+        let local_is_repository =
+            store
+                .state()
+                .repository_membership
+                .as_ref()
+                .is_some_and(|membership| {
+                    membership
+                        .members()
+                        .iter()
+                        .any(|member| member.identity().node_id().as_str() == state.cluster.node_id)
+                });
+        if !local_is_repository {
+            return false;
+        }
         store.list_nodes()
     };
     let runtime = state.repository_replica.lock().await;
