@@ -73,6 +73,10 @@
   Signed membership capabilities never wait for the history replica lock.
   A busy replica withholds only its optional ready-summary capability.
 
+  Bounded incremental vacuum drains every returned SQLite row to completion, reclaiming up to
+  64 pages after ordinary commits and 512 pages after each payload migration page. A zero budget
+  performs no work; it never enables SQLite's unbounded zero-budget behavior.
+
   SQLite releases idle WAL at normal reset with a 1 MiB retained-journal limit.
 
   Repository record and signed-segment BLOBs use a checksummed Zstandard level-1 envelope when

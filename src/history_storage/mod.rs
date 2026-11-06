@@ -807,9 +807,22 @@ fn maintain_sqlite(connection: &Connection) -> Result<()> {
     connection
         .pragma_update(None, "wal_autocheckpoint", CHECKPOINT_PAGES)
         .map_err(sqlite_error)?;
-    connection
-        .execute_batch(&format!("PRAGMA incremental_vacuum({VACUUM_PAGES})"))
+    incremental_vacuum(connection, VACUUM_PAGES)?;
+    Ok(())
+}
+
+fn incremental_vacuum(connection: &Connection, pages: u32) -> Result<()> {
+    // Zero means unlimited to SQLite; never admit it to bounded maintenance.
+    if pages == 0 {
+        return Ok(());
+    }
+    let mut statement = connection
+        .prepare(&format!("PRAGMA incremental_vacuum({pages})"))
         .map_err(sqlite_error)?;
+    let mut rows = statement.query([]).map_err(sqlite_error)?;
+    // The pragma yields a row after each step. Finalizing after the first row
+    // releases only one page, regardless of its configured page budget.
+    while rows.next().map_err(sqlite_error)?.is_some() {}
     Ok(())
 }
 
@@ -979,3 +992,6 @@ fn sqlite_error(error: rusqlite::Error) -> HistoryStorageError {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod vacuum_tests;
