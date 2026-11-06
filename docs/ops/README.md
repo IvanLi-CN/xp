@@ -881,6 +881,10 @@ Notes:
   coverage, watermarks, gaps, clock skew and `complete` / `partial` / `local_only` query quality
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
+- Only configured repository members defer their live journal replay for a missing initial-source
+  baseline. Ordinary source nodes and former repositories do not import every peer baseline; a
+  newly joined node must not suspend their durable outbox replay. This applies to systemd, OpenRC
+  and Docker/Compose senders and does not mark any checkpoint complete.
 - Source batch receive remains atomic. A signed sequence-gap or hash-chain rejection of a
   mixed batch without gap evidence triggers bounded retries by independent stream: at most
   eight requests within fifteen seconds, retaining each original wire and stream order.

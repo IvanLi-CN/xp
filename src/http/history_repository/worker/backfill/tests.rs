@@ -567,3 +567,6 @@ mod initial_source_ordering;
 
 #[path = "tests/ready_tombstones.rs"]
 pub(super) mod ready_tombstones;
+
+#[path = "tests/source_admission.rs"]
+mod source_admission;
