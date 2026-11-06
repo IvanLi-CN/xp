@@ -7,6 +7,21 @@ use crate::state::history_repository::control::{
 mod fixture;
 
 #[tokio::test]
+async fn non_repository_capacity_sync_does_not_wait_for_the_archive_runtime() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut state = fixture::app_state(directory.path());
+    state.raft = std::sync::Arc::new(RejectWrites(state.raft.clone()));
+    let _busy_archive = state.repository_replica.lock().await;
+    tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        sync_local_repository_capacity(&state),
+    )
+    .await
+    .expect("an ordinary source must not wait for repository maintenance")
+    .expect("an ordinary source must not publish repository capacity");
+}
+
+#[tokio::test]
 async fn local_quota_does_not_generate_noop_raft_usage_writes() {
     let directory = tempfile::tempdir().unwrap();
     let mut state = fixture::app_state(directory.path());
