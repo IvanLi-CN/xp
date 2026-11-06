@@ -617,3 +617,7 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 也不能生成随远端请求发送的永久 receiver repair gap。
 此类自动修复证据仅限接收目标确为本机的重放；显式持久化的源缺口仍按原有完整批次语义交付，
 不允许独立流 ACK 清除其他流的缺口。
+
+sequence summary 重建与 payload encoding 后台迁移仅适用于当前配置的仓库成员。
+普通源节点及已退出仓库角色的节点不得因此周期性改写遗留仓库；旧归档保持可读，源日志交付继续运行。
+本约束同样适用于 systemd、OpenRC 与 Docker/Compose，不修改仓库成员或任何回填完成标记。

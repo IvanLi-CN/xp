@@ -695,3 +695,6 @@ mod capacity_sync;
 
 #[path = "tests/source_gap_target.rs"]
 mod source_gap_target;
+
+#[path = "tests/metadata_role.rs"]
+mod metadata_role;
