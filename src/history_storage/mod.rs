@@ -27,6 +27,7 @@ mod counts;
 mod metrics;
 mod metrics_migration;
 mod node_history_guard;
+mod payload_codec;
 mod repository;
 mod source_journal;
 mod source_journal_ack;
@@ -503,6 +504,10 @@ fn ensure_schema(connection: &mut Connection) -> Result<()> {
               ON repository_history_records
                  (source_node_id, source_epoch, stream, subject_node_id, observer_node_id,
                   schema_id, schema_version, record_key, is_tombstone);
+             CREATE INDEX IF NOT EXISTS repository_history_records_tombstone_target
+               ON repository_history_records
+                  (subject_node_id, observer_node_id, schema_id, schema_version,
+                   is_tombstone, record_key);
              CREATE INDEX IF NOT EXISTS repository_history_records_aggregate_completeness
                ON repository_history_records
                   (subject_node_id, aggregate_complete, aggregate_start, aggregate_end);
@@ -650,7 +655,7 @@ fn repository_history_record_row(
         aggregate_complete: None,
         aggregate_start_unix_seconds: None,
         aggregate_end_unix_seconds: None,
-        payload: row.get(13)?,
+        payload: payload_codec::decode_column(row, 13)?,
     })
 }
 
@@ -742,7 +747,7 @@ fn upsert_repository_history_record(
                     .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
                 row.aggregate_end_unix_seconds
                     .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
-                row.payload,
+                payload_codec::encode(&row.payload)?,
             ],
         )
         .map(|_| ())
@@ -753,13 +758,14 @@ fn delete_repository_history_for_tombstone(
     connection: &rusqlite::Transaction<'_>,
     tombstone: &RepositoryHistoryTombstone,
 ) -> Result<usize> {
+    let started = std::time::Instant::now();
     let key_predicate = if tombstone.prefix {
         "substr(record_key, 1, length(?6)) = ?6"
     } else {
         "record_key = ?6"
     };
     let backfill_stream = format!("{}-backfill-{}", tombstone.stream, tombstone.source_node_id);
-    connection
+    let affected = connection
         .execute(
             &format!(
                 "DELETE FROM repository_history_records
@@ -783,7 +789,17 @@ fn delete_repository_history_for_tombstone(
                 i64::try_from(tombstone.source_epoch).unwrap_or(i64::MAX),
             ],
         )
-        .map_err(sqlite_error)
+        .map_err(sqlite_error)?;
+    let elapsed_ms = started.elapsed().as_millis();
+    if elapsed_ms >= 1_000 {
+        tracing::warn!(
+            elapsed_ms,
+            affected,
+            prefix = tombstone.prefix,
+            "slow history tombstone delete"
+        );
+    }
+    Ok(affected)
 }
 
 fn maintain_sqlite(connection: &Connection) -> Result<()> {

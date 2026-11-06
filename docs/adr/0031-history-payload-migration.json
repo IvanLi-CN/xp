@@ -1,0 +1,66 @@
+{
+  "id": "repository-payload-encoding-v1",
+  "durable_state": [
+    "${XP_DATA_DIR}/history.sqlite3 repository record and",
+    "signed-segment payload BLOBs"
+  ],
+  "source_compatibility_range": [
+    "Legacy JSON BLOB schema accepted by the current repository",
+    "readers; 3.47.6 incident database"
+  ],
+  "version_impact": {
+    "public_api": "unchanged",
+    "persistent_state": "minor",
+    "release_publication": "not authorized by this incident candidate deployment"
+  },
+  "operations": [
+    {
+      "kind": "DDL",
+      "action": "none; existing tables and history_storage_meta are reused"
+    },
+    {
+      "kind": "DML",
+      "action": "encode new payload writes and decode mixed legacy/envelope reads"
+    },
+    {
+      "kind": "historical_data",
+      "action": [
+        "rewrite rowid keyset pages and cursor in one transaction per",
+        "table"
+      ],
+      "order": "after decoder and encoded writes are active",
+      "bounds": [
+        "128 rows / 1 MiB per table per page; one oversized legacy row may",
+        "occupy its own page"
+      ],
+      "completion": "both repository_payload_*_cursor_v1 metadata values are -1",
+      "pause": [
+        "stop the sequence-summary worker with XP; committed pages remain",
+        "readable and resume after restart"
+      ]
+    }
+  ],
+  "rollout": [
+    "Deploy SHA-bound resource-gate-passing decoder candidate to the",
+    "sole repository 101; keep all volumes and original signed bytes"
+  ],
+  "observability": [
+    "per-page rewritten and saved_bytes log",
+    "durable per-table cursor",
+    "physical main/WAL/SHM bytes",
+    "health and source delivery progress"
+  ],
+  "recovery": [
+    "Forward repair with an envelope-aware binary; earlier binaries",
+    "cannot read migrated payloads. Failed page rolls back payloads",
+    "and cursor together. Restart resumes committed progress."
+  ],
+  "validation": [
+    "legacy and mixed encoding exact-byte reads",
+    "checksum/truncation/output-bound rejection",
+    "restart across full page",
+    "transaction failure and retry",
+    "unchanged record/segment counts and v3 digest",
+    "SHA-bound 128 MiB/no-swap GitHub resource workload before rollout"
+  ]
+}

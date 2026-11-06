@@ -3,7 +3,8 @@ use super::{
     InitialBackfillProgress, RepositoryInitialBackfillPage, RepositoryInitialBackfillRecord,
     deserialize_initial_backfill_page, initial_source_backfill_path,
     is_initial_history_source_peer, next_historical_backfill_page_cursor,
-    serialized_backfill_record_bytes, validate_peer_backfill_page,
+    select_initial_history_source_peer_ids, serialized_backfill_record_bytes,
+    validate_peer_backfill_page,
 };
 use crate::history_sync::SyncRecord;
 use crate::state::history_repository::{
@@ -307,11 +308,11 @@ fn tick_progress_blocks_readiness_after_an_unavailable_peer_page() {
 fn initial_source_backfill_uses_a_budgeted_page_size() {
     assert_eq!(
         initial_source_backfill_path(None),
-        "/api/admin/_internal/history-repository/initial-backfill?page_size=32"
+        "/api/admin/_internal/history-repository/initial-backfill?page_size=64"
     );
     assert_eq!(
         initial_source_backfill_path(Some("cursor")),
-        "/api/admin/_internal/history-repository/initial-backfill?page_cursor=cursor&page_size=32"
+        "/api/admin/_internal/history-repository/initial-backfill?page_cursor=cursor&page_size=64"
     );
 }
 
@@ -333,6 +334,28 @@ fn initial_backfill_includes_configured_repository_sources() {
         "repository-a",
         "repository-a"
     ));
+}
+
+#[test]
+fn initial_source_backfill_selects_the_least_imported_peer() {
+    let selected = select_initial_history_source_peer_ids(
+        vec![
+            ("node-d".to_owned(), 40),
+            ("node-b".to_owned(), 10),
+            ("node-e".to_owned(), 20),
+            ("node-c".to_owned(), 30),
+        ],
+        "node-a",
+    );
+
+    assert_eq!(
+        selected,
+        vec![
+            "node-b".to_owned(),
+            "node-e".to_owned(),
+            "node-c".to_owned()
+        ]
+    );
 }
 
 #[test]

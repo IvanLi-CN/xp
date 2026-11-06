@@ -158,6 +158,7 @@ impl RepositoryReplicaRuntime {
                         ready_repositories: &ready,
                         local_repository_id: identity.node_id().as_str(),
                         allow_retained_anchor: false,
+                        allow_verified_local_source_replay: false,
                         rollback_snapshot: None,
                         discard_gap_evidence_on_error: true,
                         allow_retained_sequence_gap: false,

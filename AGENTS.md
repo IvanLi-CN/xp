@@ -72,6 +72,14 @@
 
   SQLite releases idle WAL at normal reset with a 1 MiB retained-journal limit.
 
+  Repository record and signed-segment BLOBs use a checksummed Zstandard level-1 envelope when
+  smaller.
+  Reads decode before hashing or export, preserving original bytes and signed wires.
+  Existing JSON rows migrate in bounded, transactional rowid pages with durable cursors.
+  Restart resumes; failed pages preserve rows and cursor. New and legacy rows may coexist.
+  systemd, OpenRC and Docker/Compose share this codec and incremental space release.
+  Builds without the decoder cannot read migrated repositories and must not be deployed over them.
+
   Active frames and readers remain safe; capacity admission still counts the full WAL.
 
   systemd, OpenRC and Docker/Compose share this setting; manual checkpointing stays prohibited.

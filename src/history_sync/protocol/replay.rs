@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use super::{Acceptance, Acknowledgement, Cursor, ProtocolError, SignedSegment, StreamProgress};
 use crate::state::history_repository::identity::RepositoryNodeIdentity;
 
@@ -77,6 +79,88 @@ impl super::SegmentReceiver {
                 watermark: progress.watermark(first)?,
             },
         }))
+    }
+
+    /// Accept a local-source replay after the caller has verified a contiguous page through the
+    /// receiver's current watermark. The page proof makes older entries safe to acknowledge even
+    /// when their short recent-hash window has already been evicted.
+    pub(crate) fn accept_verified_local_source_replay(
+        &self,
+        segment: &SignedSegment,
+        identity: &RepositoryNodeIdentity,
+    ) -> Result<Option<Acceptance>, ProtocolError> {
+        segment.verify_identity(identity)?;
+        if self.expected_cluster_id != segment.canonical.cluster_id {
+            return Err(ProtocolError::ClusterMismatch);
+        }
+        let first = segment.canonical.first_cursor();
+        let Some(progress) = self.streams.get(&first.stream_key()) else {
+            return Ok(None);
+        };
+        if progress.epoch != first.source_epoch
+            || segment.canonical.last_cursor.sequence > progress.last_sequence
+        {
+            return Ok(None);
+        }
+        if segment.canonical.last_cursor.sequence == progress.last_sequence
+            && segment.segment_hash()? != progress.last_segment_hash
+        {
+            return Ok(None);
+        }
+        Ok(Some(Acceptance::Duplicate {
+            acknowledgement: Acknowledgement {
+                watermark: progress.watermark(first)?,
+            },
+        }))
+    }
+
+    /// Prove which local-source page streams contain a contiguous replay through the current
+    /// receiver watermark. The caller may then process the page in smaller atomic batches while
+    /// retaining the proof for older entries whose hashes are outside the recent window.
+    pub(crate) fn verified_local_source_replay_streams(
+        &self,
+        segments: &[SignedSegment],
+    ) -> BTreeSet<String> {
+        let mut grouped = BTreeMap::<String, Vec<&SignedSegment>>::new();
+        for segment in segments {
+            let cursor = segment.canonical.first_cursor();
+            let key = format!(
+                "{}:{}:{}",
+                cursor.source_node_id, cursor.source_epoch, cursor.stream
+            );
+            grouped.entry(key).or_default().push(segment);
+        }
+        let mut verified = BTreeSet::new();
+        for (key, mut stream_segments) in grouped {
+            let Some(first) = stream_segments.first() else {
+                continue;
+            };
+            let cursor = first.canonical.first_cursor();
+            let Some(progress) = self.streams.get(&cursor.stream_key()) else {
+                continue;
+            };
+            stream_segments.sort_by_key(|segment| segment.canonical.first_cursor().sequence);
+            let Some(anchor_index) = stream_segments.iter().position(|segment| {
+                let canonical = &segment.canonical;
+                canonical.last_cursor.sequence == progress.last_sequence
+                    && segment
+                        .segment_hash()
+                        .is_ok_and(|hash| hash == progress.last_segment_hash)
+            }) else {
+                continue;
+            };
+            let prefix = &stream_segments[..=anchor_index];
+            let contiguous = prefix.windows(2).all(|pair| {
+                let previous = &pair[0].canonical;
+                let current = &pair[1].canonical;
+                previous.last_cursor.sequence.checked_add(1) == Some(current.first_cursor.sequence)
+                    && current.previous_segment_hash() == pair[0].segment_hash().ok()
+            });
+            if contiguous {
+                verified.insert(key);
+            }
+        }
+        verified
     }
 }
 

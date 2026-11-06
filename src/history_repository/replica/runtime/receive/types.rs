@@ -33,6 +33,7 @@ pub(super) struct RepositoryWireRequest<'a> {
     pub(super) ready_repositories: &'a [String],
     pub(super) local_repository_id: &'a str,
     pub(super) allow_retained_anchor: bool,
+    pub(super) allow_verified_local_source_replay: bool,
     pub(super) rollback_snapshot: Option<RepositoryReplicaSnapshot>,
     pub(super) discard_gap_evidence_on_error: bool,
     pub(super) allow_retained_sequence_gap: bool,

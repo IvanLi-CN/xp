@@ -50,6 +50,14 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   保留 30 天。
 - SQLite 使用 WAL 与 `auto_vacuum=INCREMENTAL`，仅执行有界 checkpoint/incremental vacuum，
   不执行例行 full `VACUUM`。
+- 仓库 record 和 signed-segment 的本地 payload BLOB 在有收益时使用带校验和的 Zstandard level 1 envelope。
+  编码只作用于物理存储；读取须逐字节恢复原 JSON 和 signed wire，再计算摘要、导出或验证签名。
+  旧 JSON 与压缩行可共存；校验失败返回存储错误，解码大小最多 16 MiB。
+  旧行迁移每表每页最多 128 行，累计 1 MiB 后结束；单条较大的旧行可独占一页。
+  行改写和 rowid 游标原子提交，重启恢复游标，失败回滚当前表的页。
+  后台每五秒最多八页、共享两秒预算，页间释放 replica 锁。
+  迁移不改计数、保留期、源 epoch、水位或原始签名，不复制整库，只通过有界 incremental vacuum 释放空间。
+  systemd、OpenRC、Docker/Compose 使用同一路径，不允许旧构建读取已迁移数据库。
 - 仓库默认配额 10 GiB；所在文件系统可用空间低于 256 MiB 时停止历史写入，
   并报告 degraded。
 - 仓库保存 7 天分钟级、随后 90 天五分钟级、随后小时级，默认最长两年；

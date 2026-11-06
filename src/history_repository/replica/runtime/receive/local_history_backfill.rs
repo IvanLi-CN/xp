@@ -128,6 +128,7 @@ pub(crate) fn receive_local_history_backfill_page(
                 ready_repositories,
                 local_repository_id,
                 allow_retained_anchor: false,
+                allow_verified_local_source_replay: false,
                 rollback_snapshot: Some(previous_snapshot.clone()),
                 discard_gap_evidence_on_error: true,
                 allow_retained_sequence_gap: false,

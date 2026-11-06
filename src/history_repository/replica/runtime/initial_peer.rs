@@ -1,9 +1,10 @@
+mod recovery;
 use super::sync::MAX_REPAIR_SEGMENTS;
 use super::{
     RepositoryReplicaRuntime, RepositoryRuntimeError, SummaryRepairDiagnosticUpdate,
     SummaryRepairResult,
 };
-use crate::history_sync::Cursor;
+use crate::history_sync::{Cursor, ProtocolError, SignedSegment};
 use crate::state::history_repository::control::{
     HISTORY_RECOVERY_METADATA_BUDGET_BYTES, HISTORY_RECOVERY_PAGE_BUDGET_BYTES,
     HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES,
@@ -103,93 +104,6 @@ pub(crate) struct InitialPeerRecoveryPreview {
 }
 
 impl RepositoryReplicaRuntime {
-    pub(crate) fn resume_legacy_consumed_summary_page(
-        &mut self,
-        peer_node_id: &str,
-        now_unix_seconds: u64,
-    ) -> Result<bool, RepositoryRuntimeError> {
-        let Some(checkpoint) = self.snapshot.initial_peer_backfills.get(peer_node_id) else {
-            return Ok(false);
-        };
-        if !checkpoint.recovery_generation_consumed
-            || checkpoint.summary_pending_segment_ids.len() != MAX_REPAIR_SEGMENTS
-            || checkpoint.summary_pending_revisit_cursor
-            || checkpoint.summary_pending_next_cursor == checkpoint.summary_cursor
-        {
-            return Ok(false);
-        }
-
-        let previous_snapshot = self.snapshot.clone();
-        let checkpoint = self
-            .snapshot
-            .initial_peer_backfills
-            .get_mut(peer_node_id)
-            .expect("validated legacy summary checkpoint");
-        checkpoint.summary_pending_next_cursor = checkpoint.summary_cursor.clone();
-        checkpoint.summary_pending_revisit_cursor = true;
-        checkpoint.summary_complete = false;
-        self.record_summary_repair_result_in_memory(
-            peer_node_id,
-            now_unix_seconds,
-            SummaryRepairResult::Progress,
-            None,
-            None,
-        );
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
-            return Err(error);
-        }
-        Ok(true)
-    }
-
-    /// Seal the exact gap left by a failed consumed-generation anchor attempt when the source
-    /// later proves that its retained history is truncated.
-    pub(crate) fn can_accept_consumed_retained_sequence_gap(
-        &self,
-        wire: &[u8],
-        retained_first_sequence: Option<u64>,
-    ) -> Result<bool, RepositoryRuntimeError> {
-        let segment = crate::history_sync::SignedSegment::from_wire(wire)?;
-        let first = segment.canonical().first_cursor();
-        let Some(receiver) = self.receiver.as_ref() else {
-            return Ok(false);
-        };
-        let Some(watermark) = receiver.continuous_watermark(first)? else {
-            return Ok(false);
-        };
-        let Some(expected) = watermark.sequence().checked_add(1) else {
-            return Ok(false);
-        };
-        if first.sequence() <= expected || segment.canonical().previous_segment_hash().is_none() {
-            return Ok(false);
-        }
-        if retained_first_sequence != Some(first.sequence()) {
-            return Ok(false);
-        }
-        let matching_gap = self.snapshot.gaps.iter().filter(|gap| {
-            !gap.permanent
-                && gap.source_node_id == first.source_node_id()
-                && gap.source_epoch == first.source_epoch()
-                && gap.stream == first.stream()
-                && gap.first_sequence == expected
-                && gap.last_sequence == first.sequence().saturating_sub(1)
-        });
-        let matching_count = matching_gap.count();
-        let transient_gap_count = self
-            .snapshot
-            .gaps
-            .iter()
-            .filter(|gap| {
-                !gap.permanent
-                    && gap.source_node_id == first.source_node_id()
-                    && gap.source_epoch == first.source_epoch()
-                    && gap.stream == first.stream()
-            })
-            .count();
-        Ok((matching_count == 1 && transient_gap_count == 1)
-            || (matching_count == 0 && transient_gap_count == 0))
-    }
-
     pub(crate) fn initial_peer_backfill_checkpoint(
         &self,
         peer_node_id: &str,
@@ -676,6 +590,128 @@ impl RepositoryReplicaRuntime {
             return Err(error);
         }
         Ok(())
+    }
+
+    pub(crate) fn reset_initial_peer_backfill_after_fork(
+        &mut self,
+        peer_node_id: &str,
+        source_node_id: &str,
+        source_epoch: u64,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let stream_suffix = format!("-backfill-{peer_node_id}");
+        let previous_snapshot = self.snapshot.clone();
+        let previous_receiver = self
+            .receiver
+            .as_ref()
+            .ok_or(RepositoryRuntimeError::ClusterBindingMismatch)?
+            .checkpoint()?;
+        let previous_checkpoint = self
+            .snapshot
+            .initial_peer_backfills
+            .get(peer_node_id)
+            .cloned()
+            .unwrap_or_default();
+        if previous_checkpoint.epoch != source_epoch {
+            return Err(RepositoryRuntimeError::Protocol(ProtocolError::EpochGap {
+                expected: previous_checkpoint.epoch,
+                actual: source_epoch,
+            }));
+        }
+
+        if let Some(receiver) = self.receiver.as_mut() {
+            receiver.remove_source_streams_with_suffix(
+                source_node_id,
+                source_epoch,
+                &stream_suffix,
+            );
+        }
+        self.tombstones.remove_source_streams_with_suffix(
+            source_node_id,
+            source_epoch,
+            &stream_suffix,
+        );
+        self.snapshot.gaps.retain(|gap| {
+            !(gap.source_node_id == source_node_id
+                && gap.source_epoch == source_epoch
+                && gap.stream.ends_with(&stream_suffix))
+        });
+        if !self.uses_sqlite_history() {
+            self.snapshot.records.retain(|record| {
+                !(record.source_node_id == source_node_id
+                    && record.source_epoch == source_epoch
+                    && record.stream.ends_with(&stream_suffix))
+            });
+            self.snapshot.segments.retain(|segment| {
+                !SignedSegment::from_wire(&segment.wire).is_ok_and(|signed| {
+                    let first = signed.canonical().first_cursor();
+                    first.source_node_id() == source_node_id
+                        && first.source_epoch() == source_epoch
+                        && first.stream().ends_with(&stream_suffix)
+                })
+            });
+        }
+        self.reset_partition_summary_cache();
+        self.snapshot.initial_peer_backfills.insert(
+            peer_node_id.to_owned(),
+            InitialPeerBackfillCheckpoint {
+                epoch: source_epoch,
+                retained_anchor_repair_response_seen: previous_checkpoint
+                    .retained_anchor_repair_response_seen,
+                retained_anchor_repair_response_id: previous_checkpoint
+                    .retained_anchor_repair_response_id,
+                retained_anchor_streams: previous_checkpoint.retained_anchor_streams,
+                retained_anchor_handoffs: previous_checkpoint.retained_anchor_handoffs,
+                summary_tiered_handoff: previous_checkpoint.summary_tiered_handoff,
+                recovery_generation: previous_checkpoint.recovery_generation,
+                recovery_generation_consumed: previous_checkpoint.recovery_generation_consumed,
+                recovery_handoff: previous_checkpoint.recovery_handoff,
+                ..InitialPeerBackfillCheckpoint::default()
+            },
+        );
+        self.sync_summary_repair_diagnostics();
+        self.snapshot.receiver = Some(
+            self.receiver
+                .as_ref()
+                .expect("receiver checked above")
+                .checkpoint()?,
+        );
+        self.snapshot.tombstones = self.tombstones.checkpoint();
+        let bytes = serde_json::to_vec(&self.snapshot_for_persistence())
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        if bytes.len() > super::MAX_RUNTIME_STATE_BYTES {
+            self.restore(&previous_receiver, previous_snapshot)?;
+            return Err(RepositoryRuntimeError::StateLimitExceeded);
+        }
+        let result = if self.uses_sqlite_history() {
+            self.storage
+                .reset_repository_history_source_streams(
+                    source_node_id,
+                    source_epoch,
+                    &stream_suffix,
+                    &bytes,
+                )
+                .map(|outcome| outcome.maintenance_degraded)
+        } else {
+            self.storage
+                .write(
+                    crate::state::history_storage::REPOSITORY_REPLICA_KEY,
+                    &bytes,
+                )
+                .map(|()| false)
+        };
+        match result {
+            Ok(maintenance_degraded) => {
+                self.storage_degraded |= maintenance_degraded;
+                Ok(())
+            }
+            Err(error) => {
+                self.restore(&previous_receiver, previous_snapshot)?;
+                if self.uses_sqlite_history() {
+                    self.storage_degraded = true;
+                }
+                Err(RepositoryRuntimeError::Storage(error.to_string()))
+            }
+        }
     }
 
     pub(crate) fn preview_initial_peer_recovery(

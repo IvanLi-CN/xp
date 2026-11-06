@@ -273,6 +273,7 @@ pub(in super::super) fn receive_row(
             ready_repositories: ready,
             local_repository_id: local,
             allow_retained_anchor: false,
+            allow_verified_local_source_replay: false,
             rollback_snapshot: None,
             discard_gap_evidence_on_error: true,
             allow_retained_sequence_gap: false,
