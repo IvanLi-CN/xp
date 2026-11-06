@@ -375,6 +375,10 @@
 - If an environment is only partially supported or blocked by current implementation limits, the limitation must be stated concretely in specs and ops docs together with the required operator intervention.
 - When deployment or upgrade behavior changes, update `AGENTS.md`, `docs/ops/**`, and the owning spec together so the supported-environment matrix stays aligned.
 
+Raft WAL persistence borrows entries under its existing lock and transfers the serialized buffer
+to the blocking writer. It must preserve the JSON format and atomic replacement while avoiding
+deep copies of the retained log and serialized bytes on small-memory nodes.
+
 ## Build, Test, and Development Commands
 
 - Install repo tooling (commitlint + dprint): `bun install`

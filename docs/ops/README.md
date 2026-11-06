@@ -154,6 +154,9 @@ Host-managed mode assumptions:
   reports configured, partial and unreachable states with per-member capacity and sync quality.
   `PUT /api/admin/history-repositories` replaces the validated membership through Raft. There is
   no static Mesh proxy environment, listener or compatibility path.
+- Raft WAL persistence borrows retained entries while holding the existing log lock and transfers
+  its JSON buffer to the blocking writer. systemd, OpenRC and Docker/Compose keep the same WAL
+  format, atomic replacement and error propagation without cloning the full retained log or buffer.
 - Service Monitoring uses the same History Repository delivery path. Each XP node keeps a
   WAL-backed `${XP_DATA_DIR}/uptime.sqlite3` capture journal; configured repository nodes retain
   the signed observations and rollups in `${XP_DATA_DIR}/history.sqlite3`. Preserve both files on
