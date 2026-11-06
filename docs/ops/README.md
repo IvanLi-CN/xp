@@ -144,6 +144,12 @@ Host-managed mode assumptions:
   traffic and does not share a user session. Native Reverse is retained only as
   `disabled_pending_rework` diagnostic state and is not selected, probed, reconciled, or
   dynamically installed.
+  Public signed health probes use a 30-second deadline, including public-only probes when Mesh
+  is disabled and periodic public standby probes. This matches the production Raft RPC TTL;
+  Direct Mesh probes retain five seconds. A successful verified signed response can close an
+  expired public circuit. A timeout or invalid acknowledgement leaves it retryable under the
+  existing backoff. This behavior is shared by systemd, OpenRC and Docker/Compose nodes and
+  introduces no environment override or alternate route.
   Repository synchronization is separate from that control-plane fallback: direct requests use the
   peer's public HTTPS `api_base_url` only; they do not select or probe Mesh or Reverse Mesh. Source
   delivery uses the same public HTTPS path. A

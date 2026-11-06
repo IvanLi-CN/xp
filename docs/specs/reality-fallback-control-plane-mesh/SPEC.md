@@ -137,6 +137,11 @@
 - 公网 direct 使用独立、长期共享的兼容 client；严格 HTTP/2 policy 不得污染公网
   direct。Mesh H2 协商或 transport 失败按既有 breaker/fallback 规则处理；Native Reverse
   不属于通用请求回退路径。
+- Public signed health probes use a fixed 30-second request budget aligned with the production
+  Raft RPC TTL, including Mesh-disabled and public standby probes. Direct Mesh probes retain
+  five seconds. Expired public circuits admit only the existing health probe and close only on
+  a verified signed response; timeout, missing ACK or invalid identity preserves the existing
+  failure/backoff rules. All deployment modes share these bounds without a local override.
 - 同一 target 的顺序请求、并发 fan-out、Raft burst、8 MiB snapshot 与长驻 SSE 必须复用同一
   HTTP/2 connection。主动断链或 idle timeout 后允许新建一条；重连交叠瞬间最多两条，随后回到一条。
 - 每个 peer 连续三次可重试 Mesh transport 失败后打开 breaker。
