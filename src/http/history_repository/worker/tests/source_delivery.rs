@@ -201,20 +201,37 @@ fn failed_local_standby_retries_remote_primary_without_acknowledging_backlog() {
 
 #[tokio::test]
 async fn rejected_stream_does_not_pin_other_streams_or_acknowledge_its_gap() {
-    rejected_stream_case(false, false).await;
+    rejected_stream_case(false, false, Duration::ZERO).await;
 }
 
 #[tokio::test]
 async fn rejected_tombstone_blocks_live_stream_recovery() {
-    rejected_stream_case(true, false).await;
+    rejected_stream_case(true, false, Duration::ZERO).await;
 }
 
 #[tokio::test]
 async fn rejected_gap_evidence_is_not_acknowledged_by_an_independent_stream() {
-    rejected_stream_case(false, true).await;
+    rejected_stream_case(false, true, Duration::ZERO).await;
 }
 
-async fn rejected_stream_case(tombstone: bool, with_gaps: bool) {
+#[tokio::test(start_paused = true)]
+async fn independent_stream_accepts_a_real_ack_after_fifteen_seconds() {
+    rejected_stream_case(false, false, Duration::from_secs(16)).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn independent_stream_deadline_preserves_unacknowledged_wires() {
+    let start = tokio::time::Instant::now();
+    rejected_stream_case(
+        false,
+        false,
+        REPOSITORY_REQUEST_BUDGET + Duration::from_secs(1),
+    )
+    .await;
+    assert!(start.elapsed() <= REPOSITORY_REQUEST_BUDGET);
+}
+
+async fn rejected_stream_case(tombstone: bool, with_gaps: bool, delay: Duration) {
     use crate::state::history_repository::replica::RepositoryReplicaSegment;
     let source_dir = tempfile::tempdir().unwrap();
     let collector_dir = tempfile::tempdir().unwrap();
@@ -316,15 +333,22 @@ async fn rejected_stream_case(tombstone: bool, with_gaps: bool) {
                         "repository peer rejected request with 400 Bad Request: {error}"
                     ))
                 });
-            std::future::ready(result)
+            let recovery = requests_sent > 1;
+            async move {
+                if recovery {
+                    tokio::time::sleep(delay).await;
+                }
+                result
+            }
         },
     )
     .await
     .unwrap();
     assert!(!delivered.delivery_succeeded);
+    let confirmed = !tombstone && !with_gaps && delay < REPOSITORY_REQUEST_BUDGET;
     assert_eq!(
         delivered.delivered_segments.len(),
-        usize::from(!tombstone && !with_gaps),
+        usize::from(confirmed),
         "a missing runtime prefix must not pin valid connection history"
     );
     if with_gaps {
@@ -340,7 +364,7 @@ async fn rejected_stream_case(tombstone: bool, with_gaps: bool) {
     drop(source);
     let source = RepositoryReplicaRuntime::load(source_storage.clone()).unwrap();
     let pending = source.local_source_pending_segments();
-    assert_eq!(pending.len(), if tombstone || with_gaps { 2 } else { 1 });
+    assert_eq!(pending.len(), if confirmed { 1 } else { 2 });
     assert!(
         pending.iter().any(|segment| segment.wire == missing_wire),
         "unacknowledged original wire survives restart"
