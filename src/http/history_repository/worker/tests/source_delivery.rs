@@ -198,3 +198,158 @@ fn failed_local_standby_retries_remote_primary_without_acknowledging_backlog() {
         pending.wire
     );
 }
+
+#[tokio::test]
+async fn rejected_stream_does_not_pin_other_streams_or_acknowledge_its_gap() {
+    rejected_stream_case(false, false).await;
+}
+
+#[tokio::test]
+async fn rejected_tombstone_blocks_live_stream_recovery() {
+    rejected_stream_case(true, false).await;
+}
+
+#[tokio::test]
+async fn rejected_gap_evidence_is_not_acknowledged_by_an_independent_stream() {
+    rejected_stream_case(false, true).await;
+}
+
+async fn rejected_stream_case(tombstone: bool, with_gaps: bool) {
+    use crate::state::history_repository::replica::RepositoryReplicaSegment;
+    let source_dir = tempfile::tempdir().unwrap();
+    let collector_dir = tempfile::tempdir().unwrap();
+    let source_storage = HistoryStorage::open(source_dir.path());
+    let mut source = RepositoryReplicaRuntime::load(source_storage.clone()).unwrap();
+    let mut collector =
+        RepositoryReplicaRuntime::load(HistoryStorage::open(collector_dir.path())).unwrap();
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let identity = RepositoryNodeIdentity::new(
+        RepositoryNodeId::try_from("local".to_owned()).unwrap(),
+        Ed25519PublicKey::from_bytes(key.verifying_key().to_bytes()).unwrap(),
+        X25519PublicKey::from_bytes([12; 32]).unwrap(),
+    )
+    .unwrap();
+    let mut queued = Vec::new();
+    for (schema, sequence) in [("runtime.v1", 0), ("runtime.v1", 1), ("connections.v1", 0)] {
+        queued.push(
+            source
+                .queue_local_source_segment(
+                    "cluster-a",
+                    identity.clone(),
+                    &key,
+                    vec![SyncRecord::new(
+                        "local",
+                        "local",
+                        schema,
+                        1,
+                        sequence.to_string().into_bytes(),
+                        b"sample".to_vec(),
+                        tombstone && schema == "runtime.v1",
+                    )],
+                    100 + sequence,
+                )
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    // The predecessor was acknowledged before this collector lost its original prefix.
+    source
+        .acknowledge_local_source_segment_via(&queued[0].wire, 110, "direct")
+        .unwrap();
+    let page = source.local_source_pending_segments();
+    assert_eq!(page.len(), 2);
+    let missing_wire = page
+        .iter()
+        .find(|segment| {
+            SignedSegment::from_wire(&segment.wire)
+                .unwrap()
+                .canonical()
+                .first_cursor()
+                .sequence()
+                == 1
+        })
+        .unwrap()
+        .wire
+        .clone();
+    let gaps = if with_gaps {
+        vec![
+            crate::state::history_repository::replica::RepositoryReplicaGap {
+                source_node_id: "local".to_owned(),
+                source_epoch: 1,
+                stream: "runtime".to_owned(),
+                first_sequence: 0,
+                last_sequence: 0,
+                start_unix_seconds: 100,
+                end_unix_seconds: 100,
+                permanent: false,
+                reason: Some("source_backpressure".to_owned()),
+            },
+        ]
+    } else {
+        vec![]
+    };
+    let mut requests_sent = 0;
+    let delivered = super::super::source_delivery::deliver_with_transport(
+        "collector",
+        &page,
+        &gaps,
+        |requests, _| {
+            requests_sent += 1;
+            let segments = requests
+                .iter()
+                .map(|request| RepositoryReplicaSegment {
+                    identity: request.identity.clone(),
+                    wire: request.decode_wire().unwrap(),
+                })
+                .collect::<Vec<_>>();
+            let result = collector
+                .receive_wire_batch_from_repository_with_gaps(
+                    "cluster-a",
+                    &segments,
+                    &requests[0].gaps,
+                    120,
+                    &["collector".to_owned()],
+                    "collector",
+                )
+                .map_err(|error| {
+                    RepositoryDirectError::SequenceRejected(anyhow::anyhow!(
+                        "repository peer rejected request with 400 Bad Request: {error}"
+                    ))
+                });
+            std::future::ready(result)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!delivered.delivery_succeeded);
+    assert_eq!(
+        delivered.delivered_segments.len(),
+        usize::from(!tombstone && !with_gaps),
+        "a missing runtime prefix must not pin valid connection history"
+    );
+    if with_gaps {
+        assert_eq!(requests_sent, 1, "failed gap evidence is an ACK barrier");
+    }
+    source
+        .acknowledge_local_source_segments_via_without_hydrating(
+            &delivered.delivered_segments,
+            121,
+            "direct",
+        )
+        .unwrap();
+    drop(source);
+    let source = RepositoryReplicaRuntime::load(source_storage.clone()).unwrap();
+    let pending = source.local_source_pending_segments();
+    assert_eq!(pending.len(), if tombstone || with_gaps { 2 } else { 1 });
+    assert!(
+        pending.iter().any(|segment| segment.wire == missing_wire),
+        "unacknowledged original wire survives restart"
+    );
+    assert_eq!(
+        source_storage
+            .source_delivery_journal_summary()
+            .unwrap()
+            .pending_segments,
+        pending.len()
+    );
+}

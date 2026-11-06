@@ -373,6 +373,13 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
   当多个 stream head 共同超过单页 wire 预算时，tombstone head 固定优先，live stream head
   通过 state row 中的 replay stream cursor 轮转，游标只在删除已确认窗口的 ACK 事务中持久化，避免
   字典序选择造成后续 stream 饥饿；未确认的 replay window 在 ACK 前保持稳定。
+- 接收端批次仍为原子事务。签名确认的 HTTP 400 序号缺口或哈希链拒绝，不得永久阻塞同一混合批次内
+  其他独立流：当该请求不携带 gap evidence 时，发送端按 source、epoch、stream 保留原始顺序拆分，
+  每个恢复周期最多重试八个独立批次，总预算十五秒，并只根据真实 receipt 确认成功流。
+  tombstone 流优先，其失败立即停止后续数据流；认证、存储、未知响应与传输结果不明也停止恢复。
+  携带 gap evidence 的失败批次保持完整待发，不允许由其他流的成功 ACK 间接清除未提交的证据。
+  单独的缺口流继续保留原 wire，不重签、不跳过 cursor、不自动创建 permanent gap。
+  此行为位于发送端，systemd、OpenRC 与容器均须部署包含修复的 XP；只更新接收仓库不足以修复旧发送端。
 - source worker 的容量与生命周期 Raft 维护必须与 source capture 并发且各自受 repository request
   budget 限制。维护写入失败或超时只记录并在下一周期重试，不得阻塞历史投递、推进 source cursor
   或删除未 ACK 的 journal 行。

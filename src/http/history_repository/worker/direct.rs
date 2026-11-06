@@ -23,6 +23,13 @@ fn is_repair_response_changed_error(code: Option<&str>, message: &str) -> bool {
         || (code == Some("internal") && message == REPAIR_RESPONSE_CHANGED_MESSAGE)
 }
 
+fn is_source_sequence_rejection(status: u16, code: Option<&str>, detail: &str) -> bool {
+    status == 400
+        && code == Some("invalid_request")
+        && (detail.starts_with("history sync protocol error: SequenceGap {")
+            || detail == "history sync protocol error: HashChainMismatch")
+}
+
 async fn read_bounded_body(
     mut response: reqwest::Response,
     max_bytes: usize,
@@ -85,6 +92,7 @@ pub(crate) async fn preserve_history_truncated(
 pub(crate) enum RepositoryDirectError {
     Transport(anyhow::Error),
     Application(anyhow::Error),
+    SequenceRejected(anyhow::Error),
     Unsupported(anyhow::Error),
     RepairResponseChanged,
 }
@@ -102,9 +110,10 @@ impl RepositoryDirectError {
 impl std::fmt::Display for RepositoryDirectError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Transport(error) | Self::Application(error) | Self::Unsupported(error) => {
-                error.fmt(formatter)
-            }
+            Self::Transport(error)
+            | Self::Application(error)
+            | Self::SequenceRejected(error)
+            | Self::Unsupported(error) => error.fmt(formatter),
             Self::RepairResponseChanged => REPAIR_RESPONSE_CHANGED_MESSAGE.fmt(formatter),
         }
     }
@@ -261,6 +270,11 @@ async fn send_repository_request_on_path_body(
         if is_repair_response_changed_error(code, &detail) {
             return Err(RepositoryDirectError::RepairResponseChanged);
         }
+        if is_source_sequence_rejection(status.as_u16(), code, &detail) {
+            return Err(RepositoryDirectError::SequenceRejected(anyhow::anyhow!(
+                "repository peer rejected request with {status}: {detail}"
+            )));
+        }
         if path_and_query == "/api/admin/_internal/history-repository/sync-batch"
             && matches!(status.as_u16(), 404 | 405 | 501)
         {
@@ -293,6 +307,43 @@ mod tests {
     };
     use crate::control_plane_mesh::PeerDirectPath;
     use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    #[test]
+    fn only_explicit_sequence_rejections_allow_stream_recovery() {
+        for detail in [
+            "history sync protocol error: SequenceGap { expected: 2262, actual: 2379 }",
+            "history sync protocol error: HashChainMismatch",
+        ] {
+            assert!(super::is_source_sequence_rejection(
+                400,
+                Some("invalid_request"),
+                detail
+            ));
+            for status in [401, 403, 409, 500, 503] {
+                assert!(!super::is_source_sequence_rejection(
+                    status,
+                    Some("invalid_request"),
+                    detail
+                ));
+            }
+            assert!(!super::is_source_sequence_rejection(
+                400,
+                Some("internal"),
+                detail
+            ));
+        }
+        for detail in [
+            "repository segment identity is not pinned for the authenticated sender",
+            "repository segment encoding is invalid",
+            "history storage failure",
+        ] {
+            assert!(!super::is_source_sequence_rejection(
+                400,
+                Some("invalid_request"),
+                detail
+            ));
+        }
+    }
 
     #[test]
     fn repository_direct_path_is_public_even_when_mesh_is_configured() {

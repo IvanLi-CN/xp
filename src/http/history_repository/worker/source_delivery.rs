@@ -53,6 +53,53 @@ pub(super) async fn deliver_remote_source_segments(
     segments: &[crate::state::history_repository::replica::RepositoryReplicaSegment],
     gaps: &[crate::state::history_repository::replica::RepositoryReplicaGap],
 ) -> anyhow::Result<RemoteSourceDelivery> {
+    deliver_with_transport(
+        selected_repository_id,
+        segments,
+        gaps,
+        |requests, batch| async move {
+            if batch {
+                let body = serde_json::to_vec(&super::super::batch::RepositorySyncBatchRequest {
+                    requests,
+                })
+                .map_err(|error| RepositoryDirectError::Application(error.into()))?;
+                repository_direct_request::<super::super::batch::RepositorySyncBatchResponse>(
+                    state,
+                    peer,
+                    Method::POST,
+                    "/api/admin/_internal/history-repository/sync-batch",
+                    body,
+                )
+                .await
+                .map(|response| response.receipts)
+            } else {
+                let body = serde_json::to_vec(&requests[0])
+                    .map_err(|error| RepositoryDirectError::Application(error.into()))?;
+                repository_direct_request::<RepositorySyncReceipt>(
+                    state,
+                    peer,
+                    Method::POST,
+                    "/api/admin/_internal/history-repository/sync",
+                    body,
+                )
+                .await
+                .map(|receipt| vec![receipt])
+            }
+        },
+    )
+    .await
+}
+
+pub(super) async fn deliver_with_transport<F, Fut>(
+    selected_repository_id: &str,
+    segments: &[crate::state::history_repository::replica::RepositoryReplicaSegment],
+    gaps: &[crate::state::history_repository::replica::RepositoryReplicaGap],
+    mut send: F,
+) -> anyhow::Result<RemoteSourceDelivery>
+where
+    F: FnMut(Vec<RepositorySyncRequest>, bool) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<RepositorySyncReceipt>, RepositoryDirectError>>,
+{
     let mut batches = Vec::new();
     let mut batch_requests = Vec::new();
     let mut batch_segments = Vec::new();
@@ -91,23 +138,12 @@ pub(super) async fn deliver_remote_source_segments(
     };
     let mut fallback_batch_index = None;
     for (batch_index, (requests, batch_segments)) in batches.iter().enumerate() {
-        let body = serde_json::to_vec(&super::super::batch::RepositorySyncBatchRequest {
-            requests: requests.clone(),
-        })?;
-        match repository_direct_request::<super::super::batch::RepositorySyncBatchResponse>(
-            state,
-            peer,
-            Method::POST,
-            "/api/admin/_internal/history-repository/sync-batch",
-            body,
-        )
-        .await
-        {
-            Ok(response) if response.receipts.len() == batch_segments.len() => {
+        match send(requests.clone(), true).await {
+            Ok(receipts) if receipts.len() == batch_segments.len() => {
                 result.attempted_segments = result
                     .attempted_segments
                     .saturating_add(u64::try_from(batch_segments.len()).unwrap_or(u64::MAX));
-                for receipt in response.receipts {
+                for receipt in receipts {
                     result
                         .tombstone_acknowledgements
                         .extend(receipt.tombstone_acknowledgements().iter().cloned());
@@ -126,6 +162,17 @@ pub(super) async fn deliver_remote_source_segments(
             }
             Err(RepositoryDirectError::Unsupported(_)) => {
                 fallback_batch_index = Some(batch_index);
+                break;
+            }
+            Err(RepositoryDirectError::SequenceRejected(_)) if gaps.is_empty() => {
+                result.attempted_segments = result
+                    .attempted_segments
+                    .saturating_add(batch_segments.len() as u64);
+                result.delivery_succeeded = false;
+                result.delivery_outcome = "response_error";
+                recover_independent_streams(requests, batch_segments, &mut result, &mut send)
+                    .await?;
+                // Keep the original bounded window. Only real receipts authorize its next ACK.
                 break;
             }
             Err(error) => {
@@ -153,25 +200,23 @@ pub(super) async fn deliver_remote_source_segments(
                 } else {
                     &[]
                 };
-                let body = serde_json::to_vec(&RepositorySyncRequest::with_wire(
+                let request = RepositorySyncRequest::with_wire(
                     segment.identity.clone(),
                     &segment.wire,
                     segment_gaps.to_vec(),
-                )?)?;
-                match repository_direct_request::<RepositorySyncReceipt>(
-                    state,
-                    peer,
-                    Method::POST,
-                    "/api/admin/_internal/history-repository/sync",
-                    body,
-                )
-                .await
-                {
-                    Ok(receipt) => {
+                )?;
+                match send(vec![request], false).await {
+                    Ok(mut receipts) if receipts.len() == 1 => {
+                        let receipt = receipts.remove(0);
                         result
                             .tombstone_acknowledgements
                             .extend(receipt.tombstone_acknowledgements().iter().cloned());
                         result.delivered_segments.push(segment.clone());
+                    }
+                    Ok(_) => {
+                        result.delivery_succeeded = false;
+                        result.delivery_outcome = "response_error";
+                        break;
                     }
                     Err(error) => {
                         result.delivery_succeeded = false;
@@ -197,8 +242,65 @@ fn source_delivery_error_outcome(error: &RepositoryDirectError) -> &'static str 
     match error {
         RepositoryDirectError::Transport(_) => "transport_error",
         RepositoryDirectError::RepairResponseChanged => "response_changed",
-        RepositoryDirectError::Application(_) | RepositoryDirectError::Unsupported(_) => {
-            "response_error"
+        RepositoryDirectError::Application(_)
+        | RepositoryDirectError::SequenceRejected(_)
+        | RepositoryDirectError::Unsupported(_) => "response_error",
+    }
+}
+
+async fn recover_independent_streams<F, Fut>(
+    requests: &[RepositorySyncRequest],
+    segments: &[crate::state::history_repository::replica::RepositoryReplicaSegment],
+    result: &mut RemoteSourceDelivery,
+    send: &mut F,
+) -> anyhow::Result<()>
+where
+    F: FnMut(Vec<RepositorySyncRequest>, bool) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<RepositorySyncReceipt>, RepositoryDirectError>>,
+{
+    let mut groups = std::collections::BTreeMap::<_, Vec<usize>>::new();
+    for (index, segment) in segments.iter().enumerate() {
+        let signed = SignedSegment::from_wire(&segment.wire)?;
+        let cursor = signed.canonical().first_cursor();
+        groups
+            .entry((
+                cursor.stream() != "tombstone",
+                cursor.source_node_id().to_owned(),
+                cursor.source_epoch(),
+                cursor.stream().to_owned(),
+            ))
+            .or_default()
+            .push(index);
+    }
+    if groups.len() <= 1 {
+        return Ok(());
+    }
+    // A rejected mixed page must not pin unrelated streams forever. Bound the recovery work,
+    // preserve each original stream's order, and finish tombstones before trying live data.
+    // Transport ambiguity, authentication and storage failures never authorize this recovery.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    for ((live, _, _, _), indices) in groups.into_iter().take(8) {
+        let page = indices
+            .iter()
+            .map(|&index| requests[index].clone())
+            .collect();
+        result.attempted_segments = result
+            .attempted_segments
+            .saturating_add(indices.len() as u64);
+        match tokio::time::timeout_at(deadline, send(page, true)).await {
+            Ok(Ok(receipts)) if receipts.len() == indices.len() => {
+                for receipt in receipts {
+                    result
+                        .tombstone_acknowledgements
+                        .extend(receipt.tombstone_acknowledgements().iter().cloned());
+                }
+                result
+                    .delivered_segments
+                    .extend(indices.iter().map(|&index| segments[index].clone()));
+            }
+            Ok(Err(RepositoryDirectError::SequenceRejected(_))) if live => {}
+            _ => break,
         }
     }
+    Ok(())
 }
