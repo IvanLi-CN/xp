@@ -520,6 +520,11 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
   and generated Web-shell archive by SHA before building, then uploads a SHA-bound attestation and
   full workload log. The owner signs those two files into an evidence commit before release
   publication; ordinary GitHub CI and the release workflow do not synthesize that evidence.
+  musl 候选须通过 `candidate_target=x86_64-unknown-linux-musl` 在 Linux 原生 musl
+  工具链下构建，并以实际候选运行资源工作负载。流程保留目标 SHA、ABI、版本、二进制
+  和 SHA256；部署消费该 run 的已测二进制，不能以 GNU 证据替代另行构建的 musl 产物。
+  大型格式化 Node History JSON 的删除版本校验另有五秒耗时上限回归检查，必须保持
+  原有版本和摘要冲突的拒绝语义，不能通过跳过删除保护规避延迟。
 - The summary-specific resource gate runs `xp_repository_summary_memory_e2e` in the same
   128 MiB/no-swap cgroup with 257 near-limit segments and repeated summary requests; the runner's
   `XP_MESH_RESOURCE_SUMMARY_ONLY=1` mode runs this gate together with the 20,000-row source journal

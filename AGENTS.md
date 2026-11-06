@@ -188,6 +188,10 @@
   and publishes raw evidence as an artifact; an owner-signed two-file evidence commit remains
   required before release publication. Ordinary GitHub CI and release jobs do not synthesize or
   replace that evidence.
+  musl 修复候选必须选择 `candidate_target=x86_64-unknown-linux-musl`，通过 Linux 原生
+  musl 工具链构建并测试实际候选，再部署该 run 保留的校验和绑定二进制；GNU 门禁结果
+  不覆盖另行本地交叉构建的 musl 二进制。资源流程同时验证较大格式化 Node History JSON
+  的删除版本检查耗时，避免 libc 字符串扫描退化阻塞服务。
   Reverse uses XP-owned loopback `127.0.0.1:10086` with authenticated TCP-only SOCKS and does
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
 - Container history recovery requires `--data-dir /var/lib/xp/data` when `xp.env` is absent.
