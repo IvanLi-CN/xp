@@ -326,10 +326,6 @@ async fn publish_local_history_segment(
                         1024 * 1024,
                     );
                 }
-                // The durable journal is authoritative. Drop the cloned replay window before
-                // receiver processing so large wire payloads do not remain resident until the next
-                // hydration; ACK can remove durable rows even when this window is empty.
-                runtime.clear_local_source_pending_window();
                 page
             } else {
                 // Capacity can be reached after the initial guard check (for example while another
@@ -400,7 +396,6 @@ async fn publish_local_history_segment(
                                 1024 * 1024,
                             );
                         }
-                        runtime.clear_local_source_pending_window();
                         page
                     }
                     Err(error) => return Err(error),
@@ -412,6 +407,10 @@ async fn publish_local_history_segment(
                 &segments,
                 &receiver_repair_gaps,
             );
+            // SQLite owns the pending wires durably. Release the duplicate window for both
+            // live capture and replay before receiver rollback checkpoints clone source state.
+            // JSON fallback retains its only copy; real ACKs still remove SQLite journal rows.
+            runtime.clear_local_source_pending_window();
             Ok((segments, gaps))
         })?
     };

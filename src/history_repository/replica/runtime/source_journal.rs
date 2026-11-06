@@ -513,7 +513,9 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(crate) fn clear_local_source_pending_window(&mut self) {
-        self.snapshot.local_source.clear_pending();
+        if self.storage.is_sqlite() {
+            self.snapshot.local_source.clear_pending();
+        }
     }
 
     pub(crate) fn source_delivery_capture_paused(&self) -> Result<bool, RepositoryRuntimeError> {
