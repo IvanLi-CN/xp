@@ -881,6 +881,14 @@ Notes:
   coverage, watermarks, gaps, clock skew and `complete` / `partial` / `local_only` query quality
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
+- Source batch receive remains atomic. A signed sequence-gap or hash-chain rejection of a
+  mixed batch without gap evidence triggers bounded retries by independent stream: at most
+  eight requests within fifteen seconds, retaining each original wire and stream order.
+  Tombstones run first; their failure, transport ambiguity, authentication failure or storage
+  failure stops recovery. Successful streams receive real ACKs while missing-prefix streams
+  stay queued. This does not repair an expired prefix or authorize permanent-gap markers.
+  The sending XP must include this fix in systemd, OpenRC and container deployments; upgrading
+  only the repository receiver cannot change an older sender's batch failure handling.
 - Linux/glibc XP sets a two-arena allocator limit before creating Tokio workers, preserving
   an explicit `MALLOC_ARENA_MAX` override. musl and other allocators keep native behavior.
   `TOKIO_WORKER_THREADS` remains the runtime override for nodes whose visible CPU count exceeds
