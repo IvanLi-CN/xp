@@ -10,6 +10,26 @@ mod storage_source;
 const PARTITION_SUMMARY_REBUILD_PAGE_SIZE: usize = 256;
 
 impl RepositoryReplicaRuntime {
+    pub(crate) fn set_repository_quota_bytes(
+        &mut self,
+        quota_bytes: u64,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let mut next = RepositoryCapacity::new(quota_bytes)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        self.refresh_capacity()?;
+        next.record_usage(
+            self.snapshot.capacity.used_bytes(),
+            self.snapshot.capacity.filesystem_available_bytes(),
+        )
+        .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let previous = std::mem::replace(&mut self.snapshot.capacity, next);
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot.capacity = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub(crate) fn compact_repository_payload_page(&self) -> Result<usize, RepositoryRuntimeError> {
         self.storage
             .compact_repository_payload_page()

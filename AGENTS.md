@@ -80,6 +80,14 @@
   Linux/glibc XP startup caps allocator arenas at two before creating Tokio workers unless
   the operator supplies MALLOC_ARENA_MAX. musl and other allocators retain their native behavior.
 
+  The root-operated `xp-ops xp history-repository-quota --quota-bytes BYTES` command previews a
+  local physical database/WAL admission quota; persistence requires `--apply --yes` and a request
+  signed by that same node. Containers without xp.env use `--data-dir /var/lib/xp/data`.
+  systemd, OpenRC and Docker/Compose preserve the quota across restart and publish capacity through
+  the normal Raft-backed capacity sync. Lowering quota never evicts retained history or outbox rows;
+  at or above quota, new history writes stop. Reserve WAL/transaction headroom below an external
+  file-size limit: this admission setting is not an operating-system filesystem hard quota.
+
   SQLite releases idle WAL at normal reset with a 1 MiB retained-journal limit.
 
   Repository record and signed-segment BLOBs use a checksummed Zstandard level-1 envelope when
