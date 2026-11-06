@@ -3,7 +3,12 @@ use std::time::Duration;
 use super::{MeshAwareHttpClient, MeshRequestError};
 
 pub const MESH_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const PUBLIC_HEALTH_PROBE_BUDGET: Duration = Duration::from_secs(30);
 const MESH_POOL_MAX_IDLE_PER_HOST: usize = 1;
+
+#[cfg(test)]
+#[path = "public_health_budget_tests.rs"]
+mod tests;
 
 pub(super) fn join_url(
     base: &str,

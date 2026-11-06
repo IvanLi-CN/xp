@@ -43,6 +43,10 @@
   The Raft `PersistedState.mesh_enabled` field is the cluster-level Mesh switch (default `true`);
   when disabled, control-plane requests use only each peer's registered public HTTPS
   `api_base_url` and do not substitute a private or Reverse Mesh route.
+  Public signed health probes, including Mesh-disabled and standby probes, use a fixed
+  30-second budget aligned with the production Raft RPC TTL. Direct Mesh probes retain five
+  seconds. An expired public circuit closes only after a verified signed health response;
+  no probe resets a breaker or changes routing policy without that response.
   An internal-auth v2 cluster upgrade requires a one-shot maintenance marker: host-managed nodes
   bootstrap from a verified target `xp-ops` binary using
   `upgrade --allow-internal-auth-v2-cutover`, while containers use the
