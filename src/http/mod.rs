@@ -1963,11 +1963,7 @@ async fn admin_internal_capabilities(
         return Err(ApiError::unauthorized("internal auth required"));
     }
     let mut response = api_capabilities().await.0;
-    let summary_v2_ready = state
-        .repository_replica
-        .lock()
-        .await
-        .sequence_summary_blocks_ready();
+    let summary_v2_ready = capabilities::repository_summary_ready(&state.repository_replica);
     if summary_v2_ready {
         response
             .capabilities

@@ -70,6 +70,9 @@
   ACK completion removes receipt mappings before intent; a bounded version-checked scan reclaims
   orphan mappings from older versions without changing unacknowledged journal rows.
 
+  Signed membership capabilities never wait for the history replica lock.
+  A busy replica withholds only its optional ready-summary capability.
+
   SQLite releases idle WAL at normal reset with a 1 MiB retained-journal limit.
 
   Repository record and signed-segment BLOBs use a checksummed Zstandard level-1 envelope when

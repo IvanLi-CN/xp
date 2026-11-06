@@ -46,6 +46,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 ### MUST
 
+- 签名 membership 能力检查不得等待 history replica 锁；锁忙时仅暂不广告可选的 ready-summary 能力。
 - 普通节点迁移失败继续使用 JSON；迁移不双写，成功后原子切换，旧 JSON 备份
   保留 30 天。
 - SQLite 使用 WAL 与 `auto_vacuum=INCREMENTAL`，仅执行有界 checkpoint/incremental vacuum，
