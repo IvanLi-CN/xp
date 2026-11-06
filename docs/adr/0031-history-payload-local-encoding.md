@@ -25,6 +25,7 @@ SQLite 存储边界使用带版本、原始长度及 Zstandard 校验和的本�
 后台每五秒最多处理八页、共享两秒预算，页间释放 replica 锁。两表分别提交；下一表失败不撤销前一表已完成的提交。正常读取支持混合编码，损坏 envelope 返回存储错误。
 
 迁移沿用数据库和增量 vacuum，单次最多释放 512 页，不运行 full VACUUM、手动 checkpoint 或建库替换。
+必须耗尽 pragma 返回行才能执行完整页预算；普通提交最多 64 页，零预算不执行，避免 SQLite 将零解释为无限制。
 
 物理编码迁移不增加来源交付计数，不改 segment identity 或 revision。record 更新触发既有 dirty-block 重算，摘要必须与迁移前相同。
 

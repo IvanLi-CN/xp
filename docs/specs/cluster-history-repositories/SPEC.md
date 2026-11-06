@@ -53,6 +53,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   保留 30 天。
 - SQLite 使用 WAL 与 `auto_vacuum=INCREMENTAL`，仅执行有界 checkpoint/incremental vacuum，
   不执行例行 full `VACUUM`。
+  incremental vacuum 必须耗尽返回行，普通提交最多释放 64 页、迁移页之后最多 512 页；零预算不执行回收。
 - 仓库 record 和 signed-segment 的本地 payload BLOB 在有收益时使用带校验和的 Zstandard level 1 envelope。
   编码只作用于物理存储；读取须逐字节恢复原 JSON 和 signed wire，再计算摘要、导出或验证签名。
   旧 JSON 与压缩行可共存；校验失败返回存储错误，解码大小最多 16 MiB。

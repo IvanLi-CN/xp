@@ -94,9 +94,7 @@ impl HistoryStorage {
         }
         // Release up to 2 MiB of free pages without a full VACUUM, extra database,
         // or manual WAL checkpoint. A large legacy row may occupy a page on its own.
-        connection
-            .execute_batch("PRAGMA incremental_vacuum(512)")
-            .map_err(sqlite_error)?;
+        incremental_vacuum(connection, 512)?;
         if rewritten > 0 {
             tracing::info!(
                 rewritten,

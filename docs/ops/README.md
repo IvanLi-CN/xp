@@ -892,6 +892,9 @@ Notes:
   Read metadata keys `repository_payload_records_cursor_v1` and
   `repository_payload_segments_cursor_v1`;
   A value of `-1` means the table scan is complete. Incremental vacuum releases free pages.
+  XP drains the pragma result to completion within its SQLite page budget: 64 pages after
+  ordinary commits and 512 after a migration page. Zero performs no work. Free pages count
+  toward the physical database size until bounded maintenance releases them.
   There is no full VACUUM, second database, retention reduction or manual checkpoint.
   systemd, OpenRC and Docker/Compose preserve the database and use this same path.
   Builds without the decoder cannot read migrated payloads and must not be deployed over them.
