@@ -1,5 +1,5 @@
 //! Lossless local encoding. Callers and summary hashing always see the original JSON bytes.
-use std::io::Write;
+use std::sync::Mutex;
 
 use super::{HistoryStorageError, Result};
 
@@ -7,17 +7,28 @@ const MAGIC: &[u8; 8] = b"\0XPHZ01\0";
 const HEADER_BYTES: usize = MAGIC.len() + 4;
 const MAX_DECODED_BYTES: usize = 16 * 1024 * 1024;
 
+// SQLite callers may move between blocking threads. Keep one bounded context rather than
+// repeatedly allocating streaming workspaces into each worker's allocator arena.
+static COMPRESSOR: Mutex<Option<zstd::bulk::Compressor<'static>>> = Mutex::new(None);
+
 pub(super) fn encode(payload: &[u8]) -> Result<Vec<u8>> {
     if payload.len() < 512 || payload.len() > MAX_DECODED_BYTES {
         return Ok(payload.to_vec());
     }
-    let mut encoder = zstd::stream::Encoder::new(Vec::new(), 1).map_err(codec_error)?;
-    encoder.include_checksum(true).map_err(codec_error)?;
-    encoder
-        .set_pledged_src_size(Some(payload.len() as u64))
-        .map_err(codec_error)?;
-    encoder.write_all(payload).map_err(codec_error)?;
-    let compressed = encoder.finish().map_err(codec_error)?;
+    let compressed = {
+        let mut shared = COMPRESSOR.lock().unwrap_or_else(|error| error.into_inner());
+        if shared.is_none() {
+            let mut compressor = zstd::bulk::Compressor::new(1).map_err(codec_error)?;
+            compressor.include_checksum(true).map_err(codec_error)?;
+            compressor.window_log(16).map_err(codec_error)?;
+            *shared = Some(compressor);
+        }
+        shared
+            .as_mut()
+            .unwrap()
+            .compress(payload)
+            .map_err(codec_error)?
+    };
     if compressed.len().saturating_add(HEADER_BYTES + 64) >= payload.len() {
         return Ok(payload.to_vec());
     }
@@ -88,5 +99,18 @@ mod tests {
         oversized[MAGIC.len()..HEADER_BYTES]
             .copy_from_slice(&((MAX_DECODED_BYTES + 1) as u32).to_le_bytes());
         assert!(decode(oversized).is_err());
+    }
+
+    #[test]
+    fn shared_compressor_preserves_independent_frames_across_sizes() {
+        for size in [512, 1024 * 1024, 4096, MAX_DECODED_BYTES, 8192] {
+            let raw: Vec<u8> = (0..size).map(|index| (index % 251) as u8).collect();
+            let encoded = encode(&raw).unwrap();
+            assert!(encoded.starts_with(MAGIC));
+            assert_eq!(decode(encoded.clone()).unwrap(), raw);
+            let mut corrupted = encoded;
+            *corrupted.last_mut().unwrap() ^= 1;
+            assert!(decode(corrupted).is_err());
+        }
     }
 }

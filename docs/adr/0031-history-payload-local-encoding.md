@@ -14,6 +14,10 @@
 
 SQLite 存储边界使用带版本、原始长度及 Zstandard 校验和的本地 envelope。小于 512 字节、超过 16 MiB 或无收益的 payload 保留原字节。
 
+压缩复用一个互斥保护的 bulk context，窗口限制为 64 KiB，避免后台线程反复分配 streaming workspace。
+
+每行仍是独立的带校验和 frame，不共享字典或解码状态。
+
 所有行读取和 v3 summary 的直接 payload 读取先解码，再执行既有处理。canonical 字节、签名、摘要和协议保持一致；该格式不依赖 SQLite 扩展。
 
 新增写入直接编码。旧行通过 rowid keyset 分页改写，每表的 payload 更新与游标原子提交，重启后续传。每表每页最多 128 行、累计 1 MiB；较大的旧行独占一页。
