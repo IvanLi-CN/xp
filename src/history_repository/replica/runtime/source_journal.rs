@@ -36,6 +36,50 @@ impl LocalSourceState {
 }
 
 impl RepositoryReplicaRuntime {
+    pub(crate) fn normalize_unproven_local_source_gaps(
+        &mut self,
+    ) -> Result<usize, RepositoryRuntimeError> {
+        let source_node_id = self.snapshot.local_source.node_id().unwrap_or_default();
+        let source_epoch = self.snapshot.local_source.epoch();
+        if source_node_id.is_empty() || source_epoch == 0 {
+            return Ok(0);
+        }
+        let backpressure_gaps = self
+            .snapshot
+            .local_source
+            .backpressure_gaps
+            .iter()
+            .map(|(key, gap)| {
+                (
+                    super::backpressure_gap_stream(key).to_owned(),
+                    gap.source_epoch,
+                    gap.first_sequence,
+                    gap.last_sequence,
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        let mut changed = 0;
+        for gap in &mut self.snapshot.gaps {
+            let matches_local_backpressure = gap.permanent
+                && gap.reason.is_none()
+                && gap.source_node_id == source_node_id
+                && backpressure_gaps.contains(&(
+                    gap.stream.clone(),
+                    gap.source_epoch,
+                    gap.first_sequence,
+                    gap.last_sequence,
+                ));
+            if matches_local_backpressure {
+                gap.permanent = false;
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.persist_control_state()?;
+        }
+        Ok(changed)
+    }
+
     pub(crate) fn finish_source_delivery_capture(
         &mut self,
         journal_ready: bool,
@@ -80,10 +124,78 @@ impl RepositoryReplicaRuntime {
         self.local_source_gaps_for_segments(source_node_id, &[])
     }
 
+    pub(crate) fn local_source_receiver_repair_gaps(
+        &self,
+        pending_segments: &[RepositoryReplicaSegment],
+        now_unix_seconds: u64,
+    ) -> Result<Vec<RepositoryReplicaGap>, RepositoryRuntimeError> {
+        let Some(receiver) = self.receiver.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let source_node_id = self.snapshot.local_source.node_id().unwrap_or_default();
+        let source_epoch = self.snapshot.local_source.epoch();
+        if source_node_id.is_empty() || source_epoch == 0 {
+            return Ok(Vec::new());
+        }
+        let mut seen_streams = BTreeSet::new();
+        let mut gaps = Vec::new();
+        for segment in pending_segments {
+            let signed =
+                SignedSegment::from_wire(&segment.wire).map_err(RepositoryRuntimeError::from)?;
+            let cursor = signed.canonical().first_cursor();
+            if cursor.source_node_id() != source_node_id
+                || cursor.source_epoch() != source_epoch
+                || cursor.sequence() == 0
+                || !seen_streams.insert(cursor.stream().to_owned())
+                || receiver
+                    .continuous_watermark(cursor)
+                    .map_err(RepositoryRuntimeError::from)?
+                    .is_some()
+            {
+                continue;
+            }
+            let first_missing = self
+                .history_source_stream_max_sequence(
+                    cursor.source_node_id(),
+                    cursor.source_epoch(),
+                    cursor.stream(),
+                )?
+                .and_then(|sequence| sequence.checked_add(1))
+                .unwrap_or_default();
+            let Some(last_missing) = cursor.sequence().checked_sub(1) else {
+                continue;
+            };
+            if first_missing > last_missing {
+                continue;
+            }
+            gaps.push(RepositoryReplicaGap {
+                source_node_id: cursor.source_node_id().to_owned(),
+                source_epoch: cursor.source_epoch(),
+                stream: cursor.stream().to_owned(),
+                first_sequence: first_missing,
+                last_sequence: last_missing,
+                start_unix_seconds: now_unix_seconds,
+                end_unix_seconds: now_unix_seconds,
+                permanent: true,
+                reason: Some("source_retention_expired".to_owned()),
+            });
+        }
+        Ok(gaps)
+    }
+
     pub(crate) fn local_source_gaps_for_segments(
         &mut self,
         source_node_id: &str,
         pending_segments: &[RepositoryReplicaSegment],
+    ) -> Vec<RepositoryReplicaGap> {
+        self.local_source_gaps_for_segments_with_additional(source_node_id, pending_segments, &[])
+    }
+
+    pub(crate) fn local_source_gaps_for_segments_with_additional(
+        &mut self,
+        source_node_id: &str,
+        pending_segments: &[RepositoryReplicaSegment],
+        additional_gaps: &[RepositoryReplicaGap],
     ) -> Vec<RepositoryReplicaGap> {
         // A retained source stream may resume immediately after a durable retention gap. The
         // receiver needs that existing evidence on the first delivery page to advance its
@@ -97,6 +209,14 @@ impl RepositoryReplicaRuntime {
                 && !retained_anchor_gaps.contains(&gap)
             {
                 retained_anchor_gaps.push(gap);
+            }
+        }
+        for gap in additional_gaps {
+            if gap.source_node_id == source_node_id
+                && retained_anchor_gaps.len() < MAX_SOURCE_GAPS_PER_REQUEST
+                && !retained_anchor_gaps.contains(gap)
+            {
+                retained_anchor_gaps.push(gap.clone());
             }
         }
         let keys = self
@@ -183,7 +303,11 @@ impl RepositoryReplicaRuntime {
                         last_sequence: gap.last_sequence,
                         start_unix_seconds: gap.start_unix_seconds,
                         end_unix_seconds: gap.end_unix_seconds,
-                        permanent: true,
+                        // A local delivery backpressure range proves that 101 missed a
+                        // predecessor. It does not prove source retention expiry or that every
+                        // Ready repository lacks the range; keep it recoverable until that
+                        // evidence is authenticated.
+                        permanent: false,
                         reason: None,
                     })
             }))
@@ -260,7 +384,7 @@ impl RepositoryReplicaRuntime {
                 super::backpressure_gap_stream(key).to_owned(),
                 gap.first_sequence,
                 gap.last_sequence,
-                true,
+                false,
                 None,
             ));
         }

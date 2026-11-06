@@ -67,6 +67,9 @@ fn public_direct_client_builder() -> reqwest::ClientBuilder {
     // the signed direct control-plane path on a bounded HTTP/1.1 exchange.
     reqwest::Client::builder()
         .http1_only()
+        // Cloudflare rejects requests without a User-Agent with HTTP 403/1010 at the
+        // edge before the signed XP request reaches the registered public endpoint.
+        .user_agent("xp")
         .redirect(reqwest::redirect::Policy::none())
 }
 

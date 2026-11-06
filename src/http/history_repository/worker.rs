@@ -1,8 +1,11 @@
+mod repair_progress;
+use repair_progress::remove_delivered_repair_segment_ids;
+mod acknowledgements;
 use super::super::AppState;
 use super::{RepositoryRepairRequest, RepositoryTombstoneAcknowledgementRequest};
 use crate::{
     control_plane_mesh::MeshPeerTarget,
-    history_sync::{CanonicalSegment, Cursor, RelayKeypair, SyncRecord},
+    history_sync::{CanonicalSegment, Cursor, RelayKeypair, SignedSegment, SyncRecord},
     state::history_repository::{
         control::{
             RepositoryLifecycle, RepositoryMemberRuntimePatch, RepositoryMemberRuntimeUpdate,
@@ -15,8 +18,15 @@ use crate::{
     },
     state::history_storage::SourceDeliveryAttempt,
 };
+#[cfg(test)]
+use acknowledgements::missing_tombstone_ack_peer;
+use acknowledgements::propagate_tombstone_acknowledgements;
+mod relay_identity;
 use axum::http::Method;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+pub(super) use relay_identity::cluster_relay_keypair;
+#[cfg(test)]
+use relay_identity::relay_keypair_from_cluster_material;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::{
@@ -25,7 +35,12 @@ use std::{
 };
 const REPOSITORY_REPLICATION_INTERVAL: Duration = Duration::from_secs(5);
 const SOURCE_COLLECTION_INTERVAL: Duration = Duration::from_secs(5);
-const REPOSITORY_REQUEST_BUDGET: Duration = Duration::from_secs(15);
+const REPOSITORY_REQUEST_BUDGET: Duration = Duration::from_secs(60);
+// One initial-source page may scan a large source snapshot, consume the direct request budget,
+// and still need to commit its receiver/checkpoint transaction on a multi-gigabyte SQLite store.
+// Keep the lifecycle worker alive long enough to finish that bounded unit while retaining a
+// finite escape hatch for a stuck storage operation.
+const REPOSITORY_MAINTENANCE_BUDGET: Duration = Duration::from_secs(300);
 const MAX_REPOSITORY_PEERS_PER_CYCLE: usize = 4;
 const READY_STABILITY_WINDOW: Duration = Duration::from_secs(5 * 60);
 const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0";
@@ -100,10 +115,43 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     let available_ready_repository_ids =
         available_ready_repository_ids(&ready_repository_ids, &peers);
     let known_source_node_ids = known_history_source_node_ids(state).await;
+    let active_peer_node_ids = known_source_node_ids
+        .iter()
+        .filter(|node_id| *node_id != &state.cluster.node_id)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let pruned_stale_checkpoints = repository_op(&state.repository_replica, |runtime| {
+        runtime.prune_initial_peer_backfill_checkpoints(&active_peer_node_ids)
+    })
+    .await?;
+    if pruned_stale_checkpoints > 0 {
+        tracing::info!(
+            count = pruned_stale_checkpoints,
+            "removed initial history backfill checkpoints for inactive peers"
+        );
+    }
     if !ready_repository_ids
         .iter()
         .any(|id| id == &state.cluster.node_id)
     {
+        return Ok(());
+    }
+    let normalized_local_gaps = repository_op(&state.repository_replica, |runtime| {
+        runtime.normalize_unproven_local_source_gaps()
+    })
+    .await?;
+    if normalized_local_gaps > 0 {
+        tracing::info!(
+            count = normalized_local_gaps,
+            "downgraded unproven local history gaps to recoverable"
+        );
+    }
+    let source_backfill_pending = backfill::initial_history_source_backfill_pending(state).await;
+    if source_backfill_pending {
+        // Initial source import is the only path that can close a historical hole. Do not let
+        // retention, summary rebuild, or anti-entropy maintenance take the same runtime mutex
+        // while those bounded source pages are being committed. The next replication tick
+        // resumes all maintenance after the current registered sources are complete.
         return Ok(());
     }
     let mut runtime = state.repository_replica.lock().await;
@@ -358,7 +406,12 @@ async fn publish_local_history_segment(
                     Err(error) => return Err(error),
                 }
             };
-            let gaps = runtime.local_source_gaps_for_segments(&state.cluster.node_id, &segments);
+            let receiver_repair_gaps = runtime.local_source_receiver_repair_gaps(&segments, now)?;
+            let gaps = runtime.local_source_gaps_for_segments_with_additional(
+                &state.cluster.node_id,
+                &segments,
+                &receiver_repair_gaps,
+            );
             Ok((segments, gaps))
         })?
     };
@@ -459,6 +512,37 @@ async fn publish_local_history_segment(
             Err(error) => {
                 delivery_succeeded = false;
                 delivery_outcome = "storage_error";
+                if let Some(RepositoryRuntimeError::Protocol(
+                    crate::history_sync::ProtocolError::SequenceGap { expected, actual },
+                )) = error.downcast_ref::<RepositoryRuntimeError>()
+                    && actual > expected
+                    && let Some(segment) = segments.iter().find(|segment| {
+                        SignedSegment::from_wire(&segment.wire).is_ok_and(|signed| {
+                            signed.canonical().first_cursor().sequence() == *actual
+                        })
+                    })
+                    && let Ok(signed) = SignedSegment::from_wire(&segment.wire)
+                {
+                    let cursor = signed.canonical().first_cursor();
+                    let mut runtime = state.repository_replica.lock().await;
+                    if let Err(gap_error) = repository_blocking(|| {
+                        runtime.record_local_source_delivery_gap(
+                            cursor.source_epoch(),
+                            cursor.stream(),
+                            *expected,
+                            actual.saturating_sub(1),
+                            now,
+                        )
+                    }) {
+                        tracing::warn!(
+                            error = %gap_error,
+                            stream = cursor.stream(),
+                            expected,
+                            actual,
+                            "failed to persist local history source sequence gap"
+                        );
+                    }
+                }
                 tracing::warn!(
                     repository = selected_repository_id,
                     error = %error,
@@ -608,6 +692,18 @@ async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyho
         )
     };
     if lifecycle != RepositoryLifecycle::Syncing {
+        if lifecycle == RepositoryLifecycle::Ready {
+            // Ready is not the end of source import. Keep draining registered source nodes after
+            // promotion so a slow source cannot leave a permanent historical hole in 101.
+            let progress =
+                backfill::backfill_initial_repository_from_local_history(state, now).await?;
+            if progress != backfill::InitialBackfillProgress::Complete {
+                tracing::debug!(
+                    ?progress,
+                    "history source initial backfill remains in progress"
+                );
+            }
+        }
         return Ok(());
     }
     // Catch-up validates a bounded point in time without resetting the stability window.
@@ -694,55 +790,6 @@ fn completed_replication_work(work: ReplicaWork, deep_verification_succeeded: bo
     } else {
         work
     }
-}
-fn remove_delivered_repair_segment_ids<'a>(
-    pending_segment_ids: &mut BTreeSet<String>,
-    delivered_wires: impl IntoIterator<Item = &'a [u8]>,
-) -> anyhow::Result<()> {
-    let delivered_ids = delivered_wires
-        .into_iter()
-        .map(|wire| hex::encode(Sha256::digest(wire)))
-        .collect::<Vec<_>>();
-    let delivered_set = delivered_ids.iter().cloned().collect::<BTreeSet<_>>();
-    if delivered_set.len() != delivered_ids.len() {
-        anyhow::bail!("repository repair response repeated a segment")
-    }
-    if delivered_set.is_empty() || !delivered_set.is_subset(pending_segment_ids) {
-        anyhow::bail!("repository repair response did not advance the requested segment set")
-    }
-    pending_segment_ids.retain(|segment_id| !delivered_set.contains(segment_id));
-    Ok(())
-}
-pub(super) fn cluster_relay_keypair(
-    state: &AppState,
-    node_id: &str,
-) -> anyhow::Result<RelayKeypair> {
-    if node_id.is_empty() {
-        anyhow::bail!("relay node id is empty");
-    }
-    let cluster_ca_key = state
-        .cluster_ca_key_pem
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("cluster CA key is not available"))?;
-    Ok(relay_keypair_from_cluster_material(
-        &state.cluster.cluster_id,
-        node_id,
-        cluster_ca_key,
-    ))
-}
-fn relay_keypair_from_cluster_material(
-    cluster_id: &str,
-    node_id: &str,
-    cluster_ca_key: &str,
-) -> RelayKeypair {
-    let mut hasher = Sha256::new();
-    hasher.update(CLUSTER_RELAY_KEY_CONTEXT);
-    hasher.update(cluster_id.as_bytes());
-    hasher.update([0]);
-    hasher.update(node_id.as_bytes());
-    hasher.update([0]);
-    hasher.update(cluster_ca_key.as_bytes());
-    RelayKeypair::from_private_key(hasher.finalize().into())
 }
 async fn replicate_peer(
     state: &AppState,
@@ -945,49 +992,4 @@ async fn replicate_peer(
         after_segment_id = Some(next);
     }
     Ok(deep_verification_available)
-}
-
-pub(super) async fn propagate_tombstone_acknowledgements(
-    state: &AppState,
-    peers: &[MeshPeerTarget],
-    ready_repository_ids: &[String],
-    acknowledgements: Vec<RepositoryTombstoneAcknowledgement>,
-) -> anyhow::Result<()> {
-    if acknowledgements.is_empty() {
-        return Ok(());
-    }
-    let body = serde_json::to_vec(&RepositoryTombstoneAcknowledgementRequest { acknowledgements })?;
-    let mut first_delivery_error =
-        missing_tombstone_ack_peer(ready_repository_ids, &state.cluster.node_id, peers).map(
-            |repository_id| anyhow::anyhow!("ready repository {repository_id} has no usable peer"),
-        );
-    for peer in peers
-        .iter()
-        .filter(|peer| peer.node_id != state.cluster.node_id)
-    {
-        if let Err(error) = repository_direct_request::<serde_json::Value>(
-            state,
-            peer,
-            Method::POST,
-            "/api/admin/_internal/history-repository/tombstone-ack",
-            body.clone(),
-        )
-        .await
-        {
-            first_delivery_error.get_or_insert(error.into());
-        }
-    }
-    first_delivery_error.map_or(Ok(()), Err)
-}
-
-fn missing_tombstone_ack_peer(
-    ready_repository_ids: &[String],
-    local_repository_id: &str,
-    peers: &[MeshPeerTarget],
-) -> Option<String> {
-    ready_repository_ids
-        .iter()
-        .filter(|repository_id| repository_id.as_str() != local_repository_id)
-        .find(|repository_id| !peers.iter().any(|peer| &peer.node_id == *repository_id))
-        .cloned()
 }

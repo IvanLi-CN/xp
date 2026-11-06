@@ -882,6 +882,19 @@ Notes:
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
 - Normal history connections use a 1 MiB retained-journal limit in every deployment mode.
+- Repository record and signed-segment BLOBs use a checksummed Zstandard level-1 envelope when
+  smaller.
+  Reads restore exact bytes before queries, export and hashing. Signed wires and keys are unchanged.
+  Existing JSON BLOBs migrate through transactional rowid pages with durable cursors.
+  The worker wakes every five seconds and processes at most eight pages within two seconds.
+  It releases the replica lock between pages.
+  Logs report `history repository payload encoding page committed` and saved bytes.
+  Read metadata keys `repository_payload_records_cursor_v1` and
+  `repository_payload_segments_cursor_v1`;
+  A value of `-1` means the table scan is complete. Incremental vacuum releases free pages.
+  There is no full VACUUM, second database, retention reduction or manual checkpoint.
+  systemd, OpenRC and Docker/Compose preserve the database and use this same path.
+  Builds without the decoder cannot read migrated payloads and must not be deployed over them.
 - A safe WAL reset releases idle allocation; active transactions and readers may exceed the limit.
 - Capacity still counts the physical database plus WAL and stops history writes when insufficient.
 - Do not delete WAL, manually checkpoint, run full `VACUUM`, or raise quota to bypass the guard.

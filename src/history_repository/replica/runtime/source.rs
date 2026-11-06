@@ -813,6 +813,28 @@ impl RepositoryReplicaRuntime {
         gap.start_unix_seconds = gap.start_unix_seconds.min(now_unix_seconds);
         gap.end_unix_seconds = gap.end_unix_seconds.max(now_unix_seconds);
     }
+
+    pub(crate) fn record_local_source_delivery_gap(
+        &mut self,
+        source_epoch: u64,
+        stream: &str,
+        first_sequence: u64,
+        last_sequence: u64,
+        now_unix_seconds: u64,
+    ) -> Result<(), RepositoryRuntimeError> {
+        if source_epoch != self.snapshot.local_source.epoch || first_sequence > last_sequence {
+            return Err(RepositoryRuntimeError::Storage(
+                "local source sequence gap identity is invalid".to_owned(),
+            ));
+        }
+        self.record_local_source_backpressure_gap(
+            stream,
+            first_sequence,
+            last_sequence,
+            now_unix_seconds,
+        );
+        self.persist_control_state()
+    }
 }
 
 fn backpressure_gap_stream(key: &str) -> &str {

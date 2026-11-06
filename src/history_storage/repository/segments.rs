@@ -582,6 +582,6 @@ fn segment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RepositoryHistorySeg
         source_epoch: u64::try_from(row.get::<_, i64>(4)?).unwrap_or(u64::MAX),
         stream: row.get(5)?,
         first_sequence: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(u64::MAX),
-        payload: row.get(7)?,
+        payload: payload_codec::decode_column(row, 7)?,
     })
 }

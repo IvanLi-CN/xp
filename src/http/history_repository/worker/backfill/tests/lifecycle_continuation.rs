@@ -267,6 +267,49 @@ async fn ready_peer_bootstrap_does_not_start_an_unqueued_local_export() {
 }
 
 #[tokio::test]
+async fn ready_repository_continues_registered_source_initial_backfill() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = fixture::app_state(directory.path());
+    let server = peer::Peer::start(&state, &[]).await;
+    server.register(&state).await;
+    let now = chrono::Utc::now().timestamp() as u64;
+    let local = RepositoryNodeId::try_from(state.cluster.node_id.clone()).unwrap();
+    let identity = derived_repository_identity(&state, local.clone()).unwrap();
+    let member = RepositoryMember::new(identity, RepositoryCapacity::default()).unwrap();
+    let mut membership = RepositoryMembership::new(vec![member]).unwrap();
+    membership
+        .mark_catch_up_complete(&local, now - 300)
+        .unwrap();
+    membership.mark_ready(&local, now).unwrap();
+    {
+        let mut store = state.store.lock().await;
+        store.state_mut().repository_membership = Some(membership);
+        store.save().unwrap();
+    }
+
+    // The local repository is already Ready, so this call exercises the post-promotion source
+    // drain rather than the Syncing-only lifecycle catch-up path.
+    super::super::super::advance_local_repository_lifecycle(&state, now)
+        .await
+        .unwrap();
+
+    let requests = server.requests().await;
+    assert!(
+        requests
+            .iter()
+            .any(|path| path.contains("/initial-backfill"))
+    );
+    assert!(
+        state
+            .repository_replica
+            .lock()
+            .await
+            .initial_peer_backfill_checkpoint("registered-syncing-peer")
+            .is_some_and(|checkpoint| checkpoint.completed)
+    );
+}
+
+#[tokio::test]
 async fn syncing_local_tombstone_receipt_survives_runtime_reconcile_and_restart() {
     let directory = tempfile::tempdir().unwrap();
     let state = fixture::app_state(directory.path());

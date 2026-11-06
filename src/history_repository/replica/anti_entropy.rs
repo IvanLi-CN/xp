@@ -655,6 +655,19 @@ impl TombstoneLedger {
         }
     }
 
+    pub(crate) fn remove_source_streams_with_suffix(
+        &mut self,
+        source_node_id: &str,
+        source_epoch: u64,
+        stream_suffix: &str,
+    ) {
+        self.entries.retain(|key, _| {
+            !(key.source_node_id == source_node_id
+                && key.source_epoch == source_epoch
+                && key.stream.ends_with(stream_suffix))
+        });
+    }
+
     pub(crate) fn from_checkpoint(
         checkpoint: TombstoneLedgerCheckpoint,
     ) -> Result<Self, ReplicaError> {
