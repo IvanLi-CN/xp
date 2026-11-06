@@ -692,3 +692,6 @@ fn ordinary_backfill_places_tombstones_in_the_first_collector_phase() {
 
 #[path = "tests/capacity_sync.rs"]
 mod capacity_sync;
+
+#[path = "tests/source_gap_target.rs"]
+mod source_gap_target;

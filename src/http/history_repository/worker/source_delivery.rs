@@ -304,3 +304,27 @@ where
     }
     Ok(())
 }
+
+pub(super) fn source_gap_page(
+    runtime: &mut crate::state::history_repository::replica::RepositoryReplicaRuntime,
+    source_node_id: &str,
+    selected_repository_id: &str,
+    segments: &[crate::state::history_repository::replica::RepositoryReplicaSegment],
+    now: u64,
+) -> Result<
+    Vec<crate::state::history_repository::replica::RepositoryReplicaGap>,
+    RepositoryRuntimeError,
+> {
+    // Only this receiver's state can justify repairing this receiver. A former repository's
+    // absent local watermark says nothing about the remote collector's retained prefix.
+    let repair_gaps = if selected_repository_id == source_node_id {
+        runtime.local_source_receiver_repair_gaps(segments, now)?
+    } else {
+        Vec::new()
+    };
+    Ok(runtime.local_source_gaps_for_segments_with_additional(
+        source_node_id,
+        segments,
+        &repair_gaps,
+    ))
+}

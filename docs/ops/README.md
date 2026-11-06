@@ -885,6 +885,9 @@ Notes:
   baseline. Ordinary source nodes and former repositories do not import every peer baseline; a
   newly joined node must not suspend their durable outbox replay. This applies to systemd, OpenRC
   and Docker/Compose senders and does not mark any checkpoint complete.
+- 历史源向远端仓库交付时，不得根据源节点本机 receiver 缺少水位或记录而推断远端存在永久缺口。
+  本机 receiver repair gap 仅能用于本机接收重放；远端仍使用已持久化的源缺口证据和严格原始签名链。
+  曾担任仓库的普通源节点同样适用，不能通过重新赋予仓库角色绕过这一边界。
 - Source batch receive remains atomic. A signed sequence-gap or hash-chain rejection of a
   mixed batch without gap evidence triggers bounded retries by independent stream: at most
   eight requests within fifteen seconds, retaining each original wire and stream order.
