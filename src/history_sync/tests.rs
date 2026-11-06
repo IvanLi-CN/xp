@@ -237,6 +237,69 @@ fn receiver_accepts_a_stale_replay_after_the_recent_hash_window_is_evicted() {
 }
 
 #[test]
+fn streamed_replay_proof_preserves_anchor_chain_and_decode_failures() {
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut receiver = receiver(SchemaCatalog::new([("runtime.v1".to_owned(), 1)]));
+    let first = signed_segment(&key, 0, vec![record(b"first", false)], None);
+    let second = signed_segment(
+        &key,
+        1,
+        vec![record(b"second", false)],
+        Some(first.segment_hash().unwrap()),
+    );
+    let third = signed_segment(
+        &key,
+        2,
+        vec![record(b"third", false)],
+        Some(second.segment_hash().unwrap()),
+    );
+    for segment in [&first, &second, &third] {
+        receiver.accept(segment, &identity).unwrap();
+    }
+    let future = signed_segment(
+        &key,
+        3,
+        vec![record(b"future", false)],
+        Some(third.segment_hash().unwrap()),
+    );
+    let proof = receiver
+        .verified_local_source_replay_streams(
+            [future.clone(), third.clone(), first.clone(), second.clone()]
+                .into_iter()
+                .map(Ok),
+        )
+        .unwrap();
+    assert_eq!(proof.into_iter().collect::<Vec<_>>(), ["node-a:7:runtime"]);
+    for page in [
+        vec![first.clone(), third.clone()],
+        vec![first.clone(), second.clone()],
+        vec![
+            signed_segment(&key, 0, vec![record(b"fork", false)], None),
+            second.clone(),
+            third.clone(),
+        ],
+    ] {
+        assert!(
+            receiver
+                .verified_local_source_replay_streams(page.into_iter().map(Ok))
+                .unwrap()
+                .is_empty()
+        );
+    }
+    assert!(matches!(
+        receiver.verified_local_source_replay_streams([
+            Ok(first),
+            Ok(second),
+            Ok(third),
+            Ok(future),
+            Err(ProtocolError::InvalidWire),
+        ]),
+        Err(ProtocolError::InvalidWire)
+    ));
+}
+
+#[test]
 fn receiver_accepts_an_explicit_retained_anchor_without_marking_the_chain_verified() {
     let key = signing_key();
     let identity = identity(&key);

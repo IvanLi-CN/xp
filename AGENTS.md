@@ -175,6 +175,8 @@
 - XP source-delivery history is a durable SQLite outbox with a fixed 128 MiB or 20,000-segment cap.
   Live capture and replay release their duplicate in-memory wire window before receiver rollback
   checkpoints; SQLite retains unacknowledged wires until real ACK, while JSON fallback keeps them.
+  Local replay proofs decode one original wire at a time and retain only chain metadata;
+  every wire must decode successfully, including entries beyond the receiver watermark.
   At 80% either dimension it persists `capacity_suspended`, reports `journal_capacity_guard`, and
   stops source capture without advancing the cursor or deleting unacknowledged rows; ACK drain
   clears the marker only below 60% on both dimensions. Replay pages are limited to 256 segments and
