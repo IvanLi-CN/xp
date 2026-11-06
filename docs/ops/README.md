@@ -1102,6 +1102,8 @@ Notes:
   - V3 peers explicitly request `summary_version=3`; predecessors keep v1 fallback.
   - Signed membership capabilities never wait for the history replica lock.
     A busy replica withholds only its optional ready-summary capability.
+  - Live capture and replay release duplicate wire windows before receiver rollback checkpoints.
+    SQLite retains unacknowledged wires until real ACK; JSON fallback retains its only copy.
   - The five-second worker rebuilds bounded pages without copying history or resetting progress.
   - The last dirty-block page publishes completion without requiring an idle tick.
   - Ready local standbys stay eligible; failed standbys retry the HTTPS primary next cycle.
