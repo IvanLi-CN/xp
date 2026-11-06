@@ -881,6 +881,10 @@ Notes:
   coverage, watermarks, gaps, clock skew and `complete` / `partial` / `local_only` query quality
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
+- Linux/glibc XP sets a two-arena allocator limit before creating Tokio workers, preserving
+  an explicit `MALLOC_ARENA_MAX` override. musl and other allocators keep native behavior.
+  `TOKIO_WORKER_THREADS` remains the runtime override for nodes whose visible CPU count exceeds
+  their intended control-plane concurrency.
 - Normal history connections use a 1 MiB retained-journal limit in every deployment mode.
 - Repository record and signed-segment BLOBs use a checksummed Zstandard level-1 envelope when
   smaller.

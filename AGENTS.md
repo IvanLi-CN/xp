@@ -77,6 +77,9 @@
   64 pages after ordinary commits and 512 pages after each payload migration page. A zero budget
   performs no work; it never enables SQLite's unbounded zero-budget behavior.
 
+  Linux/glibc XP startup caps allocator arenas at two before creating Tokio workers unless
+  the operator supplies MALLOC_ARENA_MAX. musl and other allocators retain their native behavior.
+
   SQLite releases idle WAL at normal reset with a 1 MiB retained-journal limit.
 
   Repository record and signed-segment BLOBs use a checksummed Zstandard level-1 envelope when

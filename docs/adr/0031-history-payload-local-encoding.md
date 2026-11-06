@@ -15,6 +15,8 @@
 SQLite 存储边界使用带版本、原始长度及 Zstandard 校验和的本地 envelope。小于 512 字节、超过 16 MiB 或无收益的 payload 保留原字节。
 
 压缩复用一个互斥保护的 bulk context，窗口限制为 64 KiB，避免后台线程反复分配 streaming workspace。
+Linux/glibc 启动时在 Tokio worker 创建前默认限制两个 allocator arena，显式 `MALLOC_ARENA_MAX` 优先。
+musl 与其他 allocator 保持原行为；该限制针对并发任务释放 payload 后仍由 glibc 保留的堆空间。
 
 每行仍是独立的带校验和 frame，不共享字典或解码状态。
 
