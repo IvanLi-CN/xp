@@ -64,8 +64,15 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   后台每五秒最多八页、共享两秒预算，页间释放 replica 锁。
   迁移不改计数、保留期、源 epoch、水位或原始签名，不复制整库，只通过有界 incremental vacuum 释放空间。
   systemd、OpenRC、Docker/Compose 使用同一路径，不允许旧构建读取已迁移数据库。
-- 仓库默认配额 10 GiB；所在文件系统可用空间低于 256 MiB 时停止历史写入，
-  并报告 degraded。
+- 仓库默认配额 10 GiB；所在文件系统可用空间低于 256 MiB 时停止历史写入，并报告 degraded。
+  root 运维命令 `xp-ops xp history-repository-quota --quota-bytes BYTES` 默认仅预览；
+  `--apply --yes` 使用当前节点身份签名后持久化本地物理数据库/WAL 写入准入配额。
+  其他节点身份不得修改本节点配额；Web/Bearer 管理员不获得此操作权限。
+  容器没有 xp.env 时必须指定 `--data-dir /var/lib/xp/data`。
+  systemd、OpenRC、Docker/Compose 重启保留配额，通过既有容量同步发布到 Raft。
+  下调不删除已保留历史或未 ACK outbox；已用空间达到新配额时停止新增历史写入。
+  配额是事务前准入，不能充当文件系统硬上限；外部体积要求须为 WAL、SHM 和事务预留余量。
+  例如总文件不得超过十进制 10 GB 时可设为 9,000,000,000 字节，不能把默认 10 GiB 当作 10 GB。
 - 仓库保存 7 天分钟级、随后 90 天五分钟级、随后小时级，默认最长两年；
   普通节点的既有窗口不变。
 - 每条流使用 `(source_node_id, source_epoch, stream, sequence)` 单调游标；

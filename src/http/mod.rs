@@ -1177,6 +1177,10 @@ pub fn build_router_with_mesh_telemetry(
             post(history_repository::recovery::admin_internal_history_repository_recovery),
         )
         .route(
+            "/_internal/history-repository/quota",
+            post(history_repository::quota::admin_internal_history_repository_quota),
+        )
+        .route(
             "/_internal/history-repository/recovery-preflight",
             get(history_repository::recovery_preflight::admin_internal_recovery_preflight),
         )

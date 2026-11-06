@@ -912,6 +912,20 @@ Notes:
   Builds without the decoder cannot read migrated payloads and must not be deployed over them.
 - A safe WAL reset releases idle allocation; active transactions and readers may exceed the limit.
 - Capacity still counts the physical database plus WAL and stops history writes when insufficient.
+- Operators may preview a persistent local admission quota with
+  `sudo xp-ops xp history-repository-quota --quota-bytes 9000000000 --dry-run`, then apply the
+  reviewed value with the same command and `--apply --yes` instead of `--dry-run`.
+  Containers without xp.env use
+  `docker exec xp-101 xp-ops xp history-repository-quota` with
+  `--data-dir /var/lib/xp/data --quota-bytes 9000000000 --dry-run`
+  (replace `xp-101` with the selected container); apply still requires `--apply --yes`.
+  Only the local node's signed identity may set its quota; a remote member or administrator
+  Bearer token cannot do so. The command does not edit SQLite directly or evict retained history
+  or unacknowledged outbox rows. A quota below current usage stops new history writes.
+  systemd, OpenRC and Docker/Compose preserve this setting across restart and publish capacity
+  through normal Raft-backed capacity synchronization. Default 10 GiB is 10,737,418,240 bytes,
+  exceeding decimal 10 GB. Reserve headroom for WAL/SHM and an admitted transaction when choosing
+  a value below an external size limit; this is an admission guard, not an OS hard quota.
 - Do not delete WAL, manually checkpoint, run full `VACUUM`, or raise quota to bypass the guard.
 - `history.sqlite3.diagnostics.json` is a private, bounded operational record for investigating
   slow local repository reads and maintenance. It is atomically replaced by a bounded, coalescing

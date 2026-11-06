@@ -66,7 +66,8 @@ pub(super) use backfill::{
 };
 pub(super) use backfill::{RepositoryInitialBackfillPage, initial_backfill_page_stable};
 use backfill::{advance_initial_catch_up, pull_peer_initial_history};
-use blocking::{repository_blocking, repository_op};
+pub(super) use blocking::repository_blocking;
+use blocking::repository_op;
 use convergence::update_local_replica_convergence;
 #[cfg(test)]
 use deep_repair::deep_repair_requires_tiered_backfill;

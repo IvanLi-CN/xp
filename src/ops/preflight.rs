@@ -98,9 +98,11 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
             // filesystem state.
             Ok(())
         }
-        Command::Xp(XpCommand::HistoryRepositoryRecover(_)) => {
-            // Runtime command: it signs a local request and persists the recovery generation in
-            // the running XP control snapshot only after the fingerprint checks pass.
+        Command::Xp(
+            XpCommand::HistoryRepositoryRecover(_) | XpCommand::HistoryRepositoryQuota(_),
+        ) => {
+            // Runtime commands use the local signed identity. Confirmation and persistence are
+            // checked by the running XP handler; no host service or deployment is changed.
             Ok(())
         }
         Command::Xp(XpCommand::RecoverSingleNode(_args)) => {

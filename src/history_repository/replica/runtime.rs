@@ -951,13 +951,33 @@ pub(crate) fn source_epoch(cluster_id: &str, node_id: &str) -> u64 {
     let bytes: [u8; 32] = hasher.finalize().into();
     (u64::from_be_bytes(bytes[..8].try_into().expect("SHA-256 prefix")) & i64::MAX as u64).max(1)
 }
-
 #[cfg(test)]
 #[path = "runtime/duplicate_gap_tests.rs"]
 mod duplicate_gap_tests;
 #[cfg(test)]
+#[path = "runtime/page_replay_tests.rs"]
+mod page_replay_tests;
+#[cfg(test)]
+#[path = "runtime/peer_backfill_tests.rs"]
+mod peer_backfill_tests;
+#[cfg(test)]
+#[path = "runtime/query_budget_tests.rs"]
+mod query_budget_tests;
+#[cfg(test)]
+#[path = "runtime/query_tests.rs"]
+mod query_tests;
+#[cfg(test)]
+#[path = "runtime/quota_tests.rs"]
+mod quota_tests;
+#[cfg(test)]
+#[path = "runtime/repair_batch_tests.rs"]
+mod repair_batch_tests;
+#[cfg(test)]
 #[path = "runtime/repair_selection_tests.rs"]
 mod repair_selection_tests;
+#[cfg(test)]
+#[path = "runtime/repair_tests.rs"]
+mod repair_tests;
 #[cfg(test)]
 #[path = "runtime/retention_integrity_tests.rs"]
 mod retention_integrity_tests;
@@ -978,23 +998,3 @@ mod sync_tests;
 #[cfg(test)]
 #[path = "runtime/tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "runtime/page_replay_tests.rs"]
-mod page_replay_tests;
-#[cfg(test)]
-#[path = "runtime/peer_backfill_tests.rs"]
-mod peer_backfill_tests;
-#[cfg(test)]
-#[path = "runtime/repair_batch_tests.rs"]
-mod repair_batch_tests;
-#[cfg(test)]
-#[path = "runtime/repair_tests.rs"]
-mod repair_tests;
-
-#[cfg(test)]
-#[path = "runtime/query_budget_tests.rs"]
-mod query_budget_tests;
-#[cfg(test)]
-#[path = "runtime/query_tests.rs"]
-mod query_tests;
