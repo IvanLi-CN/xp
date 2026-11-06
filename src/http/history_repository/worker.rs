@@ -293,6 +293,30 @@ async fn publish_local_history_segment(
         .map_err(|_| anyhow::anyhow!("derive local history source identity"))?;
     let signing_key = super::derived_repository_signing_key(state, identity.node_id().as_str())
         .map_err(|_| anyhow::anyhow!("derive local history source signing key"))?;
+    let (primary_repository_id, selected_repository_id) = if let Some(collector_repository_ids) =
+        collector_repository_ids
+    {
+        let assignment = rendezvous_collectors(&state.cluster.node_id, collector_repository_ids)?;
+        let primary_repository_id = assignment.primary().to_owned();
+        let selected_repository_id = state
+            .repository_replica
+            .lock()
+            .await
+            .local_source_collector(&primary_repository_id, assignment.standby());
+        let selected_repository_id = source_delivery::avoid_local_source_fallback(
+            selected_repository_id,
+            &primary_repository_id,
+            &state.cluster.node_id,
+            ready_repository_ids
+                .iter()
+                .any(|id| id == &state.cluster.node_id),
+        );
+        (primary_repository_id, selected_repository_id)
+    } else {
+        // A Ready local repository can drain its own durable outbox even when every remote
+        // collector lacks usable metadata. Keep the page lossless and retry remote delivery later.
+        (state.cluster.node_id.clone(), state.cluster.node_id.clone())
+    };
     let mut capture_paused = !capture_live
         || repository_op(&state.repository_replica, |runtime| {
             runtime.source_delivery_capture_paused()
@@ -404,12 +428,13 @@ async fn publish_local_history_segment(
                     Err(error) => return Err(error),
                 }
             };
-            let receiver_repair_gaps = runtime.local_source_receiver_repair_gaps(&segments, now)?;
-            let gaps = runtime.local_source_gaps_for_segments_with_additional(
+            let gaps = source_delivery::source_gap_page(
+                &mut runtime,
                 &state.cluster.node_id,
+                &selected_repository_id,
                 &segments,
-                &receiver_repair_gaps,
-            );
+                now,
+            )?;
             // SQLite owns the pending wires durably. Release the duplicate window for both
             // live capture and replay before receiver rollback checkpoints clone source state.
             // JSON fallback retains its only copy; real ACKs still remove SQLite journal rows.
@@ -433,30 +458,6 @@ async fn publish_local_history_segment(
         tracing::debug!("history source capture queued while no Ready collector is available");
         return Ok(false);
     }
-    let (primary_repository_id, selected_repository_id) = if let Some(collector_repository_ids) =
-        collector_repository_ids
-    {
-        let assignment = rendezvous_collectors(&state.cluster.node_id, collector_repository_ids)?;
-        let primary_repository_id = assignment.primary().to_owned();
-        let selected_repository_id = state
-            .repository_replica
-            .lock()
-            .await
-            .local_source_collector(&primary_repository_id, assignment.standby());
-        let selected_repository_id = source_delivery::avoid_local_source_fallback(
-            selected_repository_id,
-            &primary_repository_id,
-            &state.cluster.node_id,
-            ready_repository_ids
-                .iter()
-                .any(|id| id == &state.cluster.node_id),
-        );
-        (primary_repository_id, selected_repository_id)
-    } else {
-        // A Ready local repository can drain its own durable outbox even when every remote
-        // collector lacks usable metadata. Keep the page lossless and retry remote delivery later.
-        (state.cluster.node_id.clone(), state.cluster.node_id.clone())
-    };
     let selected_peer = peers
         .iter()
         .find(|peer| peer.node_id == selected_repository_id);

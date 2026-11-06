@@ -612,3 +612,8 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 - `docs/specs/reality-fallback-control-plane-mesh/SPEC.md`
 - `docs/agents/issue-tracker.md`
 - Issue #248: https://github.com/IvanLi-CN/xp/issues/248
+
+向远端仓库投递源日志时，本机 receiver 的缺失状态不能作为远端缺口的证据，
+也不能生成随远端请求发送的永久 receiver repair gap。
+此类自动修复证据仅限接收目标确为本机的重放；显式持久化的源缺口仍按原有完整批次语义交付，
+不允许独立流 ACK 清除其他流的缺口。

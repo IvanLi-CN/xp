@@ -55,6 +55,8 @@
   public HTTPS `api_base_url` only and do not select or probe Mesh or Reverse Mesh. Source delivery
   also uses only that public HTTPS path; a transport failure leaves the durable outbox pending for
   the next bounded retry and never opens a history Mesh relay.
+  Receiver repair gaps inferred from local repository state are local-replay evidence only; remote
+  source delivery never treats a missing local receiver baseline as a gap at its collector.
 
   A legacy initial-backfill page already queued in the live source journal retains its original
   signed stream. Recovery verifies and durably imports missing predecessors over registered public
