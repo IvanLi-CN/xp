@@ -119,48 +119,65 @@ impl super::SegmentReceiver {
     /// retaining the proof for older entries whose hashes are outside the recent window.
     pub(crate) fn verified_local_source_replay_streams(
         &self,
-        segments: &[SignedSegment],
-    ) -> BTreeSet<String> {
-        let mut grouped = BTreeMap::<String, Vec<&SignedSegment>>::new();
+        segments: impl IntoIterator<Item = Result<SignedSegment, ProtocolError>>,
+    ) -> Result<BTreeSet<String>, ProtocolError> {
+        struct ReplayProof {
+            first: Cursor,
+            last_sequence: u64,
+            previous_hash: Option<[u8; 32]>,
+            hash: [u8; 32],
+        }
+        // Retain only chain metadata. Decoded record payloads are released after each wire,
+        // rather than keeping a second complete delivery page alive during verification.
+        let mut grouped = BTreeMap::<String, Vec<ReplayProof>>::new();
         for segment in segments {
+            let segment = segment?;
             let cursor = segment.canonical.first_cursor();
+            let Some(progress) = self.streams.get(&cursor.stream_key()) else {
+                continue;
+            };
+            // Future segments sort after any possible watermark anchor and cannot be part
+            // of its replay prefix. Ordinary receive still verifies their original wires.
+            if cursor.sequence > progress.last_sequence {
+                continue;
+            }
             let key = format!(
                 "{}:{}:{}",
                 cursor.source_node_id, cursor.source_epoch, cursor.stream
             );
-            grouped.entry(key).or_default().push(segment);
+            grouped.entry(key).or_default().push(ReplayProof {
+                first: cursor.clone(),
+                last_sequence: segment.canonical.last_cursor.sequence,
+                previous_hash: segment.canonical.previous_segment_hash(),
+                hash: segment.segment_hash()?,
+            });
         }
         let mut verified = BTreeSet::new();
         for (key, mut stream_segments) in grouped {
             let Some(first) = stream_segments.first() else {
                 continue;
             };
-            let cursor = first.canonical.first_cursor();
+            let cursor = &first.first;
             let Some(progress) = self.streams.get(&cursor.stream_key()) else {
                 continue;
             };
-            stream_segments.sort_by_key(|segment| segment.canonical.first_cursor().sequence);
+            stream_segments.sort_by_key(|segment| segment.first.sequence);
             let Some(anchor_index) = stream_segments.iter().position(|segment| {
-                let canonical = &segment.canonical;
-                canonical.last_cursor.sequence == progress.last_sequence
-                    && segment
-                        .segment_hash()
-                        .is_ok_and(|hash| hash == progress.last_segment_hash)
+                segment.last_sequence == progress.last_sequence
+                    && segment.hash == progress.last_segment_hash
             }) else {
                 continue;
             };
             let prefix = &stream_segments[..=anchor_index];
             let contiguous = prefix.windows(2).all(|pair| {
-                let previous = &pair[0].canonical;
-                let current = &pair[1].canonical;
-                previous.last_cursor.sequence.checked_add(1) == Some(current.first_cursor.sequence)
-                    && current.previous_segment_hash() == pair[0].segment_hash().ok()
+                pair[0].last_sequence.checked_add(1) == Some(pair[1].first.sequence)
+                    && pair[1].previous_hash == Some(pair[0].hash)
             });
             if contiguous {
                 verified.insert(key);
             }
         }
-        verified
+        Ok(verified)
     }
 }
 

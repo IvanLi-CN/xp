@@ -37,13 +37,12 @@ impl RepositoryReplicaRuntime {
         self.ensure_receiver()?;
         let signed_segments = segments
             .iter()
-            .map(|segment| SignedSegment::from_wire(&segment.wire))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|segment| SignedSegment::from_wire(&segment.wire));
         Ok(self
             .receiver
             .as_ref()
             .expect("receiver initialized")
-            .verified_local_source_replay_streams(&signed_segments))
+            .verified_local_source_replay_streams(signed_segments)?)
     }
 
     #[allow(clippy::too_many_arguments)]
