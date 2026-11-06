@@ -888,6 +888,8 @@ Notes:
 - 历史源向远端仓库交付时，不得根据源节点本机 receiver 缺少水位或记录而推断远端存在永久缺口。
   本机 receiver repair gap 仅能用于本机接收重放；远端仍使用已持久化的源缺口证据和严格原始签名链。
   曾担任仓库的普通源节点同样适用，不能通过重新赋予仓库角色绕过这一边界。
+- sequence summary 与 payload encoding 后台维护只在当前仓库成员运行。
+  普通源和已退出仓库角色的节点继续交付持久化队列，保留旧归档供恢复读取，避免反复迁移争用资源。
 - Source batch receive remains atomic. A signed sequence-gap or hash-chain rejection of a
   mixed batch without gap evidence triggers bounded retries by independent stream: at most
   eight requests within fifteen seconds, retaining each original wire and stream order.

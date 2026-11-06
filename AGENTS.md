@@ -57,6 +57,8 @@
   the next bounded retry and never opens a history Mesh relay.
   Receiver repair gaps inferred from local repository state are local-replay evidence only; remote
   source delivery never treats a missing local receiver baseline as a gap at its collector.
+  Background sequence summaries and payload encoding run only on configured repository members;
+  former repositories keep their retained archive readable without recurring metadata rewrites.
 
   A legacy initial-backfill page already queued in the live source journal retains its original
   signed stream. Recovery verifies and durably imports missing predecessors over registered public
