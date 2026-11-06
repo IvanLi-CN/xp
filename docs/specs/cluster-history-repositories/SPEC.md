@@ -46,6 +46,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 ### MUST
 
+- Linux/glibc XP 在创建 Tokio worker 前将 allocator arena 默认限制为两个，保留显式
+  `MALLOC_ARENA_MAX`；musl 与其他 allocator 不调用 glibc 配置入口。
 - 签名 membership 能力检查不得等待 history replica 锁；锁忙时仅暂不广告可选的 ready-summary 能力。
 - SQLite live capture 与 replay 在接收方建立回滚快照前释放重复 wire window；只有真实 ACK 删除 journal，JSON fallback 保留唯一副本。
 - 本地重放证明逐条解码原始 wire，仅保留链证明元数据；包括超出 receiver watermark 的条目在内，全部 wire 解码成功后才能接受证明。
