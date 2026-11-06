@@ -895,7 +895,9 @@ Notes:
   普通源和已退出仓库角色的节点继续交付持久化队列，保留旧归档供恢复读取，避免反复迁移争用资源。
 - Source batch receive remains atomic. A signed sequence-gap or hash-chain rejection of a
   mixed batch without gap evidence triggers bounded retries by independent stream: at most
-  eight requests within fifteen seconds, retaining each original wire and stream order.
+  eight requests within one shared 60-second repository request budget, retaining each original
+  wire and stream order. A legitimate WAN ACK taking longer than fifteen seconds remains eligible;
+  the deadline never resets between retries.
   Tombstones run first; their failure, transport ambiguity, authentication failure or storage
   failure stops recovery. Successful streams receive real ACKs while missing-prefix streams
   stay queued. This does not repair an expired prefix or authorize permanent-gap markers.

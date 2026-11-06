@@ -278,7 +278,7 @@ where
     // A rejected mixed page must not pin unrelated streams forever. Bound the recovery work,
     // preserve each original stream's order, and finish tombstones before trying live data.
     // Transport ambiguity, authentication and storage failures never authorize this recovery.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let deadline = tokio::time::Instant::now() + REPOSITORY_REQUEST_BUDGET;
     for ((live, _, _, _), indices) in groups.into_iter().take(8) {
         let page = indices
             .iter()

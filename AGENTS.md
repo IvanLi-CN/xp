@@ -209,8 +209,9 @@
   1 MiB wire data, with tombstone-first live-stream rotation through a replay cursor that is
   written durably in the ACK transaction and a stable unacknowledged window across retries. The
   public source batch receiver stays atomic. A signed sequence-gap or hash-chain rejection may
-  trigger at most eight independent stream retries from that rejected batch within fifteen
-  seconds, only when no gap evidence is attached. Tombstones run first and a failed tombstone,
+  trigger at most eight independent stream retries from that rejected batch within the shared
+  60-second repository request budget, only when no gap evidence is attached. Tombstones run first
+  and a failed tombstone,
   ambiguous transport, authentication or storage failure stops recovery. Only real receipts
   remove source rows; missing prefixes remain pending without creating permanent gaps.
   The Resource Alert path reports fixed XP PSS
