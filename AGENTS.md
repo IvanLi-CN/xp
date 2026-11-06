@@ -143,6 +143,8 @@
   Repository runtime status reads exact record and segment counts from a durable singleton updated
   by insert/delete triggers in each history transaction; existing databases backfill it once at
   startup. Status requests do not traverse retained history tables and run off Tokio workers.
+  Capacity synchronization checks configured repository membership before locking the replica or
+  querying SQLite; ordinary sources and former repositories do not advertise archive capacity.
   A `history_truncated=true` initial-backfill repair page may cross an existing source watermark
   once per stream over an expired retained prefix. One page may require multiple wire-bounded
   responses; each response has its own content digest, while the per-stream allowance remains until

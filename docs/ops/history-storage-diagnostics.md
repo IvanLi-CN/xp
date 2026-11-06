@@ -287,6 +287,12 @@ docker compose run --rm --no-deps \
 
 Do not start XP solely to collect evidence.
 
+容量同步会在获取 replica 锁及查询 SQLite 前检查当前仓库成员身份；普通源节点和已退出仓库的节点不执行这项容量查询。
+
+此规则覆盖 systemd、OpenRC 和 Docker/Compose，保留旧归档供恢复使用。
+
+慢操作计时包含等待共享数据库连接的时间。诊断文件会保留前一进程的慢事件；对照事件时间与当前进程启动时间后，再判断它是否解释当前请求延迟。不要仅凭操作名称推断缺少索引。
+
 Do not delete `history.sqlite3`, its WAL, or the diagnostic file while collecting evidence. The
 diagnostic file is safe to omit from a normal incident report if it contains no in-flight,
 interrupted, or slow event; that is an evidence gap, not proof that SQLite was healthy.

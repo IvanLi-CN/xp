@@ -1,10 +1,23 @@
 use super::*;
 
 pub(super) async fn sync_local_repository_capacity(state: &AppState) -> anyhow::Result<()> {
+    let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
+    let configured = {
+        let store = state.store.lock().await;
+        store
+            .state()
+            .repository_membership
+            .as_ref()
+            .is_some_and(|membership| membership.repository(&node_id).is_some())
+    };
+    // Former repositories retain their archive for recovery, but have no capacity to advertise.
+    // Check the role before waiting for the runtime or touching that archive's SQLite connection.
+    if !configured {
+        return Ok(());
+    }
     let mut runtime = state.repository_replica.lock().await;
     let capacity = repository_blocking(|| runtime.runtime_capacity())?;
     drop(runtime);
-    let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let capacity_is_current = {
         let store = state.store.lock().await;
         store
