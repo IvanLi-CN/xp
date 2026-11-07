@@ -2,6 +2,9 @@
 
 ## 实现摘要
 
+升级事务备份清理持有原文件描述符，避免按二进制总体积累加内存；后续 unlink 失败时流式恢复此前删除的文件，保留原权限。Linux 子进程回归在 64 MiB 数据段上限下清理两份 128
+MiB 稀疏备份，并保留删除失败恢复及符号链接拒绝测试。
+
 - `src/upgrade_job.rs` 定义本机 upgrade request/status 持久化模型、状态读写、host/container 支持检测与 start API helper。
 - `src/http/mod.rs` 新增 admin-only `GET /api/admin/upgrade/status` 与 `POST /api/admin/upgrade/start`。
 - `xp-ops _upgrade-runner` 读取 `${XP_DATA_DIR}/upgrade/request.json`，调用既有

@@ -4,7 +4,7 @@
 
 None
 
-## 背景 / 问题陈述
+## Context and Scope
 
 - `#n5mtq` 已经让 Web 顶栏展示当前 `xp` 版本并检查 stable GitHub Release，但更新发现后的行动仍需要离开 UI 手动执行。
 - `#ap63t` 已经把升级能力统一到 `xp-ops upgrade`，包含 release 锁定、`xp-ops` 自升级续跑、`xp` 替换、`xray` 静态配置收敛与失败回滚。
@@ -49,7 +49,10 @@ None
 - Docker image pull / Compose restart 自动化。
 - Web 回滚按钮。
 
-## 需求（Requirements）
+## Requirements
+
+- REQ-UPGRADE-BOUNDED-BACKUP-CLEANUP：所有 host-managed
+  升级收尾以文件描述符保留备份，不得按备份体积累积内存；后续删除失败时流式恢复，保留内容、权限与失败传播语义。
 
 ### MUST
 
@@ -121,6 +124,7 @@ Under `${XP_DATA_DIR}`:
 - `support.storage` 是可选的加法字段，分别返回安装目录和下载工作区的可用空间、可回收历史
   artifact 空间、`128 MiB` 门槛与清理后是否可启动。Web 仅把它用于当前节点升级的预测；root
   runner 在清理后重新检查，作为最终事实。
+- 升级收尾不得把二进制备份整体读入内存；持有原文件描述符直到删除事务结束，后续删除失败时流式恢复此前移除的备份，保留内容、权限与失败传播语义。内存占用不随备份体积累加。
 - 所有 host-managed systemd/OpenRC 节点共享同一保留策略：二进制备份只存在于当前升级事务，
   成功或成功回滚后 `.bak.*` 与 `.failed.*` 均为零；不按总磁盘容量保留离线 fallback。失败时只
   保留一份不超过 `8 KiB` 的 `${XP_DATA_DIR}/upgrade/diagnostics.json`，下一次成功删除、下一次
@@ -161,7 +165,10 @@ Status states:
   `xp-ops upgrade` 后，必须由 root 显式运行一次 `xp-ops init`；readiness check 不得通过启动
   one-shot service 隐式迁移。
 
-## 验收标准（Acceptance Criteria）
+## Verification
+
+- VER-UPGRADE-BOUNDED-BACKUP-CLEANUP：covers: REQ-UPGRADE-BOUNDED-BACKUP-CLEANUP；Linux 隔离子进程在 64
+  MiB 数据段上限下删除两份各 128 MiB 的稀疏备份，并验证后续 unlink 失败恢复原内容和权限、符号链接在任何删除前被拒绝。
 
 - Given `update_available`，When 查看版本元素，Then 右侧显示升级/download icon。
 - Given 版本元素获得 hover/click/focus，

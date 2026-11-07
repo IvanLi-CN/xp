@@ -1441,6 +1441,9 @@ Rollback notes:
   `.bak.*`, `.failed.*`, and staged files for `xp`, `xp-ops`, Xray, and cloudflared, plus the exact
   `/tmp/xp-ops` work directory. It never follows symlinks and never cleans `/var/backups/xp`,
   configuration, credentials, certificates, or Raft data.
+- Backup cleanup holds the original file descriptors until all unlinks finish; it never loads
+  complete binary backups into RAM. If a later unlink fails, earlier backups are restored by
+  bounded streaming with their original permissions.
 - All host-managed nodes use the same retention contract, regardless of disk size. A backup exists
   only for the active replacement transaction. After a successful upgrade or a successful rollback,
   no `.bak.*` or `.failed.*` binary remains. There is no persistent local binary fallback.

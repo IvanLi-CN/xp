@@ -282,6 +282,9 @@
   filesystems must have at least `128 MiB` free. Existing `/var/backups/xp`, configuration,
   credentials, certificates, Raft/WAL, and unknown files are out of scope. The latest failure may
   retain only bounded `${XP_DATA_DIR}/upgrade/diagnostics.json`; success removes it.
+  Successful backup cleanup keeps open file descriptors instead of reading binary backups into
+  memory. A later unlink failure restores removed backups by bounded streaming from those
+  descriptors.
 - The Web client must treat an unstructured start 5xx or a restart-boundary network interruption as
   an unknown result, not a terminal failure: maintain a same-tab 60-second status observation with
   2.5-second polling, preserve only the remaining window through refresh, and end only on a

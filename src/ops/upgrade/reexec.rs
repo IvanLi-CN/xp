@@ -199,7 +199,7 @@ fn remove_transaction_backups(resume: &ResumeContext) -> std::io::Result<()> {
 
 struct TransactionBackupSnapshot {
     path: std::path::PathBuf,
-    contents: Vec<u8>,
+    file: std::fs::File,
     mode: u32,
 }
 
@@ -225,10 +225,21 @@ where
                     ),
                 ));
             }
+            // Keep the inode alive across unlink without copying every binary into RAM.
+            // The descriptor also supplies the original bytes if a later deletion fails.
+            let file = std::fs::File::open(path)?;
+            let opened = file.metadata()?;
+            use std::os::unix::fs::MetadataExt;
+            if !opened.is_file() || opened.dev() != metadata.dev() || opened.ino() != metadata.ino()
+            {
+                return Err(std::io::Error::other(
+                    "transaction backup changed while opening",
+                ));
+            }
             Ok(TransactionBackupSnapshot {
                 path: path.to_path_buf(),
-                contents: std::fs::read(path)?,
-                mode: std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()),
+                file,
+                mode: std::os::unix::fs::PermissionsExt::mode(&opened.permissions()),
             })
         })
         .collect::<std::io::Result<Vec<_>>>()?;
@@ -246,11 +257,24 @@ where
 }
 
 fn restore_transaction_backup(snapshot: &TransactionBackupSnapshot) -> std::io::Result<()> {
-    std::fs::write(&snapshot.path, &snapshot.contents)?;
-    std::fs::set_permissions(
-        &snapshot.path,
-        std::os::unix::fs::PermissionsExt::from_mode(snapshot.mode),
-    )
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut destination = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&snapshot.path)?;
+    let result = (|| {
+        let mut original = &snapshot.file;
+        std::io::Seek::rewind(&mut original)?;
+        std::io::copy(&mut original, &mut destination)?;
+        destination.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(snapshot.mode))?;
+        destination.sync_all()
+    })();
+    if result.is_err() {
+        // A partial restore must never masquerade as a usable rollback binary.
+        let _ = std::fs::remove_file(&snapshot.path);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -292,6 +316,71 @@ mod tests {
             std::fs::metadata(&first).unwrap().permissions().mode() & 0o777,
             0o755
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn backup_cleanup_is_bounded_for_large_files() {
+        const CHILD: &str = "XP_OPS_BACKUP_MEMORY_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "backup_cleanup_is_bounded_for_large_files",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        // Limit only the isolated child; the parent test suite keeps its normal limits.
+        let limit = libc::rlimit {
+            rlim_cur: 64 * 1024 * 1024,
+            rlim_max: 64 * 1024 * 1024,
+        };
+        assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_DATA, &limit) }, 0);
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("xp.bak.large");
+        let second = tmp.path().join("xp-ops.bak.large");
+        for path in [&first, &second] {
+            std::fs::File::create(path)
+                .unwrap()
+                .set_len(128 * 1024 * 1024)
+                .unwrap();
+        }
+        remove_transaction_backup_paths(
+            vec![&first, &second],
+            |path| std::fs::remove_file(path),
+            restore_transaction_backup,
+        )
+        .unwrap();
+        assert!(!first.exists() && !second.exists());
+    }
+
+    #[test]
+    fn backup_cleanup_rejects_symlinks_before_deleting_any_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("xp.bak.test");
+        let target = tmp.path().join("unrelated");
+        let link = tmp.path().join("xp-ops.bak.link");
+        std::fs::write(&first, b"xp-old").unwrap();
+        std::fs::write(&target, b"unrelated").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let error = remove_transaction_backup_paths(
+            vec![&first, &link],
+            |path| std::fs::remove_file(path),
+            restore_transaction_backup,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(std::fs::read(&first).unwrap(), b"xp-old");
+        assert_eq!(std::fs::read(&target).unwrap(), b"unrelated");
     }
 
     #[test]
