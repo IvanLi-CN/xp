@@ -550,7 +550,7 @@ impl RepositoryReplicaRuntime {
         }
     }
 
-    fn ensure_receiver(&mut self) -> Result<(), RepositoryRuntimeError> {
+    pub(super) fn ensure_receiver(&mut self) -> Result<(), RepositoryRuntimeError> {
         if self.receiver.is_none() {
             let cluster_id = self
                 .snapshot
@@ -752,6 +752,9 @@ impl RepositoryReplicaRuntime {
     ) -> Result<(), RepositoryRuntimeError> {
         let (schema_id, schema_version) = key.schema();
         let prefix = key.record_key().ends_with(b":");
+        for evidence in &mut self.snapshot.prefix_recoveries {
+            evidence.delete_records(key, prefix)?;
+        }
         if self.uses_sqlite_history() {
             self.reset_partition_summary_cache();
             mutation.tombstones.push(RepositoryHistoryTombstone {

@@ -459,3 +459,19 @@ the beginning of a ready-peer catch-up tick only when they contain exactly one b
 batch and a distinct next cursor. The migration points the pending cursor back to the saved summary
 cursor, persists the marker atomically, and never re-arms the generation or changes the receiver
 watermark.
+
+## Explicit source prefix recovery
+
+- 当前分支实现显式 `history-prefix-recovery` 的源签名清单、有界聚合证据、精确缺口与原始队列头事务接收；尚未部署或应用到生产。
+- 证据检查不参与普通统计，删除事务同时清除对应证据副本。源队列仍由普通真实 ACK 删除。
+- 编译、事务失败回归、HTTP/CLI 边界、资源门禁与六节点验收尚在验证中；不能据此声明上报恢复。
+
+保留聚合另有逐条域隔离的源签名，绑定原清单摘要与完整记录内容。
+
+重启后只凭持久证据即可验签；删除只移除对应记录和证明，剩余记录仍可独立核验。
+
+完整删除基线在遍历阶段限制记录数及内存预算；超限失败，不把部分基线标记为完整。
+
+`ops/upgrade/history_compatibility.rs` 通过只读 SQLite 检查恢复账本。
+
+正式升级目标及自动回滚的实际 XP 备份应用 3.47.9 reader 下限；不兼容或无法验证时保留事务备份与当前运维程序。

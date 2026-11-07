@@ -12,6 +12,7 @@ pub(crate) mod cluster_info;
 mod container;
 mod deploy;
 mod history_original;
+mod history_prefix;
 mod history_quota;
 pub(crate) mod history_recovery;
 pub(crate) mod ingress_guard;

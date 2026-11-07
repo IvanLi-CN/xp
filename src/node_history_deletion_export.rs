@@ -216,6 +216,35 @@ impl NodeHistoryHandle {
             .1)
     }
 
+    /// Recovery requires the complete baseline; never return a truncated snapshot as complete.
+    /// Stop visiting at the bound, before cloning or sorting an unbounded marker inventory.
+    pub(crate) async fn repository_deletion_snapshot_bounded(
+        &self,
+        destination_node_id: &str,
+        max_markers: usize,
+        max_bytes: usize,
+    ) -> anyhow::Result<(u64, Vec<RepositoryHistoryDeletionMarker>)> {
+        let mut markers = Vec::new();
+        let mut bytes = 0usize;
+        let version = self
+            .visit_repository_deletion_markers(destination_node_id, true, |marker| {
+                bytes = bytes
+                    .saturating_add(marker.record_key.len())
+                    .saturating_add(marker.schema_id.len())
+                    .saturating_add(marker.target_node_id().map_or(0, str::len))
+                    .saturating_add(256);
+                anyhow::ensure!(
+                    markers.len() < max_markers && bytes <= max_bytes,
+                    "complete deletion baseline exceeds recovery bound"
+                );
+                markers.push(marker);
+                Ok(())
+            })
+            .await?;
+        markers.sort_by(|left, right| left.record_key.cmp(&right.record_key));
+        Ok((version, markers))
+    }
+
     pub(crate) async fn repository_deletion_snapshot(
         &self,
         destination_node_id: &str,
@@ -236,6 +265,43 @@ impl NodeHistoryHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn prefix_recovery_deletion_snapshot_refuses_partial_or_oversized_baselines() {
+        let directory = tempfile::tempdir().unwrap();
+        let history = NodeHistoryHandle::new(directory.path().join("node-history.json"));
+        history.clear_node("target-a").await.unwrap();
+        let (version, markers) = history
+            .repository_deletion_snapshot_bounded("collector", 5, 128 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(markers.len(), 5);
+        assert!(
+            history
+                .repository_deletion_snapshot_bounded("collector", 4, 128 * 1024)
+                .await
+                .is_err()
+        );
+        assert!(
+            history
+                .repository_deletion_snapshot_bounded("collector", 5, 1)
+                .await
+                .is_err()
+        );
+        let after = history
+            .repository_deletion_snapshot_bounded("collector", 5, 128 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(after.0, version);
+        assert_eq!(after.1.len(), 5);
+        history.clear_node("target-b").await.unwrap();
+        assert!(
+            history
+                .repository_deletion_snapshot_bounded("collector", 5, 128 * 1024)
+                .await
+                .is_err()
+        );
+    }
 
     #[tokio::test]
     async fn old_ack_preserves_reentered_deletion_after_restart() {

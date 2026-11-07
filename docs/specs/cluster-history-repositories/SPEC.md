@@ -46,6 +46,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 ### MUST
 
+- `REQ-PREFIX-LOSS`: 显式普通源前缀恢复必须遵循 ADR 0034，保存源签名聚合证据并明确不可恢复缺失；
+  聚合证据不能重复参与统计，只有原始 wire 的真实 ACK 才允许源 outbox 删除。预览绑定集群、地址、版本、删除保护、接收水位与首个原始待发段；变更或事务失败必须拒绝。
+
 - Linux/glibc XP 在创建 Tokio worker 前将 allocator arena 默认限制为两个，保留显式
   `MALLOC_ARENA_MAX`；musl 与其他 allocator 不调用 glibc 配置入口。
 - 签名 membership 能力检查不得等待 history replica 锁；锁忙时仅暂不广告可选的 ready-summary 能力。
@@ -468,6 +471,11 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 
 ## Verification
 
+- VER-PREFIX-LOSS covers: REQ-PREFIX-LOSS. 必须验证严格普通投递仍拒绝未授权缺口、源签名清单与 fingerprint 绑定。
+  验证事务失败和重启、真实 ACK、重复恢复拒绝、聚合不重复计数，以及证据副本遵循现有删除事务。
+  验证重启后逐条聚合来源证明、内容篡改拒绝及选择性删除后剩余证明仍有效；完整删除基线超限拒绝。
+  生产验收另要求待发原始段真实 ACK 排空、容量暂停解除且持续采集；历史仍 partial。
+
 - Given 普通节点存在旧 JSON，When 启动迁移成功，Then SQLite 与旧窗口语义一致、无双写且可重启
   幂等。
 - Given 迁移、写入或 checkpoint 失败，When worker 继续运行，Then 保持旧 JSON 路径并报告 degraded，
@@ -589,6 +597,7 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 - [ADR 0002](../../adr/0002-history-synchronization-recovery-order.md)
 - [ADR 0019](../../adr/0019-history-handoff-completion-and-recovery-preflight.md)
 - [ADR 0030](../../adr/0030-recoverable-history-deletion-fanout.md)
+- [ADR 0034](../../adr/0034-explicit-source-prefix-loss-recovery.md)
 
 ## Recovery cluster preflight
 
@@ -660,3 +669,9 @@ systemd、OpenRC、Docker/Compose 共用实现。无 xp.env 的容器必须指�
 已提交的历史页若原始观测时间早于当前 15 分钟，派生摘要维护让行最多 30 秒。仅成功提交可开启窗口；持续历史提交不能续期。
 
 窗口到期后，下一个维护检查消费该窗口并允许有界维护尝试；后续成功历史提交才可开启新窗口，避免摘要维护饥饿。此进程内状态重启即清除；实时上报不触发窗口，配额、提交后保留期清理与载荷压缩继续执行。
+
+恢复账本存在时，正式升级目标不得低于 3.47.9。
+
+自动回滚须验证实际 XP 备份版本支持账本；验证失败须保留当前程序、备份和诊断，不以回退 xp-ops 绕过保护。
+
+容器升级遵守相同 reader 下限。

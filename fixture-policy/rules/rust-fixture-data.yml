@@ -282,6 +282,17 @@ rule:
         all:
           - has:
               field: field
+              regex: '^dest$'
+          - has:
+              field: value
+              pattern: paths.usr_local_bin_xp()
+          - inside:
+              stopBy: end
+              pattern: RuntimeBinaryBackup { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
               regex: '^cluster_id$'
           - has:
               field: value

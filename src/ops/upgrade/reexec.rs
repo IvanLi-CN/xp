@@ -158,6 +158,7 @@ fn recover_after_complete_phase_failure(
 ) -> Result<(), ExitError> {
     let error = match super::managed_runtimes::rollback_complete_phase_binaries(
         paths,
+        &paths.map_abs(data_dir),
         &resume.service_backups,
     ) {
         Ok(()) => error,

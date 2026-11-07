@@ -202,6 +202,8 @@ pub enum XpCommand {
     HistoryOriginalSource(XpHistoryOriginalArgs),
     /// Import unchanged signed history from an absent source identity.
     HistoryOriginalImport(XpHistoryOriginalArgs),
+    /// Preserve source aggregates and explicitly recover an unrecoverable signed prefix.
+    HistoryPrefixRecovery(XpHistoryPrefixArgs),
     /// Disaster recovery: force this node to become the only Raft voter.
     ///
     /// This is only meant for cases where quorum is permanently lost (e.g. a voter node is wiped).
@@ -512,6 +514,26 @@ pub struct XpHistoryOriginalArgs {
     #[arg(long, requires = "apply")]
     pub yes: bool,
     #[arg(long, requires = "apply")]
+    pub expected_fingerprint: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpHistoryPrefixArgs {
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
+    #[arg(long, default_value = "http://127.0.0.1:62416")]
+    pub api_base_url: String,
+    /// Export a source-signed bundle using a collector/plans JSON file.
+    #[arg(long, conflicts_with = "bundle_file")]
+    pub source_plan: Option<PathBuf>,
+    /// Preview or apply an exported source-signed bundle on its collector.
+    #[arg(long)]
+    pub bundle_file: Option<PathBuf>,
+    #[arg(long)]
+    pub apply: bool,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long)]
     pub expected_fingerprint: Option<String>,
 }
 
@@ -902,6 +924,7 @@ pub async fn run() -> i32 {
             XpCommand::HistoryOriginalImport(args) => {
                 super::history_original::run(paths, args, true).await
             }
+            XpCommand::HistoryPrefixRecovery(args) => super::history_prefix::run(paths, args).await,
             XpCommand::HistoryRepositoryQuota(args) => {
                 history_quota::cmd_xp_history_repository_quota(paths, args).await
             }
