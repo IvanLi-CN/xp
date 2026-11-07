@@ -93,6 +93,12 @@ jobs:
             cargo test --locked --release --target "$CANDIDATE_TARGET" --lib \
               large_pretty_node_history_guard_stays_bounded -- --ignored --nocapture
           fi
+          if [[ "$CANDIDATE_TARGET" = native ]]; then
+            cargo test --locked --release --lib backup_cleanup_is_bounded_for_large_files
+          else
+            cargo test --locked --release --target "$CANDIDATE_TARGET" --lib \
+              backup_cleanup_is_bounded_for_large_files
+          fi
           echo "XP_MESH_RESOURCE_CANDIDATE_BIN=$GITHUB_WORKSPACE/$candidate" >> "$GITHUB_ENV"
           mkdir -p candidate
           cp "$candidate" candidate/xp

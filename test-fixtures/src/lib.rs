@@ -90,6 +90,8 @@ struct Urls {
 #[allow(dead_code)]
 #[serde(deny_unknown_fields)]
 struct Identifiers {
+    #[serde(rename = "releaseTag")]
+    release_tag: String,
     #[serde(rename = "nodePrimary")]
     node_primary: String,
     #[serde(rename = "nodeSecondary")]
@@ -377,6 +379,10 @@ pub fn primary_probe_config_hash() -> &'static str {
 
 pub fn primary_endpoint_tag() -> &'static str {
     &catalog().identifiers.endpoint_tag_primary
+}
+
+pub fn release_tag() -> &'static str {
+    &catalog().identifiers.release_tag
 }
 
 pub fn missing_endpoint_tag() -> &'static str {

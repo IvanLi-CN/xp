@@ -7,11 +7,40 @@ use crate::ops::upgrade_artifacts::{
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Display;
 use std::fs;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 const UNRESTORED_TRANSACTION_BACKUP_PREFIX: &str =
     "rollback_failed: transaction_backup_unrestored:";
 const ROLLBACK_FAILURE_EXIT_CODE: i32 = 8;
+const COMMITTED_CLEANUP_PREFIX: &str = "cleanup_incomplete: committed_upgrade:";
+
+pub(super) fn committed_cleanup_error(detail: impl Display) -> ExitError {
+    ExitError::new(7, format!("{COMMITTED_CLEANUP_PREFIX} {detail}"))
+}
+
+pub(super) fn persist_committed_cleanup_guard(
+    data_dir: &Path,
+    release_tag: &str,
+) -> io::Result<()> {
+    let error = committed_cleanup_error("backup removal pending; installed services are ready");
+    write_upgrade_diagnostics(data_dir, release_tag, &HashMap::new(), &error);
+    let path = diagnostics_path(data_dir);
+    let file = fs::File::open(&path)?;
+    if file.metadata()?.len() > 8 * 1024 {
+        return Err(io::Error::other("invalid cleanup diagnostics size"));
+    }
+    let mut raw = Vec::new();
+    (&file).take(8 * 1024 + 1).read_to_end(&mut raw)?;
+    let value: serde_json::Value = serde_json::from_slice(&raw).map_err(io::Error::other)?;
+    if value.get("error_summary").and_then(|value| value.as_str()) != Some(error.message.as_str())
+        || value.get("release_tag").and_then(|value| value.as_str()) != Some(release_tag)
+    {
+        return Err(io::Error::other("cleanup diagnostics were not persisted"));
+    }
+    file.sync_all()?;
+    fs::File::open(path.parent().expect("diagnostics parent"))?.sync_all()
+}
 
 pub(super) fn unrestored_transaction_backup_error(detail: impl Display) -> ExitError {
     ExitError::new(
@@ -22,6 +51,7 @@ pub(super) fn unrestored_transaction_backup_error(detail: impl Display) -> ExitE
 
 fn preserves_unrestored_transaction_backup(error: &ExitError) -> bool {
     error.message.contains(UNRESTORED_TRANSACTION_BACKUP_PREFIX)
+        || error.message.starts_with(COMMITTED_CLEANUP_PREFIX)
 }
 
 pub(super) fn rollback_xp_ops_after_resumed_failure(
@@ -226,7 +256,10 @@ fn manual_recovery_is_required(
             value
                 .get("error_summary")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|summary| summary.contains(UNRESTORED_TRANSACTION_BACKUP_PREFIX))
+                .is_some_and(|summary| {
+                    summary.contains(UNRESTORED_TRANSACTION_BACKUP_PREFIX)
+                        || summary.starts_with(COMMITTED_CLEANUP_PREFIX)
+                })
         });
     if !requires_manual_recovery {
         return Ok(false);

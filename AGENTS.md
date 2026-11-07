@@ -282,6 +282,11 @@
   filesystems must have at least `128 MiB` free. Existing `/var/backups/xp`, configuration,
   credentials, certificates, Raft/WAL, and unknown files are out of scope. The latest failure may
   retain only bounded `${XP_DATA_DIR}/upgrade/diagnostics.json`; success removes it.
+  After service readiness and artifact cleanup, a synced bounded diagnostics guard precedes
+  backup unlink. Cleanup never reads binary contents into RAM. A late unlink failure reports
+  `cleanup_incomplete: committed_upgrade`, keeps the ready installed binaries and remaining
+  backups, and blocks another upgrade until exact manual cleanup; it never attempts rollback
+  through already-unlinked backups. Earlier activation failures retain the rollback contract.
 - The Web client must treat an unstructured start 5xx or a restart-boundary network interruption as
   an unknown result, not a terminal failure: maintain a same-tab 60-second status observation with
   2.5-second polling, preserve only the remaining window through refresh, and end only on a

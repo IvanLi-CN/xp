@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import importlib.util
+import fnmatch
+import re
 import hashlib
 import json
 from pathlib import Path
@@ -311,6 +313,16 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("edgeone@1.6.33 makers deploy", workflow)
         self.assertIn("static_web_smoke.py", workflow)
         self.assertIn("test \"${EDGEONE_MAKERS_PROJECT}\" = \"xp-web\"", workflow)
+
+    def test_release_downloads_every_required_publication_artifact(self) -> None:
+        workflow = (Path(__file__).parents[1] / "workflows" / "release.yml").read_text()
+        publication = workflow.split("  publish-release:", 1)[1]
+        selectors = re.findall(r'(?:name|pattern):\s*"([^"]+)"', publication)
+        selectors = [value.replace("${{ github.run_id }}", "123456") for value in selectors]
+        required = ["web-release-release-123456", "resource-evidence-123456"]
+        required += [f"{kind}-release-123456-{arch}" for kind in ("musl", "runtime") for arch in ("x86_64", "aarch64")]
+        for artifact in required:
+            self.assertTrue(any(fnmatch.fnmatchcase(artifact, selector) for selector in selectors), f"unpublished release artifact: {artifact}")
 
     def test_web_archive_has_manifest_and_is_built_from_target_sha(self) -> None:
         workflow = (Path(__file__).parents[1] / "workflows" / "release-build.yml").read_text()
