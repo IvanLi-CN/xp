@@ -30,6 +30,12 @@ fingerprints decide whether a unit is reusable after the matching source slot,
 Web assets, toolchain and build environment are restored. A target directory is
 never shared between Agents and is removed only with the owning Agent Directory.
 
+源码仓库跟踪 `.xp-source-marker` 的稳定基线，供 `build.rs` 监听。普通 checkout 必须保留该文件。
+
+Cargo 会把缺失的监听路径持续视为脏输入，导致没有源码变化的连续构建仍重复编译。
+
+共享测试 runner 在独立源码副本中用实际快照标识覆盖此基线，使快照切换触发重建。该标记不能代替源码、Web 资产或构建环境的指纹检查。
+
 `XP_TESTBOX_REMOTE_ROOT` is an operator-owned private `0700` directory. Host-global subnet claim
 allocation is global within that explicit root for concurrent runs under the same Unix account; do
 not share the root across Unix UIDs. Run parents, claims, markers and contents remain owned by the

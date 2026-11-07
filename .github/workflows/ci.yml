@@ -139,6 +139,8 @@ jobs:
           ./.github/scripts/test-mihomo-fixture.sh
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with: {toolchain: 1.96.0}
+      - name: Cargo source marker cache contract
+        run: scripts/cargo-cache/test.sh
       - name: restore rust contract cache
         id: cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830

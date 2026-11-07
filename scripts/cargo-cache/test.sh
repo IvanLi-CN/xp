@@ -69,7 +69,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=XP_CACHE_TEST_VERSION");
     println!("cargo:rerun-if-changed=.xp-source-marker");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let marker = fs::read_to_string(".xp-source-marker").unwrap();
+    let marker = fs::read_to_string(".xp-source-marker").unwrap_or_default();
     fs::write(
         out_dir.join("version.txt"),
         format!("{}{}", env::var("XP_CACHE_TEST_VERSION").unwrap(), marker),
@@ -77,13 +77,28 @@ fn main() {
     .unwrap();
 }
 PROJECT_BUILD
-printf 'marker-one\n' > "$fixture_root/project/.xp-source-marker"
 cat > "$fixture_root/project/src/main.rs" <<'PROJECT_MAIN'
 fn main() {
     print!("{}", include_str!(concat!(env!("OUT_DIR"), "/version.txt")));
 }
 PROJECT_MAIN
 export PATH="$original_path"
+if [[ -f "$SCRIPT_DIR/../../.xp-source-marker" ]]; then
+  cp "$SCRIPT_DIR/../../.xp-source-marker" "$fixture_root/project/.xp-source-marker"
+fi
+for attempt in first second; do
+  XP_CACHE_TEST_VERSION=baseline "$SCRIPT_DIR/with-cargo-target.sh" \
+    --cache-root "$fixture_root/real-cache" \
+    --cargo-home "$fixture_root/real-cargo-home" \
+    --slot candidate \
+    --source "$fixture_root/project" \
+    -- cargo build --offline --message-format=json > "$fixture_root/$attempt-build.json"
+done
+grep '"reason":"compiler-artifact"' "$fixture_root/second-build.json" |
+  grep '"kind":\["bin"\]' |
+  grep -q '"fresh":true'
+
+printf 'marker-one\n' > "$fixture_root/project/.xp-source-marker"
 first_output="$(XP_CACHE_TEST_VERSION=one "$SCRIPT_DIR/with-cargo-target.sh" \
   --cache-root "$fixture_root/real-cache" \
   --cargo-home "$fixture_root/real-cargo-home" \
