@@ -326,11 +326,9 @@ impl QueryCandidate {
         let repository_id = repository_id.into();
         validate_identifier(&repository_id)?;
         let mut watermarks = bounded_metadata(watermarks, MAX_QUERY_WATERMARKS)?;
-        let mut gaps = bounded_metadata(gaps, MAX_QUERY_GAPS)?;
+        let gaps = bounded_unique_gaps(gaps)?;
         watermarks.sort_by(|left, right| watermark_key(left).cmp(&watermark_key(right)));
         watermarks.dedup_by(|left, right| watermark_key(left) == watermark_key(right));
-        gaps.sort_by_key(|gap| gap.range);
-        gaps.dedup();
         Ok(Self {
             repository_id,
             state: CandidateState::Ready,
@@ -352,11 +350,9 @@ impl QueryCandidate {
         clock_skew_seconds: i64,
     ) -> Result<Self, QueryError> {
         let mut watermarks = bounded_metadata(watermarks, MAX_QUERY_WATERMARKS)?;
-        let mut gaps = bounded_metadata(gaps, MAX_QUERY_GAPS)?;
+        let gaps = bounded_unique_gaps(gaps)?;
         watermarks.sort_by(|left, right| watermark_key(left).cmp(&watermark_key(right)));
         watermarks.dedup_by(|left, right| watermark_key(left) == watermark_key(right));
-        gaps.sort_by_key(|gap| gap.range);
-        gaps.dedup();
         Ok(Self {
             repository_id: String::new(),
             state: CandidateState::Local,
@@ -532,6 +528,31 @@ fn candidate_order(request: QueryRange, left: &QueryCandidate, right: &QueryCand
                 .cmp(&right.clock_skew_seconds.unsigned_abs())
         })
         .then_with(|| left.repository_id.cmp(&right.repository_id))
+}
+
+fn bounded_unique_gaps(
+    items: impl IntoIterator<Item = QueryGap>,
+) -> Result<Vec<QueryGap>, QueryError> {
+    let mut gaps = Vec::new();
+    for gap in items {
+        match gaps.binary_search_by(|existing: &QueryGap| {
+            (
+                existing.range,
+                existing.permanent,
+                existing.reason.as_deref(),
+            )
+                .cmp(&(gap.range, gap.permanent, gap.reason.as_deref()))
+        }) {
+            Ok(_) => continue,
+            Err(index) => {
+                if gaps.len() == MAX_QUERY_GAPS {
+                    return Err(QueryError::MetadataLimitExceeded);
+                }
+                gaps.insert(index, gap);
+            }
+        }
+    }
+    Ok(gaps)
 }
 
 fn bounded_metadata<T>(

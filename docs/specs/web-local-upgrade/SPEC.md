@@ -117,6 +117,9 @@ or persist a browser-supplied repo override.
 
 ### Durable files
 
+- 正式升级的 GitHub 请求共享 10 秒连接与 30 秒读取空闲上限；release 元数据请求总上限为 60 秒，每个 asset 下载总上限为 15 分钟，持续滴流不得延长总上限。
+- 下载超时、正文截断或写入失败必须返回现有失败路径，清理本次未完成文件并保留原目标文件；不得发布未完成 asset 或继续激活。
+
 Under `${XP_DATA_DIR}`:
 
 - `upgrade/request.json`: Web start API 写入的受限请求。

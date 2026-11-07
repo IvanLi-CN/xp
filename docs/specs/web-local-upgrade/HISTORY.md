@@ -1,5 +1,7 @@
 # Web 原地升级入口历史（#nq4ha）
 
+- 有界升级下载：共享连接、读取空闲和总耗时限制，避免慢响应无限占用升级事务；下载失败清理未完成文件。
+
 - 2026-07-04: 从 `#n5mtq` 的版本检查入口与 `#ap63t` 的统一 `xp-ops upgrade` 入口延伸，冻结当前节点 Web 触发原地升级范围。
 - 2026-07-04: 决定第一版只支持 host-managed systemd/OpenRC；Docker/Compose 节点显示
   unsupported，并继续走宿主侧 image/Compose 升级。

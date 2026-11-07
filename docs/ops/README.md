@@ -1437,6 +1437,9 @@ Host-managed root delegation:
 
 Rollback notes:
 
+- `xp-ops upgrade` 的 release 元数据请求总上限为 60 秒，每个下载总上限为 15 分钟；两者共享
+  10 秒连接和 30 秒读取空闲上限。超时沿既有失败路径退出，清理本次未完成下载并保留原目标文件。
+
 - Before every host-managed upgrade, `xp-ops` removes only its own old regular-file artifacts:
   `.bak.*`, `.failed.*`, and staged files for `xp`, `xp-ops`, Xray, and cloudflared, plus the exact
   `/tmp/xp-ops` work directory. It never follows symlinks and never cleans `/var/backups/xp`,
