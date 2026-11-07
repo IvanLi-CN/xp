@@ -4,15 +4,15 @@ use crate::ops::runtime_activation::restart_xp_service;
 use crate::ops::upgrade_artifacts::{cleanup_managed_artifacts_for, workspace_path};
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, tmp_path_next_to};
 use anyhow::Context;
-use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+mod download;
+use download::{download_to_path, upgrade_http_client};
 mod failure;
 mod history_compatibility;
 mod inputs;
@@ -115,10 +115,7 @@ async fn fetch_release(
     repo: &str,
     args: &UpgradeReleaseArgs,
 ) -> anyhow::Result<GitHubRelease> {
-    let client = reqwest::Client::builder()
-        .user_agent("xp-ops")
-        .build()
-        .context("build http client")?;
+    let client = upgrade_http_client(Duration::from_secs(60))?;
 
     if args.version == "latest" {
         if !args.prerelease {
@@ -155,29 +152,6 @@ fn find_asset_url<'a>(release: &'a GitHubRelease, asset_name: &str) -> Option<&'
         .iter()
         .find(|a| a.name == asset_name)
         .map(|a| a.browser_download_url.as_str())
-}
-
-async fn download_to_path(url: &str, dest: &Path) -> anyhow::Result<()> {
-    let client = reqwest::Client::builder()
-        .user_agent("xp-ops")
-        .build()
-        .context("build http client")?;
-    let resp = client.get(url).send().await?.error_for_status()?;
-
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let tmp = tmp_path_next_to(dest);
-    let mut file = fs::File::create(&tmp)?;
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let buf = chunk?;
-        file.write_all(&buf)?;
-    }
-    file.flush()?;
-    fs::rename(&tmp, dest)?;
-    Ok(())
 }
 
 fn read_checksums(path: &Path) -> Result<HashMap<String, [u8; 32]>, ExitError> {

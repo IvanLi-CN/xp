@@ -4,6 +4,8 @@
 
 ## Decision Trace
 
+- gap 查询在计算元数据上限前按完整标记身份去重，避免恢复账本与活动 gap 重复造成错误拒绝；独立原因和独立 gap 的硬上限保持有效。
+
 - 首个历史仓库基线回填改为独立的签名 backfill 流：schema stream 使用带 source 标识的 backfill
   stream，tombstone 使用 `tombstone-backfill-<source_node_id>`；实时 source sequence/outbox
   不再被历史页占用。页 wire 在应用前持久化，恢复时重验身份、签名、归属、epoch、sequence 和

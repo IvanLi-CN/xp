@@ -4,6 +4,36 @@ use super::{
 };
 
 #[test]
+fn recovered_gap_duplicates_do_not_exhaust_ready_or_local_candidate_budget() {
+    let coverage = QueryCoverage::new(
+        QueryRange::new(100, 200).unwrap(),
+        QueryRange::new(100, 200).unwrap(),
+    );
+    let gap = QueryGap::new(120, 130, true).unwrap();
+    // A recovery's durable evidence and its live gap ledger describe the same loss.
+    let gaps = vec![gap.clone(); super::MAX_QUERY_GAPS + 1];
+    let ready = QueryCandidate::ready("repo", coverage.clone(), [], gaps.clone(), 0)
+        .expect("duplicate recovery evidence must not reject a query");
+    let local = QueryCandidate::local(coverage.clone(), [], gaps, 0)
+        .expect("local fallback must deduplicate the same evidence");
+    assert_eq!(ready.gaps, vec![gap.clone()]);
+    assert_eq!(local.gaps, vec![gap]);
+
+    let distinct =
+        (0..=super::MAX_QUERY_GAPS).map(|i| QueryGap::new(i as u64, i as u64, true).unwrap());
+    assert!(QueryCandidate::ready("repo", coverage, [], distinct, 0).is_err());
+}
+
+#[test]
+fn gap_deduplication_keeps_distinct_reasons_for_the_same_time_range() {
+    let a = QueryGap::new_with_reason(120, 130, true, Some("loss-a".into())).unwrap();
+    let b = QueryGap::new_with_reason(120, 130, true, Some("loss-b".into())).unwrap();
+    let candidate = candidate("repo", 0, vec![a.clone(), b.clone(), a]);
+    assert_eq!(candidate.gaps.len(), 2);
+    assert!(candidate.gaps.contains(&b));
+}
+
+#[test]
 fn stream_watermark_rejects_values_outside_the_durable_sqlite_range() {
     assert!(StreamWatermark::new("source-a", i64::MAX as u64 + 1, "traffic", 0).is_err());
     assert!(StreamWatermark::new("source-a", 1, "traffic", i64::MAX as u64 + 1).is_err());

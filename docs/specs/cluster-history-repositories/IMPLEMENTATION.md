@@ -4,6 +4,8 @@
 
 ## Current Status
 
+- 查询候选按完整的时间区间、永久性和原因去重后计算 256 条 gap 上限；有界插入不累积重复恢复证据，仓库与本地候选共享此规则。不同原因仍分别报告，超过 256 条独立 gap 继续拒绝查询。
+
 - Implementation: Repository runtime, administration and rollout integration are active
 - Lifecycle: active
 - Catalog note: Initiative #248
@@ -294,7 +296,8 @@
   dimension it reports `journal_capacity_guard`, rejects new source rows before the transaction
   writes, and resumes only after both dimensions fall below 60%; no unacknowledged row is deleted.
   Backpressure ranges retained in snapshots from the pre-journal queue implementation remain
-  recoverable and are replayed through the persisted gap-page cursor; the current SQLite capacity
+  unproven loss evidence rather than a promise of recoverability and are replayed through the
+  persisted gap-page cursor; the current SQLite capacity
   guard rejects capture before allocating a source cursor and therefore creates no new such range.
   A bounded replay window may leave durable journal tails on disk after restart. New source segments
   remain appendable in that state, but are persisted behind the durable tail and trigger another
