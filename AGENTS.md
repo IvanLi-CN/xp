@@ -483,3 +483,8 @@ systemd、OpenRC、Docker/Compose 共用实现。无 xp.env 的容器必须指�
 - Overlapping aggregates stay inspectable in bounded evidence, outside ordinary statistics.
 - Existing and later tombstones govern evidence copies; only real ACK drains the source journal.
 - Historical loss stays partial. No source identity, epoch or repository membership changes.
+
+- A persisted prefix recovery ledger requires XP 3.47.9 or newer.
+  Host upgrades reject older targets before downloads; rollback verifies the actual XP backup.
+  An incompatible or unverifiable backup preserves installed binaries, transaction backups,
+  diagnostics and current xp-ops protection. Container replacements honor the same reader floor.

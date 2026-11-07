@@ -59,6 +59,12 @@ pub(super) fn rollback_xp_ops_after_resumed_failure(
     backup: &Path,
     original_err: ExitError,
 ) -> Result<(), ExitError> {
+    if original_err
+        .message
+        .contains(super::history_compatibility::ROLLBACK_BLOCKED)
+    {
+        return Err(original_err);
+    }
     let failed = dest.with_extension(format!("failed.{}", super::now_unix_secs()));
     if dest.exists() {
         fs::rename(dest, &failed).map_err(|error| {
@@ -83,10 +89,12 @@ pub(super) fn rollback_xp_ops_after_resumed_failure(
 
 pub(super) fn rollback_xp_after_runtime_failure(
     paths: &Paths,
+    data_dir: &Path,
     backup: &Path,
     original_err: ExitError,
     restart_service: bool,
 ) -> Result<(), ExitError> {
+    super::history_compatibility::ensure_rollback(data_dir, backup)?;
     let dest = paths.usr_local_bin_xp();
     let failed = dest.with_extension(format!("failed.{}", super::now_unix_secs()));
     if dest.exists() {

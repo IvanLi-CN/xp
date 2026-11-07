@@ -7,7 +7,6 @@ use anyhow::Context;
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -15,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 mod failure;
+mod history_compatibility;
 mod inputs;
 mod managed_runtimes;
 mod reexec;
@@ -27,7 +27,8 @@ use failure::{
     unrestored_transaction_backup_error, write_upgrade_diagnostics,
 };
 use inputs::{
-    detect_platform, github_api_base, parse_owner_repo, resolve_repo, validate_release_args,
+    backup_path, detect_platform, github_api_base, parse_owner_repo, resolve_repo,
+    validate_release_args,
 };
 use managed_runtimes::{
     RuntimeBinaryBackup, rollback_complete_phase_binaries, upgrade_and_reconcile_managed_runtimes,
@@ -235,15 +236,6 @@ fn now_unix_secs() -> u64 {
         .as_secs()
 }
 
-fn backup_path(dest: &Path) -> PathBuf {
-    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
-    let name = dest
-        .file_name()
-        .unwrap_or_else(|| OsStr::new("bin"))
-        .to_string_lossy();
-    parent.join(format!("{name}.bak.{}", now_unix_secs()))
-}
-
 pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitError> {
     validate_release_args(&args.release)?;
     let mode = if args.dry_run {
@@ -341,6 +333,8 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             ""
         }
     );
+
+    history_compatibility::ensure_target(&lock_data_dir, &release.tag_name)?;
 
     if mode == Mode::DryRun {
         if args.allow_internal_auth_v2_cutover {
@@ -455,6 +449,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             &checksums,
             platform,
             &xp_backup,
+            &lock_data_dir,
             rollback_xp_on_runtime_failure,
         )
         .await?;
@@ -488,7 +483,11 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
                     service_backups: &service_backups,
                 },
             ) {
-                let error = match rollback_complete_phase_binaries(&paths, &service_backups) {
+                let error = match rollback_complete_phase_binaries(
+                    &paths,
+                    &lock_data_dir,
+                    &service_backups,
+                ) {
                     Ok(()) => error,
                     Err(rollback) => ExitError::new(
                         rollback.code,
@@ -650,6 +649,7 @@ async fn upgrade_xp(
 
     if (!is_test_root(paths.root()) || test_enable_service_restart()) && !restart_xp_service(paths)
     {
+        history_compatibility::ensure_rollback(&paths.map_abs(data_dir), backup)?;
         match crate::internal_auth_epoch::is_v2_epoch(data_dir) {
             Ok(true) => {
                 return Err(ExitError::new(

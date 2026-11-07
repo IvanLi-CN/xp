@@ -1,6 +1,8 @@
 use super::Platform;
 use crate::ops::cli::{ExitError, UpgradeReleaseArgs};
 use crate::ops::platform::{CpuArch, detect_cpu_arch};
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
 pub(super) fn detect_platform() -> Result<Platform, ExitError> {
     if std::env::consts::OS != "linux" {
@@ -50,4 +52,13 @@ pub(super) fn validate_release_args(args: &UpgradeReleaseArgs) -> Result<(), Exi
         ));
     }
     Ok(())
+}
+
+pub(super) fn backup_path(dest: &Path) -> PathBuf {
+    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+    let name = dest
+        .file_name()
+        .unwrap_or_else(|| OsStr::new("bin"))
+        .to_string_lossy();
+    parent.join(format!("{name}.bak.{}", super::now_unix_secs()))
 }
