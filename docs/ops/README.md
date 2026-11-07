@@ -1441,9 +1441,12 @@ Rollback notes:
   `.bak.*`, `.failed.*`, and staged files for `xp`, `xp-ops`, Xray, and cloudflared, plus the exact
   `/tmp/xp-ops` work directory. It never follows symlinks and never cleans `/var/backups/xp`,
   configuration, credentials, certificates, or Raft data.
-- Backup cleanup holds the original file descriptors until all unlinks finish; it never loads
-  complete binary backups into RAM. If a later unlink fails, earlier backups are restored by
-  bounded streaming with their original permissions.
+- 服务激活和就绪检查完成后，备份删除是提交后的清理阶段；第一个 unlink 前先同步有界诊断守卫。
+  清理校验原文件身份，不把二进制内容读入 RAM。此后的删除失败返回
+  `cleanup_incomplete: committed_upgrade`，保留就绪的新程序、未删除的备份和诊断，不尝试通过
+  已删除的备份回滚。下一次升级拒绝开始，直到 root 核验正式程序、服务就绪并精确清理剩余备份。
+  提交前的安装、激活和就绪失败仍按既有契约回滚；完整清理成功才报告成功。
+  详见 [ADR 0033](../adr/0033-committed-upgrade-backup-cleanup.md)。
 - All host-managed nodes use the same retention contract, regardless of disk size. A backup exists
   only for the active replacement transaction. After a successful upgrade or a successful rollback,
   no `.bak.*` or `.failed.*` binary remains. There is no persistent local binary fallback.

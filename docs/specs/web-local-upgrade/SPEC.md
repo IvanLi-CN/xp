@@ -2,7 +2,7 @@
 
 ## Related ADRs
 
-None
+- [ADR 0033](../../adr/0033-committed-upgrade-backup-cleanup.md)
 
 ## Context and Scope
 
@@ -52,7 +52,7 @@ None
 ## Requirements
 
 - REQ-UPGRADE-BOUNDED-BACKUP-CLEANUP：所有 host-managed
-  升级收尾以文件描述符保留备份，不得按备份体积累积内存；后续删除失败时流式恢复，保留内容、权限与失败传播语义。
+  升级收尾不得按备份体积累积内存；服务就绪后的备份清理须有持久守卫，失败时保留就绪程序、剩余备份和诊断。
 
 ### MUST
 
@@ -124,7 +124,11 @@ Under `${XP_DATA_DIR}`:
 - `support.storage` 是可选的加法字段，分别返回安装目录和下载工作区的可用空间、可回收历史
   artifact 空间、`128 MiB` 门槛与清理后是否可启动。Web 仅把它用于当前节点升级的预测；root
   runner 在清理后重新检查，作为最终事实。
-- 升级收尾不得把二进制备份整体读入内存；持有原文件描述符直到删除事务结束，后续删除失败时流式恢复此前移除的备份，保留内容、权限与失败传播语义。内存占用不随备份体积累加。
+- 升级收尾不得把二进制备份整体读入内存；内存占用不随备份体积累加。
+- 服务激活、就绪检查和其他 artifact 清理完成后，第一个备份 unlink 前须同步有界诊断守卫。
+  守卫失败仍可按原有路径回滚；守卫之后删除失败返回 `cleanup_incomplete: committed_upgrade`，
+  保留就绪程序及未删除备份，不尝试通过已删除备份回滚。剩余备份和诊断共同阻止下一次升级，
+  直到 root 核验并精确清理；进程意外退出受同一守卫保护。
 - 所有 host-managed systemd/OpenRC 节点共享同一保留策略：二进制备份只存在于当前升级事务，
   成功或成功回滚后 `.bak.*` 与 `.failed.*` 均为零；不按总磁盘容量保留离线 fallback。失败时只
   保留一份不超过 `8 KiB` 的 `${XP_DATA_DIR}/upgrade/diagnostics.json`，下一次成功删除、下一次
@@ -168,7 +172,8 @@ Status states:
 ## Verification
 
 - VER-UPGRADE-BOUNDED-BACKUP-CLEANUP：covers: REQ-UPGRADE-BOUNDED-BACKUP-CLEANUP；Linux 隔离子进程在 64
-  MiB 数据段上限下删除两份各 128 MiB 的稀疏备份，并验证后续 unlink 失败恢复原内容和权限、符号链接在任何删除前被拒绝。
+  MiB 数据段上限下删除两份各 128 MiB 的稀疏备份；后续 unlink 失败必须保留就绪程序和剩余备份，
+  写入失败诊断并阻止新升级；符号链接在任何删除前被拒绝，守卫未持久化前不得删除备份。
 
 - Given `update_available`，When 查看版本元素，Then 右侧显示升级/download icon。
 - Given 版本元素获得 hover/click/focus，
