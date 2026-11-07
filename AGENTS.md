@@ -467,3 +467,14 @@ systemd、OpenRC、Docker/Compose 共用实现。无 xp.env 的容器必须指�
 已提交的历史页若原始观测时间早于当前 15 分钟，派生摘要维护让行最多 30 秒。仅成功提交可开启窗口；持续历史提交不能续期。
 
 窗口到期后，下一个维护检查消费该窗口并允许有界维护尝试；后续成功历史提交才可开启新窗口，避免摘要维护饥饿。此进程内状态重启即清除；实时上报不触发窗口，配额、提交后保留期清理与载荷压缩继续执行。
+
+## Explicit source-prefix history recovery
+
+- `xp-ops xp history-prefix-recovery` is an explicit local signed recovery operation.
+- Source exports bind their first durable pending heads, retained aggregates and deletion version.
+- The Ready collector re-attests over registered public HTTPS and requires quorum/version preflight.
+- Apply requires `--apply --yes --expected-fingerprint`; evidence, deletion baseline, explicit
+  unrecoverable gaps and original-head receipts commit atomically.
+- Overlapping aggregates stay inspectable in bounded evidence, outside ordinary statistics.
+- Existing and later tombstones govern evidence copies; only real ACK drains the source journal.
+- Historical loss stays partial. No source identity, epoch or repository membership changes.

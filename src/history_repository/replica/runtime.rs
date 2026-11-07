@@ -34,7 +34,12 @@ use std::{
     time::{Duration, Instant},
 };
 mod error;
+mod prefix_recovery;
+#[cfg(test)]
+#[path = "runtime/prefix_recovery_tests.rs"]
+mod prefix_recovery_tests;
 mod source_metrics;
+pub(crate) use prefix_recovery::{PrefixRecoveryBundle, PrefixRecoveryPlan};
 mod status;
 mod summary_repair;
 use status::SourceDeliveryStatus;
@@ -239,6 +244,8 @@ pub(crate) struct RepositoryReplicaSnapshot {
     #[serde(default)]
     gaps: Vec<StoredGap>,
     #[serde(default)]
+    prefix_recoveries: Vec<prefix_recovery::PrefixRecoveryEvidence>,
+    #[serde(default)]
     history_truncated: bool,
     #[serde(default)]
     capacity: RepositoryCapacity,
@@ -322,6 +329,7 @@ impl Default for RepositoryReplicaSnapshot {
             segments: Vec::new(),
             external_history: false,
             gaps: Vec::new(),
+            prefix_recoveries: Vec::new(),
             history_truncated: false,
             capacity: RepositoryCapacity::default(),
             last_verified_unix_seconds: None,
@@ -555,130 +563,6 @@ impl RepositoryReplicaRuntime {
             #[cfg(test)]
             capacity_override: None,
         }
-    }
-
-    pub(crate) fn query(
-        &self,
-        repository_id: &str,
-        query: HistoryQuery,
-        local: LocalQueryMetadata,
-    ) -> Result<RepositoryHistoryQueryResponse, RepositoryRuntimeError> {
-        let local_coverage = QueryCoverage::new(
-            QueryRange::new(
-                local.observed_start_unix_seconds,
-                local.observed_end_unix_seconds,
-            )?,
-            QueryRange::new(
-                local.observed_start_unix_seconds,
-                local.observed_end_unix_seconds,
-            )?,
-        );
-        let local_gap = QueryGap::new(
-            query.range().start_unix_seconds(),
-            query.range().end_unix_seconds(),
-            false,
-        )?;
-        let local_candidate = QueryCandidate::local(
-            local_coverage,
-            std::iter::empty(),
-            [local_gap],
-            local.clock_skew_seconds,
-        )?;
-        let mut candidates = vec![local_candidate];
-        if let Some(coverage) = self.repository_coverage(query.subject_node_id())? {
-            let watermarks = self
-                .receiver
-                .as_ref()
-                .map(SegmentReceiver::continuous_watermarks)
-                .unwrap_or_default()
-                .into_iter()
-                .map(watermark_from_cursor)
-                .collect::<Result<Vec<_>, _>>()?;
-            let mut gaps = self
-                .snapshot
-                .gaps
-                .iter()
-                .filter(|gap| {
-                    query
-                        .subject_node_id()
-                        .is_none_or(|subject_node_id| gap.source_node_id == subject_node_id)
-                })
-                .map(|gap| {
-                    QueryGap::new_with_reason(
-                        gap.start_unix_seconds,
-                        gap.end_unix_seconds,
-                        gap.permanent,
-                        gap.reason.clone(),
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if let Some((start, end)) = self.incomplete_aggregate_gap(&query)? {
-                gaps.push(QueryGap::new(start, end, true)?);
-            }
-            if self.snapshot.history_truncated {
-                gaps.push(QueryGap::new(
-                    coverage.observed().start_unix_seconds(),
-                    coverage.observed().end_unix_seconds(),
-                    true,
-                )?);
-            }
-            candidates.push(QueryCandidate::ready(
-                repository_id,
-                coverage,
-                watermarks,
-                gaps,
-                0,
-            )?);
-        }
-        let plan = QuerySelector::select(&query, candidates)?;
-        let (records, records_truncated, next_page_cursor) = if plan.repository_id().is_some() {
-            self.records_for(&query, &plan)?
-        } else {
-            (Vec::new(), false, None)
-        };
-        Ok(RepositoryHistoryQueryResponse {
-            plan,
-            records,
-            records_truncated,
-            next_page_cursor,
-        })
-    }
-
-    pub(crate) fn query_local_only(
-        &self,
-        query: HistoryQuery,
-        local: LocalQueryMetadata,
-    ) -> Result<RepositoryHistoryQueryResponse, RepositoryRuntimeError> {
-        let coverage = QueryCoverage::new(
-            QueryRange::new(
-                local.observed_start_unix_seconds,
-                local.observed_end_unix_seconds,
-            )?,
-            QueryRange::new(
-                local.observed_start_unix_seconds,
-                local.observed_end_unix_seconds,
-            )?,
-        );
-        let gap = QueryGap::new(
-            query.range().start_unix_seconds(),
-            query.range().end_unix_seconds(),
-            false,
-        )?;
-        let plan = QuerySelector::select(
-            &query,
-            [QueryCandidate::local(
-                coverage,
-                std::iter::empty(),
-                [gap],
-                local.clock_skew_seconds,
-            )?],
-        )?;
-        Ok(RepositoryHistoryQueryResponse {
-            plan,
-            records: Vec::new(),
-            records_truncated: false,
-            next_page_cursor: None,
-        })
     }
 
     pub(crate) fn runtime_status(

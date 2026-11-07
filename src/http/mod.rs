@@ -1173,6 +1173,7 @@ pub fn build_router_with_mesh_telemetry(
             get(history_repository::admin_internal_history_repository_status),
         )
         .merge(history_repository::original_source::routes())
+        .merge(history_repository::prefix_recovery::routes())
         .route(
             "/_internal/history-repository/recovery",
             post(history_repository::recovery::admin_internal_history_repository_recovery),

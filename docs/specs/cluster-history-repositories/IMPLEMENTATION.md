@@ -459,3 +459,9 @@ the beginning of a ready-peer catch-up tick only when they contain exactly one b
 batch and a distinct next cursor. The migration points the pending cursor back to the saved summary
 cursor, persists the marker atomically, and never re-arms the generation or changes the receiver
 watermark.
+
+## Explicit source prefix recovery
+
+- 当前分支实现显式 `history-prefix-recovery` 的源签名清单、有界聚合证据、精确缺口与原始队列头事务接收；尚未部署或应用到生产。
+- 证据检查不参与普通统计，删除事务同时清除对应证据副本。源队列仍由普通真实 ACK 删除。
+- 编译、事务失败回归、HTTP/CLI 边界、资源门禁与六节点验收尚在验证中；不能据此声明上报恢复。

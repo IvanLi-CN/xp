@@ -7,6 +7,7 @@ mod diagnostics;
 mod expired_tombstone_tests;
 mod original_backfill;
 mod payload_migration;
+mod prefix_recovery;
 mod segments;
 mod stale_recovery_storage;
 mod summary;

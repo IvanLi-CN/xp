@@ -923,7 +923,7 @@ pub(super) fn combine_partition_hash(left: [u8; 32], right: [u8; 32]) -> [u8; 32
     hasher.finalize().into()
 }
 
-fn gap_summary(gap: &StoredGap) -> RepositoryReplicaGap {
+pub(super) fn gap_summary(gap: &StoredGap) -> RepositoryReplicaGap {
     RepositoryReplicaGap {
         source_node_id: gap.source_node_id.clone(),
         source_epoch: gap.source_epoch,
