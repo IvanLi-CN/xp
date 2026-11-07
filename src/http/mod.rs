@@ -1172,6 +1172,7 @@ pub fn build_router_with_mesh_telemetry(
             "/_internal/history-repository/status",
             get(history_repository::admin_internal_history_repository_status),
         )
+        .merge(history_repository::original_source::routes())
         .route(
             "/_internal/history-repository/recovery",
             post(history_repository::recovery::admin_internal_history_repository_recovery),
@@ -1569,7 +1570,12 @@ async fn admin_auth(
                 .get(crate::reverse_mesh::RELAY_URI_HEADER)
                 .and_then(|value| value.to_str().ok())
                 .is_some_and(|uri| uri.starts_with("/raft/") || uri.contains("snapshot"));
-        let limit = if req.uri().path().contains("history-repository/sync-batch") {
+        let limit = if req.uri().path().contains("history-repository/sync-batch")
+            || req
+                .uri()
+                .path()
+                .ends_with("/history-repository/original-repair")
+        {
             // Batch wires are base64-encoded inside the signed JSON body. Keep a route-specific
             // envelope budget so the declared 1 MiB decoded wire limit remains usable.
             2 * 1024 * 1024

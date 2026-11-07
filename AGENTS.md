@@ -444,3 +444,17 @@ Directory, and pass both `XP_TESTBOX_CARGO_CACHE_ROOT` and
 - Commit subject/body must be English-only; subject must start lowercase; header ≤72 chars.
 - Prefer a short commit body explaining “why” for non-trivial changes.
 - PRs: include a summary, testing notes (commands run), and screenshots for UI changes; update `docs/` when behavior changes.
+
+旧身份历史恢复仅允许本机签名的正式运维入口。普通上报认证不放宽，仓库仅导入已离开集群的原始来源身份。
+
+源端使用 `xp-ops xp history-original-source`，仓库使用 `xp-ops xp history-original-import`。
+
+两个命令默认只预览，提交需 `--apply --yes --expected-fingerprint`。指纹绑定原始页与集群事实。
+
+原始 wire 保持签名、严格链与删除语义，整页事务提交后才生成收据。导入保留现有 15 分钟交接租约。
+
+源端通过注册仓库公网 HTTPS 的签名查询确认逐段持久 wire 和接收链，再由现有 ACK 事务清理队列。
+
+新身份必须等旧队列、背压和删除映射清空，再启动独立 epoch 与零序号。最后一页 ACK 原子保存旧身份。
+
+systemd、OpenRC、Docker/Compose 共用实现。无 xp.env 的容器必须指定 `--data-dir /var/lib/xp/data`。

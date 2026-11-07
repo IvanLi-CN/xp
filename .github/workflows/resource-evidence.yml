@@ -87,20 +87,23 @@ jobs:
             *) exit 1 ;;
           esac
           if [[ "$CANDIDATE_TARGET" = native ]]; then
-            cargo build --locked --release --bin xp
+            cargo build --locked --release --bin xp --bin xp-ops
           else
-            cargo build --locked --release --target "$CANDIDATE_TARGET" --bin xp
+            cargo build --locked --release --target "$CANDIDATE_TARGET" --bin xp --bin xp-ops
             cargo test --locked --release --target "$CANDIDATE_TARGET" --lib \
               large_pretty_node_history_guard_stays_bounded -- --ignored --nocapture
           fi
           echo "XP_MESH_RESOURCE_CANDIDATE_BIN=$GITHUB_WORKSPACE/$candidate" >> "$GITHUB_ENV"
           mkdir -p candidate
           cp "$candidate" candidate/xp
-          sha256sum candidate/xp > candidate/SHA256SUMS
+          cp "$(dirname "$candidate")/xp-ops" candidate/xp-ops
+          sha256sum candidate/xp candidate/xp-ops > candidate/SHA256SUMS
           printf '%s\n' "$TARGET_SHA" "$CANDIDATE_TARGET" > candidate/source-and-target.txt
           candidate/xp --version > candidate/version.txt
+          candidate/xp-ops --version > candidate/ops-version.txt
           if [[ -n "$CANDIDATE_BUILD_VERSION" ]]; then
             test "$(cat candidate/version.txt)" = "xp $CANDIDATE_BUILD_VERSION"
+            test "$(cat candidate/ops-version.txt)" = "xp-ops $CANDIDATE_BUILD_VERSION"
           fi
           cargo test --locked --release --test mesh_transport_resource_e2e --no-run
       - name: verify user cgroup support
