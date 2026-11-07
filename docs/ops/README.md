@@ -1823,3 +1823,11 @@ Practical guidance:
 
 - Do not re-run `xp init` against an existing data dir unless you are intentionally bootstrapping a new cluster.
 - For an existing node, upgrade by swapping the binary and keeping the existing `XP_DATA_DIR` (with a backup).
+
+序列汇总维护每次持有 replica 锁最多处理一个 4096 序号块，并在块间释放锁、让出调度。
+
+后台每轮最多处理 16 个切片，达到两秒调度预算后停止安排新切片；已开始的 SQLite 事务正常完成。
+
+查询与反熵准备最多推进一个块，不在同一次持锁期间重建整页摘要。
+
+摘要完成前继续使用既有版本回退，保持原始数据、接收顺序和真实 ACK 规则。
