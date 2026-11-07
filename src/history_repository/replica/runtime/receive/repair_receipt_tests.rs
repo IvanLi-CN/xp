@@ -277,3 +277,63 @@ fn unrelated_live_source_does_not_invalidate_original_import_preview() {
         fingerprint
     );
 }
+
+#[test]
+fn historical_ingest_priority_requires_commit_and_expires_without_live_renewal() {
+    use crate::state::history_repository::replica::RepositoryReplicaSegment;
+    let directory = tempfile::tempdir().unwrap();
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"live", false)], None);
+    let second = segment(
+        &key,
+        1,
+        vec![record(b"old", false)],
+        Some(first.segment_hash().unwrap()),
+    );
+    let mut runtime = load(directory.path());
+    let page = |wire| RepositoryReplicaSegment {
+        identity: identity.clone(),
+        wire,
+    };
+    runtime
+        .receive_wire_batch_from_repository_with_gaps(
+            "cluster-a",
+            &[page(first.wire_bytes().unwrap())],
+            &[],
+            12,
+            &["local".into()],
+            "local",
+        )
+        .unwrap();
+    assert!(!runtime.derived_maintenance_deferred());
+    assert!(
+        runtime
+            .receive_wire_batch_from_repository_with_gaps(
+                "cluster-a",
+                &[page(second.wire_bytes().unwrap()), page(vec![0])],
+                &[],
+                3600,
+                &["local".into()],
+                "local"
+            )
+            .is_err()
+    );
+    assert!(!runtime.derived_maintenance_deferred());
+    runtime
+        .receive_wire_batch_from_repository_with_gaps(
+            "cluster-a",
+            &[page(second.wire_bytes().unwrap())],
+            &[],
+            3600,
+            &["local".into()],
+            "local",
+        )
+        .unwrap();
+    assert!(runtime.derived_maintenance_deferred());
+    runtime.historical_ingest_at =
+        Some(std::time::Instant::now() - std::time::Duration::from_secs(31));
+    assert!(!runtime.derived_maintenance_deferred());
+    drop(runtime);
+    assert!(!load(directory.path()).derived_maintenance_deferred());
+}

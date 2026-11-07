@@ -48,9 +48,11 @@ pub(super) async fn run_maintenance_cycle(state: &AppState) {
         }
         let replica = state.repository_replica.clone();
         let result = tokio::task::spawn_blocking(move || {
-            replica
-                .blocking_lock()
-                .advance_sequence_summary_block_rebuild_slice(1)
+            let mut runtime = replica.blocking_lock();
+            if runtime.derived_maintenance_deferred() {
+                return Ok(true);
+            }
+            runtime.advance_sequence_summary_block_rebuild_slice(1)
         })
         .await;
         match result {

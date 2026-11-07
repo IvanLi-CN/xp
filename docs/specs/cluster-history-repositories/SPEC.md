@@ -652,3 +652,7 @@ sequence summary 重建与 payload encoding 后台迁移仅适用于当前配置
 新身份必须等旧队列、背压和删除映射清空，再启动独立 epoch 与零序号。最后一页 ACK 原子保存旧身份。
 
 systemd、OpenRC、Docker/Compose 共用实现。无 xp.env 的容器必须指定 `--data-dir /var/lib/xp/data`。
+
+已提交的历史页若原始观测时间早于当前 15 分钟，派生摘要维护让行 30 秒；仅成功提交可续期。
+
+此进程内窗口自动过期，重启即清除；实时上报不续期，配额、提交后保留期清理与载荷压缩继续执行。
