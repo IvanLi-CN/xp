@@ -1,6 +1,17 @@
 id: fixture-policy-rust-data-source
 snapshots:
   ? |
+    let backup = RuntimeBinaryBackup { dest: arbitrary_path.clone(), backup: None };
+  : labels:
+    - source: 'dest: arbitrary_path.clone()'
+      style: primary
+      start: 35
+      end: 63
+    - source: dest
+      style: secondary
+      start: 35
+      end: 39
+  ? |
     let call = Call::AddInbound { tag: "unapproved-tag".to_owned() };
   : labels:
     - source: 'tag: "unapproved-tag".to_owned()'
@@ -49,6 +60,17 @@ snapshots:
       style: primary
       start: 23
       end: 64
+    - source: dest
+      style: secondary
+      start: 23
+      end: 27
+  ? |
+    let fixture = Config { dest: paths.usr_local_bin_xp() };
+  : labels:
+    - source: 'dest: paths.usr_local_bin_xp()'
+      style: primary
+      start: 23
+      end: 53
     - source: dest
       style: secondary
       start: 23

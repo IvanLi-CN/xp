@@ -1,5 +1,6 @@
 use super::*;
 use crate::ops::paths::Paths;
+use crate::ops::upgrade::managed_runtimes::RuntimeBinaryBackup;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
@@ -84,8 +85,8 @@ fn prefix_history_compatibility_checks_actual_backup_before_any_complete_rollbac
     let backup = destination.with_extension("bak.test");
     executable(&backup, "3.47.8");
     let original = fs::read(&destination).unwrap();
-    let backups = [super::super::managed_runtimes::RuntimeBinaryBackup {
-        dest: destination.clone(),
+    let backups = [RuntimeBinaryBackup {
+        dest: paths.usr_local_bin_xp(),
         backup: Some(backup.clone()),
     }];
     let error =
