@@ -26,7 +26,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates build-essential pkg-config \
   && rm -rf /var/lib/apt/lists/*
 
-COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml ./
+COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml .xp-source-marker ./
 COPY proto ./proto
 COPY src ./src
 COPY tests ./tests
