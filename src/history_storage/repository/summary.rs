@@ -271,7 +271,7 @@ impl HistoryStorage {
                 .map(|value| checked_u64(value, 14))
                 .transpose()
                 .map_err(sqlite_error)?;
-            let payload = row.get::<_, Vec<u8>>(15).map_err(sqlite_error)?;
+            let payload = payload_codec::decode_column(row, 15).map_err(sqlite_error)?;
             let payload = canonical_sequence_summary_payload(
                 &payload,
                 &source,
@@ -498,7 +498,7 @@ impl HistoryStorage {
             }
             payload_bytes = next_payload_bytes;
             rows.push(row);
-            if rows.len() >= limit.min(32) {
+            if rows.len() >= limit {
                 break;
             }
         }

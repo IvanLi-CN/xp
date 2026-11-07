@@ -1,3 +1,4 @@
+mod response;
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt,
@@ -472,41 +473,6 @@ pub(crate) struct EncodedResponse {
     wire: Vec<u8>,
     canonical_len: usize,
 }
-impl EncodedResponse {
-    pub(crate) fn encode(canonical: Vec<u8>) -> Result<Self, ProtocolError> {
-        let canonical_len = canonical.len();
-        let (encoding, wire) = encoding::encode(canonical)?;
-        Ok(Self {
-            encoding,
-            canonical_len,
-            wire,
-        })
-    }
-    pub(crate) fn from_wire(
-        encoding: PayloadEncoding,
-        canonical_len: usize,
-        wire: Vec<u8>,
-    ) -> Result<Self, ProtocolError> {
-        encoding::validate_wire(encoding, canonical_len, &wire)?;
-        Ok(Self {
-            encoding,
-            wire,
-            canonical_len,
-        })
-    }
-
-    pub(crate) fn encoding(&self) -> PayloadEncoding {
-        self.encoding
-    }
-
-    pub(crate) fn wire(&self) -> &[u8] {
-        &self.wire
-    }
-
-    pub(crate) fn decode(&self) -> Result<Vec<u8>, ProtocolError> {
-        encoding::decode(self.encoding, &self.wire, self.canonical_len)
-    }
-}
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SchemaCatalog(BTreeSet<(String, u32)>);
 impl SchemaCatalog {
@@ -890,6 +856,36 @@ impl SegmentReceiver {
     }
     pub(crate) fn forwardable_unknown_segments(&self) -> &[SignedSegment] {
         &self.forwardable_unknown_segments
+    }
+
+    pub(crate) fn remove_source_streams_with_suffix(
+        &mut self,
+        source_node_id: &str,
+        source_epoch: u64,
+        stream_suffix: &str,
+    ) {
+        let matches = |stream: &str| stream.ends_with(stream_suffix);
+        self.streams.retain(|key, progress| {
+            !(key.source_node_id == source_node_id
+                && progress.epoch == source_epoch
+                && matches(&key.stream))
+        });
+        self.quarantined_streams.retain(|key, epoch| {
+            !(key.source_node_id == source_node_id
+                && *epoch == source_epoch.saturating_add(1)
+                && matches(&key.stream))
+        });
+        self.tombstones.retain(|key| {
+            !(key.stream.source_node_id == source_node_id
+                && key.source_epoch == source_epoch
+                && matches(&key.stream.stream))
+        });
+        self.forwardable_unknown_segments.retain(|segment| {
+            let first = segment.canonical().first_cursor();
+            !(first.source_node_id() == source_node_id
+                && first.source_epoch() == source_epoch
+                && matches(first.stream()))
+        });
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]

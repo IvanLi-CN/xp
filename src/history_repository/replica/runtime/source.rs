@@ -294,6 +294,29 @@ impl RepositoryReplicaRuntime {
             });
         }
         let capture_result: Result<(), RepositoryRuntimeError> = (|| {
+            let source_node_id = if self.snapshot.local_source.node_id.is_empty() {
+                self.original_source_page()?
+                    .first()
+                    .map(|segment| segment.identity.node_id().as_str().to_owned())
+                    .unwrap_or_default()
+            } else {
+                self.snapshot.local_source.node_id.clone()
+            };
+            if !source_node_id.is_empty() && source_node_id != identity.node_id().as_str() {
+                if !self.original_source_page()?.is_empty()
+                    || !self.snapshot.local_source.backpressure_gaps.is_empty()
+                    || !self.snapshot.local_source.deletion_marker_keys.is_empty()
+                    || self.snapshot.local_source.streams.values().any(|stream| {
+                        stream.backpressured_records != 0 || !stream.pending.is_empty()
+                    })
+                {
+                    return Err(RepositoryRuntimeError::Storage(
+                        "source identity recovery must drain original history before new capture"
+                            .to_owned(),
+                    ));
+                }
+                self.snapshot.local_source = LocalSourceState::default();
+            }
             if self.storage.is_sqlite() {
                 let available = self
                     .storage
@@ -321,6 +344,7 @@ impl RepositoryReplicaRuntime {
                 self.snapshot.local_source.epoch = self.finish_storage_write(result)?;
                 self.snapshot.local_source.node_id = identity.node_id().as_str().to_owned();
             }
+            self.snapshot.local_source.node_id = identity.node_id().as_str().to_owned();
             let mut journal_rows = Vec::new();
             for (stream, records) in records_by_stream {
                 let next_sequence = self
@@ -812,6 +836,28 @@ impl RepositoryReplicaRuntime {
         gap.last_sequence = gap.last_sequence.max(last_sequence);
         gap.start_unix_seconds = gap.start_unix_seconds.min(now_unix_seconds);
         gap.end_unix_seconds = gap.end_unix_seconds.max(now_unix_seconds);
+    }
+
+    pub(crate) fn record_local_source_delivery_gap(
+        &mut self,
+        source_epoch: u64,
+        stream: &str,
+        first_sequence: u64,
+        last_sequence: u64,
+        now_unix_seconds: u64,
+    ) -> Result<(), RepositoryRuntimeError> {
+        if source_epoch != self.snapshot.local_source.epoch || first_sequence > last_sequence {
+            return Err(RepositoryRuntimeError::Storage(
+                "local source sequence gap identity is invalid".to_owned(),
+            ));
+        }
+        self.record_local_source_backpressure_gap(
+            stream,
+            first_sequence,
+            last_sequence,
+            now_unix_seconds,
+        );
+        self.persist_control_state()
     }
 }
 

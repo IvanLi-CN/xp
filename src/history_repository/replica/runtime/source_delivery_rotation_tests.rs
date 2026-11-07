@@ -2,6 +2,54 @@ use super::*;
 use sha2::Sha256;
 
 #[test]
+fn released_delivery_window_survives_restart_without_acknowledging_wires() {
+    let directory = tempfile::tempdir().unwrap();
+    let key = SigningKey::from_bytes(&[11; 32]);
+    super::source_delivery_capacity_tests::append_signed_source_journal_rows(
+        directory.path(),
+        &key,
+        &identity(),
+        "runtime",
+        "runtime.v1",
+        0..4,
+    );
+    let mut runtime = load(directory.path());
+    let page = runtime.local_source_pending_segments_page();
+    assert_eq!(page.len(), 4);
+    runtime.clear_local_source_pending_window();
+    assert!(runtime.local_source_pending_segments_page().is_empty());
+    assert_eq!(
+        runtime
+            .storage
+            .source_delivery_journal_summary()
+            .unwrap()
+            .pending_segments,
+        4
+    );
+    drop(runtime);
+    let mut runtime = load(directory.path());
+    let restarted = runtime.local_source_pending_segments_page();
+    assert_eq!(
+        restarted.iter().map(|row| &row.wire).collect::<Vec<_>>(),
+        page.iter().map(|row| &row.wire).collect::<Vec<_>>()
+    );
+    runtime.clear_local_source_pending_window();
+    runtime
+        .acknowledge_local_source_segments_via_without_hydrating(&page[..1], 200, "direct")
+        .unwrap();
+    drop(runtime);
+    let runtime = load(directory.path());
+    assert_eq!(
+        runtime
+            .local_source_pending_segments_page()
+            .iter()
+            .map(|row| &row.wire)
+            .collect::<Vec<_>>(),
+        page[1..].iter().map(|row| &row.wire).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn source_delivery_replay_page_rotates_before_exhausting_a_hot_stream() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);

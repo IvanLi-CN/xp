@@ -90,16 +90,6 @@ impl TombstoneAcknowledgementPage {
 }
 
 impl RepositoryReplicaRuntime {
-    pub(crate) fn prepare_for_replication(
-        &mut self,
-        now_unix_seconds: u64,
-    ) -> Result<(), RepositoryRuntimeError> {
-        self.advance_partition_summary_rebuild_page()?;
-        self.advance_sequence_summary_block_rebuild_page()?;
-        self.rebuild_if_stale(now_unix_seconds)?;
-        self.prune_retention(now_unix_seconds)
-    }
-
     pub(crate) fn replication_work(&self, now_unix_seconds: u64) -> ReplicaWork {
         AntiEntropySchedule::default().due(
             now_unix_seconds,

@@ -6,6 +6,7 @@ mod diagnostics;
 #[path = "tests/expired_tombstone_tests.rs"]
 mod expired_tombstone_tests;
 mod original_backfill;
+mod payload_migration;
 mod segments;
 mod stale_recovery_storage;
 mod summary;
@@ -160,7 +161,7 @@ fn upsert_repository_history_segment(
                 i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
                 row.stream,
                 i64::try_from(row.first_sequence).unwrap_or(i64::MAX),
-                row.payload,
+                payload_codec::encode(&row.payload)?,
             ],
         )
         .map_err(sqlite_error)?;
@@ -359,7 +360,7 @@ impl HistoryStorage {
                             .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
                         row.aggregate_end_unix_seconds
                             .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
-                        row.payload,
+                        payload_codec::encode(&row.payload)?,
                     ],
                 )
                 .map_err(sqlite_error)?;
@@ -374,6 +375,59 @@ impl HistoryStorage {
         control_payload: &[u8],
     ) -> Result<RepositoryCommitOutcome> {
         self.commit_repository_replica_mutation_with(mutation, control_payload, |_| Ok(()))
+    }
+
+    /// Atomically remove one in-progress synthetic initial-backfill generation and persist the
+    /// caller's repaired control snapshot. These streams are disposable imports of a source's
+    /// local history; deleting only the exact source/epoch/suffix cannot touch live history or a
+    /// different source generation.
+    pub(crate) fn reset_repository_history_source_streams(
+        &self,
+        source_node_id: &str,
+        source_epoch: u64,
+        stream_suffix: &str,
+        control_payload: &[u8],
+    ) -> Result<RepositoryCommitOutcome> {
+        if stream_suffix.is_empty() {
+            return Err(HistoryStorageError(
+                "initial backfill stream suffix must not be empty".to_owned(),
+            ));
+        }
+        let source_epoch = durable_i64(source_epoch, "source stream reset epoch")?;
+        let stream_suffix = stream_suffix.to_owned();
+        self.commit_repository_replica_mutation_with(
+            RepositoryReplicaMutation::default(),
+            control_payload,
+            move |transaction| {
+                let records_deleted = transaction
+                    .execute(
+                        "DELETE FROM repository_history_records
+                         WHERE source_node_id = ?1
+                           AND source_epoch = ?2
+                           AND length(stream) >= length(?3)
+                           AND substr(stream, -length(?3)) = ?3",
+                        params![source_node_id, source_epoch, stream_suffix],
+                    )
+                    .map_err(sqlite_error)?;
+                let segments_deleted = transaction
+                    .execute(
+                        "DELETE FROM repository_history_segments
+                         WHERE source_node_id = ?1
+                           AND source_epoch = ?2
+                           AND length(stream) >= length(?3)
+                           AND substr(stream, -length(?3)) = ?3",
+                        params![source_node_id, source_epoch, stream_suffix],
+                    )
+                    .map_err(sqlite_error)?;
+                if records_deleted > 0 || segments_deleted > 0 {
+                    super::counts::bump_repository_history_segment_revisions(
+                        transaction,
+                        &std::collections::BTreeSet::from([source_node_id.to_owned()]),
+                    )?;
+                }
+                Ok(())
+            },
+        )
     }
 
     fn commit_repository_replica_mutation_with(
@@ -467,7 +521,22 @@ impl HistoryStorage {
             }
         }
         write_snapshot(&transaction, REPOSITORY_REPLICA_KEY, control_payload)?;
+        let transaction_records = mutation.records.len();
+        let transaction_segments = mutation.segments.len();
+        let transaction_tombstones = mutation.tombstones.len();
+        let commit_started = std::time::Instant::now();
         transaction.commit().map_err(sqlite_error)?;
+        let commit_elapsed_ms = commit_started.elapsed().as_millis();
+        if commit_elapsed_ms >= 1_000 {
+            tracing::warn!(
+                commit_elapsed_ms,
+                transaction_records,
+                transaction_segments,
+                transaction_tombstones,
+                "slow history repository SQLite commit"
+            );
+        }
+        let maintenance_started = std::time::Instant::now();
         #[cfg(test)]
         let maintenance_result = if fail_maintenance {
             Err(HistoryStorageError(
@@ -478,6 +547,16 @@ impl HistoryStorage {
         };
         #[cfg(not(test))]
         let maintenance_result = maintain_sqlite(connection);
+        let maintenance_elapsed_ms = maintenance_started.elapsed().as_millis();
+        if maintenance_elapsed_ms >= 1_000 {
+            tracing::warn!(
+                maintenance_elapsed_ms,
+                transaction_records,
+                transaction_segments,
+                transaction_tombstones,
+                "slow history repository SQLite maintenance"
+            );
+        }
         let maintenance_degraded = finish_post_commit_maintenance(maintenance_result);
         Ok(RepositoryCommitOutcome {
             maintenance_degraded,
@@ -546,6 +625,37 @@ impl HistoryStorage {
             offset,
             limit,
         )
+    }
+
+    pub(crate) fn repository_history_source_stream_max_sequence(
+        &self,
+        source_node_id: &str,
+        source_epoch: u64,
+        stream: &str,
+    ) -> Result<Option<u64>> {
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Ok(None);
+        };
+        let max_sequence = connection
+            .query_row(
+                "SELECT MAX(sequence)
+               FROM repository_history_records
+              WHERE source_node_id = ?1 AND source_epoch = ?2 AND stream = ?3",
+                params![
+                    source_node_id,
+                    durable_i64(source_epoch, "source stream watermark epoch")?,
+                    stream,
+                ],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .map_err(sqlite_error)?;
+        max_sequence
+            .map(|sequence| {
+                u64::try_from(sequence)
+                    .map_err(|_| HistoryStorageError("negative source stream watermark".to_owned()))
+            })
+            .transpose()
     }
 
     pub(crate) fn repository_history_records_for_schema(

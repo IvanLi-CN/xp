@@ -1,11 +1,7 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::{Duration, Instant},
+use super::{
+    ReplicaCursor, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey, TombstoneLedger,
+    TombstoneLedgerCheckpoint,
 };
-
-use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
-
 use crate::{
     history_sync::{
         Acceptance, CanonicalSegment, Cursor, ProtocolError, SegmentReceiver,
@@ -28,20 +24,19 @@ use crate::{
         },
     },
 };
-
-use super::{
-    ReplicaCursor, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey, TombstoneLedger,
-    TombstoneLedgerCheckpoint,
-};
 use local_history_backfill::LocalHistoryBackfillInFlight;
 use paths::PeerDirectPathState;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use source::LocalSourceState;
-
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::{Duration, Instant},
+};
 mod error;
 mod source_metrics;
 mod status;
 mod summary_repair;
-
 use status::SourceDeliveryStatus;
 pub(crate) use status::{SummaryRepairDiagnostic, SummaryRepairResult};
 pub(crate) use summary_repair::SummaryRepairDiagnosticUpdate;
@@ -473,6 +468,7 @@ pub(crate) struct RepositoryReplicaRuntime {
     delivery_metrics_cache: crate::state::history_storage::RepositoryDeliveryMetrics,
     delivery_metrics_dirty: bool,
     delivery_metrics_refreshed_at: Instant,
+    scheduling: scheduling::RepositorySchedulingState,
     #[cfg(test)]
     capacity_override: Option<(u64, u64)>,
 }
@@ -515,6 +511,7 @@ impl RepositoryReplicaRuntime {
                 crate::state::history_storage::RepositoryDeliveryMetrics::default(),
             delivery_metrics_dirty: true,
             delivery_metrics_refreshed_at: Instant::now(),
+            scheduling: scheduling::RepositorySchedulingState::default(),
             #[cfg(test)]
             capacity_override: None,
         };
@@ -554,6 +551,7 @@ impl RepositoryReplicaRuntime {
                 crate::state::history_storage::RepositoryDeliveryMetrics::default(),
             delivery_metrics_dirty: false,
             delivery_metrics_refreshed_at: Instant::now(),
+            scheduling: scheduling::RepositorySchedulingState::default(),
             #[cfg(test)]
             capacity_override: None,
         }
@@ -925,12 +923,14 @@ mod legacy_cursor_tests;
 #[path = "runtime/legacy_relay_tests.rs"]
 mod legacy_relay_tests;
 mod local_history_backfill;
+mod original_source;
 mod paths;
 mod query;
 mod receive;
 mod recovery_refresh;
 mod repair_batch;
 mod retention;
+mod scheduling;
 mod sequence_summary;
 pub(crate) mod source;
 mod storage;
@@ -951,13 +951,33 @@ pub(crate) fn source_epoch(cluster_id: &str, node_id: &str) -> u64 {
     let bytes: [u8; 32] = hasher.finalize().into();
     (u64::from_be_bytes(bytes[..8].try_into().expect("SHA-256 prefix")) & i64::MAX as u64).max(1)
 }
-
 #[cfg(test)]
 #[path = "runtime/duplicate_gap_tests.rs"]
 mod duplicate_gap_tests;
 #[cfg(test)]
+#[path = "runtime/page_replay_tests.rs"]
+mod page_replay_tests;
+#[cfg(test)]
+#[path = "runtime/peer_backfill_tests.rs"]
+mod peer_backfill_tests;
+#[cfg(test)]
+#[path = "runtime/query_budget_tests.rs"]
+mod query_budget_tests;
+#[cfg(test)]
+#[path = "runtime/query_tests.rs"]
+mod query_tests;
+#[cfg(test)]
+#[path = "runtime/quota_tests.rs"]
+mod quota_tests;
+#[cfg(test)]
+#[path = "runtime/repair_batch_tests.rs"]
+mod repair_batch_tests;
+#[cfg(test)]
 #[path = "runtime/repair_selection_tests.rs"]
 mod repair_selection_tests;
+#[cfg(test)]
+#[path = "runtime/repair_tests.rs"]
+mod repair_tests;
 #[cfg(test)]
 #[path = "runtime/retention_integrity_tests.rs"]
 mod retention_integrity_tests;
@@ -978,23 +998,3 @@ mod sync_tests;
 #[cfg(test)]
 #[path = "runtime/tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "runtime/page_replay_tests.rs"]
-mod page_replay_tests;
-#[cfg(test)]
-#[path = "runtime/peer_backfill_tests.rs"]
-mod peer_backfill_tests;
-#[cfg(test)]
-#[path = "runtime/repair_batch_tests.rs"]
-mod repair_batch_tests;
-#[cfg(test)]
-#[path = "runtime/repair_tests.rs"]
-mod repair_tests;
-
-#[cfg(test)]
-#[path = "runtime/query_budget_tests.rs"]
-mod query_budget_tests;
-#[cfg(test)]
-#[path = "runtime/query_tests.rs"]
-mod query_tests;

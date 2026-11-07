@@ -2,6 +2,7 @@ use crate::ops::admin_token;
 use crate::ops::cloudflare;
 use crate::ops::container;
 use crate::ops::deploy;
+use crate::ops::history_quota;
 use crate::ops::history_recovery;
 use crate::ops::ingress_guard;
 use crate::ops::init;
@@ -196,6 +197,11 @@ pub enum XpCommand {
     #[command(subcommand)]
     MembershipOperation(MembershipOperationCommand),
     HistoryRepositoryRecover(XpHistoryRepositoryRecoverArgs),
+    HistoryRepositoryQuota(XpHistoryRepositoryQuotaArgs),
+    /// Preview or acknowledge an original outbox page after verified collector storage.
+    HistoryOriginalSource(XpHistoryOriginalArgs),
+    /// Import unchanged signed history from an absent source identity.
+    HistoryOriginalImport(XpHistoryOriginalArgs),
     /// Disaster recovery: force this node to become the only Raft voter.
     ///
     /// This is only meant for cases where quorum is permanently lost (e.g. a voter node is wiped).
@@ -490,6 +496,26 @@ pub struct XpRecoverSingleNodeArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+pub struct XpHistoryOriginalArgs {
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
+    #[arg(long, default_value = "http://127.0.0.1:62416")]
+    pub api_base_url: String,
+    /// Configured Ready collector (source operation only).
+    #[arg(long)]
+    pub collector_node_id: Option<String>,
+    /// Bounded JSON source-preview file (import operation only).
+    #[arg(long)]
+    pub page_file: Option<PathBuf>,
+    #[arg(long)]
+    pub apply: bool,
+    #[arg(long, requires = "apply")]
+    pub yes: bool,
+    #[arg(long, requires = "apply")]
+    pub expected_fingerprint: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
 pub struct XpHistoryRepositoryRecoverArgs {
     /// Existing local XP data directory (required for containers without xp.env).
     #[arg(long, value_name = "PATH")]
@@ -518,6 +544,25 @@ pub struct XpHistoryRepositoryRecoverArgs {
     /// Fingerprint returned by the dry-run preview. Required with --apply.
     #[arg(long, value_name = "FINGERPRINT")]
     pub expected_recovery_fingerprint: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpHistoryRepositoryQuotaArgs {
+    /// Existing local XP data directory (required for containers without xp.env).
+    #[arg(long, value_name = "PATH")]
+    pub data_dir: Option<PathBuf>,
+    #[arg(long, default_value = "http://127.0.0.1:62416")]
+    pub api_base_url: String,
+    /// Physical database/WAL admission quota in bytes; reserve space below any external limit.
+    #[arg(long, value_name = "BYTES", value_parser = clap::value_parser!(u64).range(1..))]
+    pub quota_bytes: u64,
+    /// Persist the new quota. Omit for a read-only preview.
+    #[arg(long)]
+    pub apply: bool,
+    #[arg(long, conflicts_with = "apply")]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -850,6 +895,15 @@ pub async fn run() -> i32 {
             }
             XpCommand::HistoryRepositoryRecover(args) => {
                 history_recovery::cmd_xp_history_repository_recover(paths, args).await
+            }
+            XpCommand::HistoryOriginalSource(args) => {
+                super::history_original::run(paths, args, false).await
+            }
+            XpCommand::HistoryOriginalImport(args) => {
+                super::history_original::run(paths, args, true).await
+            }
+            XpCommand::HistoryRepositoryQuota(args) => {
+                history_quota::cmd_xp_history_repository_quota(paths, args).await
             }
             XpCommand::RecoverSingleNode(args) => xp::cmd_xp_recover_single_node(paths, args).await,
         },

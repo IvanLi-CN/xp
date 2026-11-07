@@ -4,7 +4,9 @@ use tokio::sync::Mutex;
 
 use crate::state::history_repository::replica::RepositoryReplicaRuntime;
 
-pub(super) fn repository_blocking<T>(operation: impl FnOnce() -> T) -> T {
+pub(in crate::http::history_repository) fn repository_blocking<T>(
+    operation: impl FnOnce() -> T,
+) -> T {
     if tokio::runtime::Handle::current().runtime_flavor()
         == tokio::runtime::RuntimeFlavor::MultiThread
     {

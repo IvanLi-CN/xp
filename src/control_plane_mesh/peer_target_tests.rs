@@ -19,13 +19,6 @@ use tokio::{
     time::sleep,
 };
 
-#[test]
-fn public_direct_api_url_rejects_plain_http() {
-    let error = super::join_url("http://peer.example", "/api/health", true)
-        .expect_err("public direct requests must require HTTPS");
-    assert!(matches!(error, MeshRequestError::InvalidTarget(_)));
-}
-
 async fn count_reverse_relay(State(requests): State<Arc<AtomicUsize>>) -> StatusCode {
     requests.fetch_add(1, Ordering::SeqCst);
     StatusCode::SERVICE_UNAVAILABLE
@@ -80,6 +73,7 @@ struct SignedServerState {
     ca_key_pem: String,
     ca_cert_pem: String,
     observations: Arc<AtomicUsize>,
+    delay: Duration,
 }
 
 async fn stall_mesh(State(requests): State<Arc<AtomicUsize>>) -> StatusCode {
@@ -96,6 +90,7 @@ async fn signed_public(
     body: Bytes,
 ) -> Response {
     state.observations.fetch_add(1, Ordering::SeqCst);
+    sleep(state.delay).await;
     let verified = crate::internal_auth::verify_request_v2(
         &state.ca_key_pem,
         &state.ca_cert_pem,
@@ -141,11 +136,20 @@ pub(super) async fn spawn_signed_public(
     ca_key_pem: &str,
     ca_cert_pem: &str,
 ) -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
+    spawn_signed_public_with_delay(ca_key_pem, ca_cert_pem, Duration::ZERO).await
+}
+
+pub(super) async fn spawn_signed_public_with_delay(
+    ca_key_pem: &str,
+    ca_cert_pem: &str,
+    delay: Duration,
+) -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
     let requests = Arc::new(AtomicUsize::new(0));
     let state = SignedServerState {
         ca_key_pem: ca_key_pem.to_owned(),
         ca_cert_pem: ca_cert_pem.to_owned(),
         observations: requests.clone(),
+        delay,
     };
     let app = Router::new()
         .fallback(any(

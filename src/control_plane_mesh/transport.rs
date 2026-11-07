@@ -3,7 +3,12 @@ use std::time::Duration;
 use super::{MeshAwareHttpClient, MeshRequestError};
 
 pub const MESH_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const PUBLIC_HEALTH_PROBE_BUDGET: Duration = Duration::from_secs(30);
 const MESH_POOL_MAX_IDLE_PER_HOST: usize = 1;
+
+#[cfg(test)]
+#[path = "public_health_budget_tests.rs"]
+mod tests;
 
 pub(super) fn join_url(
     base: &str,
@@ -67,6 +72,9 @@ fn public_direct_client_builder() -> reqwest::ClientBuilder {
     // the signed direct control-plane path on a bounded HTTP/1.1 exchange.
     reqwest::Client::builder()
         .http1_only()
+        // Cloudflare rejects requests without a User-Agent with HTTP 403/1010 at the
+        // edge before the signed XP request reaches the registered public endpoint.
+        .user_agent("xp")
         .redirect(reqwest::redirect::Policy::none())
 }
 

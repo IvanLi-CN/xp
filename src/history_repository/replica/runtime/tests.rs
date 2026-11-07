@@ -311,7 +311,7 @@ fn sqlite_deep_summary_rebuilds_partition_cache_in_bounded_pages() {
     let mut runtime = load(temporary.path());
     runtime.snapshot.external_history = true;
     runtime.snapshot.legacy_segment_cursor_index_complete = true;
-    let rows = (0..33_u64)
+    let rows = (0..513_u64)
         .map(|sequence| StoredRecord {
             observed_at_unix_seconds: 10 + sequence,
             received_at_unix_seconds: 10 + sequence,
@@ -346,13 +346,17 @@ fn sqlite_deep_summary_rebuilds_partition_cache_in_bounded_pages() {
     runtime
         .prepare_for_replication(100)
         .expect("finish partition summary rebuild");
+    assert!(!runtime.snapshot.partition_summaries_complete);
+    runtime
+        .prepare_for_replication(100)
+        .expect("complete partition summary rebuild");
     assert!(runtime.snapshot.partition_summaries_complete);
 
     let summary = runtime
         .replication_summary_after(None, true)
         .expect("summary with rebuilt partitions");
     assert!(summary.partitions_included);
-    assert_eq!(summary.partitions[0].record_count, 33);
+    assert_eq!(summary.partitions[0].record_count, 513);
 }
 
 #[test]
