@@ -95,7 +95,7 @@ impl RepositoryReplicaRuntime {
         now_unix_seconds: u64,
     ) -> Result<(), RepositoryRuntimeError> {
         self.advance_partition_summary_rebuild_page()?;
-        self.advance_sequence_summary_block_rebuild_page()?;
+        self.advance_sequence_summary_block_rebuild_slice(1)?;
         self.rebuild_if_stale(now_unix_seconds)?;
         self.prune_retention(now_unix_seconds)
     }

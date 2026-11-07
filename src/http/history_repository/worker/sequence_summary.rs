@@ -41,17 +41,33 @@ pub(super) async fn run_maintenance_cycle(state: &AppState) {
     if super::backfill::initial_history_source_backfill_pending(state).await {
         return;
     }
-    let replica = state.repository_replica.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        replica
-            .blocking_lock()
-            .advance_sequence_summary_block_rebuild_page()
-    })
-    .await;
-    match result {
-        Ok(Ok(_)) => {}
-        Ok(Err(error)) => tracing::debug!(%error, "history sequence summary deferred"),
-        Err(error) => tracing::warn!(%error, "history sequence summary worker failed"),
+    let summary_started = std::time::Instant::now();
+    for _ in 0..16 {
+        if summary_started.elapsed() >= Duration::from_secs(2) {
+            break;
+        }
+        let replica = state.repository_replica.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            replica
+                .blocking_lock()
+                .advance_sequence_summary_block_rebuild_slice(1)
+        })
+        .await;
+        match result {
+            Ok(Ok(true)) => break,
+            Ok(Ok(false)) => {}
+            Ok(Err(error)) => {
+                tracing::debug!(%error, "history sequence summary deferred");
+                break;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "history sequence summary worker failed");
+                break;
+            }
+        }
+        // A queued live delivery must be able to acquire the fair replica mutex before
+        // another derived summary block. Never cancel a running SQLite transaction.
+        tokio::task::yield_now().await;
     }
     let started = std::time::Instant::now();
     for _ in 0..8 {
