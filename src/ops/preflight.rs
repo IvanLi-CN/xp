@@ -99,7 +99,10 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
             Ok(())
         }
         Command::Xp(
-            XpCommand::HistoryRepositoryRecover(_) | XpCommand::HistoryRepositoryQuota(_),
+            XpCommand::HistoryRepositoryRecover(_)
+            | XpCommand::HistoryRepositoryQuota(_)
+            | XpCommand::HistoryOriginalSource(_)
+            | XpCommand::HistoryOriginalImport(_),
         ) => {
             // Runtime commands use the local signed identity. Confirmation and persistence are
             // checked by the running XP handler; no host service or deployment is changed.

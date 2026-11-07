@@ -39,6 +39,8 @@ const REPOSITORY_ED25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-ed25519-v1
 const REPOSITORY_X25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-x25519-v1\0";
 pub(super) mod gaps;
 mod initial_backfill_query;
+pub(crate) mod original_repair;
+pub(crate) mod original_source;
 pub(crate) mod quota;
 pub(crate) mod recovery;
 pub(crate) mod recovery_preflight;
@@ -278,7 +280,6 @@ fn ordinary_source_relay_batch_is_valid(
         .all(|segment| segment.identity.node_id().as_str() == source_node_id)
         && gaps::source_gaps_match_identity(&batch.gaps, source_node_id)
 }
-
 pub(super) async fn identity_is_pinned_for_node(
     state: &AppState,
     identity: &RepositoryNodeIdentity,
@@ -302,7 +303,6 @@ pub(super) async fn identity_is_pinned_for_node(
     };
     Ok(&expected == identity)
 }
-
 /// Historical repository rows can outlive the cluster member that originally produced them.
 /// Replay still verifies the deterministic cluster identity, but it must not require the source
 /// to remain in the current membership map. Live source delivery keeps the stricter pinned check.

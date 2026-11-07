@@ -36,7 +36,6 @@ use super::{
 use local_history_backfill::LocalHistoryBackfillInFlight;
 use paths::PeerDirectPathState;
 use source::LocalSourceState;
-
 mod error;
 mod source_metrics;
 mod status;
@@ -925,6 +924,7 @@ mod legacy_cursor_tests;
 #[path = "runtime/legacy_relay_tests.rs"]
 mod legacy_relay_tests;
 mod local_history_backfill;
+mod original_source;
 mod paths;
 mod query;
 mod receive;

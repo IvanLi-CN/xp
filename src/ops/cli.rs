@@ -198,6 +198,10 @@ pub enum XpCommand {
     MembershipOperation(MembershipOperationCommand),
     HistoryRepositoryRecover(XpHistoryRepositoryRecoverArgs),
     HistoryRepositoryQuota(XpHistoryRepositoryQuotaArgs),
+    /// Preview or acknowledge an original outbox page after verified collector storage.
+    HistoryOriginalSource(XpHistoryOriginalArgs),
+    /// Import unchanged signed history from an absent source identity.
+    HistoryOriginalImport(XpHistoryOriginalArgs),
     /// Disaster recovery: force this node to become the only Raft voter.
     ///
     /// This is only meant for cases where quorum is permanently lost (e.g. a voter node is wiped).
@@ -489,6 +493,26 @@ pub struct XpRecoverSingleNodeArgs {
 
     #[arg(long)]
     pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpHistoryOriginalArgs {
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
+    #[arg(long, default_value = "http://127.0.0.1:62416")]
+    pub api_base_url: String,
+    /// Configured Ready collector (source operation only).
+    #[arg(long)]
+    pub collector_node_id: Option<String>,
+    /// Bounded JSON source-preview file (import operation only).
+    #[arg(long)]
+    pub page_file: Option<PathBuf>,
+    #[arg(long)]
+    pub apply: bool,
+    #[arg(long, requires = "apply")]
+    pub yes: bool,
+    #[arg(long, requires = "apply")]
+    pub expected_fingerprint: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -871,6 +895,12 @@ pub async fn run() -> i32 {
             }
             XpCommand::HistoryRepositoryRecover(args) => {
                 history_recovery::cmd_xp_history_repository_recover(paths, args).await
+            }
+            XpCommand::HistoryOriginalSource(args) => {
+                super::history_original::run(paths, args, false).await
+            }
+            XpCommand::HistoryOriginalImport(args) => {
+                super::history_original::run(paths, args, true).await
             }
             XpCommand::HistoryRepositoryQuota(args) => {
                 history_quota::cmd_xp_history_repository_quota(paths, args).await
