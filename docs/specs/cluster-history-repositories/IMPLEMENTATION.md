@@ -272,6 +272,10 @@
   not enter the Reverse Mesh path. Source delivery uses the same public endpoint. A failed public
   request leaves the durable checkpoint or outbox unchanged for the next bounded retry; history
   synchronization never opens a Mesh relay.
+- 初始来源 worker 在仓库运行时锁内选择每轮最多三个来源，按持久导入进度排序，并使用
+  process-local attempted 集合保证一轮遍历中不重复选择；失败来源不会阻塞其他待回填来源。
+  集合随待处理成员裁剪，遍历完成后清空；重启不恢复调度集合，持久 checkpoint 和真实 ACK
+  仍是数据推进的唯一依据。回归覆盖失败来源占位、成员变化、小集合重试和零预算。
 - During initial catch-up, an unavailable Ready peer is recorded as unavailable for that tick while
   other Ready peers continue to receive their bounded public pages. Any unavailable or stale Ready
   peer keeps the aggregate catch-up incomplete, so the worker does not start the local stability

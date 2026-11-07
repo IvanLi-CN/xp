@@ -171,6 +171,10 @@
   Both pages merge with the checkpoint atomically without rearming the generation.
   Tiered handoff completion snapshots the receiver watermark in the same history transaction as
   its permanent gap, completed range and generation consumption; failed commits restore all state.
+  Initial source backfill attempts at most three pending sources per cycle. A process-local sweep
+  gives every pending source one attempt before retrying earlier sources, ordered by durable
+  import progress within each sweep. Failed requests consume only a scheduling attempt; they never
+  advance checkpoints or ACKs. Restart resets scheduling order only.
   Initial-source baseline prioritization applies only to configured repository members. Ordinary
   source nodes and former repositories keep replaying their own durable outbox when a new node
   joins; missing repository-import checkpoints on those sources must never suspend source delivery.

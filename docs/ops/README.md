@@ -1053,6 +1053,10 @@ Notes:
   only those IDs and resumes the saved summary cursor. An unchanged pending set after a release
   indicates the serving node is pre-fix and must be upgraded; never clear the checkpoint or source
   outbox manually.
+  初始来源回填每轮最多尝试三个来源；
+  每次遍历按持久导入进度排序，所有待处理来源都获得一次尝试后才重试此前来源。
+  失败只消耗内存中的调度机会，不推进 checkpoint 或 ACK；
+  新增来源加入当前遍历，完成或移除的来源退出，重启仅重置调度顺序。
   A retained segment may be the first locally available frame for a source stream and therefore
   have a nonzero sequence plus a predecessor hash that is no longer retained. The ready-peer
   initial backfill path accepts this signed anchor and keeps the stream unverified while requiring

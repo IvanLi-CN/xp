@@ -136,3 +136,5 @@ repair 的源端保留边界证明。
 - `./SPEC.md`
 - `./IMPLEMENTATION.md`
 - Issue #248: https://github.com/IvanLi-CN/xp/issues/248
+
+- PR #453 的回填调度审查发现低进度失败来源可永久占据三个名额；改为内存遍历调度，保留每轮上限与真实 ACK 语义。

@@ -170,6 +170,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   worker 重试；该 revision 与 summary cursor 一起持久化，重启后仍可重试。
   repair 仍返回完整签名 wire，接收方继续按 source、epoch、stream、签名和 predecessor
   hash-chain 校验；过滤不得放宽任何完整性检查。
+- 初始来源回填每轮最多尝试三个来源；
+  每次遍历按持久导入进度排序，所有待处理来源各尝试一次后才能重试此前来源。
+  失败不得永久占据名额，也不得推进 checkpoint 或 ACK。调度记录仅在进程内保存，新增来源加入当前遍历，完成或移除来源退出，重启仅重置尝试顺序。
 - ready repository 的初始回填可能只保留某条 source stream 的尾部 segment。若没有本地水位，
   非零首段必须携带已签名的 predecessor hash，初始回填专用接收路径才可以把它作为 retained
   anchor 持久化。若本地已有该 stream 的连续水位，且 repair 明确携带

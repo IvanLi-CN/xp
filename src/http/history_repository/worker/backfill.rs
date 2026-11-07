@@ -408,29 +408,6 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
     Ok(progress)
 }
 
-fn select_initial_history_source_peer_ids(
-    peer_progress: Vec<(String, u64)>,
-    local_node_id: &str,
-) -> Vec<String> {
-    let mut peer_progress = peer_progress
-        .into_iter()
-        .filter(|(node_id, _)| node_id != local_node_id)
-        .collect::<Vec<_>>();
-    // A page can take longer than the source tick. Select by durable import progress rather than
-    // wall-clock rotation, otherwise a slow cycle can repeatedly choose one peer and starve the
-    // remaining sources indefinitely.
-    peer_progress.sort_by(|(left_id, left_progress), (right_id, right_progress)| {
-        left_progress
-            .cmp(right_progress)
-            .then_with(|| left_id.cmp(right_id))
-    });
-    peer_progress
-        .into_iter()
-        .take(INITIAL_SOURCE_PEERS_PER_CYCLE)
-        .map(|(node_id, _)| node_id)
-        .collect()
-}
-
 async fn initial_history_source_peers(
     state: &AppState,
     _now_unix_seconds: u64,
@@ -439,9 +416,9 @@ async fn initial_history_source_peers(
         let store = state.store.lock().await;
         (store.list_nodes(), store.list_endpoints())
     };
-    let pending_peer_progress = {
-        let runtime = state.repository_replica.lock().await;
-        nodes
+    let selected_ids = {
+        let mut runtime = state.repository_replica.lock().await;
+        let pending_peer_progress = nodes
             .iter()
             .filter(|node| node.node_id != state.cluster.node_id)
             .filter_map(|node| {
@@ -463,10 +440,13 @@ async fn initial_history_source_peers(
                     .unwrap_or_default();
                 Some((node.node_id.clone(), imported_progress))
             })
-            .collect()
+            .collect();
+        runtime.select_initial_history_source_peer_ids(
+            pending_peer_progress,
+            &state.cluster.node_id,
+            INITIAL_SOURCE_PEERS_PER_CYCLE,
+        )
     };
-    let selected_ids =
-        select_initial_history_source_peer_ids(pending_peer_progress, &state.cluster.node_id);
     selected_ids
         .into_iter()
         .filter_map(|node_id| nodes.iter().find(|node| node.node_id == node_id))

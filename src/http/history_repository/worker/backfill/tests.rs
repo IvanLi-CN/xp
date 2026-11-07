@@ -3,8 +3,7 @@ use super::{
     InitialBackfillProgress, RepositoryInitialBackfillPage, RepositoryInitialBackfillRecord,
     deserialize_initial_backfill_page, initial_source_backfill_path,
     is_initial_history_source_peer, next_historical_backfill_page_cursor,
-    select_initial_history_source_peer_ids, serialized_backfill_record_bytes,
-    validate_peer_backfill_page,
+    serialized_backfill_record_bytes, validate_peer_backfill_page,
 };
 use crate::history_sync::SyncRecord;
 use crate::state::history_repository::{
@@ -338,7 +337,8 @@ fn initial_backfill_includes_configured_repository_sources() {
 
 #[test]
 fn initial_source_backfill_selects_the_least_imported_peer() {
-    let selected = select_initial_history_source_peer_ids(
+    let (_directory, mut runtime) = source_scheduler();
+    let selected = runtime.select_initial_history_source_peer_ids(
         vec![
             ("node-d".to_owned(), 40),
             ("node-b".to_owned(), 10),
@@ -346,6 +346,7 @@ fn initial_source_backfill_selects_the_least_imported_peer() {
             ("node-c".to_owned(), 30),
         ],
         "node-a",
+        3,
     );
 
     assert_eq!(
@@ -570,3 +571,79 @@ pub(super) mod ready_tombstones;
 
 #[path = "tests/source_admission.rs"]
 mod source_admission;
+
+#[test]
+fn failed_initial_sources_cannot_starve_a_healthy_source_across_cycles() {
+    let peers = || {
+        vec![
+            ("node-a".to_owned(), 0),
+            ("node-b".to_owned(), 0),
+            ("node-c".to_owned(), 0),
+            ("node-d".to_owned(), 100),
+        ]
+    };
+    let (_directory, mut runtime) = source_scheduler();
+    let mut selected = Vec::new();
+    for _ in 0..3 {
+        selected.extend(runtime.select_initial_history_source_peer_ids(peers(), "local", 3));
+    }
+    assert!(selected.iter().any(|id| id == "node-d"));
+}
+
+fn source_scheduler() -> (
+    tempfile::TempDir,
+    crate::state::history_repository::replica::RepositoryReplicaRuntime,
+) {
+    let directory = tempfile::tempdir().expect("directory");
+    let runtime = crate::state::history_repository::replica::RepositoryReplicaRuntime::empty(
+        crate::state::history_storage::HistoryStorage::open(directory.path()),
+    );
+    (directory, runtime)
+}
+
+#[test]
+fn initial_source_sweeps_handle_membership_changes_and_retry_small_sets() {
+    let (_directory, mut runtime) = source_scheduler();
+    let peers = |ids: &[&str]| ids.iter().map(|id| (id.to_string(), 0)).collect();
+    assert_eq!(
+        runtime.select_initial_history_source_peer_ids(
+            peers(&["local", "a", "b", "c", "d"]),
+            "local",
+            3
+        ),
+        ["a", "b", "c"]
+    );
+    // Completed/removed sources disappear, and a newly pending source joins this sweep.
+    assert_eq!(
+        runtime.select_initial_history_source_peer_ids(
+            peers(&["local", "a", "d", "e"]),
+            "local",
+            3
+        ),
+        ["d", "e"]
+    );
+    assert_eq!(
+        runtime.select_initial_history_source_peer_ids(peers(&["a", "d", "e"]), "local", 3),
+        ["a", "d", "e"]
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            runtime.select_initial_history_source_peer_ids(peers(&["local", "a"]), "local", 3),
+            ["a"]
+        );
+    }
+    assert!(
+        runtime
+            .select_initial_history_source_peer_ids(peers(&["a"]), "local", 0)
+            .is_empty()
+    );
+    assert_eq!(
+        runtime.select_initial_history_source_peer_ids(peers(&["a"]), "local", 3),
+        ["a"]
+    );
+    assert!(
+        runtime
+            .select_initial_history_source_peer_ids(vec![], "local", 3)
+            .is_empty()
+    );
+}

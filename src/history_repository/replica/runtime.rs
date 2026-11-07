@@ -468,7 +468,7 @@ pub(crate) struct RepositoryReplicaRuntime {
     delivery_metrics_cache: crate::state::history_storage::RepositoryDeliveryMetrics,
     delivery_metrics_dirty: bool,
     delivery_metrics_refreshed_at: Instant,
-    historical_ingest_at: Option<Instant>,
+    scheduling: scheduling::RepositorySchedulingState,
     #[cfg(test)]
     capacity_override: Option<(u64, u64)>,
 }
@@ -511,7 +511,7 @@ impl RepositoryReplicaRuntime {
                 crate::state::history_storage::RepositoryDeliveryMetrics::default(),
             delivery_metrics_dirty: true,
             delivery_metrics_refreshed_at: Instant::now(),
-            historical_ingest_at: None,
+            scheduling: scheduling::RepositorySchedulingState::default(),
             #[cfg(test)]
             capacity_override: None,
         };
@@ -551,7 +551,7 @@ impl RepositoryReplicaRuntime {
                 crate::state::history_storage::RepositoryDeliveryMetrics::default(),
             delivery_metrics_dirty: false,
             delivery_metrics_refreshed_at: Instant::now(),
-            historical_ingest_at: None,
+            scheduling: scheduling::RepositorySchedulingState::default(),
             #[cfg(test)]
             capacity_override: None,
         }
@@ -915,7 +915,6 @@ mod backfill_order_tests;
 mod base64_bytes;
 mod capacity;
 mod helpers;
-mod ingest_priority;
 mod initial_peer;
 #[cfg(test)]
 #[path = "runtime/legacy_cursor_tests.rs"]
@@ -931,6 +930,7 @@ mod receive;
 mod recovery_refresh;
 mod repair_batch;
 mod retention;
+mod scheduling;
 mod sequence_summary;
 pub(crate) mod source;
 mod storage;

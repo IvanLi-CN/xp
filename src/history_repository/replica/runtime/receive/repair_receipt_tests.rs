@@ -331,7 +331,7 @@ fn historical_ingest_priority_requires_commit_and_expires_without_live_renewal()
         )
         .unwrap();
     assert!(runtime.derived_maintenance_deferred());
-    runtime.historical_ingest_at =
+    runtime.scheduling.historical_ingest_at =
         Some(std::time::Instant::now() - std::time::Duration::from_secs(31));
     assert!(!runtime.derived_maintenance_deferred());
     drop(runtime);
@@ -347,15 +347,15 @@ fn continuous_historical_ingest_cannot_renew_the_maintenance_deadline() {
         .unwrap();
     let mut runtime = load(directory.path());
     let started = std::time::Instant::now() - std::time::Duration::from_secs(29);
-    runtime.historical_ingest_at = Some(started);
+    runtime.scheduling.historical_ingest_at = Some(started);
     runtime.note_historical_ingest([wire.as_slice()], 3600);
-    assert_eq!(runtime.historical_ingest_at, Some(started));
+    assert_eq!(runtime.scheduling.historical_ingest_at, Some(started));
     assert!(runtime.derived_maintenance_deferred());
-    runtime.historical_ingest_at =
+    runtime.scheduling.historical_ingest_at =
         Some(std::time::Instant::now() - std::time::Duration::from_secs(31));
     runtime.note_historical_ingest([wire.as_slice()], 3600);
     runtime.prepare_for_replication(3600).unwrap();
-    assert!(runtime.historical_ingest_at.is_none());
+    assert!(runtime.scheduling.historical_ingest_at.is_none());
     runtime.note_historical_ingest([wire.as_slice()], 3600);
     assert!(runtime.derived_maintenance_deferred());
 }
