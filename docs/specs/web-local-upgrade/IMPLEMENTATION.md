@@ -2,6 +2,11 @@
 
 ## 实现摘要
 
+升级事务备份清理只保留文件身份与描述符，不按二进制总体积累加内存。服务就绪后先同步有界
+诊断守卫，再逐个删除备份；此后删除失败保留已就绪程序和剩余备份，阻止下一次升级，
+不再尝试不可能保证成功的多文件回滚。Linux 子进程回归在 64 MiB 数据段上限下清理两份
+128 MiB 稀疏备份，另以真实 finisher 回归验证失败终态和后续升级拒绝。
+
 - `src/upgrade_job.rs` 定义本机 upgrade request/status 持久化模型、状态读写、host/container 支持检测与 start API helper。
 - `src/http/mod.rs` 新增 admin-only `GET /api/admin/upgrade/status` 与 `POST /api/admin/upgrade/start`。
 - `xp-ops _upgrade-runner` 读取 `${XP_DATA_DIR}/upgrade/request.json`，调用既有

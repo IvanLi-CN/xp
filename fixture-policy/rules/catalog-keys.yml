@@ -54,7 +54,7 @@ rule:
             - regex: '^"(probeRunPrimary|probeRunSecondary|probeConfigPrimary|clusterPrimary)"$'
             - regex: '^"(endpointTagPrimary|endpointTagSecondary|endpointTagTertiary)"$'
             - regex: '^"(endpointTagMissing|earlier|baseline|recent|later)"$'
-            - regex: '^"(releasePrevious|releaseCurrent|releaseHttp|probeHour)"$'
+            - regex: '^"(releasePrevious|releaseCurrent|releaseHttp|releaseTag|probeHour)"$'
             - regex: '^"(probeLatest|date|latencyLow|latencyHigh|trafficBytes)"$'
             - regex: '^"(availabilityLow|availabilityHigh|availabilityFull)"$'
             - regex: '^"(vlessKind|ssKind|port443|port444|port445|port8443|port8388)"$'

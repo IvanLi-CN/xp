@@ -310,6 +310,7 @@ esac\n\
             "--repo",
             "o/r",
         ]);
+        cmd.arg("--data-dir").arg(tmp.path().join("data"));
         cmd.assert().success();
         let new_xp_bytes = fs::read(&xp_path).unwrap();
         assert_eq!(new_xp_bytes, new_xp);
@@ -436,6 +437,7 @@ esac\n\
         cmd.env("PATH", prepend_path(&bin_dir));
         cmd.args(["--root", &root, "upgrade", "--repo", "o/r"]);
 
+        cmd.arg("--data-dir").arg(tmp.path().join("data"));
         cmd.assert().success();
 
         let marker_raw = fs::read_to_string(&marker).unwrap();
@@ -1022,6 +1024,7 @@ esac\n\
         cmd.env("PATH", prepend_path(&bin_dir));
         cmd.args(["--root", &root, "upgrade", "--repo", "o/r"]);
 
+        cmd.arg("--data-dir").arg(tmp.path().join("data"));
         cmd.assert().success();
 
         let xray_config = fs::read_to_string(tmp.path().join("etc/xray/config.json")).unwrap();
