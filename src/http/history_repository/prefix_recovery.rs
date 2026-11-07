@@ -108,7 +108,7 @@ pub(crate) async fn source(
     let bound = binding(&state).await?;
     let (deletion_version, deletions) = state
         .node_history
-        .repository_deletion_snapshot(&request.collector_node_id)
+        .repository_deletion_snapshot_bounded(&request.collector_node_id, 128, 128 * 1024)
         .await
         .map_err(|error| ApiError::conflict(error.to_string()))?;
     let identity = derived_repository_identity(
@@ -145,7 +145,7 @@ pub(crate) async fn source(
     drop(runtime);
     let (current_version, _) = state
         .node_history
-        .repository_deletion_snapshot(&request.collector_node_id)
+        .repository_deletion_snapshot_bounded(&request.collector_node_id, 128, 128 * 1024)
         .await
         .map_err(|error| ApiError::conflict(error.to_string()))?;
     if current_version != deletion_version {
@@ -289,6 +289,9 @@ pub(crate) async fn evidence(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_local(&state, internal)?;
     let runtime = state.repository_replica.lock().await;
+    for evidence in runtime.prefix_recovery_evidence() {
+        evidence.verify().map_err(repository_error)?;
+    }
     Ok(Json(
         serde_json::json!({"recoveries":runtime.prefix_recovery_evidence()}),
     ))

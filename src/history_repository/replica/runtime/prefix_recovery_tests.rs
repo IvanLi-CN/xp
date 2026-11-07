@@ -42,6 +42,7 @@ fn bundle(head: &SignedSegment, records: Vec<StoredRecord>) -> PrefixRecoveryBun
             },
             original_head: head.wire_bytes().unwrap(),
             retained_records: records,
+            retained_record_signatures: BTreeMap::new(),
         }],
         signature: String::new(),
     };
@@ -49,6 +50,15 @@ fn bundle(head: &SignedSegment, records: Vec<StoredRecord>) -> PrefixRecoveryBun
     let mut bytes = b"xp-source-prefix-recovery-v1\0".to_vec();
     bytes.extend(serde_json::to_vec(&bundle).unwrap());
     bundle.signature = URL_SAFE_NO_PAD.encode(key.sign(&Sha256::digest(bytes)).to_bytes());
+    let digest = bundle.digest().unwrap();
+    for stream in &mut bundle.streams {
+        for record in &stream.retained_records {
+            stream.retained_record_signatures.insert(
+                record_key(record).unwrap(),
+                attest_record(&digest, record, &key).unwrap(),
+            );
+        }
+    }
     bundle
 }
 
@@ -420,4 +430,64 @@ fn source_prefix_export_binds_exact_pending_head_inventory_and_deletion_baseline
                 .all(SyncRecord::is_tombstone)
         );
     });
+}
+
+#[test]
+fn persisted_prefix_provenance_rejects_tampering_and_survives_selective_deletion() {
+    let directory = tempfile::tempdir().unwrap();
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"existing", false)], None);
+    let head = segment(&key, 2, vec![record(b"head", false)], Some([9; 32]));
+    let mut kept = aggregate();
+    kept.record_key = b"kept-aggregate".to_vec();
+    let bundle = bundle(&head, vec![aggregate(), kept.clone()]);
+    let mut runtime = load(directory.path());
+    runtime
+        .receive_wire(
+            xp_test_fixtures::primary_cluster_id(),
+            &identity,
+            &first.wire_bytes().unwrap(),
+            11,
+        )
+        .unwrap();
+    let fingerprint = runtime.prefix_recovery_fingerprint(&bundle).unwrap();
+    runtime
+        .apply_prefix_recovery(&bundle, &fingerprint, 12, &["local".into()], "local")
+        .unwrap();
+    drop(runtime);
+    let mut runtime = load(directory.path());
+    let evidence = runtime.prefix_recovery_evidence()[0].clone();
+    evidence.verify().unwrap();
+    let mut changed = evidence.clone();
+    changed.retained_records[0].payload.push(0);
+    assert!(changed.verify().is_err());
+    let mut changed = evidence.clone();
+    changed.bundle_digest = hex::encode([9; 32]);
+    assert!(changed.verify().is_err());
+    let mut changed = evidence;
+    changed.retained_record_signatures.clear();
+    assert!(changed.verify().is_err());
+    let deletion = segment(
+        &key,
+        3,
+        vec![record(b"retained-aggregate", true)],
+        Some(head.segment_hash().unwrap()),
+    );
+    runtime
+        .receive_wire(
+            xp_test_fixtures::primary_cluster_id(),
+            &identity,
+            &deletion.wire_bytes().unwrap(),
+            13,
+        )
+        .unwrap();
+    drop(runtime);
+    let runtime = load(directory.path());
+    let evidence = &runtime.prefix_recovery_evidence()[0];
+    evidence.verify().unwrap();
+    assert_eq!(evidence.retained_records.len(), 1);
+    assert_eq!(evidence.retained_record_signatures.len(), 1);
+    assert_eq!(evidence.retained_records[0].payload, kept.payload);
+    assert_eq!(evidence.retained_records[0].record_key, kept.record_key);
 }

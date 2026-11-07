@@ -753,9 +753,7 @@ impl RepositoryReplicaRuntime {
         let (schema_id, schema_version) = key.schema();
         let prefix = key.record_key().ends_with(b":");
         for evidence in &mut self.snapshot.prefix_recoveries {
-            evidence
-                .retained_records
-                .retain(|record| !record.matches_tombstone_key(key, prefix));
+            evidence.delete_records(key, prefix)?;
         }
         if self.uses_sqlite_history() {
             self.reset_partition_summary_cache();

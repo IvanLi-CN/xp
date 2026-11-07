@@ -2,6 +2,10 @@ use super::*;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ed25519_dalek::{Signer as _, Verifier as _};
 
+mod provenance;
+use provenance::verify_record;
+pub(super) use provenance::{attest_record, record_key};
+
 const DOMAIN: &[u8] = b"xp-source-prefix-recovery-v1\0";
 const MAX_BUNDLE_BYTES: usize = 192 * 1024;
 const MAX_LEDGER_BYTES: usize = 1024 * 1024;
@@ -23,6 +27,7 @@ pub(crate) struct PrefixRecoveryStream {
     #[serde(with = "super::base64_bytes")]
     pub(crate) original_head: Vec<u8>,
     pub(crate) retained_records: Vec<StoredRecord>,
+    pub(crate) retained_record_signatures: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +54,7 @@ pub(crate) struct PrefixRecoveryEvidence {
     pub(crate) identity: RepositoryNodeIdentity,
     pub(crate) source_signature: String,
     pub(crate) retained_records: Vec<StoredRecord>,
+    pub(crate) retained_record_signatures: BTreeMap<String, String>,
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
 }
 
@@ -60,6 +66,10 @@ impl PrefixRecoveryBundle {
     fn signing_bytes(&self) -> Result<Vec<u8>, RepositoryRuntimeError> {
         let mut unsigned = self.clone();
         unsigned.signature.clear();
+        // Per-record proofs bind this inventory digest; excluding the proofs avoids a cycle.
+        for stream in &mut unsigned.streams {
+            stream.retained_record_signatures.clear();
+        }
         let mut bytes = DOMAIN.to_vec();
         bytes.extend(serde_json::to_vec(&unsigned).map_err(|error| invalid(&error.to_string()))?);
         if bytes.len() > MAX_BUNDLE_BYTES {
@@ -88,6 +98,14 @@ impl PrefixRecoveryBundle {
                 .map_err(|_| invalid("invalid prefix recovery public key"))?;
         key.verify(&Sha256::digest(self.signing_bytes()?), &signature)
             .map_err(|_| invalid("prefix recovery source signature mismatch"))?;
+        if serde_json::to_vec(self)
+            .map_err(|error| invalid(&error.to_string()))?
+            .len()
+            > MAX_BUNDLE_BYTES
+        {
+            return Err(RepositoryRuntimeError::StateLimitExceeded);
+        }
+        let digest = self.digest()?;
         let mut streams = BTreeSet::new();
         let mut count = 0_usize;
         if !self.deletion_baseline_wire.is_empty() {
@@ -108,6 +126,9 @@ impl PrefixRecoveryBundle {
                 return Err(invalid("invalid prefix recovery deletion baseline"));
             }
             count = baseline.canonical().records().len();
+            if count > 128 {
+                return Err(RepositoryRuntimeError::StateLimitExceeded);
+            }
         }
         for stream in &self.streams {
             let plan = &stream.plan;
@@ -135,8 +156,16 @@ impl PrefixRecoveryBundle {
                     "prefix recovery head does not bind the missing range",
                 ));
             }
+            if stream.retained_record_signatures.len() != stream.retained_records.len() {
+                return Err(invalid("prefix aggregate proofs are incomplete"));
+            }
             let mut keys = BTreeSet::new();
             for record in &stream.retained_records {
+                let signature = stream
+                    .retained_record_signatures
+                    .get(&record_key(record)?)
+                    .ok_or_else(|| invalid("prefix aggregate proof missing"))?;
+                verify_record(&self.identity, &digest, record, signature)?;
                 count += 1;
                 if count > 128
                     || record.tombstone
@@ -239,6 +268,7 @@ impl RepositoryReplicaRuntime {
                 plan,
                 original_head: row.wire,
                 retained_records: records,
+                retained_record_signatures: BTreeMap::new(),
             });
         }
         let mut bundle = PrefixRecoveryBundle {
@@ -306,6 +336,14 @@ impl RepositoryReplicaRuntime {
             key.sign(&Sha256::digest(bundle.signing_bytes()?))
                 .to_bytes(),
         );
+        let digest = bundle.digest()?;
+        for stream in &mut bundle.streams {
+            for record in &stream.retained_records {
+                stream
+                    .retained_record_signatures
+                    .insert(record_key(record)?, attest_record(&digest, record, key)?);
+            }
+        }
         bundle.verify()?;
         Ok(bundle)
     }
@@ -397,6 +435,7 @@ impl RepositoryReplicaRuntime {
                 identity: bundle.identity.clone(),
                 source_signature: bundle.signature.clone(),
                 retained_records: Vec::new(),
+                retained_record_signatures: BTreeMap::new(),
                 gaps: Vec::new(),
             };
             for stream in &bundle.streams {
@@ -435,10 +474,15 @@ impl RepositoryReplicaRuntime {
                     )?
                     .key();
                     if self.tombstones.allows(&key) {
+                        let key = record_key(record)?;
+                        evidence
+                            .retained_record_signatures
+                            .insert(key.clone(), stream.retained_record_signatures[&key].clone());
                         evidence.retained_records.push(record.clone());
                     }
                 }
             }
+            evidence.verify()?;
             self.snapshot.prefix_recoveries.push(evidence.clone());
             if self.snapshot.prefix_recoveries.len() > 32
                 || serde_json::to_vec(&self.snapshot.prefix_recoveries)

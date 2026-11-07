@@ -473,6 +473,7 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 
 - VER-PREFIX-LOSS covers: REQ-PREFIX-LOSS. 必须验证严格普通投递仍拒绝未授权缺口、源签名清单与 fingerprint 绑定。
   验证事务失败和重启、真实 ACK、重复恢复拒绝、聚合不重复计数，以及证据副本遵循现有删除事务。
+  验证重启后逐条聚合来源证明、内容篡改拒绝及选择性删除后剩余证明仍有效；完整删除基线超限拒绝。
   生产验收另要求待发原始段真实 ACK 排空、容量暂停解除且持续采集；历史仍 partial。
 
 - Given 普通节点存在旧 JSON，When 启动迁移成功，Then SQLite 与旧窗口语义一致、无双写且可重启
