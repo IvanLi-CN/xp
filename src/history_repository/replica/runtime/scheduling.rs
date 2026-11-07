@@ -34,14 +34,18 @@ impl RepositoryReplicaRuntime {
         // Each pending source gets one attempt per sweep, including failures. Progress
         // orders a sweep but cannot let unavailable low-progress peers monopolize it.
         // This process-local schedule never advances a durable checkpoint or ACK.
-        let selected = peers
+        peers
             .into_iter()
             .filter(|(id, _)| !attempted.contains(id))
             .take(limit)
             .map(|(id, _)| id)
-            .collect::<Vec<_>>();
-        attempted.extend(selected.iter().cloned());
-        selected
+            .collect()
+    }
+
+    pub(crate) fn note_initial_history_source_attempt(&mut self, node_id: &str) {
+        self.scheduling
+            .initial_sources_attempted
+            .insert(node_id.to_owned());
     }
 
     pub(crate) fn prepare_for_replication(

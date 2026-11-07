@@ -273,7 +273,8 @@
   request leaves the durable checkpoint or outbox unchanged for the next bounded retry; history
   synchronization never opens a Mesh relay.
 - 初始来源 worker 在仓库运行时锁内选择每轮最多三个来源，按持久导入进度排序，并使用
-  process-local attempted 集合保证一轮遍历中不重复选择；失败来源不会阻塞其他待回填来源。
+  process-local attempted 集合保证一轮遍历中不重复尝试；每次 pull 前单独记录该来源，
+  前序导入错误提前退出时，尚未请求的来源保留资格。失败来源不会阻塞其他待回填来源。
   集合随待处理成员裁剪，遍历完成后清空；重启不恢复调度集合，持久 checkpoint 和真实 ACK
   仍是数据推进的唯一依据。回归覆盖失败来源占位、成员变化、小集合重试和零预算。
 - During initial catch-up, an unavailable Ready peer is recorded as unavailable for that tick while

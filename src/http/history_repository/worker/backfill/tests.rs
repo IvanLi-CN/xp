@@ -338,7 +338,8 @@ fn initial_backfill_includes_configured_repository_sources() {
 #[test]
 fn initial_source_backfill_selects_the_least_imported_peer() {
     let (_directory, mut runtime) = source_scheduler();
-    let selected = runtime.select_initial_history_source_peer_ids(
+    let selected = select_and_attempt(
+        &mut runtime,
         vec![
             ("node-d".to_owned(), 40),
             ("node-b".to_owned(), 10),
@@ -585,7 +586,7 @@ fn failed_initial_sources_cannot_starve_a_healthy_source_across_cycles() {
     let (_directory, mut runtime) = source_scheduler();
     let mut selected = Vec::new();
     for _ in 0..3 {
-        selected.extend(runtime.select_initial_history_source_peer_ids(peers(), "local", 3));
+        selected.extend(select_and_attempt(&mut runtime, peers(), "local", 3));
     }
     assert!(selected.iter().any(|id| id == "node-d"));
 }
@@ -606,7 +607,8 @@ fn initial_source_sweeps_handle_membership_changes_and_retry_small_sets() {
     let (_directory, mut runtime) = source_scheduler();
     let peers = |ids: &[&str]| ids.iter().map(|id| (id.to_string(), 0)).collect();
     assert_eq!(
-        runtime.select_initial_history_source_peer_ids(
+        select_and_attempt(
+            &mut runtime,
             peers(&["local", "a", "b", "c", "d"]),
             "local",
             3
@@ -615,20 +617,16 @@ fn initial_source_sweeps_handle_membership_changes_and_retry_small_sets() {
     );
     // Completed/removed sources disappear, and a newly pending source joins this sweep.
     assert_eq!(
-        runtime.select_initial_history_source_peer_ids(
-            peers(&["local", "a", "d", "e"]),
-            "local",
-            3
-        ),
+        select_and_attempt(&mut runtime, peers(&["local", "a", "d", "e"]), "local", 3),
         ["d", "e"]
     );
     assert_eq!(
-        runtime.select_initial_history_source_peer_ids(peers(&["a", "d", "e"]), "local", 3),
+        select_and_attempt(&mut runtime, peers(&["a", "d", "e"]), "local", 3),
         ["a", "d", "e"]
     );
     for _ in 0..2 {
         assert_eq!(
-            runtime.select_initial_history_source_peer_ids(peers(&["local", "a"]), "local", 3),
+            select_and_attempt(&mut runtime, peers(&["local", "a"]), "local", 3),
             ["a"]
         );
     }
@@ -638,7 +636,7 @@ fn initial_source_sweeps_handle_membership_changes_and_retry_small_sets() {
             .is_empty()
     );
     assert_eq!(
-        runtime.select_initial_history_source_peer_ids(peers(&["a"]), "local", 3),
+        select_and_attempt(&mut runtime, peers(&["a"]), "local", 3),
         ["a"]
     );
     assert!(
@@ -646,4 +644,36 @@ fn initial_source_sweeps_handle_membership_changes_and_retry_small_sets() {
             .select_initial_history_source_peer_ids(vec![], "local", 3)
             .is_empty()
     );
+}
+
+#[test]
+fn initial_source_import_error_cannot_starve_unrequested_peers() {
+    let (_directory, mut runtime) = source_scheduler();
+    let mut requested = Vec::new();
+    for _ in 0..3 {
+        let peers = ["a", "b", "c"].map(|id| (id.to_owned(), 0)).to_vec();
+        for peer in runtime.select_initial_history_source_peer_ids(peers, "local", 3) {
+            runtime.note_initial_history_source_attempt(&peer);
+            requested.push(peer.clone());
+            // Match the worker's early return on a persistent import error from a.
+            if peer == "a" {
+                break;
+            }
+        }
+    }
+    assert!(requested.iter().any(|id| id == "b"));
+    assert!(requested.iter().any(|id| id == "c"));
+}
+
+fn select_and_attempt(
+    runtime: &mut crate::state::history_repository::replica::RepositoryReplicaRuntime,
+    peers: Vec<(String, u64)>,
+    local_node_id: &str,
+    limit: usize,
+) -> Vec<String> {
+    let selected = runtime.select_initial_history_source_peer_ids(peers, local_node_id, limit);
+    for peer in &selected {
+        runtime.note_initial_history_source_attempt(peer);
+    }
+    selected
 }

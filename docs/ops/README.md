@@ -1055,6 +1055,7 @@ Notes:
   outbox manually.
   初始来源回填每轮最多尝试三个来源；
   每次遍历按持久导入进度排序，所有待处理来源都获得一次尝试后才重试此前来源。
+  开始处理某个来源时才记录尝试，前序导入报错不把尚未请求的来源算作已尝试。
   失败只消耗内存中的调度机会，不推进 checkpoint 或 ACK；
   新增来源加入当前遍历，完成或移除的来源退出，重启仅重置调度顺序。
   A retained segment may be the first locally available frame for a source stream and therefore

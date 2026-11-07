@@ -340,6 +340,13 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
     // partially completed source checkpoint is silently abandoned when lifecycle promotion
     // stops calling the Syncing-only catch-up path.
     for peer in initial_history_source_peers(state, now).await {
+        // A prior peer can fail import and return early. Only count this peer when its
+        // processing actually starts so unrequested peers remain eligible next cycle.
+        state
+            .repository_replica
+            .lock()
+            .await
+            .note_initial_history_source_attempt(&peer.node_id);
         progress =
             progress.combine(pull_peer_initial_history(state, &peer, &ready_repository_ids).await?);
     }
