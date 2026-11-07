@@ -148,6 +148,10 @@ impl RepositoryReplicaRuntime {
             }
         }
         self.persist_or_restore_with_mutation(&previous_receiver, &previous_snapshot, mutation)?;
+        self.note_historical_ingest(
+            segments.iter().map(|segment| segment.wire.as_slice()),
+            now_unix_seconds,
+        );
         if let Err(error) = self.prune_retention(now_unix_seconds) {
             self.storage_degraded = true;
             tracing::warn!(

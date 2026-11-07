@@ -170,6 +170,9 @@ impl RepositoryReplicaRuntime {
             }
         }
         self.persist_or_restore_with_mutation(&previous_receiver, &previous_snapshot, mutation)?;
+        if let Some(now) = wires.iter().map(|(_, at)| *at).max() {
+            self.note_historical_ingest(wires.iter().map(|(wire, _)| wire.as_slice()), now);
+        }
         // Receipts become authoritative only after the entire original-wire page commits.
         Ok(receipts)
     }

@@ -1,11 +1,7 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::{Duration, Instant},
+use super::{
+    ReplicaCursor, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey, TombstoneLedger,
+    TombstoneLedgerCheckpoint,
 };
-
-use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
-
 use crate::{
     history_sync::{
         Acceptance, CanonicalSegment, Cursor, ProtocolError, SegmentReceiver,
@@ -28,19 +24,19 @@ use crate::{
         },
     },
 };
-
-use super::{
-    ReplicaCursor, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey, TombstoneLedger,
-    TombstoneLedgerCheckpoint,
-};
 use local_history_backfill::LocalHistoryBackfillInFlight;
 use paths::PeerDirectPathState;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use source::LocalSourceState;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::{Duration, Instant},
+};
 mod error;
 mod source_metrics;
 mod status;
 mod summary_repair;
-
 use status::SourceDeliveryStatus;
 pub(crate) use status::{SummaryRepairDiagnostic, SummaryRepairResult};
 pub(crate) use summary_repair::SummaryRepairDiagnosticUpdate;
@@ -472,6 +468,7 @@ pub(crate) struct RepositoryReplicaRuntime {
     delivery_metrics_cache: crate::state::history_storage::RepositoryDeliveryMetrics,
     delivery_metrics_dirty: bool,
     delivery_metrics_refreshed_at: Instant,
+    historical_ingest_at: Option<Instant>,
     #[cfg(test)]
     capacity_override: Option<(u64, u64)>,
 }
@@ -514,6 +511,7 @@ impl RepositoryReplicaRuntime {
                 crate::state::history_storage::RepositoryDeliveryMetrics::default(),
             delivery_metrics_dirty: true,
             delivery_metrics_refreshed_at: Instant::now(),
+            historical_ingest_at: None,
             #[cfg(test)]
             capacity_override: None,
         };
@@ -553,6 +551,7 @@ impl RepositoryReplicaRuntime {
                 crate::state::history_storage::RepositoryDeliveryMetrics::default(),
             delivery_metrics_dirty: false,
             delivery_metrics_refreshed_at: Instant::now(),
+            historical_ingest_at: None,
             #[cfg(test)]
             capacity_override: None,
         }
@@ -916,6 +915,7 @@ mod backfill_order_tests;
 mod base64_bytes;
 mod capacity;
 mod helpers;
+mod ingest_priority;
 mod initial_peer;
 #[cfg(test)]
 #[path = "runtime/legacy_cursor_tests.rs"]
