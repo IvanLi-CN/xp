@@ -22,11 +22,12 @@ async fn original_import_rejects_unsigned_and_remote_node_requests() {
         }),
     }));
     for auth in [None, remote] {
+        let requests = Vec::new();
         let error = admin_internal_original_repair(
             Extension(state.clone()),
             auth,
             ApiJson(OriginalRepairRequest {
-                requests: Vec::new(),
+                requests,
                 apply: true,
                 yes: true,
                 expected_fingerprint: Some("forged".to_owned()),
