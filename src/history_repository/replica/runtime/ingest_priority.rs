@@ -14,9 +14,17 @@ impl RepositoryReplicaRuntime {
         self.prune_retention(now_unix_seconds)
     }
 
-    pub(crate) fn derived_maintenance_deferred(&self) -> bool {
-        self.historical_ingest_at
+    pub(crate) fn derived_maintenance_deferred(&mut self) -> bool {
+        if self
+            .historical_ingest_at
             .is_some_and(|at| at.elapsed() < Duration::from_secs(30))
+        {
+            return true;
+        }
+        // Consume the expired window before a bounded maintenance attempt. New historical
+        // commits may start the next window, but cannot postpone this attempt indefinitely.
+        self.historical_ingest_at = None;
+        false
     }
 
     pub(super) fn note_historical_ingest<'a>(
@@ -24,17 +32,19 @@ impl RepositoryReplicaRuntime {
         wires: impl IntoIterator<Item = &'a [u8]>,
         now: u64,
     ) {
-        // Only a committed, verified historical page can renew this process-local window.
-        // Live traffic cannot postpone metadata forever; quiet/restart clears the priority.
-        if wires.into_iter().any(|wire| {
-            SignedSegment::from_wire(wire).is_ok_and(|segment| {
-                segment
-                    .canonical()
-                    .closed_at_unix_seconds()
-                    .saturating_add(15 * 60)
-                    < now
+        // Only a committed historical page opens a window. Keep its original deadline
+        // until maintenance consumes it, even when more historical pages keep arriving.
+        if self.historical_ingest_at.is_none()
+            && wires.into_iter().any(|wire| {
+                SignedSegment::from_wire(wire).is_ok_and(|segment| {
+                    segment
+                        .canonical()
+                        .closed_at_unix_seconds()
+                        .saturating_add(15 * 60)
+                        < now
+                })
             })
-        }) {
+        {
             self.historical_ingest_at = Some(Instant::now());
         }
     }

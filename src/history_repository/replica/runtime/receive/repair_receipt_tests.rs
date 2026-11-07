@@ -337,3 +337,25 @@ fn historical_ingest_priority_requires_commit_and_expires_without_live_renewal()
     drop(runtime);
     assert!(!load(directory.path()).derived_maintenance_deferred());
 }
+
+#[test]
+fn continuous_historical_ingest_cannot_renew_the_maintenance_deadline() {
+    let directory = tempfile::tempdir().unwrap();
+    let key = signing_key();
+    let wire = segment(&key, 0, vec![record(b"old", false)], None)
+        .wire_bytes()
+        .unwrap();
+    let mut runtime = load(directory.path());
+    let started = std::time::Instant::now() - std::time::Duration::from_secs(29);
+    runtime.historical_ingest_at = Some(started);
+    runtime.note_historical_ingest([wire.as_slice()], 3600);
+    assert_eq!(runtime.historical_ingest_at, Some(started));
+    assert!(runtime.derived_maintenance_deferred());
+    runtime.historical_ingest_at =
+        Some(std::time::Instant::now() - std::time::Duration::from_secs(31));
+    runtime.note_historical_ingest([wire.as_slice()], 3600);
+    runtime.prepare_for_replication(3600).unwrap();
+    assert!(runtime.historical_ingest_at.is_none());
+    runtime.note_historical_ingest([wire.as_slice()], 3600);
+    assert!(runtime.derived_maintenance_deferred());
+}
