@@ -199,7 +199,9 @@ async fn upgrade_quiesces_xp_before_openrc_runtime_activation() {
             env::var("PATH").unwrap_or_default()
         ),
     );
-    command.args(["--root", &root, "upgrade", "--repo", "o/r"]);
+    let data_dir = tmp.path().join("data");
+    command.args(["--root", &root, "upgrade", "--repo", "o/r", "--data-dir"]);
+    command.arg(&data_dir);
     command_output_retrying_executable_busy(&mut command)
         .assert()
         .success();

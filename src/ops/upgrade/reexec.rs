@@ -399,7 +399,7 @@ mod tests {
                 owner: "test".into(),
                 repo: "xp".into(),
                 api_base: "https://invalid".into(),
-                tag: "v0.2.0".into(),
+                tag: xp_test_fixtures::release_tag().into(),
             },
             xp_ops_dest: ops.clone(),
             xp_ops_backup: ops_backup.clone(),
