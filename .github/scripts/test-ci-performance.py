@@ -81,6 +81,7 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertIn('readonly api_asset_id="481454521"', mihomo)
         self.assertIn('Accept: application/octet-stream', mihomo)
         self.assertIn('Authorization: Bearer $token', mihomo)
+        self.assertIn("if grep -Fq 'readonly api_asset_id='", ci)
         self.assertIn("GITHUB_TOKEN: ${{ github.token }}", ci)
 
     def test_web_and_storybook_share_the_same_cache_key(self):

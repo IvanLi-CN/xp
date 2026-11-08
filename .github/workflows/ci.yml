@@ -203,7 +203,23 @@ jobs:
             YAML.load_file(workflow)
           end
           RUBY
-          ./.github/scripts/test-mihomo-fixture.sh
+          if grep -Fq 'readonly api_asset_id=' .github/scripts/test-mihomo-fixture.sh; then
+            ./.github/scripts/test-mihomo-fixture.sh
+          else
+            mihomo_tmp="$(mktemp -d)"
+            trap 'rm -rf "$mihomo_tmp"' EXIT
+            mihomo_asset="mihomo-linux-amd64-v1.19.29.gz"
+            mihomo_url="https://api.github.com/repos/MetaCubeX/mihomo/releases/assets/481454521"
+            curl --fail --location --retry 3 --retry-all-errors --silent --show-error \
+              -H "Accept: application/octet-stream" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${mihomo_url}" --output "${mihomo_tmp}/${mihomo_asset}"
+            test "$(sha256sum "${mihomo_tmp}/${mihomo_asset}" | awk '{print $1}')" = \
+              "60de76a35a6cbf7b4fa4a20f5c257c24345d1d635ab1aa3877022a1997ef413c"
+            gzip --decompress --stdout "${mihomo_tmp}/${mihomo_asset}" > "${mihomo_tmp}/mihomo"
+            chmod 0755 "${mihomo_tmp}/mihomo"
+            "${mihomo_tmp}/mihomo" -t -f tests/fixtures/mihomo-smux-v1.19.29.yaml
+          fi
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with: {toolchain: 1.96.0}
       - name: Cargo source marker cache contract
