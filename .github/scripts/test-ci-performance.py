@@ -56,6 +56,14 @@ class CiPerformanceTests(unittest.TestCase):
             workflow = (workflows / name).read_text()
             self.assertIn("github.event.pull_request.head.sha || github.sha", workflow)
             self.assertIn(
+                'with: {ref: "${{ github.event.pull_request.head.sha || github.sha }}"}',
+                workflow,
+            )
+            self.assertNotIn(
+                'with: {ref: "${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"}',
+                workflow,
+            )
+            self.assertIn(
                 'if [[ "${GITHUB_EVENT_NAME}" = "pull_request" ]]',
                 workflow,
             )
