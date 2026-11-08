@@ -31,7 +31,11 @@ jobs:
       - run: |
           target_sha="${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"
           [[ "${target_sha}" =~ ^[0-9a-f]{40}$ ]]
-          test "${{ github.event.pull_request.head.sha || github.sha }}" = "${target_sha}"
+          if [[ "${GITHUB_EVENT_NAME}" = "pull_request" ]]; then
+            test "${{ github.event.pull_request.head.sha }}" = "${target_sha}"
+          else
+            test "${{ inputs.target_sha }}" = "${target_sha}"
+          fi
 
   build:
     needs: verify

@@ -31,9 +31,6 @@ jobs:
       - name: verify target sha
         run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          if [[ "${GITHUB_SHA}" != "${TARGET_SHA}" ]]; then
-            test "${TARGET_SHA}" = "${{ github.event.pull_request.head.sha }}"
-          fi
       - name: normalize Cargo source marker timestamp
         run: touch -d "@$(git log -1 --format=%ct HEAD)" .xp-source-marker
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
@@ -85,9 +82,6 @@ jobs:
       - name: verify target sha
         run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          if [[ "${GITHUB_SHA}" != "${TARGET_SHA}" ]]; then
-            test "${TARGET_SHA}" = "${{ github.event.pull_request.head.sha }}"
-          fi
       - name: normalize Cargo source marker timestamp
         run: touch -d "@$(git log -1 --format=%ct HEAD)" .xp-source-marker
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
@@ -130,9 +124,6 @@ jobs:
       - name: verify target sha
         run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          if [[ "${GITHUB_SHA}" != "${TARGET_SHA}" ]]; then
-            test "${TARGET_SHA}" = "${{ github.event.pull_request.head.sha }}"
-          fi
       - name: normalize Cargo source marker timestamp
         run: touch -d "@$(git log -1 --format=%ct HEAD)" .xp-source-marker
       - name: repository contract tests
@@ -216,9 +207,6 @@ jobs:
         with: {ref: "${{ env.TARGET_SHA }}"}
       - run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          if [[ "${GITHUB_SHA}" != "${TARGET_SHA}" ]]; then
-            test "${TARGET_SHA}" = "${{ github.event.pull_request.head.sha }}"
-          fi
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -237,9 +225,6 @@ jobs:
         with: {ref: "${{ env.TARGET_SHA }}", fetch-depth: 0}
       - run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          if [[ "${GITHUB_SHA}" != "${TARGET_SHA}" ]]; then
-            test "${TARGET_SHA}" = "${{ github.event.pull_request.head.sha }}"
-          fi
         working-directory: .
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
@@ -280,9 +265,6 @@ jobs:
         with: {ref: "${{ env.TARGET_SHA }}"}
       - run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          if [[ "${GITHUB_SHA}" != "${TARGET_SHA}" ]]; then
-            test "${TARGET_SHA}" = "${{ github.event.pull_request.head.sha }}"
-          fi
         working-directory: .
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
@@ -328,9 +310,6 @@ jobs:
         with: {ref: "${{ env.TARGET_SHA }}"}
       - run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          if [[ "${GITHUB_SHA}" != "${TARGET_SHA}" ]]; then
-            test "${TARGET_SHA}" = "${{ github.event.pull_request.head.sha }}"
-          fi
       - name: restore docker cache receipt
         id: cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
