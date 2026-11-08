@@ -212,6 +212,18 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("type=local,src=.buildx-cache", ci)
         self.assertNotIn("docker-cache-marker", ci)
 
+    def test_rust_cache_tracks_stable_web_fingerprint(self):
+        root = Path(__file__).parents[2]
+        build = (root / "build.rs").read_text()
+        package = (root / "web/package.json").read_text()
+        workflow = (root / ".github/workflows/ci.yml").read_text()
+        release_workflow = (root / ".github/workflows/release-build.yml").read_text()
+        self.assertIn("web/.xp-dist-fingerprint", build)
+        self.assertNotIn('cargo:rerun-if-changed=web/dist', build)
+        self.assertIn("update-web-dist-fingerprint.sh", package)
+        self.assertIn("web/.xp-dist-fingerprint", workflow)
+        self.assertIn("fingerprint embedded web assets", release_workflow)
+
     def test_release_and_measurement_share_the_build_workflow(self):
         workflows = Path(__file__).parents[1] / "workflows"
         release = (workflows / "release.yml").read_text()
