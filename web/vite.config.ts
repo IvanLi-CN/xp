@@ -50,6 +50,7 @@ function resolveBuildId() {
 		"storybook-static",
 		"test-results",
 	]);
+	const ignoredFiles = new Set([".xp-dist-fingerprint"]);
 	const visit = (directory: string) => {
 		for (const entry of fs
 			.readdirSync(directory, { withFileTypes: true })
@@ -61,6 +62,7 @@ function resolveBuildId() {
 				continue;
 			}
 			if (!entry.isFile()) continue;
+			if (ignoredFiles.has(entry.name)) continue;
 			hash.update(path.relative(__dirname, filePath)).update("\0");
 			hash.update(fs.readFileSync(filePath));
 		}
