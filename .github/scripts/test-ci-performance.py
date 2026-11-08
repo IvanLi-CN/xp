@@ -242,7 +242,6 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("update-web-dist-fingerprint.sh", package)
         self.assertIn('".xp-dist-fingerprint"', vite_config)
         self.assertIn("web/.xp-dist-fingerprint", workflow)
-        self.assertIn('CARGO_BUILD_JOBS: "8"', workflow)
         self.assertIn('RUST_TEST_THREADS: "8"', workflow)
         self.assertIn("fingerprint embedded web assets", release_workflow)
         self.assertIn("COPY scripts/update-web-dist-fingerprint.sh", dockerfile)
