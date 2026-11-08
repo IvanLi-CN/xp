@@ -73,6 +73,10 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertIn("normalize Cargo input timestamps", release_build)
         self.assertIn("normalize Cargo input timestamps before toolchain setup", resource)
         self.assertIn("normalize Cargo input timestamps after Web build", resource)
+        fallback = "if [[ -x .github/scripts/normalize-cargo-input-timestamps.sh ]]"
+        self.assertEqual(ci.count(fallback), 5)
+        self.assertEqual(release_build.count(fallback), 1)
+        self.assertEqual(resource.count(fallback), 2)
         mihomo = (SCRIPT_DIR / "test-mihomo-fixture.sh").read_text()
         self.assertIn('readonly api_asset_id="481454521"', mihomo)
         self.assertIn('Accept: application/octet-stream', mihomo)
