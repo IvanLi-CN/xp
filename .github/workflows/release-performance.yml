@@ -14,6 +14,12 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: >-
+    release-performance-${{ github.event.pull_request.number || format('manual-{0}',
+    github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   actions: read
   contents: read
@@ -73,14 +79,23 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: {ref: "${{ inputs.target_sha || github.sha }}"}
-      - name: collect and assert timings
+      - name: collect and assert performance metadata
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           jobs_url="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100"
+          artifacts_url="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/"\
+            "artifacts?per_page=100"
+          caches_url="repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100"
           gh api --paginate "${jobs_url}" | jq -s '{jobs: map(.jobs[]) }' > jobs.json
+          gh api --paginate "${artifacts_url}" \
+            | jq -s '{artifacts: [.[].artifacts[]?]}' > artifacts.json
+          gh api --paginate "${caches_url}" \
+            | jq -s '{caches: [.[].actions_caches[]?]}' > caches.json
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > run.json
           python3 .github/scripts/performance_assert.py \
             --kind release --jobs jobs.json --run run.json \
+            --artifacts artifacts.json --caches caches.json \
+            --cache-scope release-runtime \
             --output release-performance.json
       - name: write summary
         run: cat release-performance.json >> "${GITHUB_STEP_SUMMARY}"

@@ -274,7 +274,7 @@ jobs:
             ~/.bun/install/cache
             ~/.cache/ms-playwright
           key: >-
-            ${{ runner.os }}-storybook-${{ env.CACHE_NAMESPACE }}-${{
+            ${{ runner.os }}-web-${{ env.CACHE_NAMESPACE }}-${{
             hashFiles('web/bun.lock') }}
       - run: bun install --frozen-lockfile
       - run: bunx --no-install playwright install --with-deps chromium

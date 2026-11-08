@@ -1530,15 +1530,23 @@ attempt's cold cache. It requires cold misses and warm hits, and fails when the 
 duration exceeds 540 seconds cold or 300 seconds warm. The cold budget covers a real Cargo rebuild
 on a hosted runner; warm remains the tighter regression signal after cache population.
 
+The performance workflows cancel only superseded pull-request runs for the same PR; each
+`workflow_dispatch` run has an independent concurrency group. The Web and Storybook jobs share
+their Bun/Playwright dependency cache key while retaining separate jobs and cache receipts.
+
 Dispatch `release-performance` the same way to exercise the reusable release build graph without
 creating a tag, package version, GitHub Release, or deployment. It uses a synthetic
 `0.0.0-perf.<run-id>` version, assembles but does not push the image, and enforces 120 seconds for
 Web, 600 seconds per musl architecture, 180 seconds per managed-runtime architecture, 300 seconds
 for image assembly, and 900 seconds for the composed critical path.
 
-Both workflows publish machine-readable JSON. Durations use GitHub Job `started_at` and
-`completed_at`; queue delay is not part of the execution limits. Missing jobs, failed jobs,
-incomplete timestamps, SHA mismatches, and malformed cache receipts fail closed.
+Both workflows publish machine-readable JSON. The report includes required wall-clock time, workflow
+critical path, total runner seconds, run/job counts, artifact count and bytes, artifact retention,
+and cache bytes plus typed cache-retention availability. Required wall-clock time spans the earliest
+required job start through the latest required job completion; queue delay remains a separate field,
+and critical path follows the declared workflow dependency graph. Durations use GitHub Job
+`started_at` and `completed_at`; missing jobs, failed jobs, incomplete timestamps, SHA mismatches,
+and malformed cache receipts fail closed.
 
 ```text
 sha="$(git rev-parse HEAD)"

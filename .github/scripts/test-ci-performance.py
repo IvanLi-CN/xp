@@ -35,7 +35,28 @@ class CiPerformanceTests(unittest.TestCase):
         for name in ("ci-performance.yml", "release-performance.yml"):
             workflow = (workflows / name).read_text()
             self.assertIn('gh api --paginate "${jobs_url}" | jq -s', workflow)
+            self.assertIn('gh api --paginate "${artifacts_url}"', workflow)
+            self.assertIn("jq -s '{artifacts:", workflow)
+            self.assertIn('gh api --paginate "${caches_url}"', workflow)
+            self.assertIn("jq -s '{caches:", workflow)
             self.assertNotIn("--jq -s", workflow)
+
+    def test_performance_concurrency_only_cancels_pull_request_runs(self):
+        workflows = SCRIPT_DIR.parent / "workflows"
+        for name in ("ci-performance.yml", "release-performance.yml"):
+            workflow = (workflows / name).read_text()
+            self.assertIn("concurrency:", workflow)
+            self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", workflow)
+            self.assertIn("format('manual-{0}',", workflow)
+            self.assertIn("github.run_id)", workflow)
+
+    def test_web_and_storybook_share_the_same_cache_key(self):
+        workflow = (SCRIPT_DIR.parent / "workflows" / "ci.yml").read_text()
+        self.assertGreaterEqual(
+            workflow.count("${{ runner.os }}-web-${{ env.CACHE_NAMESPACE }}-${{"),
+            2,
+        )
+        self.assertNotIn("${{ runner.os }}-storybook-${{ env.CACHE_NAMESPACE }}", workflow)
 
     def test_ci_samples_run_as_serial_cold_warm_pairs(self):
         workflows = SCRIPT_DIR.parent / "workflows"
@@ -55,6 +76,7 @@ class CiPerformanceTests(unittest.TestCase):
     def test_ci_accepts_three_exact_cold_warm_pairs(self):
         result = performance.assert_ci(self.valid_jobs(), self.valid_receipts())
         self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["critical_path_seconds"], 360)
 
     def test_ci_fails_closed_for_missing_job_or_bad_cache_state(self):
         with self.assertRaises(performance.PerformanceError):
@@ -82,6 +104,34 @@ class CiPerformanceTests(unittest.TestCase):
             "run_started_at": "2026-09-05T00:00:07Z",
         }
         self.assertEqual(performance.workflow_queue_seconds(payload), 7)
+
+    def test_observability_reports_job_artifact_and_cache_metrics(self):
+        run = {
+            "id": 123,
+            "run_attempt": 1,
+            "created_at": "2026-09-05T00:00:00Z",
+            "run_started_at": "2026-09-05T00:00:07Z",
+        }
+        artifacts = [
+            {
+                "size_in_bytes": 7,
+                "created_at": "2026-09-05T00:00:00Z",
+                "expires_at": "2026-09-05T00:01:00Z",
+            }
+        ]
+        caches = [
+            {"key": "Linux-rust-perf-123-1-1", "size_in_bytes": 11},
+            {"key": "Linux-rust-ci-1", "size_in_bytes": 99},
+        ]
+        result = performance.observability_metrics(
+            self.valid_jobs(), run, artifacts, caches
+        )
+        self.assertEqual(result["run_count"], 1)
+        self.assertEqual(result["job_count"], 42)
+        self.assertEqual(result["artifact_size_bytes"], 7)
+        self.assertEqual(result["cache"]["size_bytes"], 11)
+        self.assertEqual(result["artifact_retention_seconds"]["min"], 60)
+        self.assertEqual(result["cache"]["retention_seconds"]["status"], "unavailable")
 
 
 class ReleasePerformanceTests(unittest.TestCase):

@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - .github/scripts/performance_assert.py
+      - .github/scripts/test-ci-performance.py
       - .github/scripts/write-cache-receipt.sh
       - .github/workflows/ci.yml
       - .github/workflows/ci-performance.yml
@@ -14,6 +15,12 @@ on:
         description: Exact 40-character commit SHA to measure
         required: true
         type: string
+
+concurrency:
+  group: >-
+    ci-performance-${{ github.event.pull_request.number || format('manual-{0}',
+    github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   actions: read
@@ -49,17 +56,25 @@ jobs:
         with: {ref: "${{ inputs.target_sha || github.sha }}"}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with: {pattern: "cache-receipt-*", path: cache-receipts}
-      - name: collect job timings
+      - name: collect performance metadata
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           jobs_url="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100"
+          artifacts_url="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/"\
+            "artifacts?per_page=100"
+          caches_url="repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100"
           gh api --paginate "${jobs_url}" | jq -s '{jobs: map(.jobs[]) }' > jobs.json
+          gh api --paginate "${artifacts_url}" \
+            | jq -s '{artifacts: [.[].artifacts[]?]}' > artifacts.json
+          gh api --paginate "${caches_url}" \
+            | jq -s '{caches: [.[].actions_caches[]?]}' > caches.json
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > run.json
       - name: assert performance
         run: |
           python3 .github/scripts/performance_assert.py \
             --kind ci --jobs jobs.json --run run.json \
             --receipts cache-receipts \
+            --artifacts artifacts.json --caches caches.json \
             --output ci-performance.json
       - name: write summary
         run: |

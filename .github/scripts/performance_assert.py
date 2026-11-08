@@ -43,6 +43,14 @@ def find_one(jobs: list[dict[str, Any]], pattern: str) -> dict[str, Any]:
     return matches[0]
 
 
+def find_optional(jobs: list[dict[str, Any]], pattern: str) -> dict[str, Any] | None:
+    matches = [job for job in jobs if re.fullmatch(pattern, str(job.get("name", "")))]
+    if len(matches) > 1:
+        names = [job.get("name") for job in matches]
+        raise PerformanceError(f"expected at most one job matching {pattern!r}, got {names}")
+    return matches[0] if matches else None
+
+
 def load_receipts(directory: Path) -> list[dict[str, Any]]:
     receipts = []
     for path in sorted(directory.rglob("*.json")):
@@ -58,6 +66,103 @@ def workflow_queue_seconds(payload: dict[str, Any]) -> float:
     if queued < 0:
         raise PerformanceError("negative workflow queue duration")
     return queued
+
+
+def required_wall_clock_seconds(jobs: list[dict[str, Any]]) -> float:
+    if not jobs:
+        raise PerformanceError("required jobs payload is empty")
+    starts = [parse_time(job.get("started_at")) for job in jobs]
+    completions = [parse_time(job.get("completed_at")) for job in jobs]
+    elapsed = (max(completions) - min(starts)).total_seconds()
+    if elapsed < 0:
+        raise PerformanceError("negative required wall-clock duration")
+    return elapsed
+
+
+def retention_seconds(items: list[dict[str, Any]]) -> dict[str, float] | dict[str, str]:
+    values = []
+    for item in items:
+        created_at = item.get("created_at")
+        expires_at = item.get("expires_at")
+        if created_at is None or expires_at is None:
+            continue
+        value = (parse_time(expires_at) - parse_time(created_at)).total_seconds()
+        if value < 0:
+            raise PerformanceError("negative artifact/cache retention duration")
+        values.append(value)
+    if not values:
+        return {
+            "status": "unavailable",
+            "reason": "provider did not expose created_at and expires_at",
+        }
+    return {"min": min(values), "max": max(values)}
+
+
+def load_collection(path: Path, *keys: str) -> list[dict[str, Any]]:
+    payload = json.loads(path.read_text())
+    if isinstance(payload, list):
+        values = payload
+    elif isinstance(payload, dict):
+        values = None
+        for key in keys:
+            candidate = payload.get(key)
+            if isinstance(candidate, list):
+                values = candidate
+                break
+        if values is None:
+            raise PerformanceError(f"{path} does not contain a supported collection")
+    else:
+        raise PerformanceError(f"{path} must contain a JSON collection")
+    if not all(isinstance(item, dict) for item in values):
+        raise PerformanceError(f"{path} contains a non-object collection item")
+    return values
+
+
+def observability_metrics(
+    jobs: list[dict[str, Any]],
+    run_payload: dict[str, Any],
+    artifacts: list[dict[str, Any]],
+    caches: list[dict[str, Any]],
+    cache_scope: str | None = None,
+) -> dict[str, Any]:
+    runner_total = sum(duration(job) for job in jobs)
+    run_id = str(run_payload.get("id", ""))
+    run_attempt = str(run_payload.get("run_attempt", "1"))
+    if cache_scope is None:
+        cache_scope = f"perf-{run_id}-{run_attempt}"
+    matching_caches = [
+        cache
+        for cache in caches
+        if cache_scope in str(cache.get("key", ""))
+        or cache_scope in str(cache.get("version", ""))
+    ]
+    artifact_bytes = 0
+    for artifact in artifacts:
+        size = artifact.get("size_in_bytes", 0)
+        if not isinstance(size, int) or size < 0:
+            raise PerformanceError(f"invalid artifact size: {size!r}")
+        artifact_bytes += size
+    cache_bytes = 0
+    for cache in matching_caches:
+        size = cache.get("size_in_bytes", 0)
+        if not isinstance(size, int) or size < 0:
+            raise PerformanceError(f"invalid cache size: {size!r}")
+        cache_bytes += size
+    return {
+        "required_wall_clock_seconds": required_wall_clock_seconds(jobs),
+        "runner_total_seconds": runner_total,
+        "run_count": 1,
+        "job_count": len(jobs),
+        "artifact_count": len(artifacts),
+        "artifact_size_bytes": artifact_bytes,
+        "artifact_retention_seconds": retention_seconds(artifacts),
+        "cache": {
+            "scope": cache_scope,
+            "matching_entry_count": len(matching_caches),
+            "size_bytes": cache_bytes,
+            "retention_seconds": retention_seconds(matching_caches),
+        },
+    }
 
 
 def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dict[str, Any]:
@@ -99,7 +204,22 @@ def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dic
                         f"cache receipt mismatch for {phase}-{sample}/{component}"
                     )
         samples[str(sample)] = phase_seconds
-    return {"kind": "ci", "samples": samples, "status": "pass"}
+    verify = find_optional(jobs, r"verify")
+    assertion = find_optional(jobs, r"assert")
+    critical = sum(
+        duration(job)
+        for job in (verify, assertion)
+        if job is not None
+    ) + sum(
+        samples[str(sample)]["cold"] + samples[str(sample)]["warm"]
+        for sample in range(1, 4)
+    )
+    return {
+        "kind": "ci",
+        "samples": samples,
+        "critical_path_seconds": critical,
+        "status": "pass",
+    }
 
 
 def assert_release(jobs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -124,7 +244,17 @@ def assert_release(jobs: list[dict[str, Any]]) -> dict[str, Any]:
             raise PerformanceError(f"{name} {seconds[name]:.1f}s exceeds {limit}s")
     web_musl = seconds["web"] + max(seconds["musl-x86_64"], seconds["musl-aarch64"])
     runtime = max(seconds["runtime-x86_64"], seconds["runtime-aarch64"])
-    critical = max(web_musl, runtime) + seconds["assemble"]
+    verify = find_optional(jobs, r"verify")
+    assertion = find_optional(jobs, r"assert")
+    critical = (
+        sum(
+            duration(job)
+            for job in (verify, assertion)
+            if job is not None
+        )
+        + max(web_musl, runtime)
+        + seconds["assemble"]
+    )
     if critical > 900:
         raise PerformanceError(f"release critical path {critical:.1f}s exceeds 900s")
     return {"kind": "release", "seconds": seconds, "critical_path_seconds": critical, "status": "pass"}
@@ -136,6 +266,9 @@ def main() -> int:
     parser.add_argument("--jobs", type=Path, required=True)
     parser.add_argument("--run", type=Path, required=True)
     parser.add_argument("--receipts", type=Path)
+    parser.add_argument("--artifacts", type=Path, required=True)
+    parser.add_argument("--caches", type=Path, required=True)
+    parser.add_argument("--cache-scope")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -152,6 +285,15 @@ def main() -> int:
         result = assert_ci(jobs, load_receipts(args.receipts))
     else:
         result = assert_release(jobs)
+    result.update(
+        observability_metrics(
+            jobs,
+            run_payload,
+            load_collection(args.artifacts, "artifacts"),
+            load_collection(args.caches, "caches", "actions_caches"),
+            args.cache_scope,
+        )
+    )
     result["workflow_queue_seconds"] = workflow_queue_seconds(run_payload)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print(json.dumps(result, sort_keys=True))
