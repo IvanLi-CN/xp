@@ -76,6 +76,8 @@ jobs:
         env:
           XP_WEB_BUILD_ID: ${{ env.TARGET_SHA }}
         run: cd web && bun install --frozen-lockfile && bun run build
+      - name: normalize web asset marker timestamp
+        run: touch -d "@$(git log -1 --format=%ct HEAD)" web/.xp-dist-fingerprint
       - name: build release candidate and resource workload
         run: |
           set -euo pipefail

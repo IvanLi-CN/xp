@@ -61,11 +61,14 @@ class CiPerformanceTests(unittest.TestCase):
             )
         ci = (workflows / "ci.yml").read_text()
         self.assertEqual(ci.count("normalize Cargo source marker timestamp"), 3)
+        self.assertEqual(ci.count("normalize web asset marker timestamp"), 2)
         self.assertIn('git log -1 --format=%ct HEAD', ci)
         release_build = (workflows / "release-build.yml").read_text()
         resource = (workflows / "resource-evidence.yml").read_text()
         self.assertIn("normalize Cargo source marker timestamp", release_build)
+        self.assertIn("normalize web asset marker timestamp", release_build)
         self.assertIn("normalize Cargo source marker timestamp", resource)
+        self.assertIn("normalize web asset marker timestamp", resource)
 
     def test_web_and_storybook_share_the_same_cache_key(self):
         workflow = (SCRIPT_DIR.parent / "workflows" / "ci.yml").read_text()

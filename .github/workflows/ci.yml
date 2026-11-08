@@ -51,6 +51,8 @@ jobs:
         with: {bun-version-file: .bun-version}
       - name: build embedded web assets
         run: cd web && bun install --frozen-lockfile && bun run build
+      - name: normalize web asset marker timestamp
+        run: touch -d "@$(git log -1 --format=%ct HEAD)" web/.xp-dist-fingerprint
       - run: cargo test
       - name: test embedded web asset routes
         run: |
@@ -101,6 +103,8 @@ jobs:
         with: {bun-version-file: .bun-version}
       - name: build embedded web assets
         run: cd web && bun install --frozen-lockfile && bun run build
+      - name: normalize web asset marker timestamp
+        run: touch -d "@$(git log -1 --format=%ct HEAD)" web/.xp-dist-fingerprint
       - run: cargo clippy -- -D warnings
       - name: cache receipt
         if: env.CACHE_PHASE != 'normal'
