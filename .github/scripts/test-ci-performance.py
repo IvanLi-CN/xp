@@ -60,15 +60,19 @@ class CiPerformanceTests(unittest.TestCase):
                 workflow,
             )
         ci = (workflows / "ci.yml").read_text()
-        self.assertEqual(ci.count("normalize Cargo source marker timestamp"), 3)
-        self.assertEqual(ci.count("normalize web asset marker timestamp"), 2)
-        self.assertIn('git log -1 --format=%ct HEAD', ci)
+        self.assertEqual(ci.count("name: normalize Cargo input timestamps\n"), 3)
+        self.assertEqual(ci.count("normalize Cargo input timestamps after Web build"), 2)
+        timestamp_script = SCRIPT_DIR / "normalize-cargo-input-timestamps.sh"
+        self.assertTrue(timestamp_script.is_file())
+        timestamp_source = timestamp_script.read_text()
+        self.assertIn('git log -1 --format=%ct HEAD', timestamp_source)
+        self.assertIn('git ls-files -z', timestamp_source)
+        self.assertIn('find web/dist -type f -print0', timestamp_source)
         release_build = (workflows / "release-build.yml").read_text()
         resource = (workflows / "resource-evidence.yml").read_text()
-        self.assertIn("normalize Cargo source marker timestamp", release_build)
-        self.assertIn("normalize web asset marker timestamp", release_build)
-        self.assertIn("normalize Cargo source marker timestamp", resource)
-        self.assertIn("normalize web asset marker timestamp", resource)
+        self.assertIn("normalize Cargo input timestamps", release_build)
+        self.assertIn("normalize Cargo input timestamps before toolchain setup", resource)
+        self.assertIn("normalize Cargo input timestamps after Web build", resource)
 
     def test_web_and_storybook_share_the_same_cache_key(self):
         workflow = (SCRIPT_DIR.parent / "workflows" / "ci.yml").read_text()

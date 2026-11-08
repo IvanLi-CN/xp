@@ -48,8 +48,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
           # The workflow is dispatched from this temporary runner branch while the measured
           # source is the exact release target checked out above.
-      - name: normalize Cargo source marker timestamp
-        run: touch -d "@$(git log -1 --format=%ct HEAD)" .xp-source-marker
+      - name: normalize Cargo input timestamps before toolchain setup
+        run: .github/scripts/normalize-cargo-input-timestamps.sh
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with: {toolchain: 1.96.0}
       - name: prepare native Linux musl toolchain
@@ -76,8 +76,8 @@ jobs:
         env:
           XP_WEB_BUILD_ID: ${{ env.TARGET_SHA }}
         run: cd web && bun install --frozen-lockfile && bun run build
-      - name: normalize web asset marker timestamp
-        run: touch -d "@$(git log -1 --format=%ct HEAD)" web/.xp-dist-fingerprint
+      - name: normalize Cargo input timestamps after Web build
+        run: .github/scripts/normalize-cargo-input-timestamps.sh
       - name: build release candidate and resource workload
         run: |
           set -euo pipefail
