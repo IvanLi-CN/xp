@@ -73,6 +73,11 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertIn("normalize Cargo input timestamps", release_build)
         self.assertIn("normalize Cargo input timestamps before toolchain setup", resource)
         self.assertIn("normalize Cargo input timestamps after Web build", resource)
+        mihomo = (SCRIPT_DIR / "test-mihomo-fixture.sh").read_text()
+        self.assertIn('readonly api_asset_id="481454521"', mihomo)
+        self.assertIn('Accept: application/octet-stream', mihomo)
+        self.assertIn('Authorization: Bearer $token', mihomo)
+        self.assertIn("GITHUB_TOKEN: ${{ github.token }}", ci)
 
     def test_web_and_storybook_share_the_same_cache_key(self):
         workflow = (SCRIPT_DIR.parent / "workflows" / "ci.yml").read_text()

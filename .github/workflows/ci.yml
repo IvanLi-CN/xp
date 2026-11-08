@@ -131,6 +131,8 @@ jobs:
       - name: normalize Cargo input timestamps
         run: .github/scripts/normalize-cargo-input-timestamps.sh
       - name: repository contract tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           ./.github/scripts/test-compute-version.sh
           python3 ./.github/scripts/test-release-governance.py
