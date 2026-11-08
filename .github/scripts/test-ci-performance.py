@@ -218,11 +218,14 @@ class WorkflowContractTests(unittest.TestCase):
         package = (root / "web/package.json").read_text()
         workflow = (root / ".github/workflows/ci.yml").read_text()
         release_workflow = (root / ".github/workflows/release-build.yml").read_text()
+        dockerfile = (root / "Dockerfile").read_text()
         self.assertIn("web/.xp-dist-fingerprint", build)
         self.assertNotIn('cargo:rerun-if-changed=web/dist', build)
         self.assertIn("update-web-dist-fingerprint.sh", package)
         self.assertIn("web/.xp-dist-fingerprint", workflow)
         self.assertIn("fingerprint embedded web assets", release_workflow)
+        self.assertIn("COPY scripts/update-web-dist-fingerprint.sh", dockerfile)
+        self.assertIn("COPY --from=web-builder /app/web/.xp-dist-fingerprint", dockerfile)
 
     def test_release_and_measurement_share_the_build_workflow(self):
         workflows = Path(__file__).parents[1] / "workflows"
