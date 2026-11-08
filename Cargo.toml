@@ -82,13 +82,6 @@ opt-level = "z"
 panic = "abort"
 strip = "symbols"
 
-# Keep large recovery fixtures bounded without disabling debug assertions or checks.
-[profile.test.package.xp]
-opt-level = 1
-
-[profile.test.package.curve25519-dalek]
-opt-level = 3
-
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
 assert_cmd = "2.1.2"

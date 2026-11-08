@@ -34,10 +34,6 @@ never shared between Agents and is removed only with the owning Agent Directory.
 
 Cargo 会把缺失的监听路径持续视为脏输入，导致没有源码变化的连续构建仍重复编译。
 
-测试 profile 对 XP 使用一级优化，对 Curve25519 使用三级优化，以控制大规模签名恢复用例的计算成本。
-
-调试断言、溢出检查、数据规模和重启断言保持启用；发布 profile 独立配置。
-
 共享测试 runner 在独立源码副本中用实际快照标识覆盖此基线，使快照切换触发重建。该标记不能代替源码、Web 资产或构建环境的指纹检查。
 
 `XP_TESTBOX_REMOTE_ROOT` is an operator-owned private `0700` directory. Host-global subnet claim
