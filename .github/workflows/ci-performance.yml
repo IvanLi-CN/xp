@@ -32,9 +32,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          target_sha="${{ inputs.target_sha || github.sha }}"
+          target_sha="${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"
           [[ "${target_sha}" =~ ^[0-9a-f]{40}$ ]]
-          test "${GITHUB_SHA}" = "${target_sha}"
+          test "${{ github.event.pull_request.head.sha || github.sha }}" = "${target_sha}"
 
   sample:
     needs: verify
@@ -45,7 +45,7 @@ jobs:
     name: sample-${{ matrix.sample }}
     uses: ./.github/workflows/ci-performance-sample.yml
     with:
-      target_sha: ${{ inputs.target_sha || github.sha }}
+      target_sha: ${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}
       sample: ${{ matrix.sample }}
 
   assert:
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: "${{ inputs.target_sha || github.sha }}"}
+        with: {ref: "${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with: {pattern: "cache-receipt-*", path: cache-receipts}
       - name: collect performance metadata

@@ -50,6 +50,23 @@ class CiPerformanceTests(unittest.TestCase):
             self.assertIn("format('manual-{0}',", workflow)
             self.assertIn("github.run_id)", workflow)
 
+    def test_pr_performance_targets_the_head_sha_and_stabilizes_cargo_marker_time(self):
+        workflows = SCRIPT_DIR.parent / "workflows"
+        for name in ("ci-performance.yml", "release-performance.yml"):
+            workflow = (workflows / name).read_text()
+            self.assertIn("github.event.pull_request.head.sha || github.sha", workflow)
+            self.assertIn(
+                'test "${{ github.event.pull_request.head.sha || github.sha }}"',
+                workflow,
+            )
+        ci = (workflows / "ci.yml").read_text()
+        self.assertEqual(ci.count("normalize Cargo source marker timestamp"), 3)
+        self.assertIn('git log -1 --format=%ct HEAD', ci)
+        release_build = (workflows / "release-build.yml").read_text()
+        resource = (workflows / "resource-evidence.yml").read_text()
+        self.assertIn("normalize Cargo source marker timestamp", release_build)
+        self.assertIn("normalize Cargo source marker timestamp", resource)
+
     def test_web_and_storybook_share_the_same_cache_key(self):
         workflow = (SCRIPT_DIR.parent / "workflows" / "ci.yml").read_text()
         self.assertGreaterEqual(
