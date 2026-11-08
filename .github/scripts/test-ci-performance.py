@@ -134,6 +134,19 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(result["artifact_retention_seconds"]["min"], 60)
         self.assertEqual(result["cache"]["retention_seconds"]["status"], "unavailable")
 
+    def test_observability_materializes_the_running_assertion_job(self):
+        run = {"id": 123, "run_attempt": 1}
+        jobs = self.valid_jobs() + [job("assert")]
+        jobs[-1]["completed_at"] = None
+        jobs[-1]["conclusion"] = None
+        effective = performance.materialize_current_job(
+            jobs, observed_at="2026-09-05T01:00:00Z"
+        )
+        self.assertEqual(effective[-1]["conclusion"], "success")
+        self.assertEqual(effective[-1]["completed_at"], "2026-09-05T01:00:00Z")
+        result = performance.observability_metrics(effective, run, [], [])
+        self.assertEqual(result["job_count"], 43)
+
 
 class ReleasePerformanceTests(unittest.TestCase):
     def valid_jobs(self):

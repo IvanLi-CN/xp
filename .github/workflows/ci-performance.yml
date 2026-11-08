@@ -61,7 +61,7 @@ jobs:
         run: |
           jobs_url="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100"
           artifacts_url="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/"\
-            "artifacts?per_page=100"
+          "artifacts?per_page=100"
           caches_url="repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100"
           gh api --paginate "${jobs_url}" | jq -s '{jobs: map(.jobs[]) }' > jobs.json
           gh api --paginate "${artifacts_url}" \

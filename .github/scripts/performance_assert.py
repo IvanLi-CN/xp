@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
@@ -77,6 +77,31 @@ def required_wall_clock_seconds(jobs: list[dict[str, Any]]) -> float:
     if elapsed < 0:
         raise PerformanceError("negative required wall-clock duration")
     return elapsed
+
+
+def materialize_current_job(
+    jobs: list[dict[str, Any]],
+    name: str = "assert",
+    observed_at: str | None = None,
+) -> list[dict[str, Any]]:
+    matches = [job for job in jobs if job.get("name") == name]
+    if len(matches) != 1:
+        raise PerformanceError(f"expected one current assertion job {name!r}, got {len(matches)}")
+    current = matches[0]
+    if current.get("conclusion") == "success" and current.get("completed_at"):
+        return jobs
+    if current.get("conclusion") not in (None, ""):
+        return jobs
+    parse_time(current.get("started_at"))
+    if observed_at is None:
+        observed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
+            "+00:00", "Z"
+        )
+    parse_time(observed_at)
+    snapshot = dict(current)
+    snapshot["conclusion"] = "success"
+    snapshot["completed_at"] = observed_at
+    return [snapshot if job is current else job for job in jobs]
 
 
 def retention_seconds(items: list[dict[str, Any]]) -> dict[str, float] | dict[str, str]:
@@ -280,6 +305,7 @@ def main() -> int:
     jobs = payload.get("jobs") if isinstance(payload, dict) else None
     if not isinstance(jobs, list):
         raise PerformanceError("jobs payload must contain a jobs array")
+    jobs = materialize_current_job(jobs)
     run_payload = json.loads(args.run.read_text())
     if not isinstance(run_payload, dict):
         raise PerformanceError("run payload must be an object")
