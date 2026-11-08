@@ -143,11 +143,14 @@ def observability_metrics(
             raise PerformanceError(f"invalid artifact size: {size!r}")
         artifact_bytes += size
     cache_bytes = 0
+    cache_size_by_key: dict[str, int] = {}
     for cache in matching_caches:
         size = cache.get("size_in_bytes", 0)
         if not isinstance(size, int) or size < 0:
             raise PerformanceError(f"invalid cache size: {size!r}")
         cache_bytes += size
+        key = str(cache.get("key", ""))
+        cache_size_by_key[key] = cache_size_by_key.get(key, 0) + size
     return {
         "required_wall_clock_seconds": required_wall_clock_seconds(jobs),
         "runner_total_seconds": runner_total,
@@ -160,6 +163,7 @@ def observability_metrics(
             "scope": cache_scope,
             "matching_entry_count": len(matching_caches),
             "size_bytes": cache_bytes,
+            "size_by_key": cache_size_by_key,
             "retention_seconds": retention_seconds(matching_caches),
         },
     }

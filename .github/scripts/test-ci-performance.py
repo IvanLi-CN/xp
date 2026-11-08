@@ -130,6 +130,7 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(result["job_count"], 42)
         self.assertEqual(result["artifact_size_bytes"], 7)
         self.assertEqual(result["cache"]["size_bytes"], 11)
+        self.assertEqual(result["cache"]["size_by_key"]["Linux-rust-perf-123-1-1"], 11)
         self.assertEqual(result["artifact_retention_seconds"]["min"], 60)
         self.assertEqual(result["cache"]["retention_seconds"]["status"], "unavailable")
 
