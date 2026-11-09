@@ -116,7 +116,7 @@ class CiPerformanceTests(unittest.TestCase):
         return [job(f"sample-{sample} / {phase} / {component}") for sample in range(1, 4) for phase in ("cold", "warm") for component in components]
 
     def valid_receipts(self):
-        components = ("rust", "rust-clippy", "rust-contracts", "web", "storybook", "docker-smoke")
+        components = ("rust", "rust-clippy", "rust-contracts", "docs", "web", "storybook", "docker-smoke")
         return [{"sample": str(sample), "phase": phase, "component": component, "cache_hit": phase == "warm"} for sample in range(1, 4) for phase in ("cold", "warm") for component in components]
 
     def valid_ci_jobs(self):
