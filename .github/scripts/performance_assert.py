@@ -77,6 +77,9 @@ def step_duration(step: dict[str, Any]) -> float:
 
 def ci_workload_duration(job: dict[str, Any]) -> float:
     """Measure declared workload steps while retaining full job metrics separately."""
+    # Validate the complete job before measuring only the declared workload steps.
+    # A successful workload must not hide a failed setup, cleanup, or unlisted step.
+    duration(job)
     name = str(job.get("name", ""))
     match = re.fullmatch(r"sample-[1-3] / (?:cold|warm) / (.+)", name)
     if match is None:
