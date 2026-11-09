@@ -50,11 +50,13 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            web/dist
             web/.xp-dist-fingerprint
+            web/.xp-web-source-fingerprint
             target
           key: >-
             ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-${{ env.TARGET_SHA }}-${{
-            hashFiles('Cargo.lock') }}
+            hashFiles('Cargo.lock') }}-${{ hashFiles('web/**', 'scripts/update-web-dist-fingerprint.sh') }}
           restore-keys: |
             ${{ runner.os }}-rust-
       - run: cargo fmt --check
@@ -62,7 +64,18 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - name: build embedded web assets
-        run: cd web && bun install --frozen-lockfile && bun run build
+        env:
+          WEB_SOURCE_HASH: ${{ hashFiles('web/**', 'scripts/update-web-dist-fingerprint.sh') }}
+        run: |
+          if [[ -d web/dist && -f web/.xp-web-source-fingerprint \
+            && "$(cat web/.xp-web-source-fingerprint)" = "${WEB_SOURCE_HASH}" ]]; then
+            echo "reusing embedded web assets for ${WEB_SOURCE_HASH}"
+          else
+            cd web
+            bun install --frozen-lockfile
+            bun run build
+            printf '%s\n' "${WEB_SOURCE_HASH}" > .xp-web-source-fingerprint
+          fi
       - name: normalize Cargo input timestamps after Web build
         run: |
           if [[ -x .github/scripts/normalize-cargo-input-timestamps.sh ]]; then
@@ -131,16 +144,30 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            web/dist
+            web/.xp-dist-fingerprint
+            web/.xp-web-source-fingerprint
             target
           key: >-
             ${{ runner.os }}-rust-clippy-${{ env.CACHE_NAMESPACE }}-${{
-            env.TARGET_SHA }}-${{ hashFiles('Cargo.lock') }}
+            env.TARGET_SHA }}-${{ hashFiles('Cargo.lock') }}-${{ hashFiles('web/**', 'scripts/update-web-dist-fingerprint.sh') }}
           restore-keys: |
             ${{ runner.os }}-rust-clippy-
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - name: build embedded web assets
-        run: cd web && bun install --frozen-lockfile && bun run build
+        env:
+          WEB_SOURCE_HASH: ${{ hashFiles('web/**', 'scripts/update-web-dist-fingerprint.sh') }}
+        run: |
+          if [[ -d web/dist && -f web/.xp-web-source-fingerprint \
+            && "$(cat web/.xp-web-source-fingerprint)" = "${WEB_SOURCE_HASH}" ]]; then
+            echo "reusing embedded web assets for ${WEB_SOURCE_HASH}"
+          else
+            cd web
+            bun install --frozen-lockfile
+            bun run build
+            printf '%s\n' "${WEB_SOURCE_HASH}" > .xp-web-source-fingerprint
+          fi
       - name: normalize Cargo input timestamps after Web build
         run: |
           if [[ -x .github/scripts/normalize-cargo-input-timestamps.sh ]]; then
