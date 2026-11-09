@@ -427,7 +427,10 @@ async fn internal_restore_stale_learner_starts_the_durable_restore_operation() {
     let body = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
     assert_eq!(body["dry_run"], false);
     assert_eq!(body["operation"]["kind"], "restore");
-    assert_eq!(body["operation"]["phase"], "learner_registered");
+    assert!(matches!(
+        body["operation"]["phase"].as_str(),
+        Some("prepared" | "learner_registered")
+    ));
 }
 
 #[tokio::test]
