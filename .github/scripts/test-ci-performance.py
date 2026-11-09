@@ -56,10 +56,6 @@ class CiPerformanceTests(unittest.TestCase):
             workflow = (workflows / name).read_text()
             self.assertIn("github.event.pull_request.head.sha || github.sha", workflow)
             self.assertIn(
-                'with: {ref: "${{ github.event.pull_request.head.sha || github.sha }}"}',
-                workflow,
-            )
-            self.assertNotIn(
                 'with: {ref: "${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"}',
                 workflow,
             )
@@ -91,6 +87,9 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertIn('Authorization: Bearer $token', mihomo)
         self.assertIn("if grep -Fq 'readonly api_asset_id='", ci)
         self.assertIn("GITHUB_TOKEN: ${{ github.token }}", ci)
+        self.assertIn("env.TARGET_SHA", ci)
+        self.assertIn("if: always()", (workflows / "ci-performance.yml").read_text())
+        self.assertIn("if: always()", (workflows / "release-performance.yml").read_text())
 
     def test_web_and_storybook_share_the_same_cache_key(self):
         workflow = (SCRIPT_DIR.parent / "workflows" / "ci.yml").read_text()
@@ -304,6 +303,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("fingerprint embedded web assets", release_workflow)
         self.assertIn("COPY scripts/update-web-dist-fingerprint.sh", dockerfile)
         self.assertIn("COPY --from=web-builder /app/web/.xp-dist-fingerprint", dockerfile)
+        fingerprint_script = (root / "scripts/update-web-dist-fingerprint.sh").read_text()
+        self.assertIn("find . -type f -print0", fingerprint_script)
+        self.assertIn("sort -z", fingerprint_script)
+        self.assertIn("${{ env.TARGET_SHA }}", workflow)
 
     def test_release_and_measurement_share_the_build_workflow(self):
         workflows = Path(__file__).parents[1] / "workflows"

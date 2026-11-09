@@ -1526,9 +1526,13 @@ Performance acceptance is explicit and SHA-bound; ordinary main runs are not acc
 informal moving average. Dispatch `ci-performance` from the exact commit under test and pass the
 same full 40-character SHA as `target_sha`. It runs three isolated cold/warm pairs. Each pair has a
 unique cache namespace containing the workflow run and attempt, so a rerun cannot reuse the previous
-attempt's cold cache. It requires cold misses and warm hits, and fails when the maximum parallel-job
-duration exceeds 540 seconds cold or 300 seconds warm. The cold budget covers a real Cargo rebuild
-on a hosted runner; warm remains the tighter regression signal after cache population.
+attempt's cold cache. It requires cold misses and warm hits, and fails when the declared workload
+steps exceed 540 seconds cold or 300 seconds warm. Checkout, toolchain/cache restore, and artifact
+upload and runner cleanup remain in required wall-clock and runner-total metrics, but are not
+silently treated as test/build workload. The cold budget covers a real Cargo rebuild on a hosted
+runner; warm
+remains
+the tighter regression signal after cache population.
 
 The performance workflows cancel only superseded pull-request runs for the same PR; each
 `workflow_dispatch` run has an independent concurrency group. The Web and Storybook jobs share

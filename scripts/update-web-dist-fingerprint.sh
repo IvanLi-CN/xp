@@ -30,7 +30,7 @@ trap 'rm -f "$tmp_file"' EXIT
   while IFS= read -r -d '' file; do
     relative="${file#./}"
     printf '%s\0%s\0' "$relative" "$(hash_file "$file")"
-  done < <(find . -type f -print | LC_ALL=C sort)
+  done < <(find . -type f -print0 | LC_ALL=C sort -z)
 ) | hash_stream > "$tmp_file"
 
 if [[ ! -f "$FINGERPRINT" ]] || ! cmp -s "$tmp_file" "$FINGERPRINT"; then

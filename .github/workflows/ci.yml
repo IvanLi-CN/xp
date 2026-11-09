@@ -52,7 +52,9 @@ jobs:
             ~/.cargo/git
             web/.xp-dist-fingerprint
             target
-          key: ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-${{ hashFiles('Cargo.lock') }}
+          key: >-
+            ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-${{ env.TARGET_SHA }}-${{
+            hashFiles('Cargo.lock') }}
       - run: cargo fmt --check
       - run: python3 scripts/check-style-budget.py
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
@@ -130,7 +132,7 @@ jobs:
             target
           key: >-
             ${{ runner.os }}-rust-clippy-${{ env.CACHE_NAMESPACE }}-${{
-            hashFiles('Cargo.lock') }}
+            env.TARGET_SHA }}-${{ hashFiles('Cargo.lock') }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - name: build embedded web assets
@@ -234,7 +236,7 @@ jobs:
             target
           key: >-
             ${{ runner.os }}-rust-contracts-${{ env.CACHE_NAMESPACE }}-${{
-            hashFiles('Cargo.lock') }}
+            env.TARGET_SHA }}-${{ hashFiles('Cargo.lock') }}
       - name: contract xp-ops builds without web/dist
         run: |
           rm -rf web/dist

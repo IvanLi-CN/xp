@@ -52,7 +52,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: "${{ github.event.pull_request.head.sha || github.sha }}"}
+        with: {ref: "${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with: {pattern: "*-${{ github.run_id }}-*", path: release, merge-multiple: true}
       - name: verify asset manifest
@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: "${{ github.event.pull_request.head.sha || github.sha }}"}
+        with: {ref: "${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"}
       - name: collect and assert performance metadata
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
@@ -99,9 +99,13 @@ jobs:
           python3 .github/scripts/performance_assert.py \
             --kind release --jobs jobs.json --run run.json \
             --artifacts artifacts.json --caches caches.json \
-            --cache-scope release-runtime \
+            --cache-scope release \
             --output release-performance.json
       - name: write summary
         run: cat release-performance.json >> "${GITHUB_STEP_SUMMARY}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with: {name: "release-performance-${{ github.run_id }}", path: release-performance.json}
+        if: always()
+        with:
+          name: "release-performance-${{ github.run_id }}"
+          path: release-performance.json
+          if-no-files-found: ignore
