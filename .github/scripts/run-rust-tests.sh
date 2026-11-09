@@ -5,7 +5,7 @@ set -euo pipefail
 # targets concurrently inside the same required job. No test target is omitted.
 cargo test --tests --no-run
 
-cargo test --lib --no-fail-fast -- --test-threads=2
+cargo test --lib --no-fail-fast -- --test-threads=12
 
 integration_targets=()
 while IFS= read -r target; do
@@ -26,7 +26,7 @@ for package in metadata["packages"]:
 integration_status=0
 integration_pids=()
 for target in "${integration_targets[@]}"; do
-  cargo test --test "$target" --no-fail-fast -- --test-threads=2 &
+  cargo test --test "$target" --no-fail-fast -- --test-threads=12 &
   integration_pids+=("$!")
 done
 for pid in "${integration_pids[@]}"; do
