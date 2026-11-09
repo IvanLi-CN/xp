@@ -46,8 +46,7 @@ jobs:
           fi
           [[ "${TARGET_SHA}" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          # The workflow is dispatched from this temporary runner branch while the measured
-          # source is the exact release target checked out above.
+          test "${{ github.workflow_sha }}" = "${TARGET_SHA}"
       - name: normalize Cargo input timestamps before toolchain setup
         run: |
           if [[ -x .github/scripts/normalize-cargo-input-timestamps.sh ]]; then

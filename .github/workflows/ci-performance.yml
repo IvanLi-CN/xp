@@ -42,6 +42,7 @@ jobs:
             test "${{ github.event.pull_request.head.sha }}" = "${target_sha}"
           else
             test "${{ inputs.target_sha }}" = "${target_sha}"
+            test "${{ github.workflow_sha }}" = "${target_sha}"
           fi
 
   sample:
