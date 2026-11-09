@@ -9,6 +9,7 @@ cargo test --lib --no-fail-fast -- --test-threads=12 \
   --skip internal_restore_existing_node_starts_durable_lifecycle_operation
 cargo test --lib --no-fail-fast \
   internal_restore_existing_node_starts_durable_lifecycle_operation -- --test-threads=1
+cargo test --bins --no-fail-fast -- --test-threads=12
 
 integration_targets=()
 while IFS= read -r target; do

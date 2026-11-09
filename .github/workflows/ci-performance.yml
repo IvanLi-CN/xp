@@ -6,6 +6,8 @@ on:
       - .github/scripts/performance_assert.py
       - .github/scripts/normalize-cargo-input-timestamps.sh
       - .github/scripts/run-rust-tests.sh
+      - scripts/cargo-cache/test.sh
+      - scripts/update-web-dist-fingerprint.sh
       - .github/scripts/test-ci-performance.py
       - .github/scripts/write-cache-receipt.sh
       - .github/workflows/ci.yml

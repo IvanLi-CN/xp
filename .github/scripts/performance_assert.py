@@ -227,14 +227,14 @@ def observability_metrics(
     ]
     artifact_bytes = 0
     for artifact in artifacts:
-        size = artifact.get("size_in_bytes", 0)
+        size = artifact.get("size_in_bytes")
         if not isinstance(size, int) or size < 0:
             raise PerformanceError(f"invalid artifact size: {size!r}")
         artifact_bytes += size
     cache_bytes = 0
     cache_size_by_key: dict[str, int] = {}
     for cache in matching_caches:
-        size = cache.get("size_in_bytes", 0)
+        size = cache.get("size_in_bytes")
         if not isinstance(size, int) or size < 0:
             raise PerformanceError(f"invalid cache size: {size!r}")
         cache_bytes += size
@@ -260,7 +260,9 @@ def observability_metrics(
 
 def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dict[str, Any]:
     components = ("rust", "rust-clippy", "rust-contracts", "docs", "web", "storybook", "docker-smoke")
-    cache_components = ("rust", "rust-clippy", "rust-contracts", "web", "storybook", "docker-smoke")
+    cache_components = (
+        "rust", "rust-clippy", "rust-contracts", "docs", "web", "storybook", "docker-smoke"
+    )
     samples: dict[str, Any] = {}
     for sample in range(1, 4):
         phase_seconds: dict[str, float] = {}

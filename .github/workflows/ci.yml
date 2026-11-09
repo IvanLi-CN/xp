@@ -60,7 +60,7 @@ jobs:
             hashFiles('web/**', '!web/dist/**', '!web/node_modules/**', '!web/.xp-*',
             'scripts/update-web-dist-fingerprint.sh') }}
           restore-keys: |
-            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-', runner.os) || '' }}
+            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-ci-', runner.os) || '' }}
       - run: cargo fmt --check
       - run: python3 scripts/check-style-budget.py
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
@@ -158,7 +158,7 @@ jobs:
             hashFiles('web/**', '!web/dist/**', '!web/node_modules/**', '!web/.xp-*',
             'scripts/update-web-dist-fingerprint.sh') }}
           restore-keys: |
-            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-clippy-', runner.os) || '' }}
+            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-clippy-ci-', runner.os) || '' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - name: build embedded web assets
@@ -276,7 +276,7 @@ jobs:
             ${{ runner.os }}-rust-contracts-${{ env.CACHE_NAMESPACE }}-${{
             env.TARGET_SHA }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-contracts-', runner.os) || '' }}
+            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-contracts-ci-', runner.os) || '' }}
       - name: contract xp-ops builds without web/dist
         run: |
           rm -rf web/dist
@@ -329,11 +329,24 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        id: cache
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-docs-${{ env.CACHE_NAMESPACE }}-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
       - run: bunx --no-install dprint check
+      - name: cache receipt
+        if: env.CACHE_PHASE != 'normal'
+        run: |
+          .github/scripts/write-cache-receipt.sh \
+            "${PERF_SAMPLE}" "${CACHE_PHASE}" docs \
+            "${{ steps.cache.outputs.cache-hit == 'true' }}" \
+            cache-receipt/docs.json
+      - if: env.CACHE_PHASE != 'normal'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cache-receipt-${{ env.CACHE_PHASE }}-${{ env.PERF_SAMPLE }}-docs
+          path: cache-receipt/docs.json
 
   web:
     runs-on: ubuntu-24.04
