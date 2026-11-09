@@ -110,7 +110,10 @@ def retention_seconds(items: list[dict[str, Any]]) -> dict[str, float] | dict[st
         created_at = item.get("created_at")
         expires_at = item.get("expires_at")
         if created_at is None or expires_at is None:
-            continue
+            return {
+                "status": "unavailable",
+                "reason": "provider did not expose created_at and expires_at",
+            }
         value = (parse_time(expires_at) - parse_time(created_at)).total_seconds()
         if value < 0:
             raise PerformanceError("negative artifact/cache retention duration")
@@ -233,8 +236,8 @@ def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dic
                         f"cache receipt mismatch for {phase}-{sample}/{component}"
                     )
         samples[str(sample)] = phase_seconds
-    verify = find_optional(jobs, r"verify")
-    assertion = find_optional(jobs, r"assert")
+    verify = find_one(jobs, r"verify")
+    assertion = find_one(jobs, r"assert")
     critical = sum(
         duration(job)
         for job in (verify, assertion)
@@ -273,8 +276,8 @@ def assert_release(jobs: list[dict[str, Any]]) -> dict[str, Any]:
             raise PerformanceError(f"{name} {seconds[name]:.1f}s exceeds {limit}s")
     web_musl = seconds["web"] + max(seconds["musl-x86_64"], seconds["musl-aarch64"])
     runtime = max(seconds["runtime-x86_64"], seconds["runtime-aarch64"])
-    verify = find_optional(jobs, r"verify")
-    assertion = find_optional(jobs, r"assert")
+    verify = find_one(jobs, r"verify")
+    assertion = find_one(jobs, r"assert")
     critical = (
         sum(
             duration(job)

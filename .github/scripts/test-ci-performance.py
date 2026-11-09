@@ -115,25 +115,28 @@ class CiPerformanceTests(unittest.TestCase):
         components = ("rust", "rust-clippy", "rust-contracts", "web", "storybook", "docker-smoke")
         return [{"sample": str(sample), "phase": phase, "component": component, "cache_hit": phase == "warm"} for sample in range(1, 4) for phase in ("cold", "warm") for component in components]
 
+    def valid_ci_jobs(self):
+        return self.valid_jobs() + [job("verify", 5), job("assert", 7)]
+
     def test_ci_accepts_three_exact_cold_warm_pairs(self):
-        result = performance.assert_ci(self.valid_jobs(), self.valid_receipts())
+        result = performance.assert_ci(self.valid_ci_jobs(), self.valid_receipts())
         self.assertEqual(result["status"], "pass")
-        self.assertEqual(result["critical_path_seconds"], 360)
+        self.assertEqual(result["critical_path_seconds"], 372)
 
     def test_ci_fails_closed_for_missing_job_or_bad_cache_state(self):
         with self.assertRaises(performance.PerformanceError):
-            performance.assert_ci(self.valid_jobs()[:-1], self.valid_receipts())
+            performance.assert_ci(self.valid_ci_jobs()[:-1], self.valid_receipts())
         receipts = self.valid_receipts()
         receipts[0]["cache_hit"] = True
         with self.assertRaises(performance.PerformanceError):
-            performance.assert_ci(self.valid_jobs(), receipts)
+            performance.assert_ci(self.valid_ci_jobs(), receipts)
 
     def test_ci_rejects_incomplete_timestamps_and_threshold_regressions(self):
-        jobs = self.valid_jobs()
+        jobs = self.valid_ci_jobs()
         jobs[0]["completed_at"] = None
         with self.assertRaises(performance.PerformanceError):
             performance.assert_ci(jobs, self.valid_receipts())
-        jobs = self.valid_jobs()
+        jobs = self.valid_ci_jobs()
         jobs[0] = job(jobs[0]["name"], 541)
         with self.assertRaises(performance.PerformanceError):
             performance.assert_ci(jobs, self.valid_receipts())
@@ -176,6 +179,12 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(result["artifact_retention_seconds"]["min"], 60)
         self.assertEqual(result["cache"]["retention_seconds"]["status"], "unavailable")
 
+        caches[0]["created_at"] = "2026-09-05T00:00:00Z"
+        caches[0]["expires_at"] = "2026-09-05T00:01:00Z"
+        caches.append({"key": "Linux-rust-perf-123-1-2", "size_in_bytes": 13})
+        result = performance.observability_metrics(self.valid_jobs(), run, artifacts, caches)
+        self.assertEqual(result["cache"]["retention_seconds"]["status"], "unavailable")
+
     def test_observability_materializes_the_running_assertion_job(self):
         run = {"id": 123, "run_attempt": 1}
         jobs = self.valid_jobs() + [job("assert")]
@@ -201,12 +210,15 @@ class ReleasePerformanceTests(unittest.TestCase):
             job("assemble", 240),
         ]
 
+    def required_jobs(self, jobs):
+        return jobs + [job("verify", 5), job("assert", 7)]
+
     def test_release_computes_declared_critical_path(self):
-        result = performance.assert_release(self.valid_jobs())
-        self.assertEqual(result["critical_path_seconds"], 800)
+        result = performance.assert_release(self.required_jobs(self.valid_jobs()))
+        self.assertEqual(result["critical_path_seconds"], 812)
 
     def test_release_rejects_failed_or_slow_jobs(self):
-        jobs = self.valid_jobs()
+        jobs = self.required_jobs(self.valid_jobs())
         jobs[1] = job(jobs[1]["name"], 601)
         with self.assertRaises(performance.PerformanceError):
             performance.assert_release(jobs)
@@ -220,8 +232,8 @@ class ReleasePerformanceTests(unittest.TestCase):
             job("build / build-runtime (aarch64, arm64)", 120),
             job("assemble", 10),
         ]
-        result = performance.assert_release(jobs)
-        self.assertEqual(result["critical_path_seconds"], 130)
+        result = performance.assert_release(self.required_jobs(jobs))
+        self.assertEqual(result["critical_path_seconds"], 142)
 
 
 class WorkflowContractTests(unittest.TestCase):
