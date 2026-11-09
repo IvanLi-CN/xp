@@ -44,7 +44,7 @@ jobs:
       target_sha: ${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}
       build_version: 0.0.0-perf.${{ github.run_id }}
       artifact_prefix: perf-${{ github.run_id }}
-      cache_scope: release
+      cache_scope: release-${{ github.run_id }}
 
   assemble:
     needs: build
@@ -70,8 +70,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           outputs: type=cacheonly
           build-args: XP_BUILD_VERSION=0.0.0-perf.${{ github.run_id }}
-          cache-from: type=gha,scope=release-runtime
-          cache-to: type=gha,mode=max,scope=release-runtime
+          cache-from: type=gha,scope=release-${{ github.run_id }}
+          cache-to: type=gha,mode=max,scope=release-${{ github.run_id }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-manifest-${{ github.run_id }}
@@ -99,7 +99,7 @@ jobs:
           python3 .github/scripts/performance_assert.py \
             --kind release --jobs jobs.json --run run.json \
             --artifacts artifacts.json --caches caches.json \
-            --cache-scope release \
+            --cache-scope release-${{ github.run_id }} \
             --output release-performance.json
       - name: write summary
         run: cat release-performance.json >> "${GITHUB_STEP_SUMMARY}"

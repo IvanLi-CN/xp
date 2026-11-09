@@ -26,7 +26,7 @@ async fn assert_stalled_download_fails(send_partial_body: bool) {
     fs::write(&dest, b"previous verified asset").unwrap();
     let output = dest.clone();
     let download = tokio::spawn(async move {
-        download_to_path_with_timeout(&url, &output, Duration::from_secs(30)).await
+        download_to_path_with_timeout(&url, &output, Duration::from_secs(60)).await
     });
     stalled_rx.await.unwrap();
     if send_partial_body {
