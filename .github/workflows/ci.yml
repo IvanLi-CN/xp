@@ -60,7 +60,7 @@ jobs:
             hashFiles('web/**', '!web/dist/**', '!web/node_modules/**', '!web/.xp-*',
             'scripts/update-web-dist-fingerprint.sh') }}
           restore-keys: |
-            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-ci-', runner.os) || '' }}
+            ${{ runner.os }}-rust-ci-
       - run: cargo fmt --check
       - run: python3 scripts/check-style-budget.py
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
@@ -158,7 +158,7 @@ jobs:
             hashFiles('web/**', '!web/dist/**', '!web/node_modules/**', '!web/.xp-*',
             'scripts/update-web-dist-fingerprint.sh') }}
           restore-keys: |
-            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-clippy-ci-', runner.os) || '' }}
+            ${{ runner.os }}-rust-clippy-ci-
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - name: build embedded web assets
@@ -276,7 +276,7 @@ jobs:
             ${{ runner.os }}-rust-contracts-${{ env.CACHE_NAMESPACE }}-${{
             env.TARGET_SHA }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-contracts-ci-', runner.os) || '' }}
+            ${{ runner.os }}-rust-contracts-ci-
       - name: contract xp-ops builds without web/dist
         run: |
           rm -rf web/dist
