@@ -5,6 +5,8 @@ on:
     paths:
       - Dockerfile
       - .github/scripts/performance_assert.py
+      - .github/scripts/normalize-cargo-input-timestamps.sh
+      - scripts/update-web-dist-fingerprint.sh
       - .github/workflows/release-build.yml
       - .github/workflows/release-performance.yml
   workflow_dispatch:
@@ -79,6 +81,7 @@ jobs:
 
   assert:
     needs: assemble
+    if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

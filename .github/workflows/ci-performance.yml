@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - .github/scripts/performance_assert.py
+      - .github/scripts/normalize-cargo-input-timestamps.sh
+      - .github/scripts/run-rust-tests.sh
       - .github/scripts/test-ci-performance.py
       - .github/scripts/write-cache-receipt.sh
       - .github/workflows/ci.yml
@@ -54,6 +56,7 @@ jobs:
 
   assert:
     needs: sample
+    if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
