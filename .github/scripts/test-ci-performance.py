@@ -100,6 +100,11 @@ class CiPerformanceTests(unittest.TestCase):
         )
         self.assertNotIn("${{ runner.os }}-storybook-${{ env.CACHE_NAMESPACE }}", workflow)
 
+    def test_contract_job_reuses_the_xp_ops_build_for_dry_runs(self):
+        workflow = (SCRIPT_DIR.parent / "workflows" / "ci.yml").read_text()
+        self.assertEqual(workflow.count("cargo build --locked --bin xp-ops"), 1)
+        self.assertGreaterEqual(workflow.count("target/debug/xp-ops"), 5)
+
     def test_ci_samples_run_as_serial_cold_warm_pairs(self):
         workflows = SCRIPT_DIR.parent / "workflows"
         parent = (workflows / "ci-performance.yml").read_text()

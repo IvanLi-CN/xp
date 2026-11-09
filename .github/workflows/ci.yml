@@ -238,7 +238,7 @@ jobs:
       - name: contract xp-ops builds without web/dist
         run: |
           rm -rf web/dist
-          cargo check --locked --bin xp-ops
+          cargo build --locked --bin xp-ops
           if cargo check --locked --bin xp >/tmp/xp-missing-web-dist.log 2>&1; then exit 1; fi
           grep -Fq \
             "missing web/dist/index.html; run \`cd web && bun run build\`" \
@@ -247,7 +247,6 @@ jobs:
         env: {CLOUDFLARE_API_TOKEN: dummy}
         run: |
           tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-          cargo build --locked --bin xp-ops
           for distro in arch debian alpine; do
             XP_OPS_DISTRO="$distro" target/debug/xp-ops \
               --root "$tmp/$distro" install --only cloudflared --dry-run
