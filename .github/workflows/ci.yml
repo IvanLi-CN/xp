@@ -56,7 +56,8 @@ jobs:
             target
           key: >-
             ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-${{ env.TARGET_SHA }}-${{
-            hashFiles('Cargo.lock') }}-${{ hashFiles('web/**', 'scripts/update-web-dist-fingerprint.sh') }}
+            hashFiles('Cargo.lock') }}-${{
+            hashFiles('web/**', 'scripts/update-web-dist-fingerprint.sh') }}
           restore-keys: |
             ${{ runner.os }}-rust-
       - run: cargo fmt --check
@@ -150,7 +151,8 @@ jobs:
             target
           key: >-
             ${{ runner.os }}-rust-clippy-${{ env.CACHE_NAMESPACE }}-${{
-            env.TARGET_SHA }}-${{ hashFiles('Cargo.lock') }}-${{ hashFiles('web/**', 'scripts/update-web-dist-fingerprint.sh') }}
+            env.TARGET_SHA }}-${{ hashFiles('Cargo.lock') }}-${{
+            hashFiles('web/**', 'scripts/update-web-dist-fingerprint.sh') }}
           restore-keys: |
             ${{ runner.os }}-rust-clippy-
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
