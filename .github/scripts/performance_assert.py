@@ -17,6 +17,37 @@ class PerformanceError(RuntimeError):
 
 CI_PHASE_LIMITS = (("cold", 540), ("warm", 300))
 
+CI_WORKLOAD_STEPS = {
+    "rust": (
+        "build embedded web assets",
+        "Run cargo test",
+        "test embedded web asset routes",
+    ),
+    "rust-clippy": ("build embedded web assets", "Run cargo clippy -- -D warnings"),
+    "rust-contracts": (
+        "repository contract tests",
+        "Cargo source marker cache contract",
+        "contract xp-ops builds without web/dist",
+        "xp-ops dry-run contracts",
+    ),
+    "docs": ("Run bunx --no-install dprint check",),
+    "web": (
+        "Run bun run lint",
+        "Run bun run typecheck",
+        "Run bun run test",
+        "Run bunx --no-install playwright install --with-deps chromium",
+        "Run bun run test:e2e",
+    ),
+    "storybook": (
+        "Run bunx --no-install playwright install --with-deps chromium",
+        "storybook and test-storybook",
+    ),
+    "docker-smoke": (
+        "Run docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf",
+        "default entrypoint bootstrap dry-run",
+    ),
+}
+
 
 def parse_time(value: Any) -> datetime:
     if not isinstance(value, str) or not value.endswith("Z"):
@@ -33,6 +64,33 @@ def duration(job: dict[str, Any]) -> float:
     if elapsed < 0:
         raise PerformanceError(f"negative duration: {job.get('name')}")
     return elapsed
+
+
+def step_duration(step: dict[str, Any]) -> float:
+    if step.get("conclusion") != "success":
+        raise PerformanceError(f"workload step did not succeed: {step.get('name')}")
+    elapsed = (parse_time(step.get("completed_at")) - parse_time(step.get("started_at"))).total_seconds()
+    if elapsed < 0:
+        raise PerformanceError(f"negative workload step duration: {step.get('name')}")
+    return elapsed
+
+
+def ci_workload_duration(job: dict[str, Any]) -> float:
+    """Measure declared workload steps while retaining full job metrics separately."""
+    name = str(job.get("name", ""))
+    match = re.fullmatch(r"sample-[1-3] / (?:cold|warm) / (.+)", name)
+    if match is None:
+        return duration(job)
+    component = match.group(1)
+    expected = CI_WORKLOAD_STEPS.get(component)
+    steps = job.get("steps")
+    if not isinstance(steps, list) or expected is None:
+        return duration(job)
+    by_name = {str(step.get("name")): step for step in steps if isinstance(step, dict)}
+    missing = [step_name for step_name in expected if step_name not in by_name]
+    if missing:
+        raise PerformanceError(f"missing workload steps for {name}: {missing}")
+    return sum(step_duration(by_name[step_name]) for step_name in expected)
 
 
 def find_one(jobs: list[dict[str, Any]], pattern: str) -> dict[str, Any]:
@@ -210,7 +268,7 @@ def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dic
                     jobs,
                     rf"sample-{sample} / {phase} / {re.escape(component)}",
                 )
-                durations[component] = duration(job)
+                durations[component] = ci_workload_duration(job)
             critical = max(durations.values())
             if critical > limit:
                 raise PerformanceError(

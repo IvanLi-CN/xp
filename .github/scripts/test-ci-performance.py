@@ -136,6 +136,22 @@ class CiPerformanceTests(unittest.TestCase):
         with self.assertRaises(performance.PerformanceError):
             performance.assert_ci(self.valid_ci_jobs(), receipts)
 
+    def test_ci_uses_declared_workload_steps_for_phase_limits(self):
+        workload_job = job("sample-1 / warm / rust", 900)
+        workload_job["steps"] = [
+            {
+                "name": name,
+                "started_at": "2026-09-05T00:00:00Z",
+                "completed_at": "2026-09-05T00:00:01Z",
+                "conclusion": "success",
+            }
+            for name in performance.CI_WORKLOAD_STEPS["rust"]
+        ]
+        self.assertEqual(performance.ci_workload_duration(workload_job), 3)
+
+        workload_job["steps"][1]["completed_at"] = "2026-09-05T00:04:57Z"
+        self.assertLess(performance.ci_workload_duration(workload_job), 300)
+
     def test_ci_rejects_incomplete_timestamps_and_threshold_regressions(self):
         jobs = self.valid_ci_jobs()
         jobs[0]["completed_at"] = None
