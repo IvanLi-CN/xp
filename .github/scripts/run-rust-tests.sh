@@ -43,7 +43,7 @@ for package in metadata["packages"]:
 integration_status=0
 integration_pids=()
 for target in "${integration_targets[@]}"; do
-  cargo test --test "$target" --no-fail-fast -- --test-threads=12 &
+  cargo test --test "$target" --no-fail-fast -- --test-threads=1 &
   integration_pids+=("$!")
 done
 for pid in "${integration_pids[@]}"; do
