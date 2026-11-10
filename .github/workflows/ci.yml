@@ -303,7 +303,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-rust-contracts-${{ env.CACHE_NAMESPACE }}-
             ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-contracts-ci-', runner.os) || '' }}
-            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-contracts-perf-', runner.os) || '' }}
       - name: contract xp-ops builds without web/dist
         run: |
           rm -rf web/dist

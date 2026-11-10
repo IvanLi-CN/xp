@@ -112,6 +112,7 @@ jobs:
       - name: build release candidate and resource workload
         run: |
           set -euo pipefail
+          resource_features=(--features resource-fixture)
           case "$CANDIDATE_TARGET" in
             native) candidate=target/release/xp ;;
             x86_64-unknown-linux-musl)
@@ -122,16 +123,21 @@ jobs:
             *) exit 1 ;;
           esac
           if [[ "$CANDIDATE_TARGET" = native ]]; then
-            cargo build --locked --release --features resource-fixture --bin xp --bin xp-ops
+            cargo build --locked --release "${resource_features[@]}" \
+              --bin xp --bin xp-ops
           else
-            cargo build --locked --release --features resource-fixture --target "$CANDIDATE_TARGET" --bin xp --bin xp-ops
-            cargo test --locked --release --features resource-fixture --target "$CANDIDATE_TARGET" --lib \
+            cargo build --locked --release "${resource_features[@]}" \
+              --target "$CANDIDATE_TARGET" --bin xp --bin xp-ops
+            cargo test --locked --release "${resource_features[@]}" \
+              --target "$CANDIDATE_TARGET" --lib \
               large_pretty_node_history_guard_stays_bounded -- --ignored --nocapture
           fi
           if [[ "$CANDIDATE_TARGET" = native ]]; then
-            cargo test --locked --release --features resource-fixture --lib backup_cleanup_is_bounded_for_large_files
+            cargo test --locked --release "${resource_features[@]}" --lib \
+              backup_cleanup_is_bounded_for_large_files
           else
-            cargo test --locked --release --features resource-fixture --target "$CANDIDATE_TARGET" --lib \
+            cargo test --locked --release "${resource_features[@]}" \
+              --target "$CANDIDATE_TARGET" --lib \
               backup_cleanup_is_bounded_for_large_files
           fi
           echo "XP_MESH_RESOURCE_CANDIDATE_BIN=$GITHUB_WORKSPACE/$candidate" >> "$GITHUB_ENV"
@@ -146,7 +152,8 @@ jobs:
             test "$(cat candidate/version.txt)" = "xp $CANDIDATE_BUILD_VERSION"
             test "$(cat candidate/ops-version.txt)" = "xp-ops $CANDIDATE_BUILD_VERSION"
           fi
-          cargo test --locked --release --features resource-fixture --test mesh_transport_resource_e2e --no-run
+          cargo test --locked --release "${resource_features[@]}" \
+            --test mesh_transport_resource_e2e --no-run
       - name: verify user cgroup support
         run: |
           set -euo pipefail
@@ -164,14 +171,17 @@ jobs:
           XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT: 128MiB
         run: |
           set -euo pipefail
+          resource_features=(--features resource-fixture)
           XDG_RUNTIME_DIR="/run/user/$(id -u)"
           export XDG_RUNTIME_DIR
           mkdir -p resource-evidence
           log="resource-evidence/resource-workload.log"
           : > "$log"
-          cargo test --locked --release --features resource-fixture --test mesh_transport_resource_e2e \
+          cargo test --locked --release "${resource_features[@]}" \
+            --test mesh_transport_resource_e2e \
             xp_source_delivery_journal_memory_e2e -- --ignored --nocapture 2>&1 | tee -a "$log"
-          cargo test --locked --release --features resource-fixture --test mesh_transport_resource_e2e \
+          cargo test --locked --release "${resource_features[@]}" \
+            --test mesh_transport_resource_e2e \
             xp_repository_summary_memory_e2e -- --ignored --nocapture 2>&1 | tee -a "$log"
       - name: build resource attestation
         if: always()
