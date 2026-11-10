@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Compile every test target once, then run the unit-test binary and all integration
-# targets concurrently inside the same required job. No test target is omitted.
+# Compile and run every test target. The two tests that mutate shared upgrade
+# fixtures are skipped from the parallel pass and rerun serially below.
 cargo test --tests --no-run
 
 test_status=0
-cargo test --lib --no-fail-fast -- --test-threads=12 \
-  --skip internal_restore_existing_node_starts_durable_lifecycle_operation &
+cargo test --tests --no-fail-fast -- --test-threads=12 \
+  --skip internal_restore_existing_node_starts_durable_lifecycle_operation \
+  --skip upgrade_preserves_custom_xray_api_listener_from_env &
 test_pids=("$!")
 cargo test --lib --no-fail-fast \
   internal_restore_existing_node_starts_durable_lifecycle_operation -- --test-threads=1 &
+test_pids+=("$!")
+cargo test --test xp_ops_upgrade --no-fail-fast \
+  upgrade_preserves_custom_xray_api_listener_from_env -- --test-threads=1 &
 test_pids+=("$!")
 cargo test --bins --no-fail-fast -- --test-threads=12 &
 test_pids+=("$!")
@@ -21,39 +25,5 @@ for pid in "${test_pids[@]}"; do
 done
 
 if (( test_status != 0 )); then
-  exit 1
-fi
-
-integration_targets=()
-while IFS= read -r target; do
-  integration_targets+=("$target")
-done < <(
-  cargo metadata --no-deps --format-version 1 | python3 -c '
-import json
-import sys
-
-metadata = json.load(sys.stdin)
-for package in metadata["packages"]:
-    for target in package["targets"]:
-        if "test" in target["kind"] and target["name"] != package["name"]:
-            print(target["name"])
-'
-)
-
-integration_status=0
-integration_pids=()
-for target in "${integration_targets[@]}"; do
-  test_threads=12
-  if [[ "$target" == "xp_ops_upgrade" ]]; then
-    test_threads=1
-  fi
-  cargo test --test "$target" --no-fail-fast -- --test-threads="$test_threads" &
-  integration_pids+=("$!")
-done
-for pid in "${integration_pids[@]}"; do
-  wait "$pid" || integration_status=1
-done
-
-if (( integration_status != 0 )); then
   exit 1
 fi
