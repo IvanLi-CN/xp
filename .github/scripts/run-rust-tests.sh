@@ -10,10 +10,14 @@ cargo test --tests --no-run --message-format=json > "$test_manifest"
 
 test_status=0
 cargo test --lib --no-fail-fast -- --test-threads=12 \
-  --skip internal_restore_existing_node_starts_durable_lifecycle_operation &
+  --skip internal_restore_existing_node_starts_durable_lifecycle_operation \
+  --skip public_body_cancellation_and_lease_expiry_record_failure_telemetry &
 test_pids=("$!")
 cargo test --lib --no-fail-fast \
   internal_restore_existing_node_starts_durable_lifecycle_operation -- --test-threads=1 &
+test_pids+=("$!")
+cargo test --lib --no-fail-fast \
+  public_body_cancellation_and_lease_expiry_record_failure_telemetry -- --test-threads=1 &
 test_pids+=("$!")
 cargo test --bins --no-fail-fast -- --test-threads=12 &
 test_pids+=("$!")
