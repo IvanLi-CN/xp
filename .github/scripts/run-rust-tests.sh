@@ -43,7 +43,11 @@ for package in metadata["packages"]:
 integration_status=0
 integration_pids=()
 for target in "${integration_targets[@]}"; do
-  cargo test --test "$target" --no-fail-fast -- --test-threads=1 &
+  test_threads=12
+  if [[ "$target" == "xp_ops_upgrade" ]]; then
+    test_threads=1
+  fi
+  cargo test --test "$target" --no-fail-fast -- --test-threads="$test_threads" &
   integration_pids+=("$!")
 done
 for pid in "${integration_pids[@]}"; do
