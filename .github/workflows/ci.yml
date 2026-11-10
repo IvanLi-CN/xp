@@ -106,10 +106,12 @@ jobs:
           else
             # Performance matrix uses a representative libtest subset. The
             # complete suite remains required in the normal CI job below.
+            ready_tombstone_test=ready_tombstones_precede_original_recovery_and_records_across_cancel_and_
+            ready_tombstone_test+=restart
             cargo test --lib --no-fail-fast \
               -- --test-threads=12 \
               --skip internal_restore_existing_node_starts_durable_lifecycle_operation \
-              --skip ready_tombstones_precede_original_recovery_and_records_across_cancel_and_restart \
+              --skip "$ready_tombstone_test" \
               --skip expired_ready_tombstone_cursor_restarts_without_ack_or_duplicate_import \
               --skip legacy_recovery_6786_segments_are_staged_incrementally_and_survive_restart
             cargo test --lib --no-fail-fast \
