@@ -104,7 +104,7 @@ jobs:
           if [[ "${CACHE_PHASE}" == "normal" ]]; then
             .github/scripts/run-rust-tests.sh
           else
-            cargo test --lib --no-fail-fast -- --test-threads=16
+            cargo test --lib --no-fail-fast -- --test-threads=32
           fi
       - name: test embedded web asset routes
         run: |
