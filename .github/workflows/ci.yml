@@ -108,19 +108,19 @@ jobs:
             # complete suite remains required in the normal CI job below.
             ready_tombstone_test=ready_tombstones_precede_original_recovery_and_records_
             ready_tombstone_test+=across_cancel_and_restart
-      public_body_test=public_body_cancellation_and_lease_expiry_record_failure_telemetry
+            public_body_test=public_body_cancellation_and_lease_expiry_record_failure_telemetry
             cargo test --lib --no-fail-fast \
               -- --test-threads=12 \
               --skip internal_restore_existing_node_starts_durable_lifecycle_operation \
-        --skip "$public_body_test" \
+              --skip "$public_body_test" \
               --skip "$ready_tombstone_test" \
               --skip expired_ready_tombstone_cursor_restarts_without_ack_or_duplicate_import \
               --skip legacy_recovery_6786_segments_are_staged_incrementally_and_survive_restart
             cargo test --lib --no-fail-fast \
               internal_restore_existing_node_starts_durable_lifecycle_operation \
               -- --test-threads=1
-      cargo test --lib --no-fail-fast \
-        "$public_body_test" -- --test-threads=1
+            cargo test --lib --no-fail-fast \
+              "$public_body_test" -- --test-threads=1
           fi
       - name: test embedded web asset routes
         run: |
