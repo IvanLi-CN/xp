@@ -100,8 +100,10 @@ jobs:
           gh api --paginate "${caches_url}" \
             | jq -s '{caches: [.[].actions_caches[]?]}' > caches.json
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > run.json
+          target_sha="${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"
           python3 .github/scripts/performance_assert.py \
             --kind release --jobs jobs.json --run run.json \
+            --target-sha "${target_sha}" \
             --artifacts artifacts.json --caches caches.json \
             --cache-scope release-${{ github.run_id }} \
             --output release-performance.json

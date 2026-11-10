@@ -190,6 +190,7 @@ jobs:
           test -s resource-evidence/resource-workload.log
           python3 .github/scripts/resource_evidence.py \
             --target-sha "${TARGET_SHA}" \
+            --candidate-target "${CANDIDATE_TARGET}" \
             --log resource-evidence/resource-workload.log \
             --output resource-evidence/resource-evidence.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -135,6 +135,7 @@ class ReadinessTests(unittest.TestCase):
         valid = {
             "schema": readiness.RESOURCE_EVIDENCE_SCHEMA,
             "target_sha": sha,
+            "candidate_target": "x86_64-unknown-linux-musl",
             "log_sha": "2" * 64,
             "window_seconds": 300,
             "memory_limit_mib": 128,

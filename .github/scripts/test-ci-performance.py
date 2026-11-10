@@ -21,12 +21,27 @@ spec.loader.exec_module(performance)
 
 
 def job(name: str, seconds: int = 60, conclusion: str = "success") -> dict[str, str]:
-    return {
+    result = {
         "name": name,
         "started_at": "2026-09-05T00:00:00Z",
         "completed_at": f"2026-09-05T00:{seconds // 60:02d}:{seconds % 60:02d}Z",
         "conclusion": conclusion,
     }
+    match = re.fullmatch(r"sample-[1-3] / (?:cold|warm) / (.+)", name)
+    if match is not None:
+        step_names = performance.CI_WORKLOAD_STEPS.get(match.group(1), ())
+        result["steps"] = [
+            {
+                "name": step_name,
+                "started_at": "2026-09-05T00:00:00Z",
+                "completed_at": (
+                    result["completed_at"] if index == 0 else "2026-09-05T00:00:00Z"
+                ),
+                "conclusion": conclusion,
+            }
+            for index, step_name in enumerate(step_names)
+        ]
+    return result
 
 
 class CiPerformanceTests(unittest.TestCase):
@@ -239,6 +254,12 @@ class CiPerformanceTests(unittest.TestCase):
                 [{"key": "perf-123-1", "size_in_bytes": 1}],
             )
 
+    def test_known_workload_without_steps_fails_closed(self):
+        jobs = self.valid_jobs()
+        jobs[0].pop("steps")
+        with self.assertRaises(performance.PerformanceError):
+            performance.assert_ci(jobs, self.valid_receipts())
+
     def test_malformed_timestamp_is_a_performance_error(self):
         with self.assertRaises(performance.PerformanceError):
             performance.parse_time("2026-99-99T00:00:00Z")
@@ -279,6 +300,28 @@ class ReleasePerformanceTests(unittest.TestCase):
         ]
         result = performance.assert_release(self.required_jobs(jobs))
         self.assertEqual(result["critical_path_seconds"], 142)
+
+    def test_release_requires_each_declared_cache_scope(self):
+        caches = [
+            {"key": f"Linux-{prefix}release-1-sha", "size_in_bytes": 1}
+            for prefix in (
+                "release-web-",
+                "release-musl-x86_64-unknown-linux-musl-",
+                "release-musl-aarch64-unknown-linux-musl-",
+                "release-go-amd64-",
+            )
+        ]
+        with self.assertRaises(performance.PerformanceError):
+            performance.assert_release(
+                self.required_jobs(self.valid_jobs()), caches, "release-1"
+            )
+        caches.append({"key": "Linux-release-go-arm64-release-1-sha", "size_in_bytes": 1})
+        self.assertEqual(
+            performance.assert_release(
+                self.required_jobs(self.valid_jobs()), caches, "release-1"
+            )["status"],
+            "pass",
+        )
 
 
 class WorkflowContractTests(unittest.TestCase):

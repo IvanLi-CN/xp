@@ -34,12 +34,15 @@ def fail(message: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-sha", required=True)
+    parser.add_argument("--candidate-target", required=True)
     parser.add_argument("--log", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
     if not re.fullmatch(r"[0-9a-f]{40}", args.target_sha):
         fail("target SHA must be a 40-character lowercase hexadecimal value")
+    if args.candidate_target != "x86_64-unknown-linux-musl":
+        fail("resource evidence requires the native x86_64 musl target")
     try:
         log_bytes = args.log.read_bytes()
     except OSError as exc:
@@ -86,6 +89,7 @@ def main() -> int:
     evidence = {
         "schema": "xp-history-throughput-v2",
         "target_sha": args.target_sha,
+        "candidate_target": args.candidate_target,
         "log_sha": hashlib.sha256(log_bytes).hexdigest(),
         "window_seconds": 300,
         "memory_limit_mib": 128,

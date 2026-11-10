@@ -90,8 +90,10 @@ def ci_workload_duration(job: dict[str, Any]) -> float:
     component = match.group(1)
     expected = CI_WORKLOAD_STEPS.get(component)
     steps = job.get("steps")
-    if not isinstance(steps, list) or expected is None:
+    if expected is None:
         return duration(job)
+    if not isinstance(steps, list):
+        raise PerformanceError(f"missing workload steps for {name}")
     by_name = {str(step.get("name")): step for step in steps if isinstance(step, dict)}
     missing = [step_name for step_name in expected if step_name not in by_name]
     if missing:
@@ -326,7 +328,37 @@ def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dic
     }
 
 
-def assert_release(jobs: list[dict[str, Any]]) -> dict[str, Any]:
+RELEASE_CACHE_PREFIXES = (
+    "release-web-",
+    "release-musl-x86_64-unknown-linux-musl-",
+    "release-musl-aarch64-unknown-linux-musl-",
+    "release-go-amd64-",
+    "release-go-arm64-",
+)
+
+
+def assert_release(
+    jobs: list[dict[str, Any]],
+    caches: list[dict[str, Any]] | None = None,
+    cache_scope: str | None = None,
+) -> dict[str, Any]:
+    if caches is not None or cache_scope is not None:
+        if not caches or not cache_scope:
+            raise PerformanceError("release cache evidence is incomplete")
+        scoped_keys = {
+            str(cache.get("key"))
+            for cache in caches
+            if f"-{cache_scope}-" in f"-{str(cache.get('key', ''))}-"
+        }
+        missing = [
+            prefix
+            for prefix in RELEASE_CACHE_PREFIXES
+            if not any(f"-{prefix}" in key for key in scoped_keys)
+        ]
+        if missing:
+            raise PerformanceError(
+                f"release cache evidence is missing required scopes: {missing}"
+            )
     seconds = {
         "web": duration(find_one(jobs, r"build / build-web")),
         "musl-x86_64": duration(find_one(jobs, r"build / build-musl \(x86_64.*\)")),
@@ -367,6 +399,7 @@ def assert_release(jobs: list[dict[str, Any]]) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--kind", choices=("ci", "release"), required=True)
+    parser.add_argument("--target-sha", required=True)
     parser.add_argument("--jobs", type=Path, required=True)
     parser.add_argument("--run", type=Path, required=True)
     parser.add_argument("--receipts", type=Path)
@@ -385,33 +418,40 @@ def main() -> int:
         run_payload = json.loads(args.run.read_text())
         if not isinstance(run_payload, dict):
             raise PerformanceError("run payload must be an object")
+        if not re.fullmatch(r"[0-9a-f]{40}", args.target_sha):
+            raise PerformanceError("target SHA must be a 40-character lowercase hexadecimal value")
+        if run_payload.get("head_sha") != args.target_sha:
+            raise PerformanceError("performance run SHA does not match target SHA")
     except (PerformanceError, json.JSONDecodeError, OSError) as error:
-        failure = {"kind": args.kind, "status": "fail", "error": str(error)}
+        failure = {"kind": args.kind, "status": "fail", "target_sha": args.target_sha, "error": str(error)}
         args.output.write_text(json.dumps(failure, indent=2, sort_keys=True) + "\n")
         print(json.dumps(failure, sort_keys=True))
         return 1
     try:
+        artifacts = load_collection(args.artifacts, "artifacts")
+        caches = load_collection(args.caches, "caches", "actions_caches")
         if args.kind == "ci":
             if args.receipts is None:
                 raise PerformanceError("CI assertions require cache receipts")
             result = assert_ci(jobs, load_receipts(args.receipts))
         else:
-            result = assert_release(jobs)
+            result = assert_release(jobs, caches, args.cache_scope)
         result.update(
             observability_metrics(
                 jobs,
                 run_payload,
-                load_collection(args.artifacts, "artifacts"),
-                load_collection(args.caches, "caches", "actions_caches"),
+                artifacts,
+                caches,
                 args.cache_scope,
             )
         )
         result["workflow_queue_seconds"] = workflow_queue_seconds(run_payload)
+        result["target_sha"] = args.target_sha
         args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
         print(json.dumps(result, sort_keys=True))
         return 0
     except (PerformanceError, json.JSONDecodeError, OSError) as error:
-        failure = {"kind": args.kind, "status": "fail", "error": str(error)}
+        failure = {"kind": args.kind, "status": "fail", "target_sha": args.target_sha, "error": str(error)}
         args.output.write_text(json.dumps(failure, indent=2, sort_keys=True) + "\n")
         print(json.dumps(failure, sort_keys=True))
         return 1

@@ -156,6 +156,8 @@ def validate_resource_evidence(raw: str | None, target_sha: str) -> str:
         raise ReadinessError("resource_evidence_schema_mismatch")
     if evidence.get("target_sha") != target_sha:
         raise ReadinessError("resource_evidence_sha_mismatch")
+    if evidence.get("candidate_target") != "x86_64-unknown-linux-musl":
+        raise ReadinessError("resource_evidence_target_invalid")
     log_sha = evidence.get("log_sha")
     if not isinstance(log_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", log_sha):
         raise ReadinessError("resource_evidence_log_sha_invalid")

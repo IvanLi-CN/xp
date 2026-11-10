@@ -21,7 +21,7 @@ const JOURNAL_BACKLOG_PAYLOAD_BYTES: usize = 3 * 1024;
 const JOURNAL_FIXTURE_PAYLOAD_BYTES: usize = 2 * 1024;
 // Stay below the durable 80% suspension watermark so this workload exercises the real
 // enqueue path while the capacity-specific unit tests cover the suspended state.
-const SOURCE_JOURNAL_RESOURCE_INITIAL_SEGMENTS: i64 = 10_000;
+const SOURCE_JOURNAL_RESOURCE_INITIAL_SEGMENTS: i64 = 20_000;
 
 #[derive(Debug, Clone)]
 struct DeliveryWindowSnapshot {
