@@ -382,7 +382,8 @@ jobs:
         env:
           PLAYWRIGHT_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         run: |
-          if [[ "${PLAYWRIGHT_CACHE_HIT}" == "true" ]]; then
+          if [[ "${PLAYWRIGHT_CACHE_HIT}" == "true" \
+            || -d "${HOME}/.cache/ms-playwright" ]]; then
             test -d "${HOME}/.cache/ms-playwright"
           else
             bunx --no-install playwright install --with-deps chromium
@@ -429,7 +430,8 @@ jobs:
         env:
           PLAYWRIGHT_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         run: |
-          if [[ "${PLAYWRIGHT_CACHE_HIT}" == "true" ]]; then
+          if [[ "${PLAYWRIGHT_CACHE_HIT}" == "true" \
+            || -d "${HOME}/.cache/ms-playwright" ]]; then
             test -d "${HOME}/.cache/ms-playwright"
           else
             bunx --no-install playwright install --with-deps chromium
