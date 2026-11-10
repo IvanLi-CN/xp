@@ -6,15 +6,18 @@ set -euo pipefail
 cargo test --tests --no-run
 
 test_status=0
+upgrade_skip_args=()
+while IFS= read -r test_name; do
+  upgrade_skip_args+=(--skip "$test_name")
+done < <(rg -o '^(async )?fn [A-Za-z0-9_]+' tests/xp_ops_upgrade.rs | awk '{print $NF}')
 cargo test --tests --no-fail-fast -- --test-threads=12 \
   --skip internal_restore_existing_node_starts_durable_lifecycle_operation \
-  --skip upgrade_preserves_custom_xray_api_listener_from_env &
+  "${upgrade_skip_args[@]}" &
 test_pids=("$!")
 cargo test --lib --no-fail-fast \
   internal_restore_existing_node_starts_durable_lifecycle_operation -- --test-threads=1 &
 test_pids+=("$!")
-cargo test --test xp_ops_upgrade --no-fail-fast \
-  upgrade_preserves_custom_xray_api_listener_from_env -- --test-threads=1 &
+cargo test --test xp_ops_upgrade --no-fail-fast -- --test-threads=1 &
 test_pids+=("$!")
 cargo test --bins --no-fail-fast -- --test-threads=12 &
 test_pids+=("$!")
