@@ -10,7 +10,7 @@ upgrade_skip_args=()
 while IFS= read -r test_name; do
   upgrade_skip_args+=(--skip "$test_name")
 done < <(rg -o '^(async )?fn [A-Za-z0-9_]+' tests/xp_ops_upgrade.rs | awk '{print $NF}')
-cargo test --tests --no-fail-fast -- --test-threads=12 \
+cargo test --tests --no-fail-fast -- --test-threads=16 \
   --skip internal_restore_existing_node_starts_durable_lifecycle_operation \
   "${upgrade_skip_args[@]}" &
 test_pids=("$!")
