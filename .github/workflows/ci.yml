@@ -378,7 +378,15 @@ jobs:
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run test
-      - run: bunx --no-install playwright install --with-deps chromium
+      - name: bunx --no-install playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          if [[ "${PLAYWRIGHT_CACHE_HIT}" == "true" ]]; then
+            test -d "${HOME}/.cache/ms-playwright"
+          else
+            bunx --no-install playwright install --with-deps chromium
+          fi
       - run: bun run test:e2e
       - name: cache receipt
         if: env.CACHE_PHASE != 'normal'
@@ -417,7 +425,15 @@ jobs:
             ${{ runner.os }}-web-${{ env.CACHE_NAMESPACE }}-${{
             hashFiles('web/bun.lock') }}
       - run: bun install --frozen-lockfile
-      - run: bunx --no-install playwright install --with-deps chromium
+      - name: bunx --no-install playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          if [[ "${PLAYWRIGHT_CACHE_HIT}" == "true" ]]; then
+            test -d "${HOME}/.cache/ms-playwright"
+          else
+            bunx --no-install playwright install --with-deps chromium
+          fi
       - name: storybook and test-storybook
         run: |
           bun run storybook & SB_PID=$!
