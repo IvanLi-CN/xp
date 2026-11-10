@@ -225,6 +225,24 @@ class CiPerformanceTests(unittest.TestCase):
         with self.assertRaises(performance.PerformanceError):
             performance.observability_metrics(self.valid_jobs(), run, [], [])
 
+    def test_observability_rejects_boolean_sizes_and_unrelated_cache_scopes(self):
+        run = {"id": 123, "run_attempt": 1}
+        artifacts = [{"size_in_bytes": 1}]
+        caches = [{"key": "Linux-rust-perf-1234-1", "size_in_bytes": 1}]
+        with self.assertRaises(performance.PerformanceError):
+            performance.observability_metrics(
+                self.valid_jobs(), run, artifacts, caches, "perf-123-1"
+            )
+        with self.assertRaises(performance.PerformanceError):
+            performance.observability_metrics(
+                self.valid_jobs(), run, [{"size_in_bytes": True}],
+                [{"key": "perf-123-1", "size_in_bytes": 1}],
+            )
+
+    def test_malformed_timestamp_is_a_performance_error(self):
+        with self.assertRaises(performance.PerformanceError):
+            performance.parse_time("2026-99-99T00:00:00Z")
+
 
 class ReleasePerformanceTests(unittest.TestCase):
     def valid_jobs(self):

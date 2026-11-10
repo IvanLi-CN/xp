@@ -52,7 +52,10 @@ CI_WORKLOAD_STEPS = {
 def parse_time(value: Any) -> datetime:
     if not isinstance(value, str) or not value.endswith("Z"):
         raise PerformanceError(f"invalid workflow timestamp: {value!r}")
-    return datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+    try:
+        return datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+    except ValueError as error:
+        raise PerformanceError(f"invalid workflow timestamp: {value!r}") from error
 
 
 def duration(job: dict[str, Any]) -> float:
@@ -222,8 +225,7 @@ def observability_metrics(
     matching_caches = [
         cache
         for cache in caches
-        if cache_scope in str(cache.get("key", ""))
-        or cache_scope in str(cache.get("version", ""))
+        if f"-{cache_scope}-" in f"-{str(cache.get('key', ''))}-"
     ]
     if not artifacts:
         raise PerformanceError("required artifact evidence is missing")
@@ -232,14 +234,14 @@ def observability_metrics(
     artifact_bytes = 0
     for artifact in artifacts:
         size = artifact.get("size_in_bytes")
-        if not isinstance(size, int) or size < 0:
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
             raise PerformanceError(f"invalid artifact size: {size!r}")
         artifact_bytes += size
     cache_bytes = 0
     cache_size_by_key: dict[str, int] = {}
     for cache in matching_caches:
         size = cache.get("size_in_bytes")
-        if not isinstance(size, int) or size < 0:
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
             raise PerformanceError(f"invalid cache size: {size!r}")
         cache_bytes += size
         key = str(cache.get("key", ""))
