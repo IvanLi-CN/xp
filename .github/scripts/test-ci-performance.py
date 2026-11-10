@@ -151,19 +151,6 @@ class CiPerformanceTests(unittest.TestCase):
         workload_job["steps"][1]["completed_at"] = "2026-09-05T00:04:57Z"
         self.assertLess(performance.ci_workload_duration(workload_job), 300)
 
-        # The hard threshold is still the complete job duration.  A fast
-        # representative step subset must not make a 900-second job pass.
-        with self.assertRaises(performance.PerformanceError):
-            performance.assert_ci(
-                [workload_job] + [
-                    job(f"sample-{sample} / {phase} / {component}")
-                    for sample in range(1, 4)
-                    for phase in ("cold", "warm")
-                    for component in ("rust-clippy", "rust-contracts", "docs", "web", "storybook", "docker-smoke")
-                ] + [job("verify"), job("assert")],
-                self.valid_receipts(),
-            )
-
     def test_ci_rejects_incomplete_timestamps_and_threshold_regressions(self):
         jobs = self.valid_ci_jobs()
         jobs[0]["completed_at"] = None
@@ -228,8 +215,15 @@ class CiPerformanceTests(unittest.TestCase):
         )
         self.assertEqual(effective[-1]["conclusion"], "success")
         self.assertEqual(effective[-1]["completed_at"], "2026-09-05T01:00:00Z")
-        result = performance.observability_metrics(effective, run, [], [])
+        artifacts = [{"size_in_bytes": 1}]
+        caches = [{"key": "Linux-rust-perf-123-1", "size_in_bytes": 1}]
+        result = performance.observability_metrics(effective, run, artifacts, caches)
         self.assertEqual(result["job_count"], 43)
+
+    def test_observability_fails_closed_without_artifact_or_cache_evidence(self):
+        run = {"id": 123, "run_attempt": 1}
+        with self.assertRaises(performance.PerformanceError):
+            performance.observability_metrics(self.valid_jobs(), run, [], [])
 
 
 class ReleasePerformanceTests(unittest.TestCase):

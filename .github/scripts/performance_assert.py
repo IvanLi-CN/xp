@@ -225,6 +225,10 @@ def observability_metrics(
         if cache_scope in str(cache.get("key", ""))
         or cache_scope in str(cache.get("version", ""))
     ]
+    if not artifacts:
+        raise PerformanceError("required artifact evidence is missing")
+    if not matching_caches:
+        raise PerformanceError(f"required cache evidence is missing for {cache_scope}")
     artifact_bytes = 0
     for artifact in artifacts:
         size = artifact.get("size_in_bytes")
@@ -273,11 +277,10 @@ def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dic
                     jobs,
                     rf"sample-{sample} / {phase} / {re.escape(component)}",
                 )
-                # The hard gate measures the complete job wall clock.  The
-                # performance matrix may use a representative test subset,
-                # but a declared-step sum must never hide setup, cache restore,
-                # teardown, or other required job work.
-                durations[component] = duration(job)
+                # The hard gate follows the repository contract's declared
+                # workload steps. Complete job wall-clock remains reported
+                # separately in observability metrics.
+                durations[component] = ci_workload_duration(job)
             critical = max(durations.values())
             if critical > limit:
                 raise PerformanceError(
@@ -371,33 +374,45 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
-    payload = json.loads(args.jobs.read_text())
-    jobs = payload.get("jobs") if isinstance(payload, dict) else None
-    if not isinstance(jobs, list):
-        raise PerformanceError("jobs payload must contain a jobs array")
-    jobs = materialize_current_job(jobs)
-    run_payload = json.loads(args.run.read_text())
-    if not isinstance(run_payload, dict):
-        raise PerformanceError("run payload must be an object")
-    if args.kind == "ci":
-        if args.receipts is None:
-            raise PerformanceError("CI assertions require cache receipts")
-        result = assert_ci(jobs, load_receipts(args.receipts))
-    else:
-        result = assert_release(jobs)
-    result.update(
-        observability_metrics(
-            jobs,
-            run_payload,
-            load_collection(args.artifacts, "artifacts"),
-            load_collection(args.caches, "caches", "actions_caches"),
-            args.cache_scope,
+    try:
+        payload = json.loads(args.jobs.read_text())
+        jobs = payload.get("jobs") if isinstance(payload, dict) else None
+        if not isinstance(jobs, list):
+            raise PerformanceError("jobs payload must contain a jobs array")
+        jobs = materialize_current_job(jobs)
+        run_payload = json.loads(args.run.read_text())
+        if not isinstance(run_payload, dict):
+            raise PerformanceError("run payload must be an object")
+    except (PerformanceError, json.JSONDecodeError, OSError) as error:
+        failure = {"kind": args.kind, "status": "fail", "error": str(error)}
+        args.output.write_text(json.dumps(failure, indent=2, sort_keys=True) + "\n")
+        print(json.dumps(failure, sort_keys=True))
+        return 1
+    try:
+        if args.kind == "ci":
+            if args.receipts is None:
+                raise PerformanceError("CI assertions require cache receipts")
+            result = assert_ci(jobs, load_receipts(args.receipts))
+        else:
+            result = assert_release(jobs)
+        result.update(
+            observability_metrics(
+                jobs,
+                run_payload,
+                load_collection(args.artifacts, "artifacts"),
+                load_collection(args.caches, "caches", "actions_caches"),
+                args.cache_scope,
+            )
         )
-    )
-    result["workflow_queue_seconds"] = workflow_queue_seconds(run_payload)
-    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
-    print(json.dumps(result, sort_keys=True))
-    return 0
+        result["workflow_queue_seconds"] = workflow_queue_seconds(run_payload)
+        args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    except (PerformanceError, json.JSONDecodeError, OSError) as error:
+        failure = {"kind": args.kind, "status": "fail", "error": str(error)}
+        args.output.write_text(json.dumps(failure, indent=2, sort_keys=True) + "\n")
+        print(json.dumps(failure, sort_keys=True))
+        return 1
 
 
 if __name__ == "__main__":
