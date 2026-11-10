@@ -135,7 +135,7 @@ class CiPerformanceTests(unittest.TestCase):
         with self.assertRaises(performance.PerformanceError):
             performance.assert_ci(self.valid_ci_jobs(), receipts)
 
-    def test_ci_uses_declared_workload_steps_for_phase_limits(self):
+    def test_ci_workload_metric_is_observational_only(self):
         workload_job = job("sample-1 / warm / rust", 900)
         workload_job["steps"] = [
             {
@@ -150,6 +150,19 @@ class CiPerformanceTests(unittest.TestCase):
 
         workload_job["steps"][1]["completed_at"] = "2026-09-05T00:04:57Z"
         self.assertLess(performance.ci_workload_duration(workload_job), 300)
+
+        # The hard threshold is still the complete job duration.  A fast
+        # representative step subset must not make a 900-second job pass.
+        with self.assertRaises(performance.PerformanceError):
+            performance.assert_ci(
+                [workload_job] + [
+                    job(f"sample-{sample} / {phase} / {component}")
+                    for sample in range(1, 4)
+                    for phase in ("cold", "warm")
+                    for component in ("rust-clippy", "rust-contracts", "docs", "web", "storybook", "docker-smoke")
+                ] + [job("verify"), job("assert")],
+                self.valid_receipts(),
+            )
 
     def test_ci_rejects_incomplete_timestamps_and_threshold_regressions(self):
         jobs = self.valid_ci_jobs()

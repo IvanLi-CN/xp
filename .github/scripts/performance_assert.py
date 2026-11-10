@@ -273,7 +273,11 @@ def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dic
                     jobs,
                     rf"sample-{sample} / {phase} / {re.escape(component)}",
                 )
-                durations[component] = ci_workload_duration(job)
+                # The hard gate measures the complete job wall clock.  The
+                # performance matrix may use a representative test subset,
+                # but a declared-step sum must never hide setup, cache restore,
+                # teardown, or other required job work.
+                durations[component] = duration(job)
             critical = max(durations.values())
             if critical > limit:
                 raise PerformanceError(
