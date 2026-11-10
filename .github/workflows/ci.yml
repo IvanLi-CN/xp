@@ -378,7 +378,7 @@ jobs:
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run test
-      - name: bunx --no-install playwright install --with-deps chromium
+      - name: Run bunx --no-install playwright install --with-deps chromium
         env:
           PLAYWRIGHT_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         run: |
@@ -426,7 +426,7 @@ jobs:
             ${{ runner.os }}-web-${{ env.CACHE_NAMESPACE }}-${{
             hashFiles('web/bun.lock') }}
       - run: bun install --frozen-lockfile
-      - name: bunx --no-install playwright install --with-deps chromium
+      - name: Run bunx --no-install playwright install --with-deps chromium
         env:
           PLAYWRIGHT_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         run: |
