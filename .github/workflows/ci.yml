@@ -100,7 +100,12 @@ jobs:
             fi
           fi
       - name: Run cargo test
-        run: .github/scripts/run-rust-tests.sh
+        run: |
+          if [[ "${CACHE_PHASE}" == "normal" ]]; then
+            .github/scripts/run-rust-tests.sh
+          else
+            cargo test --no-fail-fast -- --test-threads=12
+          fi
       - name: test embedded web asset routes
         run: |
           cargo test --lib \
