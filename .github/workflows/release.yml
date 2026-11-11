@@ -91,7 +91,9 @@ jobs:
           test "${#parents[@]}" -eq 2
           test "${parents[1]}" = "${RELEASE_HEAD_SHA}"
           mapfile -t evidence_paths < <(
-            git diff-tree --no-commit-id --name-only -r "${evidence_commit}"
+            git diff-tree --no-commit-id --name-only --no-renames -r "${evidence_commit}" \
+              | sed '/^$/d' \
+              | LC_ALL=C sort
           )
           test "${#evidence_paths[@]}" -eq 2
           test "${evidence_paths[0]}" = "resource-evidence.json"
