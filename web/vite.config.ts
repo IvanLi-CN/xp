@@ -50,7 +50,10 @@ function resolveBuildId() {
 		"storybook-static",
 		"test-results",
 	]);
-	const ignoredFiles = new Set([".xp-dist-fingerprint", ".xp-web-source-fingerprint"]);
+	const ignoredFiles = new Set([
+		".xp-dist-fingerprint",
+		".xp-web-source-fingerprint",
+	]);
 	const visit = (directory: string) => {
 		for (const entry of fs
 			.readdirSync(directory, { withFileTypes: true })
