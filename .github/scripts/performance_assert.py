@@ -284,7 +284,13 @@ def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dic
                 # workload steps. Complete job wall-clock remains reported
                 # separately in observability metrics.
                 durations[component] = ci_workload_duration(job)
-            critical = max(durations.values())
+            web_storybook_path = durations["web"] + durations["storybook"]
+            independent_path = max(
+                duration
+                for component, duration in durations.items()
+                if component not in ("web", "storybook")
+            )
+            critical = max(web_storybook_path, independent_path)
             if critical > limit:
                 raise PerformanceError(
                     f"{phase}-{sample} critical path {critical:.1f}s exceeds {limit}s"

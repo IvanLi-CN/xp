@@ -113,7 +113,7 @@ class CiPerformanceTests(unittest.TestCase):
             2,
         )
         self.assertNotIn("${{ runner.os }}-storybook-${{ env.CACHE_NAMESPACE }}", workflow)
-        self.assertEqual(workflow.count("lookup-only: ${{ env.CACHE_PHASE == 'cold' }}"), 2)
+        self.assertEqual(workflow.count("actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830"), 2)
         self.assertIn("actions/cache/save@0057852bfaa89a56745bba8c7296529d2fc39830", workflow)
         self.assertIn("storybook:" + chr(10) + "    needs: web", workflow)
 
@@ -148,7 +148,7 @@ class CiPerformanceTests(unittest.TestCase):
     def test_ci_accepts_three_exact_cold_warm_pairs(self):
         result = performance.assert_ci(self.valid_ci_jobs(), self.valid_receipts())
         self.assertEqual(result["status"], "pass")
-        self.assertEqual(result["critical_path_seconds"], 372)
+        self.assertEqual(result["critical_path_seconds"], 732)
 
     def test_ci_fails_closed_for_missing_job_or_bad_cache_state(self):
         with self.assertRaises(performance.PerformanceError):
@@ -185,6 +185,18 @@ class CiPerformanceTests(unittest.TestCase):
             performance.assert_ci(jobs, self.valid_receipts())
         jobs[0] = job(jobs[0]["name"], 540)
         self.assertEqual(performance.assert_ci(jobs, self.valid_receipts())["status"], "pass")
+
+    def test_ci_models_serial_web_storybook_cache_owner_path(self):
+        jobs = self.valid_jobs()
+        for candidate in jobs:
+            if candidate["name"] == "sample-1 / cold / web":
+                candidate["completed_at"] = "2026-09-05T06:40:00Z"
+                candidate["steps"][0]["completed_at"] = "2026-09-05T06:40:00Z"
+            if candidate["name"] == "sample-1 / cold / storybook":
+                candidate["completed_at"] = "2026-09-05T03:20:00Z"
+                candidate["steps"][0]["completed_at"] = "2026-09-05T03:20:00Z"
+        with self.assertRaises(performance.PerformanceError):
+            performance.assert_ci(jobs, self.valid_receipts())
 
     def test_workflow_queue_is_reported_separately(self):
         payload = {
