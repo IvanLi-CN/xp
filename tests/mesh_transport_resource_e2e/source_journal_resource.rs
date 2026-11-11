@@ -239,7 +239,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     let bind_port = reserve_local_port();
     run_init(binary, temp.path(), bind_port);
     let cluster = ClusterMetadata::load(temp.path()).expect("load source journal cluster");
-    let backlog_bytes = prepare_source_delivery_storage(temp.path(), &cluster);
+    prepare_source_delivery_storage(temp.path(), &cluster);
     unsafe {
         std::env::set_var(
             "XP_RESOURCE_FIXTURE_PAYLOAD_BYTES",
@@ -249,6 +249,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     let log_path = temp.path().join("source-journal.log");
     let mut child = spawn_xp(binary, temp.path(), bind_port, "source-journal");
     wait_for_xp(&mut child, bind_port, &log_path).await;
+    let backlog_bytes = read_pending_bytes(temp.path());
     let pid = child.id();
     let (memory_limit_bytes, swap_limit_bytes) = assert_expected_memory_scope(pid);
 
@@ -692,7 +693,7 @@ async fn request_source_status(
     }
 }
 
-fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) -> i64 {
+fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
     let connection = rusqlite::Connection::open(data_dir.join("history.sqlite3"))
         .expect("open source journal resource database");
     connection
@@ -888,5 +889,18 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) -
         persisted.state().nodes.contains_key(&cluster.node_id),
         "source journal fixture must reload local node metadata"
     );
-    total_wire_bytes
+}
+
+fn read_pending_bytes(data_dir: &Path) -> u64 {
+    let connection = rusqlite::Connection::open(data_dir.join("history.sqlite3"))
+        .expect("open source journal pending-byte database");
+    connection
+        .query_row(
+            "SELECT pending_bytes FROM source_delivery_journal_state WHERE singleton = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("read source journal pending bytes")
+        .try_into()
+        .expect("source journal pending bytes are non-negative")
 }

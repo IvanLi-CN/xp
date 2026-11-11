@@ -72,6 +72,9 @@ class CiPerformanceTests(unittest.TestCase):
             for path in (
                 "Dockerfile", "build.rs", ".xp-source-marker", "Cargo.toml", "Cargo.lock",
                 "src/**", "proto/**", "web/**", "tests/**", "scripts/**", ".bun-version",
+                "bun.lock", "package.json", "dprint.json", "'**/*.md'", "rustfmt.toml",
+                "rust-toolchain.toml", "fixture-policy/**", "test-fixtures/**", ".dockerignore",
+                "edgeone.json",
             ):
                 self.assertIn(f"      - {path}\n", workflow)
 

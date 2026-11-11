@@ -14,6 +14,16 @@ on:
       - tests/**
       - scripts/**
       - .bun-version
+      - bun.lock
+      - package.json
+      - dprint.json
+      - '**/*.md'
+      - rustfmt.toml
+      - rust-toolchain.toml
+      - fixture-policy/**
+      - test-fixtures/**
+      - .dockerignore
+      - edgeone.json
       - .github/scripts/performance_assert.py
       - .github/scripts/normalize-cargo-input-timestamps.sh
       - .github/scripts/run-rust-tests.sh

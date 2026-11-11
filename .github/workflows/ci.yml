@@ -58,7 +58,7 @@ jobs:
             ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-${{ env.TARGET_SHA }}-${{
             hashFiles('Cargo.lock') }}-${{
             hashFiles('web/**', '!web/dist/**', '!web/node_modules/**', '!web/.xp-*',
-            'scripts/update-web-dist-fingerprint.sh') }}
+            'fixture-policy/**', 'scripts/update-web-dist-fingerprint.sh') }}
           restore-keys: |
             ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-
             ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-ci-', runner.os) || '' }}
@@ -70,7 +70,7 @@ jobs:
       - name: build embedded web assets
         env:
           WEB_SOURCE_HASH: ${{ hashFiles('web/**', '!web/dist/**', '!web/node_modules/**',
-            '!web/.xp-*', 'scripts/update-web-dist-fingerprint.sh') }}
+            '!web/.xp-*', 'fixture-policy/**', 'scripts/update-web-dist-fingerprint.sh') }}
         run: |
           if [[ -d web/dist && -f web/.xp-web-source-fingerprint \
             && "$(cat web/.xp-web-source-fingerprint)" = "${WEB_SOURCE_HASH}" ]]; then
@@ -179,7 +179,7 @@ jobs:
             ${{ runner.os }}-rust-clippy-${{ env.CACHE_NAMESPACE }}-${{
             env.TARGET_SHA }}-${{ hashFiles('Cargo.lock') }}-${{
             hashFiles('web/**', '!web/dist/**', '!web/node_modules/**', '!web/.xp-*',
-            'scripts/update-web-dist-fingerprint.sh') }}
+            'fixture-policy/**', 'scripts/update-web-dist-fingerprint.sh') }}
           restore-keys: |
             ${{ runner.os }}-rust-clippy-${{ env.CACHE_NAMESPACE }}-
             ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-clippy-ci-', runner.os) || '' }}
@@ -189,7 +189,7 @@ jobs:
       - name: build embedded web assets
         env:
           WEB_SOURCE_HASH: ${{ hashFiles('web/**', '!web/dist/**', '!web/node_modules/**',
-            '!web/.xp-*', 'scripts/update-web-dist-fingerprint.sh') }}
+            '!web/.xp-*', 'fixture-policy/**', 'scripts/update-web-dist-fingerprint.sh') }}
         run: |
           if [[ -d web/dist && -f web/.xp-web-source-fingerprint \
             && "$(cat web/.xp-web-source-fingerprint)" = "${WEB_SOURCE_HASH}" ]]; then
