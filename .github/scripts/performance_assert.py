@@ -180,13 +180,18 @@ def materialize_current_job(
     return [snapshot if job is current else job for job in jobs]
 
 
-def retention_seconds(items: list[dict[str, Any]]) -> dict[str, Any]:
+def retention_seconds(
+    items: list[dict[str, Any]], *, allow_provider_unavailable: bool = False
+) -> dict[str, Any]:
     values = []
     unavailable = 0
     for item in items:
         created_at = item.get("created_at")
         expires_at = item.get("expires_at")
         if created_at is None and expires_at is None:
+            unavailable += 1
+            continue
+        if allow_provider_unavailable and expires_at is None:
             unavailable += 1
             continue
         if not isinstance(created_at, str) or not isinstance(expires_at, str):
@@ -274,7 +279,9 @@ def observability_metrics(
             "matching_entry_count": len(matching_caches),
             "size_bytes": cache_bytes,
             "size_by_key": cache_size_by_key,
-            "retention_seconds": retention_seconds(matching_caches),
+            "retention_seconds": retention_seconds(
+                matching_caches, allow_provider_unavailable=True
+            ),
         },
     }
 

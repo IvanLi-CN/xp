@@ -249,6 +249,14 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(result["cache"]["retention_seconds"]["status"], "unavailable")
 
         caches[0]["created_at"] = "2026-09-05T00:00:00Z"
+        self.assertEqual(
+            performance.observability_metrics(
+                self.valid_jobs(), run, artifacts, caches
+            )["cache"]["retention_seconds"]["status"],
+            "unavailable",
+        )
+
+        caches[0]["created_at"] = "2026-09-05T00:00:00Z"
         caches[0]["expires_at"] = "2026-09-05T00:01:00Z"
         caches.append({"key": "Linux-rust-perf-123-1-2", "size_in_bytes": 13})
         with self.assertRaises(performance.PerformanceError):
