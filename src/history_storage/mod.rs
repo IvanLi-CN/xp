@@ -578,12 +578,9 @@ fn ensure_repository_history_segment_columns(connection: &Connection) -> Result<
     }
     connection
         .execute_batch(
-            "CREATE INDEX IF NOT EXISTS repository_history_segments_closed_at
-               ON repository_history_segments (closed_at ASC, id ASC);
-             CREATE INDEX IF NOT EXISTS repository_history_segments_sync_order
-               ON repository_history_segments
-                  (contains_tombstone DESC, source_node_id ASC, source_epoch ASC, stream ASC,
-                   first_sequence ASC, id ASC);",
+            "DROP INDEX IF EXISTS repository_history_segments_sync_order;
+             CREATE INDEX IF NOT EXISTS repository_history_segments_closed_at
+               ON repository_history_segments (closed_at ASC, id ASC);",
         )
         .map_err(sqlite_error)?;
     #[cfg(test)]
