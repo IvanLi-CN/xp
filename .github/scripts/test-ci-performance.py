@@ -238,8 +238,8 @@ class CiPerformanceTests(unittest.TestCase):
         caches[0]["created_at"] = "2026-09-05T00:00:00Z"
         caches[0]["expires_at"] = "2026-09-05T00:01:00Z"
         caches.append({"key": "Linux-rust-perf-123-1-2", "size_in_bytes": 13})
-        result = performance.observability_metrics(self.valid_jobs(), run, artifacts, caches)
-        self.assertEqual(result["cache"]["retention_seconds"]["status"], "unavailable")
+        with self.assertRaises(performance.PerformanceError):
+            performance.observability_metrics(self.valid_jobs(), run, artifacts, caches)
 
     def test_observability_materializes_the_running_assertion_job(self):
         run = {"id": 123, "run_attempt": 1}
@@ -275,6 +275,18 @@ class CiPerformanceTests(unittest.TestCase):
                 [{"key": "perf-123-1", "size_in_bytes": 1}],
             )
 
+    def test_partial_retention_metadata_fails_closed(self):
+        with self.assertRaises(performance.PerformanceError):
+            performance.retention_seconds(
+                [
+                    {
+                        "created_at": "2026-09-05T00:00:00Z",
+                        "expires_at": "2026-09-05T00:01:00Z",
+                    },
+                    {},
+                ]
+            )
+
     def test_known_workload_without_steps_fails_closed(self):
         jobs = self.valid_jobs()
         jobs[0].pop("steps")
@@ -284,6 +296,16 @@ class CiPerformanceTests(unittest.TestCase):
     def test_malformed_timestamp_is_a_performance_error(self):
         with self.assertRaises(performance.PerformanceError):
             performance.parse_time("2026-99-99T00:00:00Z")
+
+    def test_malformed_workload_steps_fail_closed(self):
+        jobs = self.valid_jobs()
+        jobs[0]["steps"] = [jobs[0]["steps"][0], "malformed"]
+        with self.assertRaises(performance.PerformanceError):
+            performance.assert_ci(jobs, self.valid_receipts())
+        jobs = self.valid_jobs()
+        jobs[0]["steps"].append(dict(jobs[0]["steps"][0]))
+        with self.assertRaises(performance.PerformanceError):
+            performance.assert_ci(jobs, self.valid_receipts())
 
     def test_non_object_job_is_rejected_before_assertion(self):
         with self.assertRaises(performance.PerformanceError):

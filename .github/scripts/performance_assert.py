@@ -91,7 +91,14 @@ def ci_workload_duration(job: dict[str, Any]) -> float:
         return duration(job)
     if not isinstance(steps, list):
         raise PerformanceError(f"missing workload steps for {name}")
-    by_name = {str(step.get("name")): step for step in steps if isinstance(step, dict)}
+    if not all(isinstance(step, dict) for step in steps):
+        raise PerformanceError(f"malformed workload steps for {name}")
+    names = [step.get("name") for step in steps]
+    if any(not isinstance(step_name, str) for step_name in names):
+        raise PerformanceError(f"malformed workload step name for {name}")
+    if len(names) != len(set(names)):
+        raise PerformanceError(f"duplicate workload step name for {name}")
+    by_name = dict(zip(names, steps))
     missing = [step_name for step_name in expected if step_name not in by_name]
     if missing:
         raise PerformanceError(f"missing workload steps for {name}: {missing}")
@@ -171,18 +178,21 @@ def materialize_current_job(
 
 def retention_seconds(items: list[dict[str, Any]]) -> dict[str, Any]:
     values = []
+    unavailable = 0
     for item in items:
         created_at = item.get("created_at")
         expires_at = item.get("expires_at")
-        if created_at is None or expires_at is None:
-            return {
-                "status": "unavailable",
-                "reason": "provider did not expose created_at and expires_at",
-            }
+        if created_at is None and expires_at is None:
+            unavailable += 1
+            continue
+        if not isinstance(created_at, str) or not isinstance(expires_at, str):
+            raise PerformanceError("malformed artifact/cache retention metadata")
         value = (parse_time(expires_at) - parse_time(created_at)).total_seconds()
         if value < 0:
             raise PerformanceError("negative artifact/cache retention duration")
         values.append(value)
+    if unavailable and values:
+        raise PerformanceError("partial artifact/cache retention metadata")
     if not values:
         return {
             "status": "unavailable",

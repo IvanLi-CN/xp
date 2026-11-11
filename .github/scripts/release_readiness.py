@@ -204,7 +204,10 @@ def validate_resource_evidence_files(
     actual_log_sha = hashlib.sha256(log_bytes).hexdigest()
     if evidence["log_sha"] != actual_log_sha:
         raise ReadinessError("resource_evidence_log_sha_mismatch")
-    log_text = log_bytes.decode("utf-8", errors="replace")
+    try:
+        log_text = log_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ReadinessError("resource_evidence_log_invalid_utf8") from exc
     if "test result: ok" not in log_text or "source_journal_resource" not in log_text:
         raise ReadinessError("resource_evidence_log_incomplete")
     if re.search(r"^test result: FAILED\b", log_text, re.MULTILINE) or re.search(
@@ -219,16 +222,12 @@ def validate_resource_evidence_files(
             rf"^test {re.escape(workload)} \.\.\. ok$", log_text, re.MULTILINE
         ):
             raise ReadinessError(f"resource_evidence_workload_incomplete:{workload}")
-    metric_line = next(
-        (
-            line
-            for line in log_text.splitlines()
-            if line.startswith("source_journal_resource ")
-        ),
-        None,
-    )
-    if metric_line is None:
+    metric_lines = [
+        line for line in log_text.splitlines() if line.startswith("source_journal_resource ")
+    ]
+    if len(metric_lines) != 1:
         raise ReadinessError("resource_evidence_metrics_missing")
+    metric_line = metric_lines[0]
     metric_fields = (
         "max_read_bytes",
         "max_cycle_read_bytes",

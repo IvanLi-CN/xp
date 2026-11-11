@@ -65,7 +65,10 @@ def main() -> int:
         log_bytes = args.log.read_bytes()
     except OSError as exc:
         fail(f"cannot read workload log: {exc}")
-    log_text = log_bytes.decode("utf-8", errors="replace")
+    try:
+        log_text = log_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        fail(f"workload log is not valid UTF-8: {exc}")
     if "test result: ok" not in log_text or "source_journal_resource" not in log_text:
         fail("workload log is incomplete")
     if re.search(r"^test result: FAILED\b", log_text, re.MULTILINE):
@@ -74,12 +77,12 @@ def main() -> int:
         if not re.search(rf"^test {re.escape(workload)} \.\.\. ok$", log_text, re.MULTILINE):
             fail(f"workload log is missing successful test: {workload}")
 
-    metric_line = next(
-        (line for line in log_text.splitlines() if line.startswith("source_journal_resource ")),
-        None,
-    )
-    if metric_line is None:
+    metric_lines = [
+        line for line in log_text.splitlines() if line.startswith("source_journal_resource ")
+    ]
+    if len(metric_lines) != 1:
         fail("workload log is missing source_journal_resource metrics")
+    metric_line = metric_lines[0]
     metrics: dict[str, int] = {}
     for field in METRIC_FIELDS:
         match = re.search(rf"(?:^|\s){re.escape(field)}=(\d+)(?:\s|$)", metric_line)
