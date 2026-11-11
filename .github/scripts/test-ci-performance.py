@@ -121,6 +121,11 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(workflow.count("cargo build --locked --bin xp-ops"), 1)
         self.assertGreaterEqual(workflow.count("target/debug/xp-ops"), 5)
 
+    def test_docker_workload_step_matches_performance_contract(self):
+        workflow = (SCRIPT_DIR.parent / "workflows" / "ci.yml").read_text()
+        self.assertIn("- name: docker build smoke", workflow)
+        self.assertIn("docker build smoke", performance.CI_WORKLOAD_STEPS["docker-smoke"])
+
     def test_ci_samples_run_as_serial_cold_warm_pairs(self):
         workflows = SCRIPT_DIR.parent / "workflows"
         parent = (workflows / "ci-performance.yml").read_text()

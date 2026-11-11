@@ -42,10 +42,7 @@ CI_WORKLOAD_STEPS = {
         "Run bunx --no-install playwright install --with-deps chromium",
         "storybook and test-storybook",
     ),
-    "docker-smoke": (
-        "Run docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf",
-        "default entrypoint bootstrap dry-run",
-    ),
+    "docker-smoke": ("docker build smoke", "default entrypoint bootstrap dry-run"),
 }
 
 
