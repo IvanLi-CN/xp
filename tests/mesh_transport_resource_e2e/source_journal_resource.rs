@@ -251,7 +251,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     let mut child = spawn_xp(binary, temp.path(), bind_port, "source-journal");
     wait_for_xp(&mut child, bind_port, &log_path).await;
     let pid = child.id();
-    assert_expected_memory_scope(pid);
+    let (memory_limit_bytes, swap_limit_bytes) = assert_expected_memory_scope(pid);
 
     let ca_pem = cluster
         .read_cluster_ca_pem(temp.path())
@@ -494,7 +494,9 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     println!(
         "source_journal_resource cpu_p95_percent={cpu_p95:.2} max_read_bytes={max_read_bytes} \
          max_cycle_read_bytes={max_cycle_read_bytes} max_rss_delta={max_rss_delta} \
-         peak_pss_kib={peak_pss_kib} sample_window_seconds={elapsed_seconds} \
+         peak_pss_kib={peak_pss_kib} memory_limit_bytes={memory_limit_bytes} \
+         swap_limit_bytes={swap_limit_bytes} backlog_segments={initial_pending} \
+         sample_window_seconds={elapsed_seconds} \
          generated_segments={generated_segments} generated_bytes={generated_bytes} \
          peak_generated_segments={} peak_generated_bytes={} \
          acknowledged_segments={acknowledged_segments} acknowledged_bytes={acknowledged_bytes} \

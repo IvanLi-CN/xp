@@ -8,11 +8,11 @@ on:
         required: true
         type: string
       candidate_target:
-        description: Linux candidate ABI to build, measure and retain
+        description: Native musl ABI to build, measure and retain
         required: true
-        default: native
+        default: x86_64-unknown-linux-musl
         type: choice
-        options: [native, x86_64-unknown-linux-musl]
+        options: [x86_64-unknown-linux-musl]
       build_version:
         description: Optional approved candidate version (does not publish a release)
         required: false
@@ -191,6 +191,7 @@ jobs:
           python3 .github/scripts/resource_evidence.py \
             --target-sha "${TARGET_SHA}" \
             --candidate-target "${CANDIDATE_TARGET}" \
+            --candidate-dir candidate \
             --log resource-evidence/resource-workload.log \
             --output resource-evidence/resource-evidence.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

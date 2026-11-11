@@ -25,6 +25,15 @@ WORKLOADS = (
     "xp_source_delivery_journal_memory_e2e",
     "xp_repository_summary_memory_e2e",
 )
+OBSERVED_FIELDS = (
+    "max_read_bytes",
+    "max_cycle_read_bytes",
+    "max_rss_delta",
+    "peak_pss_kib",
+    "memory_limit_bytes",
+    "swap_limit_bytes",
+    "backlog_segments",
+)
 
 
 def fail(message: str) -> None:
@@ -35,6 +44,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-sha", required=True)
     parser.add_argument("--candidate-target", required=True)
+    parser.add_argument("--candidate-dir", required=True, type=Path)
     parser.add_argument("--log", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
@@ -43,6 +53,14 @@ def main() -> int:
         fail("target SHA must be a 40-character lowercase hexadecimal value")
     if args.candidate_target != "x86_64-unknown-linux-musl":
         fail("resource evidence requires the native x86_64 musl target")
+    candidate_digests: dict[str, str] = {}
+    for name in ("xp", "xp-ops"):
+        path = args.candidate_dir / name
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as exc:
+            fail(f"cannot read measured candidate {name}: {exc}")
+        candidate_digests[name] = digest
     try:
         log_bytes = args.log.read_bytes()
     except OSError as exc:
@@ -68,6 +86,16 @@ def main() -> int:
         if match is None:
             fail(f"workload metrics are missing {field}")
         metrics[field] = int(match.group(1))
+    observed: dict[str, int] = {}
+    for field in OBSERVED_FIELDS:
+        match = re.search(rf"(?:^|\s){re.escape(field)}=(\d+)(?:\s|$)", metric_line)
+        if match is None:
+            fail(f"workload metrics are missing {field}")
+        observed[field] = int(match.group(1))
+    if observed["memory_limit_bytes"] != 128 * 1024 * 1024 or observed["swap_limit_bytes"] != 0:
+        fail("workload cgroup limits do not match 128 MiB/no-swap")
+    if observed["backlog_segments"] < 20_000:
+        fail("workload backlog is smaller than the 20,000-segment contract")
     if metrics["sample_window_seconds"] < 300:
         fail("workload sample window is shorter than 300 seconds")
     if metrics["peak_generated_segments"] == 0 or metrics["peak_generated_bytes"] == 0:
@@ -90,11 +118,13 @@ def main() -> int:
         "schema": "xp-history-throughput-v2",
         "target_sha": args.target_sha,
         "candidate_target": args.candidate_target,
+        "candidate_digests": candidate_digests,
         "log_sha": hashlib.sha256(log_bytes).hexdigest(),
         "window_seconds": 300,
         "memory_limit_mib": 128,
         "swap_limit_mib": 0,
         **metrics,
+        **observed,
         **gates,
     }
     args.output.write_text(

@@ -113,6 +113,8 @@ class CiPerformanceTests(unittest.TestCase):
             2,
         )
         self.assertNotIn("${{ runner.os }}-storybook-${{ env.CACHE_NAMESPACE }}", workflow)
+        self.assertEqual(workflow.count("lookup-only: ${{ env.CACHE_PHASE == 'cold' }}"), 2)
+        self.assertIn("actions/cache/save@0057852bfaa89a56745bba8c7296529d2fc39830", workflow)
 
     def test_contract_job_reuses_the_xp_ops_build_for_dry_runs(self):
         workflow = (SCRIPT_DIR.parent / "workflows" / "ci.yml").read_text()
@@ -211,7 +213,8 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(result["artifact_size_bytes"], 7)
         self.assertEqual(result["cache"]["size_bytes"], 11)
         self.assertEqual(result["cache"]["size_by_key"]["Linux-rust-perf-123-1-1"], 11)
-        self.assertEqual(result["artifact_retention_seconds"]["min"], 60)
+        self.assertEqual(result["artifact_retention_seconds"]["status"], "available")
+        self.assertEqual(result["artifact_retention_seconds"]["min_seconds"], 60)
         self.assertEqual(result["cache"]["retention_seconds"]["status"], "unavailable")
 
         caches[0]["created_at"] = "2026-09-05T00:00:00Z"

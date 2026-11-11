@@ -158,6 +158,16 @@ def validate_resource_evidence(raw: str | None, target_sha: str) -> str:
         raise ReadinessError("resource_evidence_sha_mismatch")
     if evidence.get("candidate_target") != "x86_64-unknown-linux-musl":
         raise ReadinessError("resource_evidence_target_invalid")
+    digests = evidence.get("candidate_digests")
+    if (
+        not isinstance(digests, dict)
+        or any(
+            not isinstance(digests.get(name), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digests[name])
+            for name in ("xp", "xp-ops")
+        )
+    ):
+        raise ReadinessError("resource_evidence_candidate_digest_invalid")
     log_sha = evidence.get("log_sha")
     if not isinstance(log_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", log_sha):
         raise ReadinessError("resource_evidence_log_sha_invalid")
@@ -220,6 +230,13 @@ def validate_resource_evidence_files(
     if metric_line is None:
         raise ReadinessError("resource_evidence_metrics_missing")
     metric_fields = (
+        "max_read_bytes",
+        "max_cycle_read_bytes",
+        "max_rss_delta",
+        "peak_pss_kib",
+        "memory_limit_bytes",
+        "swap_limit_bytes",
+        "backlog_segments",
         "sample_window_seconds",
         "generated_segments",
         "generated_bytes",
@@ -244,6 +261,10 @@ def validate_resource_evidence_files(
         metrics[field] = value
     if metrics["sample_window_seconds"] < 300:
         raise ReadinessError("resource_evidence_window_observed_invalid")
+    if metrics["memory_limit_bytes"] != 128 * 1024 * 1024 or metrics["swap_limit_bytes"] != 0:
+        raise ReadinessError("resource_evidence_observed_resource_limit_invalid")
+    if metrics["backlog_segments"] < 20_000:
+        raise ReadinessError("resource_evidence_backlog_invalid")
     if metrics["peak_generated_segments"] == 0 or metrics["peak_generated_bytes"] == 0:
         raise ReadinessError("resource_evidence_generation_missing")
     computed_gates = {

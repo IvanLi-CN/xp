@@ -170,7 +170,7 @@ def materialize_current_job(
     return [snapshot if job is current else job for job in jobs]
 
 
-def retention_seconds(items: list[dict[str, Any]]) -> dict[str, float] | dict[str, str]:
+def retention_seconds(items: list[dict[str, Any]]) -> dict[str, Any]:
     values = []
     for item in items:
         created_at = item.get("created_at")
@@ -189,7 +189,7 @@ def retention_seconds(items: list[dict[str, Any]]) -> dict[str, float] | dict[st
             "status": "unavailable",
             "reason": "provider did not expose created_at and expires_at",
         }
-    return {"min": min(values), "max": max(values)}
+    return {"status": "available", "min_seconds": min(values), "max_seconds": max(values)}
 
 
 def load_collection(path: Path, *keys: str) -> list[dict[str, Any]]:
@@ -393,7 +393,16 @@ def assert_release(
     )
     if critical > 900:
         raise PerformanceError(f"release critical path {critical:.1f}s exceeds 900s")
-    return {"kind": "release", "seconds": seconds, "critical_path_seconds": critical, "status": "pass"}
+    return {
+        "kind": "release",
+        "seconds": seconds,
+        "critical_path_seconds": critical,
+        "status": "pass",
+        "buildkit_cache": {
+            "status": "unavailable",
+            "reason": "GitHub Actions cache API does not expose type=gha BuildKit attribution",
+        },
+    }
 
 
 def main() -> int:
