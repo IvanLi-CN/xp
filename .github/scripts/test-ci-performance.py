@@ -302,6 +302,15 @@ class CiPerformanceTests(unittest.TestCase):
         jobs[0]["steps"] = [jobs[0]["steps"][0], "malformed"]
         with self.assertRaises(performance.PerformanceError):
             performance.assert_ci(jobs, self.valid_receipts())
+
+        jobs = self.valid_ci_jobs()
+        jobs[0]["steps"].append(
+            {
+                "name": "conditional cache save",
+                "conclusion": "skipped",
+            }
+        )
+        self.assertEqual(performance.assert_ci(jobs, self.valid_receipts())["status"], "pass")
         jobs = self.valid_jobs()
         jobs[0]["steps"].append(dict(jobs[0]["steps"][0]))
         with self.assertRaises(performance.PerformanceError):
