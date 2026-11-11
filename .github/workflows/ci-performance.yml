@@ -3,6 +3,9 @@ name: ci-performance
 on:
   pull_request:
     paths:
+      - Dockerfile
+      - build.rs
+      - .xp-source-marker
       - .github/scripts/performance_assert.py
       - .github/scripts/normalize-cargo-input-timestamps.sh
       - .github/scripts/run-rust-tests.sh

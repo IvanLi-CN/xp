@@ -65,6 +65,11 @@ class CiPerformanceTests(unittest.TestCase):
             self.assertIn("format('manual-{0}',", workflow)
             self.assertIn("github.run_id)", workflow)
 
+    def test_performance_triggers_cover_build_inputs(self):
+        workflow = (SCRIPT_DIR.parent / "workflows" / "ci-performance.yml").read_text()
+        for path in ("Dockerfile", "build.rs", ".xp-source-marker"):
+            self.assertIn(f"      - {path}\n", workflow)
+
     def test_pr_performance_targets_the_head_sha_and_stabilizes_cargo_marker_time(self):
         workflows = SCRIPT_DIR.parent / "workflows"
         for name in ("ci-performance.yml", "release-performance.yml"):
