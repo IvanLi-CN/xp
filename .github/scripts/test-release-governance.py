@@ -135,7 +135,17 @@ class ReadinessTests(unittest.TestCase):
         valid = {
             "schema": readiness.RESOURCE_EVIDENCE_SCHEMA,
             "target_sha": sha,
+            "candidate_target": "x86_64-unknown-linux-musl",
+            "candidate_digests": {"xp": "3" * 64, "xp-ops": "4" * 64},
             "log_sha": "2" * 64,
+            "max_read_bytes": 1,
+            "max_cycle_read_bytes": 1,
+            "max_rss_delta": 1,
+            "peak_pss_kib": 1,
+            "memory_limit_bytes": 134217728,
+            "swap_limit_bytes": 0,
+            "backlog_segments": 20000,
+            "backlog_bytes": 134217728,
             "window_seconds": 300,
             "memory_limit_mib": 128,
             "swap_limit_mib": 0,
@@ -164,7 +174,9 @@ class ReadinessTests(unittest.TestCase):
             evidence_path = Path(directory) / "evidence.json"
             log_path = Path(directory) / "workload.log"
             log_path.write_text(
-                "source_journal_resource sample_window_seconds=303 generated_segments=12 "
+                "source_journal_resource max_read_bytes=1 max_cycle_read_bytes=1 max_rss_delta=1 "
+                "peak_pss_kib=1 memory_limit_bytes=134217728 swap_limit_bytes=0 "
+                "backlog_segments=20000 backlog_bytes=134217728 sample_window_seconds=303 generated_segments=12 "
                 "generated_bytes=58258 peak_generated_segments=12 peak_generated_bytes=58258 "
                 "acknowledged_segments=15300 acknowledged_bytes=51237772 "
                 "applied_segments=15348 applied_bytes=51398620\n"

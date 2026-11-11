@@ -4,7 +4,15 @@ use futures_util::StreamExt;
 use std::{fs, io::Write, path::Path, time::Duration};
 
 pub(super) async fn download_to_path(url: &str, dest: &Path) -> anyhow::Result<()> {
-    let client = upgrade_http_client(Duration::from_secs(15 * 60))?;
+    download_to_path_with_timeout(url, dest, Duration::from_secs(15 * 60)).await
+}
+
+async fn download_to_path_with_timeout(
+    url: &str,
+    dest: &Path,
+    total_timeout: Duration,
+) -> anyhow::Result<()> {
+    let client = upgrade_http_client(total_timeout)?;
     let resp = client.get(url).send().await?.error_for_status()?;
 
     if let Some(parent) = dest.parent() {

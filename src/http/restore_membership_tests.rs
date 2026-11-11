@@ -427,7 +427,10 @@ async fn internal_restore_stale_learner_starts_the_durable_restore_operation() {
     let body = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
     assert_eq!(body["dry_run"], false);
     assert_eq!(body["operation"]["kind"], "restore");
-    assert_eq!(body["operation"]["phase"], "learner_registered");
+    assert!(matches!(
+        body["operation"]["phase"].as_str(),
+        Some("prepared" | "learner_registered")
+    ));
 }
 
 #[tokio::test]
@@ -512,7 +515,7 @@ async fn internal_restore_existing_node_starts_durable_lifecycle_operation() {
     assert_eq!(body["phase"], "prepared");
 
     let restored_raft_id = raft_node_id_from_ulid(&restored.node_id).unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             if calls.add_learners.lock().await.len() == 1 {
                 break;

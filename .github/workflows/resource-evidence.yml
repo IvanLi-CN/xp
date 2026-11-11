@@ -8,11 +8,11 @@ on:
         required: true
         type: string
       candidate_target:
-        description: Linux candidate ABI to build, measure and retain
+        description: Native musl ABI to build, measure and retain
         required: true
-        default: native
+        default: x86_64-unknown-linux-musl
         type: choice
-        options: [native, x86_64-unknown-linux-musl]
+        options: [x86_64-unknown-linux-musl]
       build_version:
         description: Optional approved candidate version (does not publish a release)
         required: false
@@ -46,8 +46,25 @@ jobs:
           fi
           [[ "${TARGET_SHA}" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          # The workflow is dispatched from this temporary runner branch while the measured
-          # source is the exact release target checked out above.
+          test "${{ github.workflow_sha }}" = "${TARGET_SHA}"
+      - name: normalize Cargo input timestamps before toolchain setup
+        run: |
+          if [[ -x .github/scripts/normalize-cargo-input-timestamps.sh ]]; then
+            .github/scripts/normalize-cargo-input-timestamps.sh
+          else
+            epoch="$(git log -1 --format=%ct HEAD)"
+            while IFS= read -r -d '' path; do
+              touch -d "@${epoch}" -- "$path"
+            done < <(git ls-files -z)
+            if [[ -d web/dist ]]; then
+              while IFS= read -r -d '' path; do
+                touch -d "@${epoch}" -- "$path"
+              done < <(find web/dist -type f -print0)
+            fi
+            if [[ -f web/.xp-dist-fingerprint ]]; then
+              touch -d "@${epoch}" -- web/.xp-dist-fingerprint
+            fi
+          fi
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with: {toolchain: 1.96.0}
       - name: prepare native Linux musl toolchain
@@ -74,9 +91,28 @@ jobs:
         env:
           XP_WEB_BUILD_ID: ${{ env.TARGET_SHA }}
         run: cd web && bun install --frozen-lockfile && bun run build
+      - name: normalize Cargo input timestamps after Web build
+        run: |
+          if [[ -x .github/scripts/normalize-cargo-input-timestamps.sh ]]; then
+            .github/scripts/normalize-cargo-input-timestamps.sh
+          else
+            epoch="$(git log -1 --format=%ct HEAD)"
+            while IFS= read -r -d '' path; do
+              touch -d "@${epoch}" -- "$path"
+            done < <(git ls-files -z)
+            if [[ -d web/dist ]]; then
+              while IFS= read -r -d '' path; do
+                touch -d "@${epoch}" -- "$path"
+              done < <(find web/dist -type f -print0)
+            fi
+            if [[ -f web/.xp-dist-fingerprint ]]; then
+              touch -d "@${epoch}" -- web/.xp-dist-fingerprint
+            fi
+          fi
       - name: build release candidate and resource workload
         run: |
           set -euo pipefail
+          resource_features=(--features resource-fixture)
           case "$CANDIDATE_TARGET" in
             native) candidate=target/release/xp ;;
             x86_64-unknown-linux-musl)
@@ -87,16 +123,21 @@ jobs:
             *) exit 1 ;;
           esac
           if [[ "$CANDIDATE_TARGET" = native ]]; then
-            cargo build --locked --release --bin xp --bin xp-ops
+            cargo build --locked --release "${resource_features[@]}" \
+              --bin xp --bin xp-ops
           else
-            cargo build --locked --release --target "$CANDIDATE_TARGET" --bin xp --bin xp-ops
-            cargo test --locked --release --target "$CANDIDATE_TARGET" --lib \
+            cargo build --locked --release "${resource_features[@]}" \
+              --target "$CANDIDATE_TARGET" --bin xp --bin xp-ops
+            cargo test --locked --release "${resource_features[@]}" \
+              --target "$CANDIDATE_TARGET" --lib \
               large_pretty_node_history_guard_stays_bounded -- --ignored --nocapture
           fi
           if [[ "$CANDIDATE_TARGET" = native ]]; then
-            cargo test --locked --release --lib backup_cleanup_is_bounded_for_large_files
+            cargo test --locked --release "${resource_features[@]}" --lib \
+              backup_cleanup_is_bounded_for_large_files
           else
-            cargo test --locked --release --target "$CANDIDATE_TARGET" --lib \
+            cargo test --locked --release "${resource_features[@]}" \
+              --target "$CANDIDATE_TARGET" --lib \
               backup_cleanup_is_bounded_for_large_files
           fi
           echo "XP_MESH_RESOURCE_CANDIDATE_BIN=$GITHUB_WORKSPACE/$candidate" >> "$GITHUB_ENV"
@@ -111,7 +152,8 @@ jobs:
             test "$(cat candidate/version.txt)" = "xp $CANDIDATE_BUILD_VERSION"
             test "$(cat candidate/ops-version.txt)" = "xp-ops $CANDIDATE_BUILD_VERSION"
           fi
-          cargo test --locked --release --test mesh_transport_resource_e2e --no-run
+          cargo test --locked --release "${resource_features[@]}" \
+            --test mesh_transport_resource_e2e --no-run
       - name: verify user cgroup support
         run: |
           set -euo pipefail
@@ -129,14 +171,17 @@ jobs:
           XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT: 128MiB
         run: |
           set -euo pipefail
+          resource_features=(--features resource-fixture)
           XDG_RUNTIME_DIR="/run/user/$(id -u)"
           export XDG_RUNTIME_DIR
           mkdir -p resource-evidence
           log="resource-evidence/resource-workload.log"
           : > "$log"
-          cargo test --locked --release --test mesh_transport_resource_e2e \
+          cargo test --locked --release "${resource_features[@]}" \
+            --test mesh_transport_resource_e2e \
             xp_source_delivery_journal_memory_e2e -- --ignored --nocapture 2>&1 | tee -a "$log"
-          cargo test --locked --release --test mesh_transport_resource_e2e \
+          cargo test --locked --release "${resource_features[@]}" \
+            --test mesh_transport_resource_e2e \
             xp_repository_summary_memory_e2e -- --ignored --nocapture 2>&1 | tee -a "$log"
       - name: build resource attestation
         if: always()
@@ -145,6 +190,8 @@ jobs:
           test -s resource-evidence/resource-workload.log
           python3 .github/scripts/resource_evidence.py \
             --target-sha "${TARGET_SHA}" \
+            --candidate-target "${CANDIDATE_TARGET}" \
+            --candidate-dir candidate \
             --log resource-evidence/resource-workload.log \
             --output resource-evidence/resource-evidence.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -154,6 +201,7 @@ jobs:
           path: resource-evidence
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
         with:
           name: measured-candidate-${{ github.run_id }}
           path: candidate

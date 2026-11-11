@@ -1,6 +1,8 @@
 node_modules
 dist
 dist-demo
+.xp-dist-fingerprint
+.xp-web-source-fingerprint
 .vite
 storybook-static
 playwright-report

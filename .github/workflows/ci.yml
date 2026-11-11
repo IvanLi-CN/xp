@@ -10,19 +10,22 @@ on:
       cache_namespace: {required: false, type: string}
       cache_phase: {required: false, type: string}
       sample: {required: false, type: string}
+      performance_subset: {required: false, type: boolean, default: false}
 
 env:
   TARGET_SHA: ${{ inputs.target_sha || github.sha }}
   CACHE_NAMESPACE: ${{ inputs.cache_namespace || 'ci' }}
   CACHE_PHASE: ${{ inputs.cache_phase || 'normal' }}
   PERF_SAMPLE: ${{ inputs.sample || 'normal' }}
+  PERF_SUBSET: ${{ inputs.performance_subset || false }}
   CARGO_INCREMENTAL: "0"
+  CARGO_BUILD_JOBS: "4"
   CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
   rust:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -30,7 +33,16 @@ jobs:
       - name: verify target sha
         run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          test "${GITHUB_SHA}" = "${TARGET_SHA}"
+      - name: normalize Cargo input timestamps
+        run: |
+          if [[ -x .github/scripts/normalize-cargo-input-timestamps.sh ]]; then
+            .github/scripts/normalize-cargo-input-timestamps.sh
+          else
+            epoch="$(git log -1 --format=%ct HEAD)"
+            while IFS= read -r -d '' path; do
+              touch -d "@${epoch}" -- "$path"
+            done < <(git ls-files -z)
+          fi
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with: {toolchain: 1.96.0, components: "rustfmt, clippy"}
       - name: restore rust cache
@@ -40,15 +52,65 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            web/dist
+            web/.xp-dist-fingerprint
+            web/.xp-web-source-fingerprint
             target
-          key: ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-${{ hashFiles('Cargo.lock') }}
+          key: >-
+            ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-${{ env.TARGET_SHA }}-${{
+            hashFiles('Cargo.lock') }}-${{
+            hashFiles('web/**', '!web/dist/**', '!web/node_modules/**', '!web/.xp-*',
+            'fixture-policy/**', 'scripts/update-web-dist-fingerprint.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-
+            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-ci-', runner.os) || '' }}
+            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-perf-', runner.os) || '' }}
       - run: cargo fmt --check
       - run: python3 scripts/check-style-budget.py
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - name: build embedded web assets
-        run: cd web && bun install --frozen-lockfile && bun run build
-      - run: cargo test
+        env:
+          WEB_SOURCE_HASH: ${{ hashFiles('web/**', '!web/dist/**', '!web/node_modules/**',
+            '!web/.xp-*', 'fixture-policy/**', 'scripts/update-web-dist-fingerprint.sh') }}
+        run: |
+          if [[ -d web/dist && -f web/.xp-web-source-fingerprint \
+            && "$(cat web/.xp-web-source-fingerprint)" = "${WEB_SOURCE_HASH}" ]]; then
+            echo "reusing embedded web assets for ${WEB_SOURCE_HASH}"
+          else
+            cd web
+            bun install --frozen-lockfile
+            bun run build
+            printf '%s\n' "${WEB_SOURCE_HASH}" > .xp-web-source-fingerprint
+          fi
+      - name: normalize Cargo input timestamps after Web build
+        run: |
+          if [[ -x .github/scripts/normalize-cargo-input-timestamps.sh ]]; then
+            .github/scripts/normalize-cargo-input-timestamps.sh
+          else
+            epoch="$(git log -1 --format=%ct HEAD)"
+            while IFS= read -r -d '' path; do
+              touch -d "@${epoch}" -- "$path"
+            done < <(git ls-files -z)
+            if [[ -d web/dist ]]; then
+              while IFS= read -r -d '' path; do
+                touch -d "@${epoch}" -- "$path"
+              done < <(find web/dist -type f -print0)
+            fi
+            if [[ -f web/.xp-dist-fingerprint ]]; then
+              touch -d "@${epoch}" -- web/.xp-dist-fingerprint
+            fi
+          fi
+      - name: Run cargo test
+        run: |
+          if [[ "${CACHE_PHASE}" == "normal" ]]; then
+            .github/scripts/run-rust-tests.sh
+          else
+            # Performance matrix uses targeted representative filters. The
+            # complete suite remains required in the normal CI job below.
+            cargo test --lib --no-fail-fast 'http::tests::ui_' -- --test-threads=12
+            cargo test --lib --no-fail-fast 'cluster_identity::tests' -- --test-threads=12
+          fi
       - name: test embedded web asset routes
         run: |
           cargo test --lib \
@@ -71,7 +133,7 @@ jobs:
           path: cache-receipt/rust.json
 
   rust-clippy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -79,7 +141,16 @@ jobs:
       - name: verify target sha
         run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          test "${GITHUB_SHA}" = "${TARGET_SHA}"
+      - name: normalize Cargo input timestamps
+        run: |
+          if [[ -x .github/scripts/normalize-cargo-input-timestamps.sh ]]; then
+            .github/scripts/normalize-cargo-input-timestamps.sh
+          else
+            epoch="$(git log -1 --format=%ct HEAD)"
+            while IFS= read -r -d '' path; do
+              touch -d "@${epoch}" -- "$path"
+            done < <(git ls-files -z)
+          fi
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with: {toolchain: 1.96.0, components: clippy}
       - name: restore rust clippy cache
@@ -89,14 +160,53 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            web/dist
+            web/.xp-dist-fingerprint
+            web/.xp-web-source-fingerprint
             target
           key: >-
             ${{ runner.os }}-rust-clippy-${{ env.CACHE_NAMESPACE }}-${{
-            hashFiles('Cargo.lock') }}
+            env.TARGET_SHA }}-${{ hashFiles('Cargo.lock') }}-${{
+            hashFiles('web/**', '!web/dist/**', '!web/node_modules/**', '!web/.xp-*',
+            'fixture-policy/**', 'scripts/update-web-dist-fingerprint.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-rust-clippy-${{ env.CACHE_NAMESPACE }}-
+            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-clippy-ci-', runner.os) || '' }}
+            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-clippy-perf-', runner.os) || '' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - name: build embedded web assets
-        run: cd web && bun install --frozen-lockfile && bun run build
+        env:
+          WEB_SOURCE_HASH: ${{ hashFiles('web/**', '!web/dist/**', '!web/node_modules/**',
+            '!web/.xp-*', 'fixture-policy/**', 'scripts/update-web-dist-fingerprint.sh') }}
+        run: |
+          if [[ -d web/dist && -f web/.xp-web-source-fingerprint \
+            && "$(cat web/.xp-web-source-fingerprint)" = "${WEB_SOURCE_HASH}" ]]; then
+            echo "reusing embedded web assets for ${WEB_SOURCE_HASH}"
+          else
+            cd web
+            bun install --frozen-lockfile
+            bun run build
+            printf '%s\n' "${WEB_SOURCE_HASH}" > .xp-web-source-fingerprint
+          fi
+      - name: normalize Cargo input timestamps after Web build
+        run: |
+          if [[ -x .github/scripts/normalize-cargo-input-timestamps.sh ]]; then
+            .github/scripts/normalize-cargo-input-timestamps.sh
+          else
+            epoch="$(git log -1 --format=%ct HEAD)"
+            while IFS= read -r -d '' path; do
+              touch -d "@${epoch}" -- "$path"
+            done < <(git ls-files -z)
+            if [[ -d web/dist ]]; then
+              while IFS= read -r -d '' path; do
+                touch -d "@${epoch}" -- "$path"
+              done < <(find web/dist -type f -print0)
+            fi
+            if [[ -f web/.xp-dist-fingerprint ]]; then
+              touch -d "@${epoch}" -- web/.xp-dist-fingerprint
+            fi
+          fi
       - run: cargo clippy -- -D warnings
       - name: cache receipt
         if: env.CACHE_PHASE != 'normal'
@@ -112,7 +222,7 @@ jobs:
           path: cache-receipt/rust-clippy.json
 
   rust-contracts:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -120,8 +230,19 @@ jobs:
       - name: verify target sha
         run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          test "${GITHUB_SHA}" = "${TARGET_SHA}"
+      - name: normalize Cargo input timestamps
+        run: |
+          if [[ -x .github/scripts/normalize-cargo-input-timestamps.sh ]]; then
+            .github/scripts/normalize-cargo-input-timestamps.sh
+          else
+            epoch="$(git log -1 --format=%ct HEAD)"
+            while IFS= read -r -d '' path; do
+              touch -d "@${epoch}" -- "$path"
+            done < <(git ls-files -z)
+          fi
       - name: repository contract tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           ./.github/scripts/test-compute-version.sh
           python3 ./.github/scripts/test-release-governance.py
@@ -136,9 +257,27 @@ jobs:
             YAML.load_file(workflow)
           end
           RUBY
-          ./.github/scripts/test-mihomo-fixture.sh
+          if grep -Fq 'readonly api_asset_id=' .github/scripts/test-mihomo-fixture.sh; then
+            ./.github/scripts/test-mihomo-fixture.sh
+          else
+            mihomo_tmp="$(mktemp -d)"
+            trap 'rm -rf "$mihomo_tmp"' EXIT
+            mihomo_asset="mihomo-linux-amd64-v1.19.29.gz"
+            mihomo_url="https://api.github.com/repos/MetaCubeX/mihomo/releases/assets/481454521"
+            curl --fail --location --retry 3 --retry-all-errors --silent --show-error \
+              -H "Accept: application/octet-stream" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${mihomo_url}" --output "${mihomo_tmp}/${mihomo_asset}"
+            test "$(sha256sum "${mihomo_tmp}/${mihomo_asset}" | awk '{print $1}')" = \
+              "60de76a35a6cbf7b4fa4a20f5c257c24345d1d635ab1aa3877022a1997ef413c"
+            gzip --decompress --stdout "${mihomo_tmp}/${mihomo_asset}" > "${mihomo_tmp}/mihomo"
+            chmod 0755 "${mihomo_tmp}/mihomo"
+            "${mihomo_tmp}/mihomo" -t -f tests/fixtures/mihomo-smux-v1.19.29.yaml
+          fi
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with: {toolchain: 1.96.0}
+      - name: Cargo source marker cache contract
+        run: scripts/cargo-cache/test.sh
       - name: restore rust contract cache
         id: cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -149,11 +288,14 @@ jobs:
             target
           key: >-
             ${{ runner.os }}-rust-contracts-${{ env.CACHE_NAMESPACE }}-${{
-            hashFiles('Cargo.lock') }}
+            env.TARGET_SHA }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-rust-contracts-${{ env.CACHE_NAMESPACE }}-
+            ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-contracts-ci-', runner.os) || '' }}
       - name: contract xp-ops builds without web/dist
         run: |
           rm -rf web/dist
-          cargo check --locked --bin xp-ops
+          cargo build --locked --bin xp-ops
           if cargo check --locked --bin xp >/tmp/xp-missing-web-dist.log 2>&1; then exit 1; fi
           grep -Fq \
             "missing web/dist/index.html; run \`cd web && bun run build\`" \
@@ -162,7 +304,6 @@ jobs:
         env: {CLOUDFLARE_API_TOKEN: dummy}
         run: |
           tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-          cargo build --locked --bin xp-ops
           for distro in arch debian alpine; do
             XP_OPS_DISTRO="$distro" target/debug/xp-ops \
               --root "$tmp/$distro" install --only cloudflared --dry-run
@@ -200,15 +341,27 @@ jobs:
         with: {ref: "${{ env.TARGET_SHA }}"}
       - run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          test "${GITHUB_SHA}" = "${TARGET_SHA}"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        id: cache
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-docs-${{ env.CACHE_NAMESPACE }}-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
       - run: bunx --no-install dprint check
+      - name: cache receipt
+        if: env.CACHE_PHASE != 'normal'
+        run: |
+          .github/scripts/write-cache-receipt.sh \
+            "${PERF_SAMPLE}" "${CACHE_PHASE}" docs \
+            "${{ steps.cache.outputs.cache-hit == 'true' }}" \
+            cache-receipt/docs.json
+      - if: env.CACHE_PHASE != 'normal'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cache-receipt-${{ env.CACHE_PHASE }}-${{ env.PERF_SAMPLE }}-docs
+          path: cache-receipt/docs.json
 
   web:
     runs-on: ubuntu-24.04
@@ -219,13 +372,12 @@ jobs:
         with: {ref: "${{ env.TARGET_SHA }}", fetch-depth: 0}
       - run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          test "${GITHUB_SHA}" = "${TARGET_SHA}"
         working-directory: .
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - name: restore web cache
         id: cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             ~/.bun/install/cache
@@ -235,8 +387,21 @@ jobs:
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run test
-      - run: bunx --no-install playwright install --with-deps chromium
+        if: env.PERF_SUBSET != 'true'
+      - name: Run bunx --no-install playwright install --with-deps chromium
+        if: env.PERF_SUBSET != 'true'
+        run: |
+          bunx --no-install playwright install --with-deps chromium
       - run: bun run test:e2e
+        if: env.PERF_SUBSET != 'true'
+      - name: save web cache
+        if: env.CACHE_PHASE == 'normal'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/.cache/ms-playwright
+          key: ${{ runner.os }}-web-${{ env.CACHE_NAMESPACE }}-${{ hashFiles('web/bun.lock') }}
       - name: cache receipt
         if: env.CACHE_PHASE != 'normal'
         working-directory: .
@@ -252,6 +417,7 @@ jobs:
           path: cache-receipt/web.json
 
   storybook:
+    needs: web
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults: {run: {working-directory: web}}
@@ -260,22 +426,23 @@ jobs:
         with: {ref: "${{ env.TARGET_SHA }}"}
       - run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          test "${GITHUB_SHA}" = "${TARGET_SHA}"
         working-directory: .
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with: {bun-version-file: .bun-version}
       - name: restore storybook cache
         id: cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             ~/.bun/install/cache
             ~/.cache/ms-playwright
           key: >-
-            ${{ runner.os }}-storybook-${{ env.CACHE_NAMESPACE }}-${{
+            ${{ runner.os }}-web-${{ env.CACHE_NAMESPACE }}-${{
             hashFiles('web/bun.lock') }}
       - run: bun install --frozen-lockfile
-      - run: bunx --no-install playwright install --with-deps chromium
+      - name: Run bunx --no-install playwright install --with-deps chromium
+        run: |
+          bunx --no-install playwright install --with-deps chromium
       - name: storybook and test-storybook
         run: |
           bun run storybook & SB_PID=$!
@@ -283,6 +450,16 @@ jobs:
           for _ in {1..60}; do curl -fsS http://127.0.0.1:60081/ >/dev/null && break; sleep 2; done
           curl -fsS http://127.0.0.1:60081/ >/dev/null
           bun run test-storybook
+      - name: save shared web cache after cold tests
+        if: env.CACHE_PHASE == 'cold' || env.CACHE_PHASE == 'normal'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/.cache/ms-playwright
+          key: >-
+            ${{ runner.os }}-web-${{ env.CACHE_NAMESPACE }}-${{
+            hashFiles('web/bun.lock') }}
       - name: cache receipt
         if: env.CACHE_PHASE != 'normal'
         working-directory: .
@@ -306,13 +483,13 @@ jobs:
         with: {ref: "${{ env.TARGET_SHA }}"}
       - run: |
           test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-          test "${GITHUB_SHA}" = "${TARGET_SHA}"
       - name: restore docker cache receipt
         id: cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with: {path: .buildx-cache, key: "${{ runner.os }}-docker-${{ env.CACHE_NAMESPACE }}"}
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
-      - uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+      - name: docker build smoke
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
         with:
           context: .
           target: runtime-ci

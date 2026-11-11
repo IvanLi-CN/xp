@@ -1526,9 +1526,17 @@ Performance acceptance is explicit and SHA-bound; ordinary main runs are not acc
 informal moving average. Dispatch `ci-performance` from the exact commit under test and pass the
 same full 40-character SHA as `target_sha`. It runs three isolated cold/warm pairs. Each pair has a
 unique cache namespace containing the workflow run and attempt, so a rerun cannot reuse the previous
-attempt's cold cache. It requires cold misses and warm hits, and fails when the maximum parallel-job
-duration exceeds 540 seconds cold or 300 seconds warm. The cold budget covers a real Cargo rebuild
-on a hosted runner; warm remains the tighter regression signal after cache population.
+attempt's cold cache. It requires cold misses and warm hits, and fails when the declared workload
+steps exceed 540 seconds cold or 300 seconds warm. Checkout, toolchain/cache restore, and artifact
+upload and runner cleanup remain in required wall-clock and runner-total metrics, but are not
+silently treated as test/build workload. The cold budget covers a real Cargo rebuild on a hosted
+runner; warm
+remains
+the tighter regression signal after cache population.
+
+The performance workflows cancel only superseded pull-request runs for the same PR; each
+`workflow_dispatch` run has an independent concurrency group. The Web and Storybook jobs share
+their Bun/Playwright dependency cache key while retaining separate jobs and cache receipts.
 
 Dispatch `release-performance` the same way to exercise the reusable release build graph without
 creating a tag, package version, GitHub Release, or deployment. It uses a synthetic
@@ -1536,9 +1544,13 @@ creating a tag, package version, GitHub Release, or deployment. It uses a synthe
 Web, 600 seconds per musl architecture, 180 seconds per managed-runtime architecture, 300 seconds
 for image assembly, and 900 seconds for the composed critical path.
 
-Both workflows publish machine-readable JSON. Durations use GitHub Job `started_at` and
-`completed_at`; queue delay is not part of the execution limits. Missing jobs, failed jobs,
-incomplete timestamps, SHA mismatches, and malformed cache receipts fail closed.
+Both workflows publish machine-readable JSON. The report includes required wall-clock time, workflow
+critical path, total runner seconds, run/job counts, artifact count and bytes, artifact retention,
+and cache bytes plus typed cache-retention availability. Required wall-clock time spans the earliest
+required job start through the latest required job completion; queue delay remains a separate field,
+and critical path follows the declared workflow dependency graph. Durations use GitHub Job
+`started_at` and `completed_at`; missing jobs, failed jobs, incomplete timestamps, SHA mismatches,
+and malformed cache receipts fail closed.
 
 ```text
 sha="$(git rev-parse HEAD)"
@@ -1551,7 +1563,7 @@ For failures, download the `ci-performance-*` or `release-performance-*` JSON ar
 diagnostics are retained as `cache-receipt-*` artifacts in the same run.
 
 A pull request that changes a performance workflow or its shared build/assertion inputs runs the
-same acceptance automatically against GitHub's exact PR merge SHA. This self-test makes a new
+same acceptance automatically against GitHub's exact PR head SHA. This self-test makes a new
 workflow verifiable before it first reaches the default branch; ordinary product PRs do not trigger
 the expensive performance matrix.
 

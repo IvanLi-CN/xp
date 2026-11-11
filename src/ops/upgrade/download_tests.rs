@@ -25,7 +25,9 @@ async fn assert_stalled_download_fails(send_partial_body: bool) {
     let dest = temp.path().join("asset");
     fs::write(&dest, b"previous verified asset").unwrap();
     let output = dest.clone();
-    let download = tokio::spawn(async move { download_to_path(&url, &output).await });
+    let download = tokio::spawn(async move {
+        download_to_path_with_timeout(&url, &output, Duration::from_secs(60)).await
+    });
     stalled_rx.await.unwrap();
     if send_partial_body {
         tokio::time::timeout(Duration::from_secs(2), async {
@@ -92,7 +94,9 @@ async fn upgrade_download_total_budget_bounds_a_continuously_trickling_body() {
     let temp = tempfile::tempdir().unwrap();
     let dest = temp.path().join("asset");
     let output = dest.clone();
-    let download = tokio::spawn(async move { download_to_path(&url, &output).await });
+    let download = tokio::spawn(async move {
+        download_to_path_with_timeout(&url, &output, Duration::from_secs(15)).await
+    });
     tokio::time::timeout(Duration::from_secs(2), async {
         while !fs::metadata(tmp_path_next_to(&dest)).is_ok_and(|file| file.len() == 1) {
             tokio::task::yield_now().await;
@@ -102,7 +106,7 @@ async fn upgrade_download_total_budget_bounds_a_continuously_trickling_body() {
     .unwrap();
     tokio::time::pause();
     let started = tokio::time::Instant::now();
-    let result = tokio::time::timeout(Duration::from_secs(15 * 60 + 1), download).await;
+    let result = tokio::time::timeout(Duration::from_secs(16), download).await;
     server.abort();
     let error = result
         .expect("periodic body traffic must not bypass the total budget")
@@ -110,7 +114,7 @@ async fn upgrade_download_total_budget_bounds_a_continuously_trickling_body() {
         .expect_err("unfinished asset must fail");
     assert!(format!("{error:#}").contains("timed out"), "{error:#}");
     assert!(
-        started.elapsed() >= Duration::from_secs(14 * 60),
+        started.elapsed() >= Duration::from_secs(14),
         "must exercise the total, not idle, timeout"
     );
     assert!(!dest.exists());

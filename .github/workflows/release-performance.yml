@@ -4,7 +4,29 @@ on:
   pull_request:
     paths:
       - Dockerfile
+      - build.rs
+      - .xp-source-marker
+      - Cargo.toml
+      - Cargo.lock
+      - src/**
+      - proto/**
+      - web/**
+      - tests/**
+      - scripts/**
+      - .bun-version
+      - bun.lock
+      - package.json
+      - dprint.json
+      - '**/*.md'
+      - rustfmt.toml
+      - rust-toolchain.toml
+      - fixture-policy/**
+      - test-fixtures/**
+      - .dockerignore
+      - edgeone.json
       - .github/scripts/performance_assert.py
+      - .github/scripts/normalize-cargo-input-timestamps.sh
+      - scripts/update-web-dist-fingerprint.sh
       - .github/workflows/release-build.yml
       - .github/workflows/release-performance.yml
   workflow_dispatch:
@@ -13,6 +35,12 @@ on:
         description: Exact 40-character commit SHA to measure
         required: true
         type: string
+
+concurrency:
+  group: >-
+    release-performance-${{ github.event.pull_request.number || format('manual-{0}',
+    github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   actions: read
@@ -23,18 +51,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          target_sha="${{ inputs.target_sha || github.sha }}"
+          target_sha="${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"
           [[ "${target_sha}" =~ ^[0-9a-f]{40}$ ]]
-          test "${GITHUB_SHA}" = "${target_sha}"
+          if [[ "${GITHUB_EVENT_NAME}" = "pull_request" ]]; then
+            test "${{ github.event.pull_request.head.sha }}" = "${target_sha}"
+          else
+            test "${{ inputs.target_sha }}" = "${target_sha}"
+            test "${{ github.workflow_sha }}" = "${target_sha}"
+          fi
 
   build:
     needs: verify
     uses: ./.github/workflows/release-build.yml
     with:
-      target_sha: ${{ inputs.target_sha || github.sha }}
+      target_sha: ${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}
       build_version: 0.0.0-perf.${{ github.run_id }}
       artifact_prefix: perf-${{ github.run_id }}
-      cache_scope: release
+      cache_scope: release-${{ github.run_id }}
 
   assemble:
     needs: build
@@ -42,7 +75,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: "${{ inputs.target_sha || github.sha }}"}
+        with: {ref: "${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with: {pattern: "*-${{ github.run_id }}-*", path: release, merge-multiple: true}
       - name: verify asset manifest
@@ -60,8 +93,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           outputs: type=cacheonly
           build-args: XP_BUILD_VERSION=0.0.0-perf.${{ github.run_id }}
-          cache-from: type=gha,scope=release-runtime
-          cache-to: type=gha,mode=max,scope=release-runtime
+          cache-from: type=gha,scope=release-${{ github.run_id }}
+          cache-to: type=gha,mode=max,scope=release-${{ github.run_id }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-manifest-${{ github.run_id }}
@@ -69,20 +102,47 @@ jobs:
 
   assert:
     needs: assemble
+    if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: "${{ inputs.target_sha || github.sha }}"}
-      - name: collect and assert timings
+        with: {ref: "${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"}
+      - name: collect and assert performance metadata
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           jobs_url="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100"
-          gh api --paginate "${jobs_url}" | jq -s '{jobs: map(.jobs[]) }' > jobs.json
+          artifacts_url="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/"
+          artifacts_url+="artifacts?per_page=100"
+          caches_url="repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100"
+          gh api --paginate "${jobs_url}" | jq -s '
+            if all(.[]; .jobs | type == "array") then {jobs: map(.jobs[])}
+            else error("jobs page shape") end
+          ' > jobs.json
+          gh api --paginate "${artifacts_url}" \
+            | jq -s '
+                if all(.[]; .artifacts | type == "array")
+                then {artifacts: [.[].artifacts[]]}
+                else error("artifacts page shape") end
+              ' > artifacts.json
+          gh api --paginate "${caches_url}" \
+            | jq -s '
+                if all(.[]; .actions_caches | type == "array")
+                then {caches: [.[].actions_caches[]]}
+                else error("caches page shape") end
+              ' > caches.json
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > run.json
+          target_sha="${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"
           python3 .github/scripts/performance_assert.py \
             --kind release --jobs jobs.json --run run.json \
+            --target-sha "${target_sha}" \
+            --artifacts artifacts.json --caches caches.json \
+            --cache-scope release-${{ github.run_id }} \
             --output release-performance.json
       - name: write summary
         run: cat release-performance.json >> "${GITHUB_STEP_SUMMARY}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with: {name: "release-performance-${{ github.run_id }}", path: release-performance.json}
+        if: always()
+        with:
+          name: "release-performance-${{ github.run_id }}"
+          path: release-performance.json
+          if-no-files-found: ignore

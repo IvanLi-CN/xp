@@ -4,8 +4,10 @@ set -euo pipefail
 readonly version="v1.19.29"
 readonly asset="mihomo-linux-amd64-v1.19.29.gz"
 readonly expected_sha256="60de76a35a6cbf7b4fa4a20f5c257c24345d1d635ab1aa3877022a1997ef413c"
+readonly api_asset_id="481454521"
 readonly fixture="tests/fixtures/mihomo-smux-v1.19.29.yaml"
 readonly url="https://github.com/MetaCubeX/mihomo/releases/download/${version}/${asset}"
+readonly api_url="https://api.github.com/repos/MetaCubeX/mihomo/releases/assets/${api_asset_id}"
 
 if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
   printf '%s\n' "Mihomo fixture validation requires Linux x86_64." >&2
@@ -18,8 +20,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-curl --fail --location --retry 3 --retry-all-errors --silent --show-error "$url" \
-  --output "$tmp_dir/$asset"
+token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+if [[ -n "$token" ]]; then
+  curl --fail --location --retry 3 --retry-all-errors --silent --show-error \
+    -H "Accept: application/octet-stream" \
+    -H "Authorization: Bearer $token" \
+    "$api_url" --output "$tmp_dir/$asset"
+else
+  curl --fail --location --retry 3 --retry-all-errors --silent --show-error "$url" \
+    --output "$tmp_dir/$asset"
+fi
 actual_sha256="$(sha256sum "$tmp_dir/$asset" | awk '{print $1}')"
 if [ "$actual_sha256" != "$expected_sha256" ]; then
   printf '%s\n' "Mihomo fixture checksum mismatch." >&2
