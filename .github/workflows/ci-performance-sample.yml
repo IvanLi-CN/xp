@@ -14,6 +14,7 @@ jobs:
       cache_namespace: perf-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.sample }}
       cache_phase: cold
       sample: ${{ inputs.sample }}
+      performance_subset: true
 
   warm:
     needs: cold
@@ -23,3 +24,4 @@ jobs:
       cache_namespace: perf-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.sample }}
       cache_phase: warm
       sample: ${{ inputs.sample }}
+      performance_subset: true

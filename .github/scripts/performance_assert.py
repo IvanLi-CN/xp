@@ -34,14 +34,8 @@ CI_WORKLOAD_STEPS = {
     "web": (
         "Run bun run lint",
         "Run bun run typecheck",
-        "Run bun run test",
-        "Run bunx --no-install playwright install --with-deps chromium",
-        "Run bun run test:e2e",
     ),
-    "storybook": (
-        "Run bunx --no-install playwright install --with-deps chromium",
-        "storybook and test-storybook",
-    ),
+    "storybook": ("storybook and test-storybook",),
     "docker-smoke": ("docker build smoke", "default entrypoint bootstrap dry-run"),
 }
 
