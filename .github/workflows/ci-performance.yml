@@ -6,6 +6,14 @@ on:
       - Dockerfile
       - build.rs
       - .xp-source-marker
+      - Cargo.toml
+      - Cargo.lock
+      - src/**
+      - proto/**
+      - web/**
+      - tests/**
+      - scripts/**
+      - .bun-version
       - .github/scripts/performance_assert.py
       - .github/scripts/normalize-cargo-input-timestamps.sh
       - .github/scripts/run-rust-tests.sh

@@ -4,6 +4,16 @@ on:
   pull_request:
     paths:
       - Dockerfile
+      - build.rs
+      - .xp-source-marker
+      - Cargo.toml
+      - Cargo.lock
+      - src/**
+      - proto/**
+      - web/**
+      - tests/**
+      - scripts/**
+      - .bun-version
       - .github/scripts/performance_assert.py
       - .github/scripts/normalize-cargo-input-timestamps.sh
       - scripts/update-web-dist-fingerprint.sh
