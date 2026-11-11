@@ -115,6 +115,7 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertNotIn("${{ runner.os }}-storybook-${{ env.CACHE_NAMESPACE }}", workflow)
         self.assertEqual(workflow.count("lookup-only: ${{ env.CACHE_PHASE == 'cold' }}"), 2)
         self.assertIn("actions/cache/save@0057852bfaa89a56745bba8c7296529d2fc39830", workflow)
+        self.assertIn("storybook:" + chr(10) + "    needs: web", workflow)
 
     def test_contract_job_reuses_the_xp_ops_build_for_dry_runs(self):
         workflow = (SCRIPT_DIR.parent / "workflows" / "ci.yml").read_text()
@@ -271,6 +272,10 @@ class CiPerformanceTests(unittest.TestCase):
     def test_malformed_timestamp_is_a_performance_error(self):
         with self.assertRaises(performance.PerformanceError):
             performance.parse_time("2026-99-99T00:00:00Z")
+
+    def test_non_object_job_is_rejected_before_assertion(self):
+        with self.assertRaises(performance.PerformanceError):
+            performance.materialize_current_job(["malformed"])
 
 
 class ReleasePerformanceTests(unittest.TestCase):

@@ -147,6 +147,8 @@ def materialize_current_job(
     name: str = "assert",
     observed_at: str | None = None,
 ) -> list[dict[str, Any]]:
+    if not all(isinstance(job, dict) for job in jobs):
+        raise PerformanceError("jobs payload contains a non-object job")
     matches = [job for job in jobs if job.get("name") == name]
     if len(matches) != 1:
         raise PerformanceError(f"expected one current assertion job {name!r}, got {len(matches)}")
@@ -420,6 +422,8 @@ def main() -> int:
         jobs = payload.get("jobs") if isinstance(payload, dict) else None
         if not isinstance(jobs, list):
             raise PerformanceError("jobs payload must contain a jobs array")
+        if not all(isinstance(job, dict) for job in jobs):
+            raise PerformanceError("jobs payload contains a non-object job")
         jobs = materialize_current_job(jobs)
         run_payload = json.loads(args.run.read_text())
         if not isinstance(run_payload, dict):

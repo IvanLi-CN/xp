@@ -418,6 +418,7 @@ jobs:
           path: cache-receipt/web.json
 
   storybook:
+    needs: web
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults: {run: {working-directory: web}}
