@@ -93,6 +93,8 @@ def ci_workload_duration(job: dict[str, Any]) -> float:
         raise PerformanceError(f"missing workload steps for {name}")
     if not all(isinstance(step, dict) for step in steps):
         raise PerformanceError(f"malformed workload steps for {name}")
+    for step in steps:
+        step_duration(step)
     names = [step.get("name") for step in steps]
     if any(not isinstance(step_name, str) for step_name in names):
         raise PerformanceError(f"malformed workload step name for {name}")

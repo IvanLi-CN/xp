@@ -145,6 +145,7 @@ class ReadinessTests(unittest.TestCase):
             "memory_limit_bytes": 134217728,
             "swap_limit_bytes": 0,
             "backlog_segments": 20000,
+            "backlog_bytes": 134217728,
             "window_seconds": 300,
             "memory_limit_mib": 128,
             "swap_limit_mib": 0,
@@ -175,7 +176,7 @@ class ReadinessTests(unittest.TestCase):
             log_path.write_text(
                 "source_journal_resource max_read_bytes=1 max_cycle_read_bytes=1 max_rss_delta=1 "
                 "peak_pss_kib=1 memory_limit_bytes=134217728 swap_limit_bytes=0 "
-                "backlog_segments=20000 sample_window_seconds=303 generated_segments=12 "
+                "backlog_segments=20000 backlog_bytes=134217728 sample_window_seconds=303 generated_segments=12 "
                 "generated_bytes=58258 peak_generated_segments=12 peak_generated_bytes=58258 "
                 "acknowledged_segments=15300 acknowledged_bytes=51237772 "
                 "applied_segments=15348 applied_bytes=51398620\n"

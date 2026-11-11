@@ -51,9 +51,9 @@ class CiPerformanceTests(unittest.TestCase):
             workflow = (workflows / name).read_text()
             self.assertIn('gh api --paginate "${jobs_url}" | jq -s', workflow)
             self.assertIn('gh api --paginate "${artifacts_url}"', workflow)
-            self.assertIn("jq -s '{artifacts:", workflow)
+            self.assertIn('.artifacts | type == "array"', workflow)
             self.assertIn('gh api --paginate "${caches_url}"', workflow)
-            self.assertIn("jq -s '{caches:", workflow)
+            self.assertIn('.actions_caches | type == "array"', workflow)
             self.assertNotIn("--jq -s", workflow)
 
     def test_performance_concurrency_only_cancels_pull_request_runs(self):
@@ -114,7 +114,7 @@ class CiPerformanceTests(unittest.TestCase):
         )
         self.assertNotIn("${{ runner.os }}-storybook-${{ env.CACHE_NAMESPACE }}", workflow)
         self.assertEqual(workflow.count("actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830"), 2)
-        self.assertIn("actions/cache/save@0057852bfaa89a56745bba8c7296529d2fc39830", workflow)
+        self.assertIn("actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830", workflow)
         self.assertIn("storybook:" + chr(10) + "    needs: web", workflow)
 
     def test_contract_job_reuses_the_xp_ops_build_for_dry_runs(self):

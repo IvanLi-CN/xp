@@ -14,14 +14,13 @@ const JOURNAL_CYCLE_READ_BYTES_LIMIT: u64 = 16 * 1024 * 1024;
 // check catches unbounded growth without rejecting the measured bounded working set.
 const JOURNAL_RSS_DELTA_LIMIT: u64 = 32 * 1024 * 1024;
 const JOURNAL_THROUGHPUT_SAMPLE_SECONDS: u64 = 5 * 60;
-// Keep the 20,000-segment count cap while leaving headroom for XP, SQLite and the
-// no-swap cgroup. The generated fixture is smaller than the backlog row so the
-// byte-based ten-x gate can drain from the same bounded synthetic journal.
-const JOURNAL_BACKLOG_PAYLOAD_BYTES: usize = 3 * 1024;
+// Exercise the 128 MiB durable backlog alternative without crossing the 80% segment
+// admission watermark, so the real enqueue path can still run during the workload.
+const JOURNAL_BACKLOG_PAYLOAD_BYTES: usize = 15 * 1024;
 const JOURNAL_FIXTURE_PAYLOAD_BYTES: usize = 2 * 1024;
 // Stay below the durable 80% suspension watermark so this workload exercises the real
 // enqueue path while the capacity-specific unit tests cover the suspended state.
-const SOURCE_JOURNAL_RESOURCE_INITIAL_SEGMENTS: i64 = 20_000;
+const SOURCE_JOURNAL_RESOURCE_INITIAL_SEGMENTS: i64 = 10_000;
 
 #[derive(Debug, Clone)]
 struct DeliveryWindowSnapshot {
@@ -240,7 +239,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     let bind_port = reserve_local_port();
     run_init(binary, temp.path(), bind_port);
     let cluster = ClusterMetadata::load(temp.path()).expect("load source journal cluster");
-    prepare_source_delivery_storage(temp.path(), &cluster);
+    let backlog_bytes = prepare_source_delivery_storage(temp.path(), &cluster);
     unsafe {
         std::env::set_var(
             "XP_RESOURCE_FIXTURE_PAYLOAD_BYTES",
@@ -496,6 +495,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
          max_cycle_read_bytes={max_cycle_read_bytes} max_rss_delta={max_rss_delta} \
          peak_pss_kib={peak_pss_kib} memory_limit_bytes={memory_limit_bytes} \
          swap_limit_bytes={swap_limit_bytes} backlog_segments={initial_pending} \
+         backlog_bytes={backlog_bytes} \
          sample_window_seconds={elapsed_seconds} \
          generated_segments={generated_segments} generated_bytes={generated_bytes} \
          peak_generated_segments={} peak_generated_bytes={} \
@@ -692,7 +692,7 @@ async fn request_source_status(
     }
 }
 
-fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
+fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) -> i64 {
     let connection = rusqlite::Connection::open(data_dir.join("history.sqlite3"))
         .expect("open source journal resource database");
     connection
@@ -723,8 +723,8 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
         "x25519_relay_public_key": relay_public_key.clone(),
     }))
     .expect("encode source journal identity");
-    // Keep the synthetic backlog below the 128 MiB capacity boundary so the real enqueue path
-    // can prove both ten-x counters during this throughput workload.
+    // Keep segment admission below its watermark while the wire bytes exercise the 128 MiB
+    // backlog alternative in the resource contract.
     let payload = vec![0_u8; JOURNAL_BACKLOG_PAYLOAD_BYTES];
     let mut previous_hash = None;
     let mut total_wire_bytes = 0_i64;
@@ -888,4 +888,5 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
         persisted.state().nodes.contains_key(&cluster.node_id),
         "source journal fixture must reload local node metadata"
     );
+    total_wire_bytes
 }

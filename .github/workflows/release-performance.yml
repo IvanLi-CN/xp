@@ -94,11 +94,22 @@ jobs:
           artifacts_url="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/"
           artifacts_url+="artifacts?per_page=100"
           caches_url="repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100"
-          gh api --paginate "${jobs_url}" | jq -s '{jobs: map(.jobs[]) }' > jobs.json
+          gh api --paginate "${jobs_url}" | jq -s '
+            if all(.[]; .jobs | type == "array") then {jobs: map(.jobs[])}
+            else error("jobs page shape") end
+          ' > jobs.json
           gh api --paginate "${artifacts_url}" \
-            | jq -s '{artifacts: [.[].artifacts[]?]}' > artifacts.json
+            | jq -s '
+                if all(.[]; .artifacts | type == "array")
+                then {artifacts: [.[].artifacts[]]}
+                else error("artifacts page shape") end
+              ' > artifacts.json
           gh api --paginate "${caches_url}" \
-            | jq -s '{caches: [.[].actions_caches[]?]}' > caches.json
+            | jq -s '
+                if all(.[]; .actions_caches | type == "array")
+                then {caches: [.[].actions_caches[]]}
+                else error("caches page shape") end
+              ' > caches.json
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > run.json
           target_sha="${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}"
           python3 .github/scripts/performance_assert.py \

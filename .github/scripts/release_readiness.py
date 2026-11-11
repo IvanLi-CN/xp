@@ -75,7 +75,7 @@ def latest_runs(payload: Any, target_sha: str) -> dict[str, WorkflowState]:
     selected: dict[str, dict[str, Any]] = {}
     for run in runs:
         if not isinstance(run, dict):
-            continue
+            raise ReadinessError("github_api_shape_failure:workflow_run")
         name = run.get("name")
         if name not in REQUIRED_WORKFLOWS:
             continue
@@ -171,9 +171,16 @@ def validate_resource_evidence(raw: str | None, target_sha: str) -> str:
     log_sha = evidence.get("log_sha")
     if not isinstance(log_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", log_sha):
         raise ReadinessError("resource_evidence_log_sha_invalid")
-    if evidence.get("window_seconds") != 300:
+    if not isinstance(evidence.get("window_seconds"), int) or isinstance(evidence.get("window_seconds"), bool) or evidence.get("window_seconds") != 300:
         raise ReadinessError("resource_evidence_window_invalid")
-    if evidence.get("memory_limit_mib") != 128 or evidence.get("swap_limit_mib") != 0:
+    if (
+        not isinstance(evidence.get("memory_limit_mib"), int)
+        or isinstance(evidence.get("memory_limit_mib"), bool)
+        or not isinstance(evidence.get("swap_limit_mib"), int)
+        or isinstance(evidence.get("swap_limit_mib"), bool)
+        or evidence.get("memory_limit_mib") != 128
+        or evidence.get("swap_limit_mib") != 0
+    ):
         raise ReadinessError("resource_evidence_resource_limit_invalid")
     required_gates = (
         "source_ack_meets_ten_x_segments",
@@ -236,6 +243,7 @@ def validate_resource_evidence_files(
         "memory_limit_bytes",
         "swap_limit_bytes",
         "backlog_segments",
+        "backlog_bytes",
         "sample_window_seconds",
         "generated_segments",
         "generated_bytes",
@@ -262,7 +270,7 @@ def validate_resource_evidence_files(
         raise ReadinessError("resource_evidence_window_observed_invalid")
     if metrics["memory_limit_bytes"] != 128 * 1024 * 1024 or metrics["swap_limit_bytes"] != 0:
         raise ReadinessError("resource_evidence_observed_resource_limit_invalid")
-    if metrics["backlog_segments"] < 20_000:
+    if metrics["backlog_segments"] < 20_000 and metrics["backlog_bytes"] < 128 * 1024 * 1024:
         raise ReadinessError("resource_evidence_backlog_invalid")
     if metrics["peak_generated_segments"] == 0 or metrics["peak_generated_bytes"] == 0:
         raise ReadinessError("resource_evidence_generation_missing")

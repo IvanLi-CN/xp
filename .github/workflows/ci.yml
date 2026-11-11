@@ -45,7 +45,7 @@ jobs:
         with: {toolchain: 1.96.0, components: "rustfmt, clippy"}
       - name: restore rust cache
         id: cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             ~/.cargo/registry
@@ -388,7 +388,7 @@ jobs:
         with: {bun-version-file: .bun-version}
       - name: restore web cache
         id: cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             ~/.bun/install/cache
@@ -460,7 +460,7 @@ jobs:
           bun run test-storybook
       - name: save shared web cache after cold tests
         if: env.CACHE_PHASE == 'cold' || env.CACHE_PHASE == 'normal'
-        uses: actions/cache/save@0057852bfaa89a56745bba8c7296529d2fc39830
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             ~/.bun/install/cache

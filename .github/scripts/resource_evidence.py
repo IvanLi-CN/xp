@@ -33,6 +33,7 @@ OBSERVED_FIELDS = (
     "memory_limit_bytes",
     "swap_limit_bytes",
     "backlog_segments",
+    "backlog_bytes",
 )
 
 
@@ -97,8 +98,8 @@ def main() -> int:
         observed[field] = int(match.group(1))
     if observed["memory_limit_bytes"] != 128 * 1024 * 1024 or observed["swap_limit_bytes"] != 0:
         fail("workload cgroup limits do not match 128 MiB/no-swap")
-    if observed["backlog_segments"] < 20_000:
-        fail("workload backlog is smaller than the 20,000-segment contract")
+    if observed["backlog_segments"] < 20_000 and observed["backlog_bytes"] < 128 * 1024 * 1024:
+        fail("workload backlog is smaller than the 20,000-segment or 128 MiB contract")
     if metrics["sample_window_seconds"] < 300:
         fail("workload sample window is shorter than 300 seconds")
     if metrics["peak_generated_segments"] == 0 or metrics["peak_generated_bytes"] == 0:
