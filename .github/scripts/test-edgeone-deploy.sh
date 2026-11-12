@@ -73,6 +73,7 @@ run_failure_case project-permission project-permission project_or_permission 1 3
 run_failure_case deployment-ambiguous post-deploy deployment_ambiguous 1 3
 run_failure_case generic-token-error ambiguous auth_or_endpoint_ambiguous 1 3
 run_failure_case ambiguous-http-5xx ambiguous-http-5xx auth_or_endpoint_ambiguous 1 3
+run_failure_case ambiguous-http-522 ambiguous-http-522 auth_or_endpoint_ambiguous 1 3
 
 if grep -Eqi 'token (is )?invalid([.![:space:]]|$)' \
   "${test_root}/generic-token-error.log"; then

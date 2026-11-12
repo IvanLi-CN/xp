@@ -47,6 +47,10 @@ if (( count <= fail_until )); then
       echo "API request failed (500): server failure" >&2
       exit 7
       ;;
+    ambiguous-http-522)
+      echo "API request failed (522): gateway timeout" >&2
+      exit 7
+      ;;
     *)
       echo "unexpected fixture stage: ${stage}" >&2
       exit 2
