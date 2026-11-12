@@ -318,11 +318,24 @@ class WorkflowIntegrationTests(unittest.TestCase):
 
     def test_static_web_gate_precedes_image_and_release(self) -> None:
         workflow = (Path(__file__).parents[1] / "workflows" / "release.yml").read_text()
+        helper = (Path(__file__).parents[1] / "scripts" / "deploy-edgeone.sh").read_text()
         self.assertIn("publish-static-web:", workflow)
         self.assertIn("needs: [prepare, build]", workflow)
         self.assertIn("needs: [prepare, build, publish-static-web]", workflow)
         self.assertIn("needs: [prepare, build, publish-static-web, publish-image]", workflow)
-        self.assertIn("edgeone@1.6.33 makers deploy", workflow)
+        self.assertIn("bash .github/scripts/deploy-edgeone.sh", workflow)
+        self.assertIn('with: {ref: "${{ github.workflow_sha }}"}', workflow)
+        self.assertIn('manifest.get("artifact") != expected_archive', workflow)
+        self.assertIn('cli_version="1.6.33"', helper)
+        self.assertIn('npx_bin="npx"', helper)
+        for failure_class in (
+            "credential_rejected",
+            "project_or_permission",
+            "endpoint_unavailable",
+            "deployment_ambiguous",
+            "auth_or_endpoint_ambiguous",
+        ):
+            self.assertIn(failure_class, helper)
         self.assertIn("static_web_smoke.py", workflow)
         self.assertIn("test \"${EDGEONE_MAKERS_PROJECT}\" = \"xp-web\"", workflow)
 
@@ -348,7 +361,9 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("gh release download", workflow)
         self.assertIn("supported API compatibility window", workflow)
-        self.assertIn("edgeone@1.6.33 makers deploy", workflow)
+        self.assertIn("bash .github/scripts/deploy-edgeone.sh", workflow)
+        self.assertIn('with: {ref: "${{ github.workflow_sha }}"}', workflow)
+        self.assertIn('expected_archive = f"xp-web-{build_id}-{target_sha}.tar.gz"', workflow)
         self.assertNotIn("git push", workflow)
         self.assertNotIn("docker", workflow)
 

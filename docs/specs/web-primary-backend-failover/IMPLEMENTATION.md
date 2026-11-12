@@ -72,6 +72,10 @@
   the static EdgeOne deployment gate. The image and GitHub Release jobs depend on the public static
   smoke gate; the protected static rollback workflow reuses only verified release archives.
 
+- The release and protected rollback workflows share a pinned EdgeOne deploy wrapper. It retains the
+  original CLI result, emits a non-secret failure class, and reuses the verified archive without
+  recalculating release identity.
+
 - The Login page now exposes a same-cluster service-node selector backed by public health,
   cluster, and compatibility probes that never send the admin token.
 - On desktop the login selector sits at the top right, with its button and menu sized to the
