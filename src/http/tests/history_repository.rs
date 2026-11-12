@@ -484,6 +484,8 @@ async fn repository_relay_bypasses_collector_gate_only_for_ready_repository_sour
 async fn initial_backfill_exports_historical_data_from_an_authenticated_peer() {
     let tmp = tempfile::tempdir().expect("temporary directory");
     let config = test_config(tmp.path().to_path_buf());
+    let now = chrono::Utc::now();
+    let traffic_at = now - chrono::Duration::days(1);
     let mut cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
         config.node_name.clone(),
@@ -497,17 +499,17 @@ async fn initial_backfill_exports_historical_data_from_an_authenticated_peer() {
     let history = crate::node_history::NodeHistoryHandle::from_config(&config);
     history
         .replace_node_snapshot(
-            chrono::Utc::now(),
+            now,
             &cluster.node_id,
             crate::node_history::NodeHistorySnapshot {
                 node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
-                last_synced_at: Some("2026-08-14T00:00:00Z".to_owned()),
+                last_synced_at: Some(traffic_at.to_rfc3339()),
                 last_sync_error: None,
                 daily_traffic: vec![crate::node_history::NodeHistoryDailyTraffic {
-                    date: "2026-08-14".to_owned(),
+                    date: traffic_at.date_naive().to_string(),
                     uplink_bytes: 42,
                     downlink_bytes: 24,
-                    updated_at: "2026-08-14T00:00:00Z".to_owned(),
+                    updated_at: traffic_at.to_rfc3339(),
                 }],
                 daily_component_status: Vec::new(),
                 component_status_events: Vec::new(),
