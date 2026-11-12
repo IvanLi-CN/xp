@@ -64,8 +64,9 @@ pub(crate) use sync::RepositoryReplicaGap;
 const MAX_RUNTIME_STATE_BYTES: usize = 16 * 1024 * 1024;
 // A continuation is persisted in the 16 MiB control snapshot. Keep its bounded per-bucket
 // aggregate state comfortably below that limit even when source records approach their payload
-// budget.
-const RETENTION_COMPACTION_PAGE_SIZE: usize = 256;
+// budget. The worker runs every five seconds, so the page must also be large enough to keep up
+// with a busy repository instead of leaving the seven-day raw window permanently backlogged.
+const RETENTION_COMPACTION_PAGE_SIZE: usize = 1024;
 const RETENTION_COMPACTION_BUCKET_LOOKAHEAD: usize = 32;
 const REPLICATION_SEGMENT_PAGE_SIZE: usize = 256;
 const MAX_QUERY_RESPONSE_BYTES: usize = 256 * 1024;
