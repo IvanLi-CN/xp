@@ -43,6 +43,10 @@ if (( count <= fail_until )); then
       echo "Deployment failed: Invalid EDGEONE_PAGES_API_TOKEN." >&2
       exit 7
       ;;
+    ambiguous-http-5xx)
+      echo "API request failed (500): server failure" >&2
+      exit 7
+      ;;
     *)
       echo "unexpected fixture stage: ${stage}" >&2
       exit 2

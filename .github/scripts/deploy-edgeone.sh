@@ -92,7 +92,6 @@ classify_failure() {
   local output_file="$1"
   local auth_pattern
   local project_pattern
-  local endpoint_pattern
 
   if deployment_started "${output_file}"; then
     echo "deployment_ambiguous"
@@ -114,14 +113,6 @@ classify_failure() {
   auth_pattern+="|\b(AUTH_[A-Z0-9_]+|TOKEN_[A-Z0-9_]+)\b"
   if grep -Eiq "${auth_pattern}" "${output_file}"; then
     echo "credential_rejected"
-    return
-  fi
-
-  endpoint_pattern='AxiosError: (timeout|Network Error)|ETIMEDOUT|ECONNRESET'
-  endpoint_pattern+="|ECONNREFUSED|ENOTFOUND|socket hang up"
-  endpoint_pattern+="|API request failed \(5[0-9]{2}\)|\b522\b"
-  if grep -Eiq "${endpoint_pattern}" "${output_file}"; then
-    echo "endpoint_unavailable"
     return
   fi
 
