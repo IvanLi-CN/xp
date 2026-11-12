@@ -30,7 +30,7 @@ if (( count <= fail_until )); then
       exit 7
       ;;
     project-permission)
-      echo "Project makers-project has Provider 'Git' and does not support direct folder deployment" >&2
+      echo "check and set region failed: API request failed (403): project permission denied" >&2
       exit 7
       ;;
     post-deploy)

@@ -324,7 +324,8 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("needs: [prepare, build, publish-static-web]", workflow)
         self.assertIn("needs: [prepare, build, publish-static-web, publish-image]", workflow)
         self.assertIn("bash .github/scripts/deploy-edgeone.sh", workflow)
-        self.assertIn('cli_version="${EDGEONE_CLI_VERSION:-1.6.33}"', helper)
+        self.assertIn('cli_version="1.6.33"', helper)
+        self.assertIn('npx_bin="npx"', helper)
         for failure_class in (
             "credential_rejected",
             "project_or_permission",

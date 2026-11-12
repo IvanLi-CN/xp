@@ -8,6 +8,8 @@ test_root="$(mktemp -d)"
 trap 'rm -rf -- "${test_root}"' EXIT
 
 mkdir -p "${test_root}/site"
+mkdir -p "${test_root}/bin"
+ln -s "${fake_npx}" "${test_root}/bin/npx"
 count_file="${test_root}/retry-count"
 args_file="${test_root}/args"
 
@@ -23,8 +25,10 @@ run_failure_case() {
 
   expected_attempts=$((fail_until < max_attempts ? fail_until : max_attempts))
   : > "${count_file}"
-  if EDGEONE_API_TOKEN='fixture-token' \
-    EDGEONE_NPX_BIN="${fake_npx}" \
+  if PATH="${test_root}/bin:${PATH}" \
+    EDGEONE_API_TOKEN='fixture-token' \
+    EDGEONE_CLI_VERSION='9.9.9' \
+    EDGEONE_NPX_BIN='/tmp/untrusted-npx' \
     EDGEONE_TEST_COUNT_FILE="${count_file}" \
     EDGEONE_TEST_ARGS_FILE="${args_file}" \
     EDGEONE_TEST_FAILURE_STAGE="${stage}" \
@@ -44,8 +48,10 @@ run_failure_case() {
 }
 
 : > "${count_file}"
-if EDGEONE_API_TOKEN='fixture-token' \
-  EDGEONE_NPX_BIN="${fake_npx}" \
+if PATH="${test_root}/bin:${PATH}" \
+  EDGEONE_API_TOKEN='fixture-token' \
+  EDGEONE_CLI_VERSION='9.9.9' \
+  EDGEONE_NPX_BIN='/tmp/untrusted-npx' \
   EDGEONE_TEST_COUNT_FILE="${count_file}" \
   EDGEONE_TEST_ARGS_FILE="${args_file}" \
   EDGEONE_TEST_FAILURE_STAGE=preflight-endpoint \

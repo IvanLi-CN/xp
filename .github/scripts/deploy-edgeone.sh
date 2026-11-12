@@ -26,8 +26,8 @@ if [[ -z "${project_name}" ]]; then
   exit 1
 fi
 
-cli_version="${EDGEONE_CLI_VERSION:-1.6.33}"
-npx_bin="${EDGEONE_NPX_BIN:-npx}"
+cli_version="1.6.33"
+npx_bin="npx"
 max_attempts="${EDGEONE_MAX_ATTEMPTS:-3}"
 retry_delays_text="${EDGEONE_RETRY_DELAYS_SECONDS:-30 60}"
 attempt_logs_dir="$(mktemp -d)"
@@ -99,20 +99,21 @@ classify_failure() {
     return
   fi
 
-  auth_pattern='API request failed \((401|403)\)|\b(Unauthorized|AccessDenied)\b'
-  auth_pattern+="|\b(AUTH_[A-Z0-9_]+|TOKEN_[A-Z0-9_]+)\b"
-  if grep -Eiq "${auth_pattern}" "${output_file}"; then
-    echo "credential_rejected"
-    return
-  fi
-
   project_pattern='PROJECT_[A-Z0-9_]+|project[[:space:]_-]+(not found|does not exist)'
   project_pattern+="|project[[:space:]_-]+permission denied"
   project_pattern+="|permission[[:space:]]+(denied|insufficient)|invalid project"
   project_pattern+="|project .*does not support direct|Provider .*does not support"
   project_pattern+="|failed to (get|retrieve) project"
+  project_pattern+="|API request failed \(403\):.*(project|permission|direct|Provider)"
   if grep -Eiq "${project_pattern}" "${output_file}"; then
     echo "project_or_permission"
+    return
+  fi
+
+  auth_pattern='API request failed \((401|403)\)|\b(Unauthorized|AccessDenied)\b'
+  auth_pattern+="|\b(AUTH_[A-Z0-9_]+|TOKEN_[A-Z0-9_]+)\b"
+  if grep -Eiq "${auth_pattern}" "${output_file}"; then
+    echo "credential_rejected"
     return
   fi
 
