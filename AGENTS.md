@@ -325,6 +325,11 @@
   discovery, or API proxy is supported. The release workflow must pass the public five-minute static
   smoke gate before publishing image or GitHub Release artifacts; the protected static rollback
   workflow accepts only checksum-valid archives in the `3.22/3.21/3.20` compatibility window.
+  Both workflows load the deployment helper from `github.workflow_sha` and require the manifest
+  artifact name `xp-web-<web_build_id>-<target_sha>.tar.gz`. The helper emits only the five
+  non-secret EdgeOne failure classes; it retries at most three complete preflight transport
+  failures, never retries after a possible remote side effect, and keeps incomplete evidence
+  `auth_or_endpoint_ambiguous`.
 - Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
 - An owner-approved private Docker follower may omit the managed-default VLESS/REALITY endpoint.
   It remains a voter and must expose its registered private `api_base_url` to the serving voters

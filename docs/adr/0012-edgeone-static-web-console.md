@@ -114,6 +114,10 @@ allowlist, while origins absent from the authenticated inventory are retired.
   valid, deploys that archive to `xp-web`, and repeats the production-domain
   verification. It neither creates a tag nor modifies images or Nodes; an
   arbitrary historical tag is not an emergency rollback source.
+- Release and rollback invoke one pinned deploy wrapper that preserves the CLI exit
+  status, reports evidence-bounded failure classes, retries only complete preflight
+  transport failures, and never retries after a possible remote deployment side
+  effect. Recovery reuses the verified same-SHA archive and release identity.
 - Anonymous health-response hardening is a separate security decision. The static
   console must not depend on anonymous health diagnostics for bootstrap or policy
   discovery.
