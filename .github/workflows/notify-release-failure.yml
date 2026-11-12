@@ -71,6 +71,11 @@ jobs:
               'intent_type': re.compile(r'\brelease_intent_type=([^\r\n]+)'),
               'channel': re.compile(r'\brelease_channel=([^\r\n]+)'),
               'backfill_reason': re.compile(r'\bbackfill_reason=([^\r\n]+)'),
+              'edgeone_failure_class': re.compile(
+                  r'\bEDGEONE_FAILURE_CLASS='
+                  r'(credential_rejected|project_or_permission|endpoint_unavailable|'
+                  r'deployment_ambiguous|auth_or_endpoint_ambiguous)\b'
+              ),
           }
 
           def api_request(path: str, *, accept: str = 'application/vnd.github+json') -> str:
@@ -175,7 +180,13 @@ jobs:
 
               metadata_details = '; '.join(
                   f'{key}={metadata[key]}'
-                  for key in ('intent_source', 'intent_type', 'channel', 'backfill_reason')
+                  for key in (
+                      'intent_source',
+                      'intent_type',
+                      'channel',
+                      'backfill_reason',
+                      'edgeone_failure_class',
+                  )
                   if metadata.get(key)
               )
               if resolved_sha and resolved_sha != fallback_head_sha:

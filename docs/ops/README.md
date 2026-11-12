@@ -131,6 +131,24 @@ deploys it to `xp-web`, and repeats the same public gate. It does not create tag
 modify Nodes. Docker/Compose continues to use host-side image replacement and is not a Web automatic
 upgrade target.
 
+The release and rollback workflows use `.github/scripts/deploy-edgeone.sh` for the pinned
+`edgeone@1.6.33` CLI call. The helper never rebuilds the Web archive and emits only a non-secret
+`EDGEONE_FAILURE_CLASS` when deployment fails:
+
+- `credential_rejected` requires visible 401/403 or an explicit authentication error.
+- `project_or_permission` requires visible project or permission evidence.
+- `endpoint_unavailable` is limited to deployment-before-side-effect transport failures.
+- `deployment_ambiguous` means upload, remote acceptance, or deployment state may have started.
+- `auth_or_endpoint_ambiguous` preserves a generic CLI error whose cause is not proven.
+
+Only complete preflight transport failures receive at most three bounded attempts. Once deployment
+may have started, or evidence is ambiguous, the helper stops without retrying. A recovery must reuse
+the same `head_sha`, expected version, resource-evidence commit, and verified Web archive; it must
+not compute a successor version or replace an exact existing tag. The owner should verify that the
+secret is an EdgeOne Makers API Token from the same Global/China site and workspace as `xp-web`,
+then update `EDGEONE_API_TOKEN` in GitHub without exposing its value and rerun the existing release
+identity or protected rollback workflow.
+
 ## Minimal runtime assumptions
 
 Host-managed mode assumptions:

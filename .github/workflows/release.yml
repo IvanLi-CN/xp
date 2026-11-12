@@ -284,10 +284,9 @@ jobs:
           target_sha="${{ env.RELEASE_HEAD_SHA }}"
           archive="web-release/xp-web-${version}-${target_sha}.tar.gz"
           tar -xzf "${archive}" -C web-deploy
-          npx --yes edgeone@1.6.33 makers deploy ./web-deploy \
-            -n "${EDGEONE_MAKERS_PROJECT}" \
-            -t "${EDGEONE_API_TOKEN}" \
-            -e production
+          bash .github/scripts/deploy-edgeone.sh \
+            ./web-deploy "${EDGEONE_MAKERS_PROJECT}" \
+            "release-${version}-${target_sha}"
       - name: verify public static Web deployment
         run: |
           python3 .github/scripts/static_web_smoke.py \

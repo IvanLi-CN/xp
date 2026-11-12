@@ -78,10 +78,9 @@ jobs:
           rm -rf web-deploy
           mkdir web-deploy
           tar -xzf "web-release/$(cat web-release/.verified-archive)" -C web-deploy
-          npx --yes edgeone@1.6.33 makers deploy ./web-deploy \
-            -n "${EDGEONE_MAKERS_PROJECT}" \
-            -t "${EDGEONE_API_TOKEN}" \
-            -e production
+          bash .github/scripts/deploy-edgeone.sh \
+            ./web-deploy "${EDGEONE_MAKERS_PROJECT}" \
+            "rollback-${RELEASE_TAG}"
       - name: verify public static Web rollback
         run: |
           python3 .github/scripts/static_web_smoke.py \

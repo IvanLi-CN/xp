@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+count_file="${EDGEONE_TEST_COUNT_FILE:?missing count file}"
+count=0
+if [[ -f "${count_file}" ]]; then
+  count="$(<"${count_file}")"
+fi
+count=$((count + 1))
+printf '%s\n' "${count}" > "${count_file}"
+
+if [[ -n "${EDGEONE_TEST_ARGS_FILE:-}" ]]; then
+  printf '%s\n' "$*" >> "${EDGEONE_TEST_ARGS_FILE}"
+fi
+
+stage="${EDGEONE_TEST_FAILURE_STAGE:-success}"
+fail_until="${EDGEONE_TEST_FAIL_UNTIL:-0}"
+if (( count <= fail_until )); then
+  case "${stage}" in
+    preflight-endpoint)
+      echo "npm warn deprecated fixture@1.0.0: fixture warning" >&2
+      echo "Resolving dependencies"
+      echo "Using provided API token for deployment..."
+      echo "check and set region failed: AxiosError: timeout of 3000ms exceeded" >&2
+      exit 7
+      ;;
+    auth-rejected)
+      echo "Using provided API token for deployment..."
+      echo "check and set region failed: API request failed (401): Unauthorized" >&2
+      exit 7
+      ;;
+    project-permission)
+      echo "Project makers-project has Provider 'Git' and does not support direct folder deployment" >&2
+      exit 7
+      ;;
+    post-deploy)
+      echo "Uploading folder to EdgeOne COS"
+      echo "Deployment failed: response body unavailable" >&2
+      exit 7
+      ;;
+    ambiguous)
+      echo "Using provided API token for deployment..."
+      echo "Deployment failed: Invalid EDGEONE_PAGES_API_TOKEN." >&2
+      exit 7
+      ;;
+    *)
+      echo "unexpected fixture stage: ${stage}" >&2
+      exit 2
+      ;;
+  esac
+fi
+
+echo "Deploy Success"

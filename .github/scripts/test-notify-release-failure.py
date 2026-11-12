@@ -77,4 +77,6 @@ for name, block in (("notify_failure", failure_job), ("smoke_test", smoke_job)):
 require("smoke: workflow_dispatch" in smoke_job, "smoke summary title/context is missing")
 require("🚨 Release Failed · ${{ github.repository }}\n        status: failure" in failure_job, "failure summary title/status changed")
 require("🧪 Smoke Test · ${{ github.repository }}\n        status: smoke test" in smoke_job, "smoke summary title/status changed")
+require("EDGEONE_FAILURE_CLASS=" in source, "EdgeOne failure classification is not preserved")
+require("edgeone_failure_class" in source, "EdgeOne failure metadata is not notified")
 print("notify-release-failure workflow contract: ok")
