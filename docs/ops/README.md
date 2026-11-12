@@ -144,7 +144,9 @@ The release and rollback workflows use `.github/scripts/deploy-edgeone.sh` for t
 Only complete preflight transport failures receive at most three bounded attempts. Once deployment
 may have started, or evidence is ambiguous, the helper stops without retrying. A recovery must reuse
 the same `head_sha`, expected version, resource-evidence commit, and verified Web archive; it must
-not compute a successor version or replace an exact existing tag. The owner should verify that the
+not compute a successor version or replace an exact existing tag. The manifest artifact name must
+also equal `xp-web-<web_build_id>-<target_sha>.tar.gz`; release and rollback jobs load their
+deployment helper from the immutable workflow commit. The owner should verify that the
 secret is an EdgeOne Makers API Token from the same Global/China site and workspace as `xp-web`,
 then update `EDGEONE_API_TOKEN` in GitHub without exposing its value and rerun the existing release
 identity or protected rollback workflow.

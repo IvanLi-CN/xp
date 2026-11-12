@@ -324,6 +324,8 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("needs: [prepare, build, publish-static-web]", workflow)
         self.assertIn("needs: [prepare, build, publish-static-web, publish-image]", workflow)
         self.assertIn("bash .github/scripts/deploy-edgeone.sh", workflow)
+        self.assertIn('with: {ref: "${{ github.workflow_sha }}"}', workflow)
+        self.assertIn('manifest.get("artifact") != expected_archive', workflow)
         self.assertIn('cli_version="1.6.33"', helper)
         self.assertIn('npx_bin="npx"', helper)
         for failure_class in (
@@ -360,6 +362,8 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("gh release download", workflow)
         self.assertIn("supported API compatibility window", workflow)
         self.assertIn("bash .github/scripts/deploy-edgeone.sh", workflow)
+        self.assertIn('with: {ref: "${{ github.workflow_sha }}"}', workflow)
+        self.assertIn('expected_archive = f"xp-web-{build_id}-{target_sha}.tar.gz"', workflow)
         self.assertNotIn("git push", workflow)
         self.assertNotIn("docker", workflow)
 

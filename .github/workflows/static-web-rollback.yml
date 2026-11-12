@@ -25,7 +25,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: main}
+        with: {ref: "${{ github.workflow_sha }}"}
       - name: verify EdgeOne deployment prerequisites
         run: |
           set -euo pipefail
@@ -65,6 +65,9 @@ jobs:
               raise SystemExit("Web archive target SHA is invalid")
           if not isinstance(archive, str) or Path(archive).name != archive:
               raise SystemExit("Web archive manifest path is invalid")
+          expected_archive = f"xp-web-{build_id}-{target_sha}.tar.gz"
+          if archive != expected_archive:
+              raise SystemExit("Web archive artifact identity mismatch")
           Path("web-release/.verified-build-id").write_text(build_id)
           Path("web-release/.verified-archive").write_text(archive)
           PY

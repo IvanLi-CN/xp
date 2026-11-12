@@ -243,7 +243,7 @@ jobs:
       EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: main}
+        with: {ref: "${{ github.workflow_sha }}"}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: "web-release-release-${{ github.run_id }}"
@@ -275,6 +275,9 @@ jobs:
               raise SystemExit("Web archive target SHA mismatch")
           if manifest.get("web_build_id") != sys.argv[3]:
               raise SystemExit("Web archive build ID mismatch")
+          expected_archive = f"xp-web-{sys.argv[3]}-{sys.argv[2]}.tar.gz"
+          if manifest.get("artifact") != expected_archive:
+              raise SystemExit("Web archive artifact identity mismatch")
           PY
       - name: deploy Web to EdgeOne Makers
         run: |
