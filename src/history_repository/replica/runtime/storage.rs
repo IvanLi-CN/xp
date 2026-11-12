@@ -781,7 +781,7 @@ impl RepositoryReplicaRuntime {
             if unchanged { &[] } else { &removed_rows },
             if unchanged { &[] } else { &retained },
             record_expiry_cutoff,
-            now_unix_seconds.saturating_sub(policy.minute_retention_seconds()),
+            repair_cache_cutoff,
             &control_payload,
         );
         match result {
