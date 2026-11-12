@@ -138,6 +138,41 @@ impl HistoryStorage {
         Ok(outcome)
     }
 
+    pub(crate) fn prune_repository_history_segments(
+        &self,
+        segment_closed_at_unix_seconds: u64,
+        control_payload: &[u8],
+    ) -> Result<RepositoryCommitOutcome> {
+        let diagnostic = self.begin_diagnostic(
+            HistoryStorageDiagnosticOperation::RetentionReplaceAndPrune,
+            "history_storage.retention",
+        );
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Err(HistoryStorageError(
+                "repository history row storage requires SQLite".to_owned(),
+            ));
+        };
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        super::super::counts::bump_repository_history_segment_revisions_for_expired_segments(
+            &transaction,
+            segment_closed_at_unix_seconds,
+        )?;
+        transaction
+            .execute(
+                "DELETE FROM repository_history_segments WHERE closed_at < ?1",
+                [i64::try_from(segment_closed_at_unix_seconds).unwrap_or(i64::MAX)],
+            )
+            .map_err(sqlite_error)?;
+        write_snapshot(&transaction, REPOSITORY_REPLICA_KEY, control_payload)?;
+        transaction.commit().map_err(sqlite_error)?;
+        let maintenance_degraded = finish_post_commit_maintenance(maintain_sqlite(connection));
+        diagnostic.finish();
+        Ok(RepositoryCommitOutcome {
+            maintenance_degraded,
+        })
+    }
+
     pub(crate) fn repository_history_records_for_compaction(
         &self,
         end_unix_seconds: u64,

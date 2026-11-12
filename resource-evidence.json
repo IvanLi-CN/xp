@@ -1,26 +1,26 @@
 {
-  "acknowledged_bytes": 155530468,
+  "acknowledged_bytes": 155530105,
   "acknowledged_segments": 9970,
-  "applied_bytes": 156457405,
+  "applied_bytes": 156457129,
   "applied_segments": 10162,
   "backlog_bytes": 157038596,
   "backlog_segments": 10000,
   "candidate_digests": {
-    "xp": "1a2cac9b04eab49549c2d3843e632dc49bb380dbc2af9063d5e8d9c23ea978ad",
-    "xp-ops": "f4291b3130a5373e166415c87b11b575f1f21cb8d12a097dee894dd8d4a7d913"
+    "xp": "3a6430c5348e3460dbaeb94f9466cfaad37471a54d2363779e5cc6fce8e678e5",
+    "xp-ops": "f705c345fe0fd17a0c531eae635f215eeaf91124baadc8e3d2f22763d9b5b560"
   },
   "candidate_target": "x86_64-unknown-linux-musl",
-  "generated_bytes": 1276095,
+  "generated_bytes": 1270779,
   "generated_segments": 260,
-  "log_sha": "1168bcac4659b925e3bab854d87c7f353214f86e49aed066e12d5c61fb9fc9fc",
+  "log_sha": "a27eb05ece1f0604a2b9a603c3037c183ad62b84039c4284d9b47b706eba7c3a",
   "max_cycle_read_bytes": 0,
   "max_read_bytes": 0,
-  "max_rss_delta": 335872,
+  "max_rss_delta": 3358720,
   "memory_limit_bytes": 134217728,
   "memory_limit_mib": 128,
-  "peak_generated_bytes": 1276095,
+  "peak_generated_bytes": 1270779,
   "peak_generated_segments": 260,
-  "peak_pss_kib": 32224,
+  "peak_pss_kib": 32072,
   "repository_apply_meets_ten_x_bytes": true,
   "repository_apply_meets_ten_x_segments": true,
   "sample_window_seconds": 300,
@@ -29,6 +29,6 @@
   "source_ack_meets_ten_x_segments": true,
   "swap_limit_bytes": 0,
   "swap_limit_mib": 0,
-  "target_sha": "3a08c3a8c982c303d3c6df71e49a7e24e9854bfa",
+  "target_sha": "bba56b1d96eff51d870ecf0ada97dcdde991e1d0",
   "window_seconds": 300
 }

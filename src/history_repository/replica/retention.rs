@@ -15,6 +15,7 @@ pub(crate) struct RepositoryRetentionPolicy {
     minute_retention_seconds: u64,
     five_minute_retention_seconds: u64,
     max_retention_seconds: u64,
+    repair_cache_retention_seconds: u64,
 }
 
 impl Default for RepositoryRetentionPolicy {
@@ -23,6 +24,7 @@ impl Default for RepositoryRetentionPolicy {
             minute_retention_seconds: 7 * DAY_SECONDS,
             five_minute_retention_seconds: 90 * DAY_SECONDS,
             max_retention_seconds: 2 * 365 * DAY_SECONDS,
+            repair_cache_retention_seconds: DAY_SECONDS,
         }
     }
 }
@@ -38,6 +40,10 @@ impl RepositoryRetentionPolicy {
 
     pub(crate) fn max_age_seconds(self) -> u64 {
         self.max_retention_seconds
+    }
+
+    pub(crate) fn repair_cache_retention_seconds(self) -> u64 {
+        self.repair_cache_retention_seconds
     }
 
     pub(crate) fn resolution_for_age(self, age_seconds: u64) -> Option<RetentionResolution> {
