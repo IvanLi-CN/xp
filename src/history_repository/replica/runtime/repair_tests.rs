@@ -140,7 +140,7 @@ fn tiered_export_retains_a_bounded_repair_grace_after_the_final_page() {
     let now = 20_000_u64
         .saturating_add(policy.minute_retention_seconds())
         .saturating_add(1);
-    let repair_cache_cutoff = now.saturating_sub(policy.minute_retention_seconds());
+    let repair_cache_cutoff = now.saturating_sub(policy.repair_cache_retention_seconds());
     let mut runtime = load(temporary.path());
     let rows = (0..2_u64)
         .map(|sequence| {

@@ -879,7 +879,7 @@ pub(crate) async fn initial_backfill_page_stable(
         let now_unix_seconds = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
         let repair_cache_cutoff_unix_seconds = now_unix_seconds.saturating_sub(
             crate::state::history_repository::replica::RepositoryRetentionPolicy::default()
-                .minute_retention_seconds(),
+                .repair_cache_retention_seconds(),
         );
         let page = state.repository_replica.lock().await.tiered_backfill_page(
             page_cursor,

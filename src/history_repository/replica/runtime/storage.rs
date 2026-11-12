@@ -574,7 +574,7 @@ impl RepositoryReplicaRuntime {
         // by compacted canonical SQLite rows; retaining minute-sized wire payloads for that full
         // period would defeat the repository quota before tiering can help.
         let repair_cache_cutoff = now_unix_seconds.saturating_sub(
-            super::super::RepositoryRetentionPolicy::default().minute_retention_seconds(),
+            super::super::RepositoryRetentionPolicy::default().repair_cache_retention_seconds(),
         );
         self.snapshot
             .segments
@@ -600,6 +600,8 @@ impl RepositoryReplicaRuntime {
         }
         let policy = super::super::RepositoryRetentionPolicy::default();
         let cutoff = now_unix_seconds.saturating_sub(policy.minute_retention_seconds());
+        let repair_cache_cutoff =
+            now_unix_seconds.saturating_sub(policy.repair_cache_retention_seconds());
         let after = self
             .snapshot
             .retention_compaction_cursor
@@ -618,7 +620,14 @@ impl RepositoryReplicaRuntime {
         if fetched_rows.is_empty() {
             self.snapshot.retention_compaction_cursor = None;
             self.snapshot.retention_compaction_continuation = None;
-            let result = self.persist_control_state();
+            let control_payload = serde_json::to_vec(&self.snapshot_for_persistence())
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            let outcome = self
+                .storage
+                .prune_repository_history_segments(repair_cache_cutoff, &control_payload)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            self.storage_degraded |= outcome.maintenance_degraded;
+            let result = Ok(());
             if result.is_ok() {
                 diagnostic.finish();
             }

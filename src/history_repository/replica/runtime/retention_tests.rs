@@ -512,12 +512,12 @@ fn continuous_ingestion_does_not_restart_sqlite_retention_compaction() {
 }
 
 #[test]
-fn sqlite_signed_segment_cache_expires_after_the_minute_detail_window() {
+fn sqlite_signed_segment_cache_expires_after_the_repair_cache_window() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let policy = super::super::RepositoryRetentionPolicy::default();
     let now = policy.minute_retention_seconds().saturating_add(10_000);
     let observed_at = now
-        .saturating_sub(policy.minute_retention_seconds())
+        .saturating_sub(policy.repair_cache_retention_seconds())
         .saturating_sub(1);
     let key = signing_key();
     let identity = identity(&key);
@@ -538,6 +538,9 @@ fn sqlite_signed_segment_cache_expires_after_the_minute_detail_window() {
             now,
         )
         .expect("receive old segment");
+    runtime
+        .prepare_for_replication(now)
+        .expect("prune expired signed wire cache");
     assert_eq!(
         runtime
             .storage

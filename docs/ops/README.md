@@ -914,6 +914,8 @@ Notes:
   `TOKIO_WORKER_THREADS` remains the runtime override for nodes whose visible CPU count exceeds
   their intended control-plane concurrency.
 - Normal history connections use a 1 MiB retained-journal limit in every deployment mode.
+- Repository signed wire segments use a 24-hour anti-entropy cache; canonical rollup rows retain the
+  separate 7-day minute, 90-day five-minute and two-year hourly history contract.
 - Repository record and signed-segment BLOBs use a checksummed Zstandard level-1 envelope when
   smaller.
   Reads restore exact bytes before queries, export and hashing. Signed wires and keys are unchanged.
