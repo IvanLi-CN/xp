@@ -395,7 +395,9 @@ async fn start_snapshot_listeners(
                 let users = active.users;
                 let traffic = traffic.clone();
                 tokio::spawn(async move {
-                    let _ = handle_connection(stream, users, listener, traffic).await;
+                    if let Err(error) = handle_connection(stream, users, listener, traffic).await {
+                        eprintln!("proxy connection failed: {error:#}");
+                    }
                 });
             }
         });
