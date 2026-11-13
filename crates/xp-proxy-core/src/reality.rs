@@ -3,14 +3,23 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
 
+use crate::tls_hello::ClientHelloInfo;
+
 pub const REALITY_INFO: &[u8] = b"REALITY";
 pub const SESSION_ID_LEN: usize = 32;
+pub const SESSION_METADATA_LEN: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionMetadata {
     pub version: [u8; 4],
     pub unix_seconds: u32,
     pub short_id: [u8; 8],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthenticatedClientHello {
+    pub auth_key: [u8; 32],
+    pub session: SessionMetadata,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -75,7 +84,7 @@ pub fn seal_session_id(
     }
     let cipher = Aes256Gcm::new_from_slice(&auth_key).expect("AES-256 key length is valid");
     let nonce = Nonce::from_slice(&client_hello_random[20..32]);
-    let mut encrypted = session_id.to_vec();
+    let mut encrypted = session_id[..SESSION_METADATA_LEN].to_vec();
     cipher
         .encrypt_in_place(nonce, client_hello, &mut encrypted)
         .map_err(|_| RealityCryptoError::InvalidCiphertext)?;
@@ -88,7 +97,7 @@ pub fn open_session_id(
     encrypted_session_id: &[u8],
     client_hello: &[u8],
 ) -> Result<Vec<u8>, RealityCryptoError> {
-    if encrypted_session_id.len() != SESSION_ID_LEN + 16 {
+    if encrypted_session_id.len() != SESSION_ID_LEN {
         return Err(RealityCryptoError::InvalidCiphertext);
     }
     let cipher = Aes256Gcm::new_from_slice(&auth_key).expect("AES-256 key length is valid");
@@ -101,7 +110,7 @@ pub fn open_session_id(
 }
 
 pub fn parse_session_metadata(session_id: &[u8]) -> Result<SessionMetadata, RealityCryptoError> {
-    if session_id.len() != SESSION_ID_LEN {
+    if session_id.len() != SESSION_METADATA_LEN {
         return Err(RealityCryptoError::InvalidSessionId);
     }
     let mut version = [0u8; 4];
@@ -113,6 +122,50 @@ pub fn parse_session_metadata(session_id: &[u8]) -> Result<SessionMetadata, Real
         version,
         unix_seconds,
         short_id,
+    })
+}
+
+pub fn authenticate_client_hello(
+    hello: &ClientHelloInfo,
+    server_private_key: [u8; 32],
+    allowed_short_ids: &[[u8; 8]],
+) -> Result<AuthenticatedClientHello, RealityCryptoError> {
+    let client_public = hello
+        .x25519_key_share
+        .as_ref()
+        .ok_or(RealityCryptoError::InvalidCiphertext)?;
+    let client_public: [u8; 32] = client_public
+        .as_slice()
+        .try_into()
+        .map_err(|_| RealityCryptoError::InvalidCiphertext)?;
+    let server_private = StaticSecret::from(server_private_key);
+    let shared = server_private
+        .diffie_hellman(&PublicKey::from(client_public))
+        .to_bytes();
+    let auth_key = derive_auth_key_from_shared(shared, hello.random);
+    if hello.session_id.len() != SESSION_ID_LEN {
+        return Err(RealityCryptoError::InvalidCiphertext);
+    }
+    let mut aad = hello.handshake.clone();
+    let end = hello
+        .session_id_offset
+        .checked_add(SESSION_ID_LEN)
+        .ok_or(RealityCryptoError::InvalidSessionId)?;
+    let session = aad
+        .get_mut(hello.session_id_offset..end)
+        .ok_or(RealityCryptoError::InvalidSessionId)?;
+    session.fill(0);
+    let opened = open_session_id(auth_key, hello.random, &hello.session_id, &aad)?;
+    let metadata = parse_session_metadata(&opened)?;
+    if !allowed_short_ids
+        .iter()
+        .any(|short_id| short_id == &metadata.short_id)
+    {
+        return Err(RealityCryptoError::InvalidCiphertext);
+    }
+    Ok(AuthenticatedClientHello {
+        auth_key,
+        session: metadata,
     })
 }
 
@@ -134,9 +187,10 @@ mod tests {
         let session_id = build_session_id(*b"1.8\0", 1_700_000_000, &[1, 2, 3], &[4; 16]).unwrap();
         let hello = b"client hello bytes";
         let sealed = seal_session_id(client_key, random, &session_id, hello).unwrap();
+        assert_eq!(sealed.len(), SESSION_ID_LEN);
         assert_eq!(
             open_session_id(server_key, random, &sealed, hello).unwrap(),
-            session_id
+            session_id[..SESSION_METADATA_LEN]
         );
     }
 
@@ -152,10 +206,37 @@ mod tests {
     #[test]
     fn session_metadata_preserves_version_time_and_short_id() {
         let session_id = build_session_id(*b"1.8\0", 123, &[0xaa, 0xbb], &[4; 16]).unwrap();
-        let metadata = parse_session_metadata(&session_id).unwrap();
+        let metadata = parse_session_metadata(&session_id[..SESSION_METADATA_LEN]).unwrap();
         assert_eq!(metadata.version, *b"1.8\0");
         assert_eq!(metadata.unix_seconds, 123);
         assert_eq!(&metadata.short_id[..2], &[0xaa, 0xbb]);
         assert_eq!(&metadata.short_id[2..], &[0; 6]);
+    }
+
+    #[test]
+    fn authenticates_client_hello_with_zeroed_original_session_id_aad() {
+        let client_private = [5u8; 32];
+        let server_private = [6u8; 32];
+        let client_public = PublicKey::from(&StaticSecret::from(client_private));
+        let server_public = PublicKey::from(&StaticSecret::from(server_private));
+        let random = [11u8; 32];
+        let session_id = build_session_id(*b"1.8\0", 1_700_000_000, &[0xaa; 8], &[0; 16]).unwrap();
+        let original = vec![0u8; 4 + SESSION_ID_LEN + 35];
+        let wire_offset = 4 + 35;
+        let auth_key = derive_auth_key(client_private, server_public.to_bytes(), random);
+        let sealed = seal_session_id(auth_key, random, &session_id, &original).unwrap();
+        let hello = ClientHelloInfo {
+            record: Vec::new(),
+            handshake: original,
+            session_id_offset: wire_offset,
+            random,
+            session_id: sealed,
+            server_name: Some("example.com".to_owned()),
+            x25519_key_share: Some(client_public.to_bytes().to_vec()),
+        };
+        let authenticated =
+            authenticate_client_hello(&hello, server_private, &[[0xaa; 8]]).unwrap();
+        assert_eq!(authenticated.auth_key, auth_key);
+        assert_eq!(authenticated.session.short_id, [0xaa; 8]);
     }
 }

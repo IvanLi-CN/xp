@@ -1,6 +1,8 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientHelloInfo {
     pub record: Vec<u8>,
+    pub handshake: Vec<u8>,
+    pub session_id_offset: usize,
     pub random: [u8; 32],
     pub session_id: Vec<u8>,
     pub server_name: Option<String>,
@@ -90,6 +92,8 @@ pub fn parse_client_hello(input: &[u8]) -> Result<ClientHelloInfo, ClientHelloEr
     }
     Ok(ClientHelloInfo {
         record: record.to_vec(),
+        handshake: payload[..4 + hello_len].to_vec(),
+        session_id_offset: 39,
         random,
         session_id,
         server_name,
