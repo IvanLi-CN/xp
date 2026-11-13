@@ -1,6 +1,7 @@
 //! Protocol and control-plane primitives for the native XP data plane.
 
 pub mod control;
+pub mod fallback;
 pub mod transport;
 pub mod vless;
 

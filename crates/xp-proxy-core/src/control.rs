@@ -30,6 +30,15 @@ pub struct ListenerSnapshot {
     pub bind: String,
     pub path: String,
     pub reality: RealitySnapshot,
+    #[serde(default)]
+    pub fallbacks: Vec<FallbackSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FallbackSnapshot {
+    pub target: String,
+    #[serde(default)]
+    pub authorities: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -204,6 +213,20 @@ impl ProxySnapshot {
             if listener.reality.server_names.is_empty() || listener.reality.short_ids.is_empty() {
                 return Err("REALITY server_names and short_ids must not be empty".into());
             }
+            for fallback in &listener.fallbacks {
+                let target = crate::fallback::FallbackTarget::parse(&fallback.target)?;
+                let authorities = fallback
+                    .authorities
+                    .iter()
+                    .cloned()
+                    .collect::<std::collections::BTreeSet<_>>();
+                if !target.is_allowed(&authorities) {
+                    return Err(format!(
+                        "fallback target authority is not allowlisted: {}",
+                        target.authority
+                    ));
+                }
+            }
         }
         for user in &self.users {
             uuid::Uuid::parse_str(&user.uuid)
@@ -240,6 +263,7 @@ mod tests {
                     short_ids: vec!["0123456789abcdef".into()],
                     private_key: "key".into(),
                 },
+                fallbacks: Vec::new(),
             }],
             users: vec![UserSnapshot {
                 uuid: uuid::Uuid::nil().to_string(),
