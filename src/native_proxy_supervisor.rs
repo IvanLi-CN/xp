@@ -322,7 +322,12 @@ mod tests {
             "listeners": [{
                 "bind": "127.0.0.1:0",
                 "path": "/xp-xhttp",
-                "reality": xp_test_fixtures::endpoint_reality(),
+                "reality": {
+                    "dest": xp_test_fixtures::endpoint_reality()["dest"],
+                    "server_names": xp_test_fixtures::endpoint_reality()["server_names"],
+                    "short_ids": xp_test_fixtures::endpoint_short_ids(),
+                    "private_key": xp_test_fixtures::endpoint_reality_keys()["private_key"]
+                },
                 "fallbacks": []
             }],
             "users": [{"uuid": xp_test_fixtures::primary_user_id()}]
@@ -371,8 +376,14 @@ mod tests {
             node_id: xp_test_fixtures::primary_node_id().into(),
             endpoint_id: xp_test_fixtures::primary_endpoint_id().into(),
         }];
-        let snapshot =
-            build_snapshot("node-1", &[endpoint], &users, &memberships, "cluster-key").unwrap();
+        let snapshot = build_snapshot(
+            xp_test_fixtures::primary_node_id(),
+            &[endpoint],
+            &users,
+            &memberships,
+            "cluster-key",
+        )
+        .unwrap();
         assert_eq!(snapshot.listeners.len(), 1);
         assert_eq!(snapshot.listeners[0].bind, "0.0.0.0:443");
         assert_eq!(snapshot.listeners[0].path, "/xp-xhttp");
@@ -382,7 +393,7 @@ mod tests {
         assert_eq!(snapshot.listeners[0].xmux.h_keep_alive_period, 30);
         assert_eq!(
             snapshot.listeners[0].fallbacks[0].target,
-            "https://canary.example/"
+            xp_test_fixtures::canary_http_loopback_url()
         );
         assert_eq!(snapshot.users.len(), 1);
         assert!(uuid::Uuid::parse_str(&snapshot.users[0].uuid).is_ok());
