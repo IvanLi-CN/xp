@@ -10,6 +10,16 @@ pub const SESSION_ID_LEN: usize = 32;
 pub const SESSION_METADATA_LEN: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RealityClientHelloConfig {
+    pub server_name: String,
+    pub server_public_key: [u8; 32],
+    pub short_id: Vec<u8>,
+    pub unix_seconds: u32,
+    pub version: [u8; 4],
+    pub alpn: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionMetadata {
     pub version: [u8; 4],
     pub unix_seconds: u32,
@@ -30,6 +40,105 @@ pub enum RealityCryptoError {
     InvalidSessionId,
     #[error("invalid encrypted session id")]
     InvalidCiphertext,
+    #[error("server name must not be empty")]
+    EmptyServerName,
+    #[error("server name is too long")]
+    ServerNameTooLong,
+    #[error("ALPN value is invalid")]
+    InvalidAlpn,
+}
+
+pub fn build_client_hello(
+    config: &RealityClientHelloConfig,
+    client_private_key: [u8; 32],
+    random: [u8; 32],
+    random_tail: [u8; 16],
+) -> Result<(Vec<u8>, [u8; 32]), RealityCryptoError> {
+    if config.server_name.is_empty() {
+        return Err(RealityCryptoError::EmptyServerName);
+    }
+    if config.server_name.len() > u16::MAX as usize {
+        return Err(RealityCryptoError::ServerNameTooLong);
+    }
+    if config
+        .alpn
+        .iter()
+        .any(|value| value.is_empty() || value.len() > u8::MAX as usize)
+    {
+        return Err(RealityCryptoError::InvalidAlpn);
+    }
+    let private = StaticSecret::from(client_private_key);
+    let public = PublicKey::from(&private);
+    let auth_key = derive_auth_key(client_private_key, config.server_public_key, random);
+    let session_id = build_session_id(
+        config.version,
+        config.unix_seconds,
+        &config.short_id,
+        &random_tail,
+    )?;
+
+    let mut body = Vec::with_capacity(256);
+    body.extend_from_slice(&[0x03, 0x03]);
+    body.extend_from_slice(&random);
+    body.push(SESSION_ID_LEN as u8);
+    let session_offset = body.len();
+    body.extend_from_slice(&[0u8; SESSION_ID_LEN]);
+    body.extend_from_slice(&[
+        0, 10, 0x13, 0x01, 0x13, 0x02, 0x13, 0x03, 0xc0, 0x2f, 0xc0, 0x30,
+    ]);
+    body.extend_from_slice(&[1, 0]);
+    let extensions =
+        client_hello_extensions(&config.server_name, &public.to_bytes(), &config.alpn)?;
+    body.extend_from_slice(&(extensions.len() as u16).to_be_bytes());
+    body.extend_from_slice(&extensions);
+
+    let mut handshake = vec![1, 0, 0, 0];
+    let length = u32::try_from(body.len()).map_err(|_| RealityCryptoError::InvalidCiphertext)?;
+    handshake[1..].copy_from_slice(&length.to_be_bytes()[1..]);
+    handshake.extend_from_slice(&body);
+    let sealed = seal_session_id(auth_key, random, &session_id, &handshake)?;
+    body[session_offset..session_offset + SESSION_ID_LEN].copy_from_slice(&sealed);
+    handshake[4..].copy_from_slice(&body);
+    let record_len =
+        u16::try_from(handshake.len()).map_err(|_| RealityCryptoError::InvalidCiphertext)?;
+    let mut record = vec![0x16, 0x03, 0x01];
+    record.extend_from_slice(&record_len.to_be_bytes());
+    record.extend_from_slice(&handshake);
+    Ok((record, public.to_bytes()))
+}
+
+fn client_hello_extensions(
+    server_name: &str,
+    public_key: &[u8; 32],
+    alpn: &[String],
+) -> Result<Vec<u8>, RealityCryptoError> {
+    let name = server_name.as_bytes();
+    let mut extensions = Vec::new();
+    let mut sni = Vec::with_capacity(name.len() + 5);
+    sni.extend_from_slice(&((name.len() + 3) as u16).to_be_bytes());
+    sni.push(0);
+    sni.extend_from_slice(&(name.len() as u16).to_be_bytes());
+    sni.extend_from_slice(name);
+    extensions.extend_from_slice(&[0, 0]);
+    extensions.extend_from_slice(&(sni.len() as u16).to_be_bytes());
+    extensions.extend_from_slice(&sni);
+    extensions.extend_from_slice(&[0, 0x2b, 0, 3, 2, 3, 4]);
+    extensions.extend_from_slice(&[0, 0x0a, 0, 4, 0, 2, 0, 0x1d]);
+    extensions.extend_from_slice(&[0, 0x33, 0, 38, 0, 36, 0, 0x1d, 0, 32]);
+    extensions.extend_from_slice(public_key);
+    extensions.extend_from_slice(&[0, 0x2d, 0, 2, 1, 1]);
+    if !alpn.is_empty() {
+        let mut protocols = Vec::new();
+        for value in alpn {
+            protocols.push(value.len() as u8);
+            protocols.extend_from_slice(value.as_bytes());
+        }
+        extensions.extend_from_slice(&[0, 0x10]);
+        extensions.extend_from_slice(&((protocols.len() + 2) as u16).to_be_bytes());
+        extensions.extend_from_slice(&(protocols.len() as u16).to_be_bytes());
+        extensions.extend_from_slice(&protocols);
+    }
+    Ok(extensions)
 }
 
 pub fn derive_auth_key(
@@ -315,5 +424,35 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn builds_a_reality_client_hello_accepted_by_server_authenticator() {
+        let client_private = [7u8; 32];
+        let server_private = [9u8; 32];
+        let server_public = PublicKey::from(&StaticSecret::from(server_private));
+        let config = RealityClientHelloConfig {
+            server_name: "origin.example".into(),
+            server_public_key: server_public.to_bytes(),
+            short_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            unix_seconds: 1_700_000_000,
+            version: *b"1.8\0",
+            alpn: vec!["h2".into(), "http/1.1".into()],
+        };
+        let (hello, client_public) =
+            build_client_hello(&config, client_private, [3u8; 32], [4u8; 16]).unwrap();
+        assert_eq!(
+            client_public,
+            PublicKey::from(&StaticSecret::from(client_private)).to_bytes()
+        );
+        let parsed = crate::tls_hello::parse_client_hello(&hello).unwrap();
+        let authenticated = authenticate_client_hello(
+            &parsed,
+            server_private,
+            &[config.short_id.clone().try_into().unwrap()],
+        )
+        .unwrap();
+        assert_eq!(authenticated.session.version, *b"1.8\0");
+        assert_eq!(authenticated.session.short_id, [1, 2, 3, 4, 5, 6, 7, 8]);
     }
 }
