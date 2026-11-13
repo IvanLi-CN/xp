@@ -88,7 +88,7 @@ pub async fn accept(
         key_pair.public_key_raw(),
     )?;
 
-    let provider = rustls::crypto::ring::default_provider();
+    let provider = rustls::crypto::aws_lc_rs::default_provider();
     let config = rustls::ServerConfig::builder_with_provider(provider.into())
         .with_safe_default_protocol_versions()
         .map_err(|error| anyhow!("REALITY TLS protocol versions: {error}"))?
