@@ -3,6 +3,7 @@
 pub mod control;
 pub mod fallback;
 pub mod reality;
+pub mod tls_hello;
 pub mod transport;
 pub mod vless;
 pub mod xhttp;
