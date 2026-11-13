@@ -18,6 +18,19 @@ pub struct XmuxSettings {
     pub h_keep_alive_period: i32,
 }
 
+impl From<crate::control::XmuxSnapshot> for XmuxSettings {
+    fn from(value: crate::control::XmuxSnapshot) -> Self {
+        Self {
+            max_connections: value.max_connections,
+            max_concurrency: value.max_concurrency,
+            c_max_reuse_times: value.c_max_reuse_times,
+            h_max_request_times: value.h_max_request_times,
+            h_max_reusable_secs: value.h_max_reusable_secs,
+            h_keep_alive_period: value.h_keep_alive_period,
+        }
+    }
+}
+
 impl Default for XmuxSettings {
     fn default() -> Self {
         Self {

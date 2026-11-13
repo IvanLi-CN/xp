@@ -1,5 +1,5 @@
 use std::convert::Infallible;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
@@ -15,9 +15,10 @@ use tokio::{
     sync::mpsc,
 };
 
-use xp_proxy_core::TrafficCounter;
 use xp_proxy_core::control::UserSnapshot;
 use xp_proxy_core::vless::{VlessRequestError, decode_request, is_authorized};
+use xp_proxy_core::xhttp::{StreamOneSession, StreamPermit};
+use xp_proxy_core::{TrafficCounter, XmuxSettings};
 
 type ResponseBody = BoxBody<Bytes, Infallible>;
 
@@ -25,14 +26,24 @@ pub async fn serve<S>(
     stream: S,
     users: Vec<UserSnapshot>,
     path: String,
+    xmux: XmuxSettings,
     traffic: Arc<TrafficCounter>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let io = TokioIo::new(stream);
+    let session = Arc::new(Mutex::new(
+        StreamOneSession::new(path.clone(), xmux).map_err(|error| anyhow!(error))?,
+    ));
     let service = service_fn(move |request| {
-        handle_request(request, users.clone(), path.clone(), traffic.clone())
+        handle_request(
+            request,
+            users.clone(),
+            path.clone(),
+            session.clone(),
+            traffic.clone(),
+        )
     });
     http2::Builder::new(TokioExecutor::new())
         .serve_connection(io, service)
@@ -45,12 +56,13 @@ async fn handle_request(
     request: Request<Incoming>,
     users: Vec<UserSnapshot>,
     path: String,
+    session: Arc<Mutex<StreamOneSession>>,
     traffic: Arc<TrafficCounter>,
 ) -> Result<Response<ResponseBody>, Infallible> {
     if request.uri().path() != path {
         return Ok(simple_response(StatusCode::NOT_FOUND, "path not found"));
     }
-    let response = match open_stream(request, users, traffic).await {
+    let response = match open_stream(request, users, session, traffic).await {
         Ok(response) => response,
         Err(error) => simple_response(StatusCode::BAD_REQUEST, &error.to_string()),
     };
@@ -60,6 +72,7 @@ async fn handle_request(
 async fn open_stream(
     request: Request<Incoming>,
     users: Vec<UserSnapshot>,
+    session: Arc<Mutex<StreamOneSession>>,
     traffic: Arc<TrafficCounter>,
 ) -> Result<Response<ResponseBody>> {
     if request.method() != hyper::Method::POST {
@@ -92,6 +105,11 @@ async fn open_stream(
     if !is_authorized(&vless, &allowed) {
         return Err(anyhow!("unauthorized VLESS user"));
     }
+    let permit = session
+        .lock()
+        .map_err(|_| anyhow!("XMUX session lock poisoned"))?
+        .try_open_stream()
+        .map_err(|error| anyhow!(error))?;
     let destination = format!("{}:{}", vless.destination.0, vless.destination.1);
     let mut outbound = TcpStream::connect(destination).await?;
     let extra = &buffered[consumed..];
@@ -103,7 +121,7 @@ async fn open_stream(
         .send(Ok(Frame::data(Bytes::from_static(&[1, 0]))))
         .await
         .map_err(|_| anyhow!("HTTP/2 response stream closed"))?;
-    tokio::spawn(relay_body(body, outbound, sender, traffic));
+    tokio::spawn(relay_body(body, outbound, sender, traffic, session, permit));
     let stream = tokio_stream::wrappers::ReceiverStream::new(receiver);
     let body = StreamBody::new(stream).boxed();
     Ok(Response::builder()
@@ -119,6 +137,8 @@ async fn relay_body(
     outbound: TcpStream,
     sender: mpsc::Sender<Result<Frame<Bytes>, Infallible>>,
     traffic: Arc<TrafficCounter>,
+    session: Arc<Mutex<StreamOneSession>>,
+    permit: StreamPermit,
 ) {
     let (mut read_in, mut write_out) = outbound.into_split();
     let sender_for_downlink = sender;
@@ -151,6 +171,9 @@ async fn relay_body(
         Ok::<(), anyhow::Error>(())
     };
     let _ = tokio::join!(downlink, uplink);
+    if let Ok(mut session) = session.lock() {
+        let _ = session.close_stream(permit);
+    }
 }
 
 fn simple_response(status: StatusCode, message: &str) -> Response<ResponseBody> {
@@ -195,6 +218,7 @@ mod tests {
                 stream,
                 users,
                 "/xp-xhttp".into(),
+                XmuxSettings::default(),
                 Arc::new(TrafficCounter::default()),
             )
             .await

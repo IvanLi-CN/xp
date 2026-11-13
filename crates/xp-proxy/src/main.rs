@@ -111,7 +111,7 @@ async fn handle_connection(
 ) -> Result<()> {
     let (size, probe) = peek_probe(&stream).await?;
     if size == 4 && &probe == b"PRI " {
-        return xhttp_h2::serve(stream, users, listener.path, traffic).await;
+        return xhttp_h2::serve(stream, users, listener.path, listener.xmux.into(), traffic).await;
     }
     if size >= 1 && probe[0] == 0x16 {
         return handle_tls_or_fallback(stream, listener, traffic).await;
