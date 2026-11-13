@@ -862,9 +862,9 @@ fn read_pss(pid: u32) -> Option<PssSample> {
         file_kib: if uses_rollup { metric("Pss_File:") } else { 0 },
     })
 }
-fn assert_expected_memory_scope(pid: u32) {
+fn assert_expected_memory_scope(pid: u32) -> (u64, u64) {
     if std::env::var_os("XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT").is_none() {
-        return;
+        return (0, 0);
     }
     let cgroup_contents = fs::read_to_string(format!("/proc/{pid}/cgroup"))
         .expect("read XP cgroup membership")
@@ -890,6 +890,10 @@ fn assert_expected_memory_scope(pid: u32) {
         memory_swap_max, "0",
         "XP workload must disable swap in its cgroup"
     );
+    (
+        memory_max.parse().expect("parse XP memory.max"),
+        memory_swap_max.parse().expect("parse XP memory.swap.max"),
+    )
 }
 pub(crate) fn read_cpu_ticks(pid: u32) -> u64 {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).expect("read process stat");
@@ -910,7 +914,6 @@ pub fn support_pids_from_env() -> Vec<u32> {
         .filter_map(|value| value.trim().parse::<u32>().ok())
         .collect()
 }
-
 pub async fn run_resource_workload(
     label: &str,
     binary: &Path,

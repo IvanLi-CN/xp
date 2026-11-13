@@ -1,3 +1,4 @@
+mod entry;
 use super::*;
 
 mod batch;
@@ -16,50 +17,6 @@ pub(crate) use types::PendingRepositoryMutation;
 use types::RepositoryWireRequest;
 
 impl RepositoryReplicaRuntime {
-    pub(crate) fn receive_wire(
-        &mut self,
-        cluster_id: &str,
-        identity: &RepositoryNodeIdentity,
-        wire: &[u8],
-        now_unix_seconds: u64,
-    ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
-        self.receive_wire_from_repository(
-            cluster_id,
-            identity,
-            wire,
-            now_unix_seconds,
-            &["local".to_owned()],
-            "local",
-        )
-    }
-
-    pub(crate) fn receive_wire_from_repository(
-        &mut self,
-        cluster_id: &str,
-        identity: &RepositoryNodeIdentity,
-        wire: &[u8],
-        now_unix_seconds: u64,
-        ready_repositories: &[String],
-        local_repository_id: &str,
-    ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
-        self.receive_wire_from_repository_inner(
-            RepositoryWireRequest {
-                cluster_id,
-                identity,
-                wire,
-                now_unix_seconds,
-                ready_repositories,
-                local_repository_id,
-                allow_retained_anchor: false,
-                rollback_snapshot: None,
-                discard_gap_evidence_on_error: false,
-                allow_retained_sequence_gap: false,
-                retained_anchor_checkpoint: None,
-            },
-            None,
-        )
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn receive_wire_from_repository_with_gaps(
         &mut self,
@@ -88,6 +45,7 @@ impl RepositoryReplicaRuntime {
                 ready_repositories,
                 local_repository_id,
                 allow_retained_anchor: false,
+                allow_verified_local_source_replay: false,
                 rollback_snapshot: Some(previous_snapshot.clone()),
                 discard_gap_evidence_on_error: true,
                 allow_retained_sequence_gap: false,
@@ -133,6 +91,7 @@ impl RepositoryReplicaRuntime {
                 ready_repositories,
                 local_repository_id,
                 allow_retained_anchor: true,
+                allow_verified_local_source_replay: false,
                 rollback_snapshot: None,
                 discard_gap_evidence_on_error: false,
                 allow_retained_sequence_gap: false,
@@ -199,6 +158,7 @@ impl RepositoryReplicaRuntime {
                 ready_repositories,
                 local_repository_id,
                 allow_retained_anchor: true,
+                allow_verified_local_source_replay: false,
                 rollback_snapshot: Some(previous_snapshot.clone()),
                 discard_gap_evidence_on_error: true,
                 allow_retained_sequence_gap,
@@ -243,6 +203,7 @@ impl RepositoryReplicaRuntime {
             ready_repositories,
             local_repository_id,
             allow_retained_anchor,
+            allow_verified_local_source_replay,
             rollback_snapshot,
             discard_gap_evidence_on_error,
             allow_retained_sequence_gap,
@@ -349,7 +310,18 @@ impl RepositoryReplicaRuntime {
         } else {
             None
         };
+        let local_source_replay_acceptance = if allow_verified_local_source_replay {
+            self.receiver
+                .as_ref()
+                .expect("receiver initialized")
+                .accept_verified_local_source_replay(&segment, identity)
+                .map_err(RepositoryRuntimeError::from)?
+        } else {
+            None
+        };
         let acceptance = if let Some(acceptance) = persisted_acceptance {
+            Ok(acceptance)
+        } else if let Some(acceptance) = local_source_replay_acceptance {
             Ok(acceptance)
         } else if suppress_known_deletions && (allow_retained_anchor || allow_retained_sequence_gap)
         {
@@ -578,7 +550,7 @@ impl RepositoryReplicaRuntime {
         }
     }
 
-    fn ensure_receiver(&mut self) -> Result<(), RepositoryRuntimeError> {
+    pub(super) fn ensure_receiver(&mut self) -> Result<(), RepositoryRuntimeError> {
         if self.receiver.is_none() {
             let cluster_id = self
                 .snapshot
@@ -780,6 +752,9 @@ impl RepositoryReplicaRuntime {
     ) -> Result<(), RepositoryRuntimeError> {
         let (schema_id, schema_version) = key.schema();
         let prefix = key.record_key().ends_with(b":");
+        for evidence in &mut self.snapshot.prefix_recoveries {
+            evidence.delete_records(key, prefix)?;
+        }
         if self.uses_sqlite_history() {
             self.reset_partition_summary_cache();
             mutation.tombstones.push(RepositoryHistoryTombstone {

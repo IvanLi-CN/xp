@@ -1,5 +1,6 @@
 id: fixture-policy-catalog-value-types
 valid:
+  - '{ "identifiers": { "releaseTag": "v0.2.0" } }'
   - '{ "metrics": { "latencyLow": 12 } }'
   - '{ "hosts": { "primary": "node-a.fixture.test" } }'
   - '{ "lists": { "primaryServerNames": ["edge-a.fixture.test"] } }'
@@ -14,6 +15,7 @@ valid:
     }
   - '{ "fixtures": { "strings": { "nodeId": { "fixture229": "node-fixture-229" } } } }'
 invalid:
+  - '{ "identifiers": { "releaseTag": 2 } }'
   - '{ "metrics": true }'
   - '{ "latencyLow": "12" }'
   - '{ "primary": 12 }'

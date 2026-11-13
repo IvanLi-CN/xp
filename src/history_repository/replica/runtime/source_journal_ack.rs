@@ -5,6 +5,35 @@ use crate::state::history_storage::SourceDeliveryAttempt;
 use super::*;
 
 impl RepositoryReplicaRuntime {
+    pub(crate) fn acknowledge_original_source_page(
+        &mut self,
+        page: &[RepositoryReplicaSegment],
+        at: u64,
+        path: &str,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let identity = page
+            .first()
+            .ok_or(RepositoryRuntimeError::StateLimitExceeded)?
+            .identity
+            .clone();
+        if page.iter().any(|segment| segment.identity != identity) {
+            return Err(RepositoryRuntimeError::Storage(
+                "original source page mixes identities".to_owned(),
+            ));
+        }
+        let previous = self.snapshot.clone();
+        if self.snapshot.local_source.node_id.is_empty() {
+            self.snapshot.local_source.node_id = identity.node_id().as_str().to_owned();
+        }
+        if let Err(error) =
+            self.acknowledge_local_source_segments_via_without_hydrating(page, at, path)
+        {
+            self.snapshot = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub(crate) fn acknowledge_local_source_segment(
         &mut self,
         delivered_wire: &[u8],

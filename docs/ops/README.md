@@ -131,6 +131,26 @@ deploys it to `xp-web`, and repeats the same public gate. It does not create tag
 modify Nodes. Docker/Compose continues to use host-side image replacement and is not a Web automatic
 upgrade target.
 
+The release and rollback workflows use `.github/scripts/deploy-edgeone.sh` for the pinned
+`edgeone@1.6.33` CLI call. The helper never rebuilds the Web archive and emits only a non-secret
+`EDGEONE_FAILURE_CLASS` when deployment fails:
+
+- `credential_rejected` requires visible 401/403 or an explicit authentication error.
+- `project_or_permission` requires visible project or permission evidence.
+- `endpoint_unavailable` is limited to deployment-before-side-effect transport failures.
+- `deployment_ambiguous` means upload, remote acceptance, or deployment state may have started.
+- `auth_or_endpoint_ambiguous` preserves a generic CLI error whose cause is not proven.
+
+Only complete preflight transport failures receive at most three bounded attempts. Once deployment
+may have started, or evidence is ambiguous, the helper stops without retrying. A recovery must reuse
+the same `head_sha`, expected version, resource-evidence commit, and verified Web archive; it must
+not compute a successor version or replace an exact existing tag. The manifest artifact name must
+also equal `xp-web-<web_build_id>-<target_sha>.tar.gz`; release and rollback jobs load their
+deployment helper from the immutable workflow commit. The owner should verify that the
+secret is an EdgeOne Makers API Token from the same Global/China site and workspace as `xp-web`,
+then update `EDGEONE_API_TOKEN` in GitHub without exposing its value and rerun the existing release
+identity or protected rollback workflow.
+
 ## Minimal runtime assumptions
 
 Host-managed mode assumptions:
@@ -144,6 +164,12 @@ Host-managed mode assumptions:
   traffic and does not share a user session. Native Reverse is retained only as
   `disabled_pending_rework` diagnostic state and is not selected, probed, reconciled, or
   dynamically installed.
+  Public signed health probes use a 30-second deadline, including public-only probes when Mesh
+  is disabled and periodic public standby probes. This matches the production Raft RPC TTL;
+  Direct Mesh probes retain five seconds. A successful verified signed response can close an
+  expired public circuit. A timeout or invalid acknowledgement leaves it retryable under the
+  existing backoff. This behavior is shared by systemd, OpenRC and Docker/Compose nodes and
+  introduces no environment override or alternate route.
   Repository synchronization is separate from that control-plane fallback: direct requests use the
   peer's public HTTPS `api_base_url` only; they do not select or probe Mesh or Reverse Mesh. Source
   delivery uses the same public HTTPS path. A
@@ -154,6 +180,9 @@ Host-managed mode assumptions:
   reports configured, partial and unreachable states with per-member capacity and sync quality.
   `PUT /api/admin/history-repositories` replaces the validated membership through Raft. There is
   no static Mesh proxy environment, listener or compatibility path.
+- Raft WAL persistence borrows retained entries while holding the existing log lock and transfers
+  its JSON buffer to the blocking writer. systemd, OpenRC and Docker/Compose keep the same WAL
+  format, atomic replacement and error propagation without cloning the full retained log or buffer.
 - Service Monitoring uses the same History Repository delivery path. Each XP node keeps a
   WAL-backed `${XP_DATA_DIR}/uptime.sqlite3` capture journal; configured repository nodes retain
   the signed observations and rollups in `${XP_DATA_DIR}/history.sqlite3`. Preserve both files on
@@ -881,9 +910,74 @@ Notes:
   coverage, watermarks, gaps, clock skew and `complete` / `partial` / `local_only` query quality
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
+- 缺口报告必须先分类：仍有原始 wire、source journal 或 Ready 副本可验证的为
+  `recoverable_gap`，应继续 recovery；经过正式来源、签名和保留边界证据确认无法恢复的为
+  `permanent_gap`，属于设计允许的历史不完整性，必须保留并让受影响查询维持 `partial` 与
+  `replica_converged=false`；证据不足的为 `unclassified_gap`，必须继续调查。只有
+  `recoverable_gap` 与 `unclassified_gap` 均为零，且没有待处理 repair/outbox 或未解释的
+  `history_truncated`，才能报告没有未解决的同步异常。`ready`、无新错误或空间下降本身不能
+  证明历史已经完整收敛。
+- Only configured repository members defer their live journal replay for a missing initial-source
+  baseline. Ordinary source nodes and former repositories do not import every peer baseline; a
+  newly joined node must not suspend their durable outbox replay. This applies to systemd, OpenRC
+  and Docker/Compose senders and does not mark any checkpoint complete.
+- 历史源向远端仓库交付时，不得根据源节点本机 receiver 缺少水位或记录而推断远端存在永久缺口。
+  本机 receiver repair gap 仅能用于本机接收重放；远端仍使用已持久化的源缺口证据和严格原始签名链。
+  曾担任仓库的普通源节点同样适用，不能通过重新赋予仓库角色绕过这一边界。
+- sequence summary 与 payload encoding 后台维护只在当前仓库成员运行。
+  普通源和已退出仓库角色的节点继续交付持久化队列，保留旧归档供恢复读取，避免反复迁移争用资源。
+- Source batch receive remains atomic. A signed sequence-gap or hash-chain rejection of a
+  mixed batch without gap evidence triggers bounded retries by independent stream: at most
+  eight requests within one shared 60-second repository request budget, retaining each original
+  wire and stream order. A legitimate WAN ACK taking longer than fifteen seconds remains eligible;
+  the deadline never resets between retries.
+  Tombstones run first; their failure, transport ambiguity, authentication failure or storage
+  failure stops recovery. Successful streams receive real ACKs while missing-prefix streams
+  stay queued. This does not repair an expired prefix or authorize permanent-gap markers.
+  The sending XP must include this fix in systemd, OpenRC and container deployments; upgrading
+  only the repository receiver cannot change an older sender's batch failure handling.
+- Linux/glibc XP sets a two-arena allocator limit before creating Tokio workers, preserving
+  an explicit `MALLOC_ARENA_MAX` override. musl and other allocators keep native behavior.
+  `TOKIO_WORKER_THREADS` remains the runtime override for nodes whose visible CPU count exceeds
+  their intended control-plane concurrency.
 - Normal history connections use a 1 MiB retained-journal limit in every deployment mode.
+- Repository signed wire segments use a 24-hour anti-entropy cache; canonical rollup rows retain the
+  separate 3-day minute, 90-day five-minute and two-year hourly history contract.
+- Repository record and signed-segment BLOBs use a checksummed Zstandard level-1 envelope when
+  smaller.
+  Reads restore exact bytes before queries, export and hashing. Signed wires and keys are unchanged.
+  Existing JSON BLOBs migrate through transactional rowid pages with durable cursors.
+  The worker wakes every five seconds and processes at most eight pages within two seconds.
+  It releases the replica lock between pages.
+  Logs report `history repository payload encoding page committed` and saved bytes.
+  Read metadata keys `repository_payload_records_cursor_v1` and
+  `repository_payload_segments_cursor_v1`;
+  A value of `-1` means the table scan is complete. Incremental vacuum releases free pages.
+  XP drains the pragma result to completion within its SQLite page budget: 64 pages after
+  ordinary commits and 512 after a migration page. Zero performs no work. Free pages count
+  toward the physical database size until bounded maintenance releases them.
+  There is no full VACUUM, second database, retention reduction or manual checkpoint.
+  systemd, OpenRC and Docker/Compose preserve the database and use this same path.
+  Builds without the decoder cannot read migrated payloads and must not be deployed over them.
 - A safe WAL reset releases idle allocation; active transactions and readers may exceed the limit.
 - Capacity still counts the physical database plus WAL and stops history writes when insufficient.
+- Operators may preview a persistent local admission quota with
+  `sudo xp-ops xp history-repository-quota --quota-bytes 9000000000 --dry-run`, then apply the
+  reviewed value with the same command and `--apply --yes` instead of `--dry-run`.
+  Containers without xp.env use
+  `docker exec xp-101 xp-ops xp history-repository-quota` with
+  `--data-dir /var/lib/xp/data --quota-bytes 9000000000 --dry-run`
+  (replace `xp-101` with the selected container); apply still requires `--apply --yes`.
+  Only the local node's signed identity may set its quota; a remote member or administrator
+  Bearer token cannot do so. The command does not edit SQLite directly or evict retained history
+  or unacknowledged outbox rows. A quota below current usage stops new history writes.
+  systemd, OpenRC and Docker/Compose preserve this local admission setting across restart.
+  Runtime capacity reports the enforced local quota. The existing Raft runtime patch publishes
+  usage and free space only; `member.capacity.quota_bytes` retains its configured value. A local
+  quota difference alone must not trigger repeated usage-only writes. Default 10 GiB is
+  10,737,418,240 bytes,
+  exceeding decimal 10 GB. Reserve headroom for WAL/SHM and an admitted transaction when choosing
+  a value below an external size limit; this is an admission guard, not an OS hard quota.
 - Do not delete WAL, manually checkpoint, run full `VACUUM`, or raise quota to bypass the guard.
 - `history.sqlite3.diagnostics.json` is a private, bounded operational record for investigating
   slow local repository reads and maintenance. It is atomically replaced by a bounded, coalescing
@@ -988,6 +1082,11 @@ Notes:
   only those IDs and resumes the saved summary cursor. An unchanged pending set after a release
   indicates the serving node is pre-fix and must be upgraded; never clear the checkpoint or source
   outbox manually.
+  初始来源回填每轮最多尝试三个来源；
+  每次遍历按持久导入进度排序，所有待处理来源都获得一次尝试后才重试此前来源。
+  开始处理某个来源时才记录尝试，前序导入报错不把尚未请求的来源算作已尝试。
+  失败只消耗内存中的调度机会，不推进 checkpoint 或 ACK；
+  新增来源加入当前遍历，完成或移除的来源退出，重启仅重置调度顺序。
   A retained segment may be the first locally available frame for a source stream and therefore
   have a nonzero sequence plus a predecessor hash that is no longer retained. The ready-peer
   initial backfill path accepts this signed anchor and keeps the stream unverified while requiring
@@ -1087,6 +1186,12 @@ Notes:
   History summary maintenance uses canonical v3 metadata in the existing database.
 
   - V3 peers explicitly request `summary_version=3`; predecessors keep v1 fallback.
+  - Signed membership capabilities never wait for the history replica lock.
+    A busy replica withholds only its optional ready-summary capability.
+  - Live capture and replay release duplicate wire windows before receiver rollback checkpoints.
+    SQLite retains unacknowledged wires until real ACK; JSON fallback retains its only copy.
+    Local replay proofs decode one wire at a time and retain only chain metadata. All wires,
+    including future entries, must decode before the proof is accepted.
   - The five-second worker rebuilds bounded pages without copying history or resetting progress.
   - The last dirty-block page publishes completion without requiring an idle tick.
   - Ready local standbys stay eligible; failed standbys retry the HTTPS primary next cycle.
@@ -1102,6 +1207,12 @@ Notes:
   decision. The workflow checks out the exact target SHA, builds the generated Web shell from that
   SHA, and uploads the raw workload log plus a v2 attestation. The owner must then create a signed
   evidence commit containing exactly those two files before dispatching the release workflow.
+  musl 节点的修复候选使用 `candidate_target=x86_64-unknown-linux-musl` 和已授权的
+  `build_version` 运行同一门禁。流程以 Linux 原生 musl 工具链构建候选、验证大型格式化
+  Node History JSON 的删除版本读取耗时，并用该候选执行资源工作负载；下载
+  `measured-candidate-<run-id>` 中的二进制，核验 source/target、版本和 SHA256 后部署。
+  GNU 测量结果不能替代另行本地交叉构建的 musl 候选；这条路径不发布 release，
+  部署仍须满足正式升级或已明确授权的候选例外。
   Retained partition mismatches after segment repair drains trigger the same single-authority
   tiered import followed by a fresh deep summary pass; the member cannot enter `ready` while that
   verification remains unresolved.
@@ -1355,10 +1466,19 @@ Host-managed root delegation:
 
 Rollback notes:
 
+- `xp-ops upgrade` 的 release 元数据请求总上限为 60 秒，每个下载总上限为 15 分钟；两者共享
+  10 秒连接和 30 秒读取空闲上限。超时沿既有失败路径退出，清理本次未完成下载并保留原目标文件。
+
 - Before every host-managed upgrade, `xp-ops` removes only its own old regular-file artifacts:
   `.bak.*`, `.failed.*`, and staged files for `xp`, `xp-ops`, Xray, and cloudflared, plus the exact
   `/tmp/xp-ops` work directory. It never follows symlinks and never cleans `/var/backups/xp`,
   configuration, credentials, certificates, or Raft data.
+- 服务激活和就绪检查完成后，备份删除是提交后的清理阶段；第一个 unlink 前先同步有界诊断守卫。
+  清理校验原文件身份，不把二进制内容读入 RAM。此后的删除失败返回
+  `cleanup_incomplete: committed_upgrade`，保留就绪的新程序、未删除的备份和诊断，不尝试通过
+  已删除的备份回滚。下一次升级拒绝开始，直到 root 核验正式程序、服务就绪并精确清理剩余备份。
+  提交前的安装、激活和就绪失败仍按既有契约回滚；完整清理成功才报告成功。
+  详见 [ADR 0033](../adr/0033-committed-upgrade-backup-cleanup.md)。
 - All host-managed nodes use the same retention contract, regardless of disk size. A backup exists
   only for the active replacement transaction. After a successful upgrade or a successful rollback,
   no `.bak.*` or `.failed.*` binary remains. There is no persistent local binary fallback.
@@ -1435,9 +1555,17 @@ Performance acceptance is explicit and SHA-bound; ordinary main runs are not acc
 informal moving average. Dispatch `ci-performance` from the exact commit under test and pass the
 same full 40-character SHA as `target_sha`. It runs three isolated cold/warm pairs. Each pair has a
 unique cache namespace containing the workflow run and attempt, so a rerun cannot reuse the previous
-attempt's cold cache. It requires cold misses and warm hits, and fails when the maximum parallel-job
-duration exceeds 540 seconds cold or 300 seconds warm. The cold budget covers a real Cargo rebuild
-on a hosted runner; warm remains the tighter regression signal after cache population.
+attempt's cold cache. It requires cold misses and warm hits, and fails when the declared workload
+steps exceed 540 seconds cold or 300 seconds warm. Checkout, toolchain/cache restore, and artifact
+upload and runner cleanup remain in required wall-clock and runner-total metrics, but are not
+silently treated as test/build workload. The cold budget covers a real Cargo rebuild on a hosted
+runner; warm
+remains
+the tighter regression signal after cache population.
+
+The performance workflows cancel only superseded pull-request runs for the same PR; each
+`workflow_dispatch` run has an independent concurrency group. The Web and Storybook jobs share
+their Bun/Playwright dependency cache key while retaining separate jobs and cache receipts.
 
 Dispatch `release-performance` the same way to exercise the reusable release build graph without
 creating a tag, package version, GitHub Release, or deployment. It uses a synthetic
@@ -1445,9 +1573,13 @@ creating a tag, package version, GitHub Release, or deployment. It uses a synthe
 Web, 600 seconds per musl architecture, 180 seconds per managed-runtime architecture, 300 seconds
 for image assembly, and 900 seconds for the composed critical path.
 
-Both workflows publish machine-readable JSON. Durations use GitHub Job `started_at` and
-`completed_at`; queue delay is not part of the execution limits. Missing jobs, failed jobs,
-incomplete timestamps, SHA mismatches, and malformed cache receipts fail closed.
+Both workflows publish machine-readable JSON. The report includes required wall-clock time, workflow
+critical path, total runner seconds, run/job counts, artifact count and bytes, artifact retention,
+and cache bytes plus typed cache-retention availability. Required wall-clock time spans the earliest
+required job start through the latest required job completion; queue delay remains a separate field,
+and critical path follows the declared workflow dependency graph. Durations use GitHub Job
+`started_at` and `completed_at`; missing jobs, failed jobs, incomplete timestamps, SHA mismatches,
+and malformed cache receipts fail closed.
 
 ```text
 sha="$(git rev-parse HEAD)"
@@ -1460,7 +1592,7 @@ For failures, download the `ci-performance-*` or `release-performance-*` JSON ar
 diagnostics are retained as `cache-receipt-*` artifacts in the same run.
 
 A pull request that changes a performance workflow or its shared build/assertion inputs runs the
-same acceptance automatically against GitHub's exact PR merge SHA. This self-test makes a new
+same acceptance automatically against GitHub's exact PR head SHA. This self-test makes a new
 workflow verifiable before it first reaches the default branch; ordinary product PRs do not trigger
 the expensive performance matrix.
 
@@ -1746,3 +1878,73 @@ Practical guidance:
 
 - Do not re-run `xp init` against an existing data dir unless you are intentionally bootstrapping a new cluster.
 - For an existing node, upgrade by swapping the binary and keeping the existing `XP_DATA_DIR` (with a backup).
+
+序列汇总维护每次持有 replica 锁最多处理一个 4096 序号块，并在块间释放锁、让出调度。
+
+后台每轮最多处理 16 个切片，达到两秒调度预算后停止安排新切片；已开始的 SQLite 事务正常完成。
+
+查询与反熵准备最多推进一个块，不在同一次持锁期间重建整页摘要。
+
+摘要完成前继续使用既有版本回退，保持原始数据、接收顺序和真实 ACK 规则。
+
+旧身份历史恢复仅允许本机签名的正式运维入口。普通上报认证不放宽，仓库仅导入已离开集群的原始来源身份。
+
+源端使用 `xp-ops xp history-original-source`，仓库使用 `xp-ops xp history-original-import`。
+
+两个命令默认只预览，提交需 `--apply --yes --expected-fingerprint`。指纹绑定原始页与集群事实。
+
+原始 wire 保持签名、严格链与删除语义，整页事务提交后才生成收据。导入保留现有 15 分钟交接租约。
+
+源端通过注册仓库公网 HTTPS 的签名查询确认逐段持久 wire 和接收链，再由现有 ACK 事务清理队列。
+
+新身份必须等旧队列、背压和删除映射清空，再启动独立 epoch 与零序号。最后一页 ACK 原子保存旧身份。
+
+systemd、OpenRC、Docker/Compose 共用实现。无 xp.env 的容器必须指定 `--data-dir /var/lib/xp/data`。
+
+已提交的历史页若原始观测时间早于当前 15 分钟，派生摘要维护让行最多 30 秒。仅成功提交可开启窗口；持续历史提交不能续期。
+
+窗口到期后，下一个维护检查消费该窗口并允许有界维护尝试；后续成功历史提交才可开启新窗口，避免摘要维护饥饿。此进程内状态重启即清除；实时上报不触发窗口，配额、提交后保留期清理与载荷压缩继续执行。
+
+## 普通源原始前缀不可恢复时的显式恢复
+
+操作人确认原始签名前缀无法找回并接受历史缺失后，才可使用以下正式运维入口。
+
+`xp-ops xp history-prefix-recovery` 不会把源加入仓库，也不会清空未 ACK 的队列。
+
+源节点通过 `--source-plan FILE` 读取计划 JSON，输出带 `bundle` 的签名清单。
+
+- 顶层包含 `collector_node_id` 和 `plans`。
+- 每项计划包含 `stream`、`source_epoch`、`receiver_watermark` 和 `head_segment_id`。
+- `head_segment_id` 必须指向该流首个原始待发段。
+- 只支持 runtime、traffic、path_health。
+- 清单绑定源端持久删除版本及完整删除基线。
+
+在目标 Ready 仓库使用 `--bundle-file FILE` 预览。
+
+服务通过注册公网 HTTPS 再次读取同一清单，验证全部 voter 版本、leader quorum、成员与地址。
+
+预览也绑定接收水位和删除保护；事实变化必须重新预览。
+
+提交增加 `--apply --yes --expected-fingerprint FINGERPRINT`。
+
+不带文件参数时检查持久恢复证据。源聚合与已有聚合可能重叠，因此证据不进入普通统计。
+
+删除事务也清除证据副本；数据库及持久数据目录仍须按正常升级合同保留。
+
+源端继续用普通上报取得真实 ACK，随后才能删除原始 outbox 行。
+
+验收须看到队列排空、容量暂停解除和后续 ACK 持续前进。
+
+历史仍标记 partial，不能宣称原始历史完整。
+
+保留聚合另有逐条域隔离的源签名，绑定原清单摘要与完整记录内容。
+
+重启后只凭持久证据即可验签；删除只移除对应记录和证明，剩余记录仍可独立核验。
+
+完整删除基线在遍历阶段限制记录数及内存预算；超限失败，不把部分基线标记为完整。
+
+恢复账本要求 XP 3.47.9 或更新版本。`xp-ops upgrade` 在下载或替换前拒绝不兼容目标。
+
+自动回滚在恢复 XP 备份前实际检查备份版本，失败时保留现有程序、事务备份与诊断，不把 xp-ops 退回缺少保护的版本。
+
+容器镜像替换同样不得覆盖为不支持此账本的版本。

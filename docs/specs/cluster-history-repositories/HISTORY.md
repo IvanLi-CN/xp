@@ -4,6 +4,10 @@
 
 ## Decision Trace
 
+- 分析生产仓库的实际占用后，将分钟级 rollup 保留从 7 天收紧为 3 天；90 天五分钟级、随后小时级和 24 小时 signed wire 修复缓存保持不变，避免把配额上限误当作合理容量。
+
+- gap 查询在计算元数据上限前按完整标记身份去重，避免恢复账本与活动 gap 重复造成错误拒绝；独立原因和独立 gap 的硬上限保持有效。
+
 - 首个历史仓库基线回填改为独立的签名 backfill 流：schema stream 使用带 source 标识的 backfill
   stream，tombstone 使用 `tombstone-backfill-<source_node_id>`；实时 source sequence/outbox
   不再被历史页占用。页 wire 在应用前持久化，恢复时重验身份、签名、归属、epoch、sequence 和
@@ -136,3 +140,12 @@ repair 的源端保留边界证明。
 - `./SPEC.md`
 - `./IMPLEMENTATION.md`
 - Issue #248: https://github.com/IvanLi-CN/xp/issues/248
+
+- PR #453 的回填调度审查发现低进度失败来源可永久占据三个名额；改为内存遍历调度，保留每轮上限与真实 ACK 语义。
+- 同一调度根因的错误退出复核要求逐来源记录实际尝试，避免整批预记后首个导入失败继续饿死未请求来源。
+
+## 显式普通源前缀恢复
+
+- ADR 0034 将普通源无法找回的签名前缀与保留期证据分开，新增明确损失的人工恢复边界。聚合内容通过有界证据保留，避免把重叠贡献误当成互斥样本。
+
+- 补齐恢复账本的升级与自动回滚兼容性保护，覆盖持久证据保留、不兼容目标拒绝和备份版本实际检查。

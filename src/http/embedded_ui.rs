@@ -190,8 +190,32 @@ fn client_accepts_gzip(headers: &HeaderMap) -> bool {
     gzip.or(wildcard).is_some_and(|quality| quality > 0.0)
 }
 
-fn embedded_index_response(accepts_gzip: bool) -> Response {
-    let Some(index) = web_assets::get("index.html") else {
+#[cfg(test)]
+const TEST_INDEX_GZIP: &[u8] = &[
+    0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0xb3, 0x51, 0x4c, 0xc9, 0x4f, 0x2e,
+    0xa9, 0x2c, 0x48, 0x55, 0xc8, 0x28, 0xc9, 0xcd, 0xb1, 0xb3, 0x81, 0x90, 0x49, 0xf9, 0x29, 0x95,
+    0x76, 0x25, 0xa9, 0xc5, 0x25, 0x36, 0xfa, 0x60, 0xa6, 0x8d, 0x3e, 0x58, 0x1c, 0x00, 0xfc, 0x54,
+    0xf8, 0x77, 0x2d, 0x00, 0x00, 0x00,
+];
+
+#[cfg(test)]
+const TEST_SERVICE_WORKER_GZIP: &[u8] = &[
+    0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0x2b, 0x4e, 0xcd, 0x49, 0xd3, 0x4b,
+    0x4c, 0x49, 0x71, 0x2d, 0x4b, 0xcd, 0x2b, 0xf1, 0xc9, 0x2c, 0x2e, 0x49, 0xcd, 0x4b, 0x2d, 0xd2,
+    0x50, 0x4f, 0x4b, 0x2d, 0x49, 0xce, 0x50, 0xd7, 0x51, 0xd0, 0xd0, 0x54, 0xb0, 0xb5, 0x53, 0xa8,
+    0xae, 0xd5, 0xb4, 0x06, 0x00, 0xac, 0xa5, 0x9f, 0x58, 0x29, 0x00, 0x00, 0x00,
+];
+
+#[cfg(test)]
+fn test_embedded_asset(bytes: &'static [u8]) -> web_assets::EmbeddedAsset {
+    web_assets::EmbeddedAsset { bytes, gzip: true }
+}
+
+fn embedded_index_response(
+    index: Option<web_assets::EmbeddedAsset>,
+    accepts_gzip: bool,
+) -> Response {
+    let Some(index) = index else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     embedded_bytes_response(
@@ -216,6 +240,13 @@ pub async fn embedded_asset(Path(path): Path<String>, headers: HeaderMap) -> Res
 }
 
 pub async fn embedded_spa_fallback(req: Request<Body>) -> Response {
+    embedded_spa_fallback_with_lookup(req, web_assets::get)
+}
+
+fn embedded_spa_fallback_with_lookup(
+    req: Request<Body>,
+    lookup: impl Fn(&str) -> Option<web_assets::EmbeddedAsset>,
+) -> Response {
     if !matches!(*req.method(), Method::GET | Method::HEAD) {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -223,10 +254,10 @@ pub async fn embedded_spa_fallback(req: Request<Body>) -> Response {
     let accepts_gzip = client_accepts_gzip(req.headers());
     let path = req.uri().path().trim_start_matches('/');
     if path.is_empty() {
-        return embedded_index_response(accepts_gzip);
+        return embedded_index_response(lookup("index.html"), accepts_gzip);
     }
 
-    if let Some(bytes) = web_assets::get(path) {
+    if let Some(bytes) = lookup(path) {
         let cache_policy = if path == "sw.js" {
             SERVICE_WORKER_CACHE_POLICY
         } else if path.starts_with("assets/") {
@@ -242,20 +273,31 @@ pub async fn embedded_spa_fallback(req: Request<Body>) -> Response {
         );
     }
 
-    embedded_index_response(accepts_gzip)
+    embedded_index_response(lookup("index.html"), accepts_gzip)
 }
 
 #[cfg(test)]
 mod tests {
     use std::io::Read;
 
-    use super::{client_accepts_gzip, content_security_policy, embedded_spa_fallback};
+    use super::{
+        TEST_INDEX_GZIP, TEST_SERVICE_WORKER_GZIP, client_accepts_gzip, content_security_policy,
+        embedded_spa_fallback_with_lookup, test_embedded_asset, web_assets,
+    };
     use axum::{
         body::Body,
         http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     };
     use flate2::read::GzDecoder;
     use http_body_util::BodyExt;
+
+    fn test_assets(path: &str) -> Option<web_assets::EmbeddedAsset> {
+        match path {
+            "index.html" => Some(test_embedded_asset(TEST_INDEX_GZIP)),
+            "sw.js" => Some(test_embedded_asset(TEST_SERVICE_WORKER_GZIP)),
+            _ => None,
+        }
+    }
 
     fn req(method: Method, uri: &str) -> axum::extract::Request {
         axum::extract::Request::builder()
@@ -267,7 +309,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_worker_uses_cache_bypass_headers() {
-        let response = embedded_spa_fallback(req(Method::GET, "/sw.js")).await;
+        let response = embedded_spa_fallback_with_lookup(req(Method::GET, "/sw.js"), test_assets);
         assert_eq!(response.status(), StatusCode::OK);
 
         let headers = response.headers();
@@ -306,7 +348,7 @@ mod tests {
             .header(header::ACCEPT_ENCODING, "br, GZIP")
             .body(Body::empty())
             .unwrap();
-        let response = embedded_spa_fallback(request).await;
+        let response = embedded_spa_fallback_with_lookup(request, test_assets);
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.headers().get(header::CONTENT_ENCODING).unwrap(),

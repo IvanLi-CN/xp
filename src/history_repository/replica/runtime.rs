@@ -1,11 +1,7 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::{Duration, Instant},
+use super::{
+    ReplicaCursor, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey, TombstoneLedger,
+    TombstoneLedgerCheckpoint,
 };
-
-use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
-
 use crate::{
     history_sync::{
         Acceptance, CanonicalSegment, Cursor, ProtocolError, SegmentReceiver,
@@ -28,20 +24,24 @@ use crate::{
         },
     },
 };
-
-use super::{
-    ReplicaCursor, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey, TombstoneLedger,
-    TombstoneLedgerCheckpoint,
-};
 use local_history_backfill::LocalHistoryBackfillInFlight;
 use paths::PeerDirectPathState;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use source::LocalSourceState;
-
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::{Duration, Instant},
+};
 mod error;
+mod prefix_recovery;
+#[cfg(test)]
+#[path = "runtime/prefix_recovery_tests.rs"]
+mod prefix_recovery_tests;
 mod source_metrics;
+pub(crate) use prefix_recovery::{PrefixRecoveryBundle, PrefixRecoveryPlan};
 mod status;
 mod summary_repair;
-
 use status::SourceDeliveryStatus;
 pub(crate) use status::{SummaryRepairDiagnostic, SummaryRepairResult};
 pub(crate) use summary_repair::SummaryRepairDiagnosticUpdate;
@@ -64,8 +64,9 @@ pub(crate) use sync::RepositoryReplicaGap;
 const MAX_RUNTIME_STATE_BYTES: usize = 16 * 1024 * 1024;
 // A continuation is persisted in the 16 MiB control snapshot. Keep its bounded per-bucket
 // aggregate state comfortably below that limit even when source records approach their payload
-// budget.
-const RETENTION_COMPACTION_PAGE_SIZE: usize = 256;
+// budget. The worker runs every five seconds, so the page must also be large enough to keep up
+// with a busy repository instead of leaving the seven-day raw window permanently backlogged.
+const RETENTION_COMPACTION_PAGE_SIZE: usize = 1024;
 const RETENTION_COMPACTION_BUCKET_LOOKAHEAD: usize = 32;
 const REPLICATION_SEGMENT_PAGE_SIZE: usize = 256;
 const MAX_QUERY_RESPONSE_BYTES: usize = 256 * 1024;
@@ -244,6 +245,8 @@ pub(crate) struct RepositoryReplicaSnapshot {
     #[serde(default)]
     gaps: Vec<StoredGap>,
     #[serde(default)]
+    prefix_recoveries: Vec<prefix_recovery::PrefixRecoveryEvidence>,
+    #[serde(default)]
     history_truncated: bool,
     #[serde(default)]
     capacity: RepositoryCapacity,
@@ -327,6 +330,7 @@ impl Default for RepositoryReplicaSnapshot {
             segments: Vec::new(),
             external_history: false,
             gaps: Vec::new(),
+            prefix_recoveries: Vec::new(),
             history_truncated: false,
             capacity: RepositoryCapacity::default(),
             last_verified_unix_seconds: None,
@@ -473,6 +477,7 @@ pub(crate) struct RepositoryReplicaRuntime {
     delivery_metrics_cache: crate::state::history_storage::RepositoryDeliveryMetrics,
     delivery_metrics_dirty: bool,
     delivery_metrics_refreshed_at: Instant,
+    scheduling: scheduling::RepositorySchedulingState,
     #[cfg(test)]
     capacity_override: Option<(u64, u64)>,
 }
@@ -515,6 +520,7 @@ impl RepositoryReplicaRuntime {
                 crate::state::history_storage::RepositoryDeliveryMetrics::default(),
             delivery_metrics_dirty: true,
             delivery_metrics_refreshed_at: Instant::now(),
+            scheduling: scheduling::RepositorySchedulingState::default(),
             #[cfg(test)]
             capacity_override: None,
         };
@@ -554,133 +560,10 @@ impl RepositoryReplicaRuntime {
                 crate::state::history_storage::RepositoryDeliveryMetrics::default(),
             delivery_metrics_dirty: false,
             delivery_metrics_refreshed_at: Instant::now(),
+            scheduling: scheduling::RepositorySchedulingState::default(),
             #[cfg(test)]
             capacity_override: None,
         }
-    }
-
-    pub(crate) fn query(
-        &self,
-        repository_id: &str,
-        query: HistoryQuery,
-        local: LocalQueryMetadata,
-    ) -> Result<RepositoryHistoryQueryResponse, RepositoryRuntimeError> {
-        let local_coverage = QueryCoverage::new(
-            QueryRange::new(
-                local.observed_start_unix_seconds,
-                local.observed_end_unix_seconds,
-            )?,
-            QueryRange::new(
-                local.observed_start_unix_seconds,
-                local.observed_end_unix_seconds,
-            )?,
-        );
-        let local_gap = QueryGap::new(
-            query.range().start_unix_seconds(),
-            query.range().end_unix_seconds(),
-            false,
-        )?;
-        let local_candidate = QueryCandidate::local(
-            local_coverage,
-            std::iter::empty(),
-            [local_gap],
-            local.clock_skew_seconds,
-        )?;
-        let mut candidates = vec![local_candidate];
-        if let Some(coverage) = self.repository_coverage(query.subject_node_id())? {
-            let watermarks = self
-                .receiver
-                .as_ref()
-                .map(SegmentReceiver::continuous_watermarks)
-                .unwrap_or_default()
-                .into_iter()
-                .map(watermark_from_cursor)
-                .collect::<Result<Vec<_>, _>>()?;
-            let mut gaps = self
-                .snapshot
-                .gaps
-                .iter()
-                .filter(|gap| {
-                    query
-                        .subject_node_id()
-                        .is_none_or(|subject_node_id| gap.source_node_id == subject_node_id)
-                })
-                .map(|gap| {
-                    QueryGap::new_with_reason(
-                        gap.start_unix_seconds,
-                        gap.end_unix_seconds,
-                        gap.permanent,
-                        gap.reason.clone(),
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if let Some((start, end)) = self.incomplete_aggregate_gap(&query)? {
-                gaps.push(QueryGap::new(start, end, true)?);
-            }
-            if self.snapshot.history_truncated {
-                gaps.push(QueryGap::new(
-                    coverage.observed().start_unix_seconds(),
-                    coverage.observed().end_unix_seconds(),
-                    true,
-                )?);
-            }
-            candidates.push(QueryCandidate::ready(
-                repository_id,
-                coverage,
-                watermarks,
-                gaps,
-                0,
-            )?);
-        }
-        let plan = QuerySelector::select(&query, candidates)?;
-        let (records, records_truncated, next_page_cursor) = if plan.repository_id().is_some() {
-            self.records_for(&query, &plan)?
-        } else {
-            (Vec::new(), false, None)
-        };
-        Ok(RepositoryHistoryQueryResponse {
-            plan,
-            records,
-            records_truncated,
-            next_page_cursor,
-        })
-    }
-
-    pub(crate) fn query_local_only(
-        &self,
-        query: HistoryQuery,
-        local: LocalQueryMetadata,
-    ) -> Result<RepositoryHistoryQueryResponse, RepositoryRuntimeError> {
-        let coverage = QueryCoverage::new(
-            QueryRange::new(
-                local.observed_start_unix_seconds,
-                local.observed_end_unix_seconds,
-            )?,
-            QueryRange::new(
-                local.observed_start_unix_seconds,
-                local.observed_end_unix_seconds,
-            )?,
-        );
-        let gap = QueryGap::new(
-            query.range().start_unix_seconds(),
-            query.range().end_unix_seconds(),
-            false,
-        )?;
-        let plan = QuerySelector::select(
-            &query,
-            [QueryCandidate::local(
-                coverage,
-                std::iter::empty(),
-                [gap],
-                local.clock_skew_seconds,
-            )?],
-        )?;
-        Ok(RepositoryHistoryQueryResponse {
-            plan,
-            records: Vec::new(),
-            records_truncated: false,
-            next_page_cursor: None,
-        })
     }
 
     pub(crate) fn runtime_status(
@@ -925,12 +808,14 @@ mod legacy_cursor_tests;
 #[path = "runtime/legacy_relay_tests.rs"]
 mod legacy_relay_tests;
 mod local_history_backfill;
+mod original_source;
 mod paths;
 mod query;
 mod receive;
 mod recovery_refresh;
 mod repair_batch;
 mod retention;
+mod scheduling;
 mod sequence_summary;
 pub(crate) mod source;
 mod storage;
@@ -951,13 +836,33 @@ pub(crate) fn source_epoch(cluster_id: &str, node_id: &str) -> u64 {
     let bytes: [u8; 32] = hasher.finalize().into();
     (u64::from_be_bytes(bytes[..8].try_into().expect("SHA-256 prefix")) & i64::MAX as u64).max(1)
 }
-
 #[cfg(test)]
 #[path = "runtime/duplicate_gap_tests.rs"]
 mod duplicate_gap_tests;
 #[cfg(test)]
+#[path = "runtime/page_replay_tests.rs"]
+mod page_replay_tests;
+#[cfg(test)]
+#[path = "runtime/peer_backfill_tests.rs"]
+mod peer_backfill_tests;
+#[cfg(test)]
+#[path = "runtime/query_budget_tests.rs"]
+mod query_budget_tests;
+#[cfg(test)]
+#[path = "runtime/query_tests.rs"]
+mod query_tests;
+#[cfg(test)]
+#[path = "runtime/quota_tests.rs"]
+mod quota_tests;
+#[cfg(test)]
+#[path = "runtime/repair_batch_tests.rs"]
+mod repair_batch_tests;
+#[cfg(test)]
 #[path = "runtime/repair_selection_tests.rs"]
 mod repair_selection_tests;
+#[cfg(test)]
+#[path = "runtime/repair_tests.rs"]
+mod repair_tests;
 #[cfg(test)]
 #[path = "runtime/retention_integrity_tests.rs"]
 mod retention_integrity_tests;
@@ -978,23 +883,3 @@ mod sync_tests;
 #[cfg(test)]
 #[path = "runtime/tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "runtime/page_replay_tests.rs"]
-mod page_replay_tests;
-#[cfg(test)]
-#[path = "runtime/peer_backfill_tests.rs"]
-mod peer_backfill_tests;
-#[cfg(test)]
-#[path = "runtime/repair_batch_tests.rs"]
-mod repair_batch_tests;
-#[cfg(test)]
-#[path = "runtime/repair_tests.rs"]
-mod repair_tests;
-
-#[cfg(test)]
-#[path = "runtime/query_budget_tests.rs"]
-mod query_budget_tests;
-#[cfg(test)]
-#[path = "runtime/query_tests.rs"]
-mod query_tests;

@@ -81,6 +81,11 @@ struct PersistedWal {
     #[serde(default)]
     entries: Vec<openraft::impls::Entry<TypeConfig>>,
 }
+#[derive(serde::Serialize)]
+struct BorrowedWal<'a> {
+    last_purged_log_id: Option<LogId<NodeId>>,
+    entries: Vec<&'a openraft::impls::Entry<TypeConfig>>,
+}
 impl PersistedWal {
     fn empty() -> Self {
         Self {
@@ -169,9 +174,9 @@ impl FileLogStore {
 
     async fn persist_wal(&self) -> Result<(), openraft::StorageError<NodeId>> {
         let inner = self.inner.lock().await;
-        let wal = PersistedWal {
+        let wal = BorrowedWal {
             last_purged_log_id: inner.last_purged_log_id,
-            entries: inner.entries.values().cloned().collect(),
+            entries: inner.entries.values().collect(),
         };
         write_json(&self.paths.wal_json, &wal)
             .await
@@ -941,7 +946,7 @@ fn rewrite_entry_payload_to_blank(entry: &mut serde_json::Value) -> Result<(), s
 async fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), std::io::Error> {
     let path = path.to_path_buf();
     let bytes = serde_json::to_vec_pretty(value).map_err(std::io::Error::other)?;
-    write_bytes(&path, &bytes).await
+    write_owned_bytes(path, bytes).await
 }
 
 async fn read_bytes(path: &Path) -> Result<Vec<u8>, std::io::Error> {
@@ -952,8 +957,10 @@ async fn read_bytes(path: &Path) -> Result<Vec<u8>, std::io::Error> {
 }
 
 async fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
-    let path = path.to_path_buf();
-    let bytes = bytes.to_vec();
+    write_owned_bytes(path.to_path_buf(), bytes.to_vec()).await
+}
+
+async fn write_owned_bytes(path: PathBuf, bytes: Vec<u8>) -> Result<(), std::io::Error> {
     tokio::task::spawn_blocking(move || {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;

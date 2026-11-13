@@ -30,6 +30,7 @@
 		"publicOrigin": "https://public.fixture.test"
 	},
 	"identifiers": {
+		"releaseTag": "v0.2.0",
 		"nodePrimary": "node-fixture-a",
 		"nodeSecondary": "node-fixture-b",
 		"nodeTertiary": "node-fixture-layout-abcdefghijklmnopqrstuvwxyz",

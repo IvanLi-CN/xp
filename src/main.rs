@@ -1,4 +1,6 @@
-#[cfg(xp_missing_web_dist)]
+#![cfg_attr(xp_missing_web_dist, allow(dead_code, unused_imports))]
+
+#[cfg(all(xp_missing_web_dist, not(test)))]
 compile_error!("missing web/dist/index.html; run `cd web && bun run build`");
 
 use anyhow::{Context, Result};
@@ -102,8 +104,30 @@ async fn reconcile_managed_defaults_with_startup_retries(
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+#[cfg(all(xp_missing_web_dist, test))]
+fn main() -> Result<()> {
+    anyhow::bail!("missing web/dist/index.html; run `cd web && bun run build`");
+}
+
+#[cfg(not(xp_missing_web_dist))]
+fn main() -> Result<()> {
+    // Configure glibc before Tokio creates worker threads and their allocator arenas.
+    // musl and other allocators do not expose this glibc-specific control.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    if std::env::var_os("MALLOC_ARENA_MAX").is_none() {
+        // SAFETY: mallopt is called on the startup thread before constructing the runtime.
+        anyhow::ensure!(
+            unsafe { libc::mallopt(libc::M_ARENA_MAX, 2) } != 0,
+            "cannot configure XP allocator arena limit"
+        );
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     init_tracing();
     install_rustls_crypto_provider();
     reject_legacy_relay_probe_env()?;

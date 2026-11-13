@@ -25,6 +25,16 @@ WORKLOADS = (
     "xp_source_delivery_journal_memory_e2e",
     "xp_repository_summary_memory_e2e",
 )
+OBSERVED_FIELDS = (
+    "max_read_bytes",
+    "max_cycle_read_bytes",
+    "max_rss_delta",
+    "peak_pss_kib",
+    "memory_limit_bytes",
+    "swap_limit_bytes",
+    "backlog_segments",
+    "backlog_bytes",
+)
 
 
 def fail(message: str) -> None:
@@ -34,17 +44,32 @@ def fail(message: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-sha", required=True)
+    parser.add_argument("--candidate-target", required=True)
+    parser.add_argument("--candidate-dir", required=True, type=Path)
     parser.add_argument("--log", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
     if not re.fullmatch(r"[0-9a-f]{40}", args.target_sha):
         fail("target SHA must be a 40-character lowercase hexadecimal value")
+    if args.candidate_target != "x86_64-unknown-linux-musl":
+        fail("resource evidence requires the native x86_64 musl target")
+    candidate_digests: dict[str, str] = {}
+    for name in ("xp", "xp-ops"):
+        path = args.candidate_dir / name
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as exc:
+            fail(f"cannot read measured candidate {name}: {exc}")
+        candidate_digests[name] = digest
     try:
         log_bytes = args.log.read_bytes()
     except OSError as exc:
         fail(f"cannot read workload log: {exc}")
-    log_text = log_bytes.decode("utf-8", errors="replace")
+    try:
+        log_text = log_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        fail(f"workload log is not valid UTF-8: {exc}")
     if "test result: ok" not in log_text or "source_journal_resource" not in log_text:
         fail("workload log is incomplete")
     if re.search(r"^test result: FAILED\b", log_text, re.MULTILINE):
@@ -53,18 +78,28 @@ def main() -> int:
         if not re.search(rf"^test {re.escape(workload)} \.\.\. ok$", log_text, re.MULTILINE):
             fail(f"workload log is missing successful test: {workload}")
 
-    metric_line = next(
-        (line for line in log_text.splitlines() if line.startswith("source_journal_resource ")),
-        None,
-    )
-    if metric_line is None:
+    metric_lines = [
+        line for line in log_text.splitlines() if line.startswith("source_journal_resource ")
+    ]
+    if len(metric_lines) != 1:
         fail("workload log is missing source_journal_resource metrics")
+    metric_line = metric_lines[0]
     metrics: dict[str, int] = {}
     for field in METRIC_FIELDS:
         match = re.search(rf"(?:^|\s){re.escape(field)}=(\d+)(?:\s|$)", metric_line)
         if match is None:
             fail(f"workload metrics are missing {field}")
         metrics[field] = int(match.group(1))
+    observed: dict[str, int] = {}
+    for field in OBSERVED_FIELDS:
+        match = re.search(rf"(?:^|\s){re.escape(field)}=(\d+)(?:\s|$)", metric_line)
+        if match is None:
+            fail(f"workload metrics are missing {field}")
+        observed[field] = int(match.group(1))
+    if observed["memory_limit_bytes"] != 128 * 1024 * 1024 or observed["swap_limit_bytes"] != 0:
+        fail("workload cgroup limits do not match 128 MiB/no-swap")
+    if observed["backlog_segments"] < 20_000 and observed["backlog_bytes"] < 128 * 1024 * 1024:
+        fail("workload backlog is smaller than the 20,000-segment or 128 MiB contract")
     if metrics["sample_window_seconds"] < 300:
         fail("workload sample window is shorter than 300 seconds")
     if metrics["peak_generated_segments"] == 0 or metrics["peak_generated_bytes"] == 0:
@@ -86,11 +121,14 @@ def main() -> int:
     evidence = {
         "schema": "xp-history-throughput-v2",
         "target_sha": args.target_sha,
+        "candidate_target": args.candidate_target,
+        "candidate_digests": candidate_digests,
         "log_sha": hashlib.sha256(log_bytes).hexdigest(),
         "window_seconds": 300,
         "memory_limit_mib": 128,
         "swap_limit_mib": 0,
         **metrics,
+        **observed,
         **gates,
     }
     args.output.write_text(

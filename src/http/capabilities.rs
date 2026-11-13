@@ -5,6 +5,18 @@ use serde::{Deserialize, Serialize};
 
 pub(super) const STATIC_CONSOLE_CAPABILITY: &str = "web.static-console-v1";
 
+pub(super) fn repository_summary_ready(
+    replica: &tokio::sync::Mutex<
+        crate::state::history_repository::replica::RepositoryReplicaRuntime,
+    >,
+) -> bool {
+    // History maintenance must not prevent signed membership capability checks. A busy
+    // repository conservatively withholds only its optional ready-summary capability.
+    replica
+        .try_lock()
+        .is_ok_and(|runtime| runtime.sequence_summary_blocks_ready())
+}
+
 #[derive(Debug, Serialize)]
 pub(super) struct ApiCapabilitiesResponse {
     pub(super) release_tag: String,
@@ -100,6 +112,27 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
 #[cfg(test)]
 mod tests {
     use super::{STATIC_CONSOLE_CAPABILITY, api_capabilities};
+
+    #[tokio::test]
+    async fn membership_capabilities_remain_available_while_history_is_locked() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = crate::state::history_repository::replica::RepositoryReplicaRuntime::load(
+            crate::state::history_storage::HistoryStorage::open(directory.path()),
+        )
+        .unwrap();
+        let replica = tokio::sync::Mutex::new(runtime);
+        let held = replica.lock().await;
+        assert!(!super::repository_summary_ready(&replica));
+        let response = api_capabilities().await.0;
+        assert!(
+            response
+                .capabilities
+                .contains(&"cluster.membership-lifecycle-v1")
+        );
+        assert!(response.capabilities.contains(&"cluster.join.staged-v1"));
+        drop(held);
+        assert!(!super::repository_summary_ready(&replica));
+    }
 
     #[tokio::test]
     async fn exposes_stable_capability_ids_and_release_tag() {

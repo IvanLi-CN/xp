@@ -43,6 +43,10 @@
   The Raft `PersistedState.mesh_enabled` field is the cluster-level Mesh switch (default `true`);
   when disabled, control-plane requests use only each peer's registered public HTTPS
   `api_base_url` and do not substitute a private or Reverse Mesh route.
+  Public signed health probes, including Mesh-disabled and standby probes, use a fixed
+  30-second budget aligned with the production Raft RPC TTL. Direct Mesh probes retain five
+  seconds. An expired public circuit closes only after a verified signed health response;
+  no probe resets a breaker or changes routing policy without that response.
   An internal-auth v2 cluster upgrade requires a one-shot maintenance marker: host-managed nodes
   bootstrap from a verified target `xp-ops` binary using
   `upgrade --allow-internal-auth-v2-cutover`, while containers use the
@@ -55,6 +59,10 @@
   public HTTPS `api_base_url` only and do not select or probe Mesh or Reverse Mesh. Source delivery
   also uses only that public HTTPS path; a transport failure leaves the durable outbox pending for
   the next bounded retry and never opens a history Mesh relay.
+  Receiver repair gaps inferred from local repository state are local-replay evidence only; remote
+  source delivery never treats a missing local receiver baseline as a gap at its collector.
+  Background sequence summaries and payload encoding run only on configured repository members;
+  former repositories keep their retained archive readable without recurring metadata rewrites.
 
   A legacy initial-backfill page already queued in the live source journal retains its original
   signed stream. Recovery verifies and durably imports missing predecessors over registered public
@@ -70,7 +78,35 @@
   ACK completion removes receipt mappings before intent; a bounded version-checked scan reclaims
   orphan mappings from older versions without changing unacknowledged journal rows.
 
+  Signed membership capabilities never wait for the history replica lock.
+  A busy replica withholds only its optional ready-summary capability.
+
+  Bounded incremental vacuum drains every returned SQLite row to completion, reclaiming up to
+  64 pages after ordinary commits and 512 pages after each payload migration page. A zero budget
+  performs no work; it never enables SQLite's unbounded zero-budget behavior.
+
+  Linux/glibc XP startup caps allocator arenas at two before creating Tokio workers unless
+  the operator supplies MALLOC_ARENA_MAX. musl and other allocators retain their native behavior.
+
+  The root-operated `xp-ops xp history-repository-quota --quota-bytes BYTES` command previews a
+  local physical database/WAL admission quota; persistence requires `--apply --yes` and a request
+  signed by that same node. Containers without xp.env use `--data-dir /var/lib/xp/data`.
+  systemd, OpenRC and Docker/Compose preserve this local admission quota across restart. The
+  existing Raft capacity patch publishes usage and free space only; it preserves the configured
+  membership quota. Runtime capacity is authoritative for the local guard. Lowering quota never
+  evicts retained history or outbox rows;
+  at or above quota, new history writes stop. Reserve WAL/transaction headroom below an external
+  file-size limit: this admission setting is not an operating-system filesystem hard quota.
+
   SQLite releases idle WAL at normal reset with a 1 MiB retained-journal limit.
+
+  Repository record and signed-segment BLOBs use a checksummed Zstandard level-1 envelope when
+  smaller.
+  Reads decode before hashing or export, preserving original bytes and signed wires.
+  Existing JSON rows migrate in bounded, transactional rowid pages with durable cursors.
+  Restart resumes; failed pages preserve rows and cursor. New and legacy rows may coexist.
+  systemd, OpenRC and Docker/Compose share this codec and incremental space release.
+  Builds without the decoder cannot read migrated repositories and must not be deployed over them.
 
   Active frames and readers remain safe; capacity admission still counts the full WAL.
 
@@ -111,6 +147,8 @@
   Repository runtime status reads exact record and segment counts from a durable singleton updated
   by insert/delete triggers in each history transaction; existing databases backfill it once at
   startup. Status requests do not traverse retained history tables and run off Tokio workers.
+  Capacity synchronization checks configured repository membership before locking the replica or
+  querying SQLite; ordinary sources and former repositories do not advertise archive capacity.
   A `history_truncated=true` initial-backfill repair page may cross an existing source watermark
   once per stream over an expired retained prefix. One page may require multiple wire-bounded
   responses; each response has its own content digest, while the per-stream allowance remains until
@@ -133,6 +171,14 @@
   Both pages merge with the checkpoint atomically without rearming the generation.
   Tiered handoff completion snapshots the receiver watermark in the same history transaction as
   its permanent gap, completed range and generation consumption; failed commits restore all state.
+  Initial source backfill attempts at most three pending sources per cycle. A process-local sweep
+  gives every pending source one attempt before retrying earlier sources, ordered by durable
+  import progress within each sweep. Record each attempt only when processing that source begins;
+  an earlier import error leaves unrequested peers eligible. Failed requests never advance
+  checkpoints or ACKs. Restart resets scheduling order only.
+  Initial-source baseline prioritization applies only to configured repository members. Ordinary
+  source nodes and former repositories keep replaying their own durable outbox when a new node
+  joins; missing repository-import checkpoints on those sources must never suspend source delivery.
   Signed recovery may finish an exactly audited predecessor partial commit while arming a new
   generation; dry-run exposes the proposed watermark repair and remains read-only. Final export
   pages retain the existing 15-minute lease until natural expiry to protect the repair handoff.
@@ -147,6 +193,10 @@
   and publishes raw evidence as an artifact; an owner-signed two-file evidence commit remains
   required before release publication. Ordinary GitHub CI and release jobs do not synthesize or
   replace that evidence.
+  musl 修复候选必须选择 `candidate_target=x86_64-unknown-linux-musl`，通过 Linux 原生
+  musl 工具链构建并测试实际候选，再部署该 run 保留的校验和绑定二进制；GNU 门禁结果
+  不覆盖另行本地交叉构建的 musl 二进制。资源流程同时验证较大格式化 Node History JSON
+  的删除版本检查耗时，避免 libc 字符串扫描退化阻塞服务。
   Reverse uses XP-owned loopback `127.0.0.1:10086` with authenticated TCP-only SOCKS and does
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
 - Container history recovery requires `--data-dir /var/lib/xp/data` when `xp.env` is absent.
@@ -162,12 +212,22 @@
   PID/start-time identity file. It never enumerates arbitrary processes, starts a helper, or
   treats XP-internal canary work as a separate process. Upgrades preserve the Resource Store.
 - XP source-delivery history is a durable SQLite outbox with a fixed 128 MiB or 20,000-segment cap.
+  Live capture and replay release their duplicate in-memory wire window before receiver rollback
+  checkpoints; SQLite retains unacknowledged wires until real ACK, while JSON fallback keeps them.
+  Local replay proofs decode one original wire at a time and retain only chain metadata;
+  every wire must decode successfully, including entries beyond the receiver watermark.
   At 80% either dimension it persists `capacity_suspended`, reports `journal_capacity_guard`, and
   stops source capture without advancing the cursor or deleting unacknowledged rows; ACK drain
   clears the marker only below 60% on both dimensions. Replay pages are limited to 256 segments and
   1 MiB wire data, with tombstone-first live-stream rotation through a replay cursor that is
   written durably in the ACK transaction and a stable unacknowledged window across retries. The
-  Resource Alert path reports fixed XP PSS
+  public source batch receiver stays atomic. A signed sequence-gap or hash-chain rejection may
+  trigger at most eight independent stream retries from that rejected batch within the shared
+  60-second repository request budget, only when no gap evidence is attached. Tombstones run first
+  and a failed tombstone,
+  ambiguous transport, authentication or storage failure stops recovery. Only real receipts
+  remove source rows; missing prefixes remain pending without creating permanent gaps.
+  The Resource Alert path reports fixed XP PSS
   warning/critical thresholds at 28/32 MiB
   for one minute and never restarts XP. Generated OpenRC XP services use `supervise-daemon`,
   `respawn_delay=2`, and `respawn_max=0`; systemd and container supervision remain unchanged.
@@ -222,6 +282,11 @@
   filesystems must have at least `128 MiB` free. Existing `/var/backups/xp`, configuration,
   credentials, certificates, Raft/WAL, and unknown files are out of scope. The latest failure may
   retain only bounded `${XP_DATA_DIR}/upgrade/diagnostics.json`; success removes it.
+  After service readiness and artifact cleanup, a synced bounded diagnostics guard precedes
+  backup unlink. Cleanup never reads binary contents into RAM. A late unlink failure reports
+  `cleanup_incomplete: committed_upgrade`, keeps the ready installed binaries and remaining
+  backups, and blocks another upgrade until exact manual cleanup; it never attempts rollback
+  through already-unlinked backups. Earlier activation failures retain the rollback contract.
 - The Web client must treat an unstructured start 5xx or a restart-boundary network interruption as
   an unknown result, not a terminal failure: maintain a same-tab 60-second status observation with
   2.5-second polling, preserve only the remaining window through refresh, and end only on a
@@ -260,6 +325,11 @@
   discovery, or API proxy is supported. The release workflow must pass the public five-minute static
   smoke gate before publishing image or GitHub Release artifacts; the protected static rollback
   workflow accepts only checksum-valid archives in the `3.22/3.21/3.20` compatibility window.
+  Both workflows load the deployment helper from `github.workflow_sha` and require the manifest
+  artifact name `xp-web-<web_build_id>-<target_sha>.tar.gz`. The helper emits only the five
+  non-secret EdgeOne failure classes; it retries at most three complete preflight transport
+  failures, never retries after a possible remote side effect, and keeps incomplete evidence
+  `auth_or_endpoint_ambiguous`.
 - Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
 - An owner-approved private Docker follower may omit the managed-default VLESS/REALITY endpoint.
   It remains a voter and must expose its registered private `api_base_url` to the serving voters
@@ -329,6 +399,18 @@
 - If an environment is only partially supported or blocked by current implementation limits, the limitation must be stated concretely in specs and ops docs together with the required operator intervention.
 - When deployment or upgrade behavior changes, update `AGENTS.md`, `docs/ops/**`, and the owning spec together so the supported-environment matrix stays aligned.
 
+Raft WAL persistence borrows entries under its existing lock and transfers the serialized buffer
+to the blocking writer. It must preserve the JSON format and atomic replacement while avoiding
+deep copies of the retained log and serialized bytes on small-memory nodes.
+
+序列汇总维护每次持有 replica 锁最多处理一个 4096 序号块，并在块间释放锁、让出调度。
+
+后台每轮最多处理 16 个切片，达到两秒调度预算后停止安排新切片；已开始的 SQLite 事务正常完成。
+
+查询与反熵准备最多推进一个块，不在同一次持锁期间重建整页摘要。
+
+摘要完成前继续使用既有版本回退，保持原始数据、接收顺序和真实 ACK 规则。
+
 ## Build, Test, and Development Commands
 
 - Install repo tooling (commitlint + dprint): `bun install`
@@ -377,3 +459,37 @@ Directory, and pass both `XP_TESTBOX_CARGO_CACHE_ROOT` and
 - Commit subject/body must be English-only; subject must start lowercase; header ≤72 chars.
 - Prefer a short commit body explaining “why” for non-trivial changes.
 - PRs: include a summary, testing notes (commands run), and screenshots for UI changes; update `docs/` when behavior changes.
+
+旧身份历史恢复仅允许本机签名的正式运维入口。普通上报认证不放宽，仓库仅导入已离开集群的原始来源身份。
+
+源端使用 `xp-ops xp history-original-source`，仓库使用 `xp-ops xp history-original-import`。
+
+两个命令默认只预览，提交需 `--apply --yes --expected-fingerprint`。指纹绑定原始页与集群事实。
+
+原始 wire 保持签名、严格链与删除语义，整页事务提交后才生成收据。导入保留现有 15 分钟交接租约。
+
+源端通过注册仓库公网 HTTPS 的签名查询确认逐段持久 wire 和接收链，再由现有 ACK 事务清理队列。
+
+新身份必须等旧队列、背压和删除映射清空，再启动独立 epoch 与零序号。最后一页 ACK 原子保存旧身份。
+
+systemd、OpenRC、Docker/Compose 共用实现。无 xp.env 的容器必须指定 `--data-dir /var/lib/xp/data`。
+
+已提交的历史页若原始观测时间早于当前 15 分钟，派生摘要维护让行最多 30 秒。仅成功提交可开启窗口；持续历史提交不能续期。
+
+窗口到期后，下一个维护检查消费该窗口并允许有界维护尝试；后续成功历史提交才可开启新窗口，避免摘要维护饥饿。此进程内状态重启即清除；实时上报不触发窗口，配额、提交后保留期清理与载荷压缩继续执行。
+
+## Explicit source-prefix history recovery
+
+- `xp-ops xp history-prefix-recovery` is an explicit local signed recovery operation.
+- Source exports bind their first durable pending heads, retained aggregates and deletion version.
+- The Ready collector re-attests over registered public HTTPS and requires quorum/version preflight.
+- Apply requires `--apply --yes --expected-fingerprint`; evidence, deletion baseline, explicit
+  unrecoverable gaps and original-head receipts commit atomically.
+- Overlapping aggregates stay inspectable in bounded evidence, outside ordinary statistics.
+- Existing and later tombstones govern evidence copies; only real ACK drains the source journal.
+- Historical loss stays partial. No source identity, epoch or repository membership changes.
+
+- A persisted prefix recovery ledger requires XP 3.47.9 or newer.
+  Host upgrades reject older targets before downloads; rollback verifies the actual XP backup.
+  An incompatible or unverifiable backup preserves installed binaries, transaction backups,
+  diagnostics and current xp-ops protection. Container replacements honor the same reader floor.

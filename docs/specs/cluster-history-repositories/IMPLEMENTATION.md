@@ -4,6 +4,8 @@
 
 ## Current Status
 
+- 查询候选按完整的时间区间、永久性和原因去重后计算 256 条 gap 上限；有界插入不累积重复恢复证据，仓库与本地候选共享此规则。不同原因仍分别报告，超过 256 条独立 gap 继续拒绝查询。
+
 - Implementation: Repository runtime, administration and rollout integration are active
 - Lifecycle: active
 - Catalog note: Initiative #248
@@ -272,6 +274,11 @@
   not enter the Reverse Mesh path. Source delivery uses the same public endpoint. A failed public
   request leaves the durable checkpoint or outbox unchanged for the next bounded retry; history
   synchronization never opens a Mesh relay.
+- 初始来源 worker 在仓库运行时锁内选择每轮最多三个来源，按持久导入进度排序，并使用
+  process-local attempted 集合保证一轮遍历中不重复尝试；每次 pull 前单独记录该来源，
+  前序导入错误提前退出时，尚未请求的来源保留资格。失败来源不会阻塞其他待回填来源。
+  集合随待处理成员裁剪，遍历完成后清空；重启不恢复调度集合，持久 checkpoint 和真实 ACK
+  仍是数据推进的唯一依据。回归覆盖失败来源占位、成员变化、小集合重试和零预算。
 - During initial catch-up, an unavailable Ready peer is recorded as unavailable for that tick while
   other Ready peers continue to receive their bounded public pages. Any unavailable or stale Ready
   peer keeps the aggregate catch-up incomplete, so the worker does not start the local stability
@@ -289,7 +296,8 @@
   dimension it reports `journal_capacity_guard`, rejects new source rows before the transaction
   writes, and resumes only after both dimensions fall below 60%; no unacknowledged row is deleted.
   Backpressure ranges retained in snapshots from the pre-journal queue implementation remain
-  recoverable and are replayed through the persisted gap-page cursor; the current SQLite capacity
+  unproven loss evidence rather than a promise of recoverability and are replayed through the
+  persisted gap-page cursor; the current SQLite capacity
   guard rejects capture before allocating a source cursor and therefore creates no new such range.
   A bounded replay window may leave durable journal tails on disk after restart. New source segments
   remain appendable in that state, but are persisted behind the durable tail and trigger another
@@ -454,3 +462,19 @@ the beginning of a ready-peer catch-up tick only when they contain exactly one b
 batch and a distinct next cursor. The migration points the pending cursor back to the saved summary
 cursor, persists the marker atomically, and never re-arms the generation or changes the receiver
 watermark.
+
+## Explicit source prefix recovery
+
+- 当前分支实现显式 `history-prefix-recovery` 的源签名清单、有界聚合证据、精确缺口与原始队列头事务接收；尚未部署或应用到生产。
+- 证据检查不参与普通统计，删除事务同时清除对应证据副本。源队列仍由普通真实 ACK 删除。
+- 编译、事务失败回归、HTTP/CLI 边界、资源门禁与六节点验收尚在验证中；不能据此声明上报恢复。
+
+保留聚合另有逐条域隔离的源签名，绑定原清单摘要与完整记录内容。
+
+重启后只凭持久证据即可验签；删除只移除对应记录和证明，剩余记录仍可独立核验。
+
+完整删除基线在遍历阶段限制记录数及内存预算；超限失败，不把部分基线标记为完整。
+
+`ops/upgrade/history_compatibility.rs` 通过只读 SQLite 检查恢复账本。
+
+正式升级目标及自动回滚的实际 XP 备份应用 3.47.9 reader 下限；不兼容或无法验证时保留事务备份与当前运维程序。

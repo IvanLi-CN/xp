@@ -13,6 +13,7 @@ WORKDIR /app/web
 RUN bun install --frozen-lockfile
 WORKDIR /app
 COPY fixture-policy/catalog.json ./fixture-policy/catalog.json
+COPY scripts/update-web-dist-fingerprint.sh ./scripts/update-web-dist-fingerprint.sh
 COPY web/ ./web/
 WORKDIR /app/web
 RUN bun run build
@@ -26,12 +27,13 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates build-essential pkg-config \
   && rm -rf /var/lib/apt/lists/*
 
-COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml ./
+COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml .xp-source-marker ./
 COPY proto ./proto
 COPY src ./src
 COPY tests ./tests
 COPY test-fixtures ./test-fixtures
 COPY --from=web-builder /app/web/dist ./web/dist
+COPY --from=web-builder /app/web/.xp-dist-fingerprint ./web/.xp-dist-fingerprint
 
 FROM builder-base AS builder
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

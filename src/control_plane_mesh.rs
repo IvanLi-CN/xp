@@ -49,9 +49,9 @@ use request_flow::direct_mesh_is_eligible;
 pub(super) use retry::{SignedSendError, signed_headers, signed_send};
 #[cfg(test)]
 pub(crate) use transport::build_mesh_http_client_with_policy;
-pub(crate) use transport::build_unauthenticated_mesh_http_client;
 use transport::join_url;
 pub use transport::{MESH_POOL_IDLE_TIMEOUT, MeshTransportPolicy, build_mesh_http_client};
+pub(crate) use transport::{PUBLIC_HEALTH_PROBE_BUDGET, build_unauthenticated_mesh_http_client};
 pub const MESH_FAILURES_BEFORE_OPEN: u8 = 3;
 pub const MESH_BACKOFF: [Duration; 5] = [
     Duration::from_secs(30),

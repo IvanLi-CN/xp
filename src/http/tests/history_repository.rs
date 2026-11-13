@@ -484,6 +484,9 @@ async fn repository_relay_bypasses_collector_gate_only_for_ready_repository_sour
 async fn initial_backfill_exports_historical_data_from_an_authenticated_peer() {
     let tmp = tempfile::tempdir().expect("temporary directory");
     let config = test_config(tmp.path().to_path_buf());
+    // Keep synthetic traffic inside the bounded history retention window as time advances.
+    let now = chrono::Utc::now();
+    let traffic_at = now - chrono::Duration::days(1);
     let mut cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
         config.node_name.clone(),
@@ -495,22 +498,19 @@ async fn initial_backfill_exports_historical_data_from_an_authenticated_peer() {
     cluster.save(tmp.path()).expect("save cluster");
     let peer_id = xp_test_fixtures::secondary_node_id().to_owned();
     let history = crate::node_history::NodeHistoryHandle::from_config(&config);
-    let observed_at = chrono::Utc::now();
-    let observed_date = observed_at.date_naive().to_string();
-    let observed_timestamp = observed_at.to_rfc3339();
     history
         .replace_node_snapshot(
-            observed_at,
+            now,
             &cluster.node_id,
             crate::node_history::NodeHistorySnapshot {
                 node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
-                last_synced_at: Some(observed_timestamp.clone()),
+                last_synced_at: Some(traffic_at.to_rfc3339()),
                 last_sync_error: None,
                 daily_traffic: vec![crate::node_history::NodeHistoryDailyTraffic {
-                    date: observed_date,
+                    date: traffic_at.date_naive().to_string(),
                     uplink_bytes: 42,
                     downlink_bytes: 24,
-                    updated_at: observed_timestamp,
+                    updated_at: traffic_at.to_rfc3339(),
                 }],
                 daily_component_status: Vec::new(),
                 component_status_events: Vec::new(),

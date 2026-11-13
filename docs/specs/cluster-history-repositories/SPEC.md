@@ -21,6 +21,23 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - 让 ready 仓库通过 anti-entropy、tombstone 和分层聚合最终收敛。
 - 为历史查询和管理界面返回完整性、覆盖范围、缺口和同步质量。
 
+### Gap classification and reporting
+
+历史缺口本身不是统一的运行故障。实现和运维报告必须把缺口分为三类：`recoverable_gap` 表示按当前
+保留策略仍有可验证的原始 wire、有效 source journal 或 Ready 仓库副本，必须继续重试或执行正式 recovery；
+`permanent_gap` 表示已通过签名、保留边界和来源证据确认原始前缀不可恢复，允许保留并继续提供已知并集，
+但受影响查询必须保持 `partial` 且 `replica_converged=false`；`unclassified_gap` 表示证据不足，
+必须继续调查，不能当作永久缺口，也不能报告为已解决。
+
+只有 `recoverable_gap`、`unclassified_gap` 或伴随 transport、storage、ACK、outbox、quota、worker 停滞的状态
+才应报告为当前异常。已确认的 `permanent_gap` 应报告为“设计允许的历史不完整性”，同时单独列出数量、
+来源、stream、序号范围和确认依据；它不是新的运行告警，也不能通过删除 gap、伪造 ACK、改写 checkpoint
+或降低完整性标志来消除。
+
+当报告“历史同步正常”时，必须同时说明实时投递、可恢复缺口和永久缺口三项结果。`ready`、无新错误或
+数据库空间下降都不能单独证明历史完整收敛；只有 `unclassified_gap=0`、`recoverable_gap=0`，并且没有
+未解释的 `history_truncated` 或待处理 repair，才可以报告“没有未解决的同步异常”。
+
 ### Non-goals
 
 - 不改变普通节点数据保留策略或业务流量配额。
@@ -46,14 +63,43 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 ### MUST
 
+- `REQ-PREFIX-LOSS`: 显式普通源前缀恢复必须遵循 ADR 0034，保存源签名聚合证据并明确不可恢复缺失；
+  聚合证据不能重复参与统计，只有原始 wire 的真实 ACK 才允许源 outbox 删除。预览绑定集群、地址、版本、删除保护、接收水位与首个原始待发段；变更或事务失败必须拒绝。
+
+- Linux/glibc XP 在创建 Tokio worker 前将 allocator arena 默认限制为两个，保留显式
+  `MALLOC_ARENA_MAX`；musl 与其他 allocator 不调用 glibc 配置入口。
+- 签名 membership 能力检查不得等待 history replica 锁；锁忙时仅暂不广告可选的 ready-summary 能力。
+- SQLite live capture 与 replay 在接收方建立回滚快照前释放重复 wire window；只有真实 ACK 删除 journal，JSON fallback 保留唯一副本。
+- 本地重放证明逐条解码原始 wire，仅保留链证明元数据；包括超出 receiver watermark 的条目在内，全部 wire 解码成功后才能接受证明。
 - 普通节点迁移失败继续使用 JSON；迁移不双写，成功后原子切换，旧 JSON 备份
   保留 30 天。
 - SQLite 使用 WAL 与 `auto_vacuum=INCREMENTAL`，仅执行有界 checkpoint/incremental vacuum，
   不执行例行 full `VACUUM`。
-- 仓库默认配额 10 GiB；所在文件系统可用空间低于 256 MiB 时停止历史写入，
-  并报告 degraded。
-- 仓库保存 7 天分钟级、随后 90 天五分钟级、随后小时级，默认最长两年；
+  incremental vacuum 必须耗尽返回行，普通提交最多释放 64 页、迁移页之后最多 512 页；零预算不执行回收。
+- 仓库 record 和 signed-segment 的本地 payload BLOB 在有收益时使用带校验和的 Zstandard level 1 envelope。
+  编码只作用于物理存储；读取须逐字节恢复原 JSON 和 signed wire，再计算摘要、导出或验证签名。
+  旧 JSON 与压缩行可共存；校验失败返回存储错误，解码大小最多 16 MiB。
+  旧行迁移每表每页最多 128 行，累计 1 MiB 后结束；单条较大的旧行可独占一页。
+  行改写和 rowid 游标原子提交，重启恢复游标，失败回滚当前表的页。
+  后台每五秒最多八页、共享两秒预算，页间释放 replica 锁。
+  迁移不改计数、保留期、源 epoch、水位或原始签名，不复制整库，只通过有界 incremental vacuum 释放空间。
+  systemd、OpenRC、Docker/Compose 使用同一路径，不允许旧构建读取已迁移数据库。
+- 仓库默认配额 10 GiB；所在文件系统可用空间低于 256 MiB 时停止历史写入，并报告 degraded。
+  root 运维命令 `xp-ops xp history-repository-quota --quota-bytes BYTES` 默认仅预览；
+  `--apply --yes` 使用当前节点身份签名后持久化本地物理数据库/WAL 写入准入配额。
+  其他节点身份不得修改本节点配额；Web/Bearer 管理员不获得此操作权限。
+  容器没有 xp.env 时必须指定 `--data-dir /var/lib/xp/data`。
+  systemd、OpenRC、Docker/Compose 重启保留本机写入准入配额，runtime capacity 报告实际保护值。
+  现有 Raft Capacity patch 仅同步用量和文件系统可用空间，保留 member.capacity 的配置配额；
+  本机配额不同不得触发重复的用量空写入，不得宣称该 patch 已修改集群配置配额。
+  下调不删除已保留历史或未 ACK outbox；已用空间达到新配额时停止新增历史写入。
+  配额是事务前准入，不能充当文件系统硬上限；外部体积要求须为 WAL、SHM 和事务预留余量。
+  例如总文件不得超过十进制 10 GB 时可设为 9,000,000,000 字节，不能把默认 10 GiB 当作 10 GB。
+- 仓库保存 3 天分钟级、随后 90 天五分钟级、随后小时级，默认最长两年；原始 signed wire 仅保留 24 小时作为 anti-entropy 修复缓存，不参与长期查询保留。
   普通节点的既有窗口不变。
+- 初始源回填优先级只适用于当前配置的仓库成员。普通源节点和已退出仓库的节点不承担
+  全部 peer baseline 导入；新节点加入后缺少此类 checkpoint 不得暂停其持久化 outbox 投递。
+  systemd、OpenRC、Docker/Compose 发送端一致，不伪造完成 checkpoint 或绕过缺口检查。
 - 每条流使用 `(source_node_id, source_epoch, stream, sequence)` 单调游标；
   发现洞或新 epoch 时报告 gap，不跳过连续水位。
 - segment 上限为 1000 条、192 KiB canonical uncompressed 或一分钟；
@@ -144,6 +190,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   worker 重试；该 revision 与 summary cursor 一起持久化，重启后仍可重试。
   repair 仍返回完整签名 wire，接收方继续按 source、epoch、stream、签名和 predecessor
   hash-chain 校验；过滤不得放宽任何完整性检查。
+- 初始来源回填每轮最多尝试三个来源；
+  仅在开始处理该来源时记录尝试，前序导入错误不得把尚未请求的来源视作已尝试。
+  每次遍历按持久导入进度排序，所有待处理来源各尝试一次后才能重试此前来源。
+  失败不得永久占据名额，也不得推进 checkpoint 或 ACK。调度记录仅在进程内保存，新增来源加入当前遍历，完成或移除来源退出，重启仅重置尝试顺序。
 - ready repository 的初始回填可能只保留某条 source stream 的尾部 segment。若没有本地水位，
   非零首段必须携带已签名的 predecessor hash，初始回填专用接收路径才可以把它作为 retained
   anchor 持久化。若本地已有该 stream 的连续水位，且 repair 明确携带
@@ -359,6 +409,14 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
   当多个 stream head 共同超过单页 wire 预算时，tombstone head 固定优先，live stream head
   通过 state row 中的 replay stream cursor 轮转，游标只在删除已确认窗口的 ACK 事务中持久化，避免
   字典序选择造成后续 stream 饥饿；未确认的 replay window 在 ACK 前保持稳定。
+- 接收端批次仍为原子事务。签名确认的 HTTP 400 序号缺口或哈希链拒绝，不得永久阻塞同一混合批次内
+  其他独立流：当该请求不携带 gap evidence 时，发送端按 source、epoch、stream 保留原始顺序拆分，
+  每个恢复周期最多重试八个独立批次，共享既有仓库请求的六十秒总预算，并只根据真实 receipt 确认成功流。
+  重试间不得重置截止时间；超过十五秒但仍在该总预算内的合法公网 ACK 仍可完成确认。
+  tombstone 流优先，其失败立即停止后续数据流；认证、存储、未知响应与传输结果不明也停止恢复。
+  携带 gap evidence 的失败批次保持完整待发，不允许由其他流的成功 ACK 间接清除未提交的证据。
+  单独的缺口流继续保留原 wire，不重签、不跳过 cursor、不自动创建 permanent gap。
+  此行为位于发送端，systemd、OpenRC 与容器均须部署包含修复的 XP；只更新接收仓库不足以修复旧发送端。
 - source worker 的容量与生命周期 Raft 维护必须与 source capture 并发且各自受 repository request
   budget 限制。维护写入失败或超时只记录并在下一周期重试，不得阻塞历史投递、推进 source cursor
   或删除未 ACK 的 journal 行。
@@ -430,6 +488,11 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 
 ## Verification
 
+- VER-PREFIX-LOSS covers: REQ-PREFIX-LOSS. 必须验证严格普通投递仍拒绝未授权缺口、源签名清单与 fingerprint 绑定。
+  验证事务失败和重启、真实 ACK、重复恢复拒绝、聚合不重复计数，以及证据副本遵循现有删除事务。
+  验证重启后逐条聚合来源证明、内容篡改拒绝及选择性删除后剩余证明仍有效；完整删除基线超限拒绝。
+  生产验收另要求待发原始段真实 ACK 排空、容量暂停解除且持续采集；历史仍 partial。
+
 - Given 普通节点存在旧 JSON，When 启动迁移成功，Then SQLite 与旧窗口语义一致、无双写且可重启
   幂等。
 - Given 迁移、写入或 checkpoint 失败，When worker 继续运行，Then 保持旧 JSON 路径并报告 degraded，
@@ -486,6 +549,11 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
   and generated Web-shell archive by SHA before building, then uploads a SHA-bound attestation and
   full workload log. The owner signs those two files into an evidence commit before release
   publication; ordinary GitHub CI and the release workflow do not synthesize that evidence.
+  musl 候选须通过 `candidate_target=x86_64-unknown-linux-musl` 在 Linux 原生 musl
+  工具链下构建，并以实际候选运行资源工作负载。流程保留目标 SHA、ABI、版本、二进制
+  和 SHA256；部署消费该 run 的已测二进制，不能以 GNU 证据替代另行构建的 musl 产物。
+  大型格式化 Node History JSON 的删除版本校验另有五秒耗时上限回归检查，必须保持
+  原有版本和摘要冲突的拒绝语义，不能通过跳过删除保护规避延迟。
 - The summary-specific resource gate runs `xp_repository_summary_memory_e2e` in the same
   128 MiB/no-swap cgroup with 257 near-limit segments and repeated summary requests; the runner's
   `XP_MESH_RESOURCE_SUMMARY_ONLY=1` mode runs this gate together with the 20,000-row source journal
@@ -546,6 +614,7 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 - [ADR 0002](../../adr/0002-history-synchronization-recovery-order.md)
 - [ADR 0019](../../adr/0019-history-handoff-completion-and-recovery-preflight.md)
 - [ADR 0030](../../adr/0030-recoverable-history-deletion-fanout.md)
+- [ADR 0034](../../adr/0034-explicit-source-prefix-loss-recovery.md)
 
 ## Recovery cluster preflight
 
@@ -579,3 +648,47 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 - `docs/specs/reality-fallback-control-plane-mesh/SPEC.md`
 - `docs/agents/issue-tracker.md`
 - Issue #248: https://github.com/IvanLi-CN/xp/issues/248
+
+向远端仓库投递源日志时，本机 receiver 的缺失状态不能作为远端缺口的证据，
+也不能生成随远端请求发送的永久 receiver repair gap。
+此类自动修复证据仅限接收目标确为本机的重放；显式持久化的源缺口仍按原有完整批次语义交付，
+不允许独立流 ACK 清除其他流的缺口。
+
+sequence summary 重建与 payload encoding 后台迁移仅适用于当前配置的仓库成员。
+普通源节点及已退出仓库角色的节点不得因此周期性改写遗留仓库；旧归档保持可读，源日志交付继续运行。
+本约束同样适用于 systemd、OpenRC 与 Docker/Compose，不修改仓库成员或任何回填完成标记。
+
+仓库容量同步必须先检查本机的当前仓库成员身份，再获取 replica 锁或查询 SQLite。
+普通源节点与已退出仓库的节点不发布遗留归档的容量；读取容量后仍需复核成员身份，避免向已移除成员写入。
+
+序列汇总维护每次持有 replica 锁最多处理一个 4096 序号块，并在块间释放锁、让出调度。
+
+后台每轮最多处理 16 个切片，达到两秒调度预算后停止安排新切片；已开始的 SQLite 事务正常完成。
+
+查询与反熵准备最多推进一个块，不在同一次持锁期间重建整页摘要。
+
+摘要完成前继续使用既有版本回退，保持原始数据、接收顺序和真实 ACK 规则。
+
+旧身份历史恢复仅允许本机签名的正式运维入口。普通上报认证不放宽，仓库仅导入已离开集群的原始来源身份。
+
+源端使用 `xp-ops xp history-original-source`，仓库使用 `xp-ops xp history-original-import`。
+
+两个命令默认只预览，提交需 `--apply --yes --expected-fingerprint`。指纹绑定原始页与集群事实。
+
+原始 wire 保持签名、严格链与删除语义，整页事务提交后才生成收据。导入保留现有 15 分钟交接租约。
+
+源端通过注册仓库公网 HTTPS 的签名查询确认逐段持久 wire 和接收链，再由现有 ACK 事务清理队列。
+
+新身份必须等旧队列、背压和删除映射清空，再启动独立 epoch 与零序号。最后一页 ACK 原子保存旧身份。
+
+systemd、OpenRC、Docker/Compose 共用实现。无 xp.env 的容器必须指定 `--data-dir /var/lib/xp/data`。
+
+已提交的历史页若原始观测时间早于当前 15 分钟，派生摘要维护让行最多 30 秒。仅成功提交可开启窗口；持续历史提交不能续期。
+
+窗口到期后，下一个维护检查消费该窗口并允许有界维护尝试；后续成功历史提交才可开启新窗口，避免摘要维护饥饿。此进程内状态重启即清除；实时上报不触发窗口，配额、提交后保留期清理与载荷压缩继续执行。
+
+恢复账本存在时，正式升级目标不得低于 3.47.9。
+
+自动回滚须验证实际 XP 备份版本支持账本；验证失败须保留当前程序、备份和诊断，不以回退 xp-ops 绕过保护。
+
+容器升级遵守相同 reader 下限。

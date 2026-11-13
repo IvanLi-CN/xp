@@ -379,13 +379,13 @@ providerA:
         vec![
             "🛬 Osaka-B",
             "🛬 Tokyo-A",
-            "🤯 Japan",
-            "🤯 HongKong",
-            "🤯 Taiwan",
-            "🤯 Korea",
-            "🤯 Singapore",
-            "🤯 US",
-            "🤯 Other",
+            "🌟 Japan",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 US",
+            "🌟 Other",
         ]
     );
 }

@@ -1,3 +1,4 @@
+mod batches;
 use super::*;
 use crate::control_plane_mesh::peer_target_from_node;
 use crate::history_sync::ProtocolError;
@@ -7,6 +8,8 @@ use crate::http::history_repository::{
 use crate::state::history_repository::{
     MAX_INITIAL_BACKFILL_PAGE_BYTES, MAX_INITIAL_BACKFILL_PAGE_RECORDS,
 };
+use batches::push_backfill_record;
+pub(super) use batches::{historical_record_batches, queued_history_backfill_batches};
 mod cursor;
 mod historical_source;
 mod legacy_recovery;
@@ -32,10 +35,14 @@ use validation::{deserialize_initial_backfill_page, validate_peer_backfill_page}
 // pre-decode allocation bounded to four times the semantic page budget; typed validation below
 // still enforces the exact record and canonical-byte limits.
 const MAX_INITIAL_BACKFILL_WIRE_BYTES: usize = MAX_INITIAL_BACKFILL_PAGE_BYTES * 4;
-// Historical source export scans the source snapshot before returning a page. Keep the
-// receiver's per-request work comfortably below the 15-second direct-request budget while
-// retaining the protocol's 128-record upper bound for other recovery paths.
-const INITIAL_SOURCE_BACKFILL_PAGE_RECORDS: usize = 32;
+// Historical source export scans the source snapshot before returning a page. Keep the page below
+// the protocol maximum so one SQLite import remains bounded on a multi-gigabyte repository while
+// avoiding per-page transaction overhead once maintenance is paused during source convergence.
+const INITIAL_SOURCE_BACKFILL_PAGE_RECORDS: usize = 64;
+// Each direct request has a 60-second budget and lifecycle maintenance has a 300-second budget.
+// A page is committed in one SQLite transaction, so keep the number of selected sources bounded
+// while progress ordering prevents a slow source from starving the remaining peers.
+const INITIAL_SOURCE_PEERS_PER_CYCLE: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InitialBackfillProgress {
@@ -59,6 +66,12 @@ pub(super) struct PeerBackfillImport<'a> {
     peer_node_id: &'a str,
     epoch: u64,
     ready_repository_ids: &'a [String],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PeerBackfillPageOutcome {
+    Imported,
+    ResetAfterFork,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct RepositoryInitialBackfillRecord {
@@ -285,11 +298,11 @@ impl RepositoryInitialBackfillRecord {
 }
 pub(crate) async fn backfill_initial_repository_from_local_history(
     state: &AppState,
-    _now: u64,
+    now: u64,
 ) -> anyhow::Result<InitialBackfillProgress> {
     let local_backfill_completed = {
         let mut replica = state.repository_replica.lock().await;
-        replica.prepare_local_history_backfill(_now)?;
+        replica.prepare_local_history_backfill(now)?;
         replica.local_history_backfill_completed()
             && replica
                 .local_history_backfill_inflight_checkpoint()
@@ -322,11 +335,20 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
         ready_repository_ids.push(state.cluster.node_id.clone());
     }
     let mut progress = InitialBackfillProgress::Complete;
-    if !has_ready_repository {
-        for peer in initial_history_source_peers(state).await {
-            progress = progress
-                .combine(pull_peer_initial_history(state, &peer, &ready_repository_ids).await?);
-        }
+    // Source imports are independent of the local repository lifecycle. Once this node becomes
+    // Ready it must keep draining every registered node's pre-repository history; otherwise a
+    // partially completed source checkpoint is silently abandoned when lifecycle promotion
+    // stops calling the Syncing-only catch-up path.
+    for peer in initial_history_source_peers(state, now).await {
+        // A prior peer can fail import and return early. Only count this peer when its
+        // processing actually starts so unrequested peers remain eligible next cycle.
+        state
+            .repository_replica
+            .lock()
+            .await
+            .note_initial_history_source_attempt(&peer.node_id);
+        progress =
+            progress.combine(pull_peer_initial_history(state, &peer, &ready_repository_ids).await?);
     }
     // A first repository must learn every registered source's deletion baseline before replay.
     // Durable peer cursors bound each tick; an unavailable source never becomes an implicit ACK.
@@ -343,7 +365,7 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
             let page_progress = local_page::resume_local_history_backfill_page(
                 state,
                 &identity,
-                _now,
+                now,
                 &ready_repository_ids,
                 page_cursor,
                 completed,
@@ -375,7 +397,7 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
                     page_cursor.clone(),
                     completed,
                     queued_history_backfill_batches(batches),
-                    _now,
+                    now,
                     &ready_repository_ids,
                     &state.cluster.node_id,
                 )?;
@@ -393,18 +415,84 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
     Ok(progress)
 }
 
-async fn initial_history_source_peers(state: &AppState) -> Vec<MeshPeerTarget> {
-    let store = state.store.lock().await;
-    let endpoints = store.list_endpoints();
-    store
-        .list_nodes()
+async fn initial_history_source_peers(
+    state: &AppState,
+    _now_unix_seconds: u64,
+) -> Vec<MeshPeerTarget> {
+    let (nodes, endpoints) = {
+        let store = state.store.lock().await;
+        (store.list_nodes(), store.list_endpoints())
+    };
+    let selected_ids = {
+        let mut runtime = state.repository_replica.lock().await;
+        let pending_peer_progress = nodes
+            .iter()
+            .filter(|node| node.node_id != state.cluster.node_id)
+            .filter_map(|node| {
+                let checkpoint = runtime.initial_peer_backfill_checkpoint(&node.node_id);
+                if checkpoint
+                    .as_ref()
+                    .is_some_and(|checkpoint| checkpoint.completed)
+                {
+                    return None;
+                }
+                let imported_progress = checkpoint
+                    .map(|checkpoint| {
+                        checkpoint
+                            .stream_state
+                            .values()
+                            .map(|(sequence, _)| *sequence)
+                            .fold(0_u64, u64::saturating_add)
+                    })
+                    .unwrap_or_default();
+                Some((node.node_id.clone(), imported_progress))
+            })
+            .collect();
+        runtime.select_initial_history_source_peer_ids(
+            pending_peer_progress,
+            &state.cluster.node_id,
+            INITIAL_SOURCE_PEERS_PER_CYCLE,
+        )
+    };
+    selected_ids
         .into_iter()
+        .filter_map(|node_id| nodes.iter().find(|node| node.node_id == node_id))
         // A configured peer serves its node-local history from this endpoint. Including it here
         // makes concurrently syncing repositories ingest the same complete cluster baseline;
         // it does not recursively start repository-to-repository repair.
         .filter(|node| is_initial_history_source_peer(&node.node_id, &state.cluster.node_id))
-        .map(|node| peer_target_from_node(&node, &endpoints))
+        .map(|node| peer_target_from_node(node, &endpoints))
         .collect()
+}
+
+pub(super) async fn initial_history_source_backfill_pending(state: &AppState) -> bool {
+    let nodes = {
+        let store = state.store.lock().await;
+        // Only configured repositories import every source's baseline. Normal sources and
+        // former repositories must keep replaying their own durable outbox after a fresh join.
+        let local_is_repository =
+            store
+                .state()
+                .repository_membership
+                .as_ref()
+                .is_some_and(|membership| {
+                    membership
+                        .members()
+                        .iter()
+                        .any(|member| member.identity().node_id().as_str() == state.cluster.node_id)
+                });
+        if !local_is_repository {
+            return false;
+        }
+        store.list_nodes()
+    };
+    let runtime = state.repository_replica.lock().await;
+    nodes.iter().any(|node| {
+        node.node_id != state.cluster.node_id
+            && runtime
+                .initial_peer_backfill_checkpoint(&node.node_id)
+                .is_none_or(|checkpoint| !checkpoint.completed)
+    })
 }
 
 fn initial_source_backfill_path(cursor: Option<&str>) -> String {
@@ -461,6 +549,7 @@ pub(super) async fn pull_peer_initial_history(
     if checkpoint.completed {
         return Ok(InitialBackfillProgress::Complete);
     }
+    let request_started = std::time::Instant::now();
     let page_body = match repository_direct_request_body(
         state,
         peer,
@@ -471,7 +560,15 @@ pub(super) async fn pull_peer_initial_history(
     )
     .await
     {
-        Ok(page) => page,
+        Ok(page) => {
+            tracing::info!(
+                peer = %peer.node_id,
+                elapsed_ms = request_started.elapsed().as_millis(),
+                bytes = page.len(),
+                "peer history backfill page fetched"
+            );
+            page
+        }
         Err(error) => {
             if should_restart_peer_backfill(cursor.as_deref(), &error) {
                 state
@@ -480,7 +577,7 @@ pub(super) async fn pull_peer_initial_history(
                     .await
                     .restart_initial_peer_backfill(&peer.node_id)?;
             }
-            tracing::debug!(
+            tracing::warn!(
                 peer = %peer.node_id,
                 error = %error,
                 "peer history backfill is incomplete"
@@ -491,7 +588,7 @@ pub(super) async fn pull_peer_initial_history(
     let page = match deserialize_initial_backfill_page(&page_body) {
         Ok(page) => page,
         Err(error) => {
-            tracing::debug!(
+            tracing::warn!(
                 peer = %peer.node_id,
                 error = %error,
                 "peer history backfill page failed pre-decode validation"
@@ -502,16 +599,37 @@ pub(super) async fn pull_peer_initial_history(
     if let Err(error) =
         ordering::validate_initial_source_page(&page, cursor.as_deref(), &state.cluster.cluster_id)
     {
-        tracing::debug!(
+        tracing::warn!(
             peer = %peer.node_id,
             error = %error,
             "peer history backfill page failed semantic validation"
         );
         return Ok(InitialBackfillProgress::Unavailable);
     }
+    let page_record_count = page.records.len();
+    let tombstone_count = page
+        .records
+        .iter()
+        .filter(|record| record.tombstone)
+        .count();
+    if tombstone_count > 0 {
+        tracing::warn!(
+            peer = %peer.node_id,
+            records = page_record_count,
+            tombstones = tombstone_count,
+            tombstone_key_lengths = ?page
+                .records
+                .iter()
+                .filter(|record| record.tombstone)
+                .map(|record| record.record_key_base64.len())
+                .collect::<Vec<_>>(),
+            "peer history backfill page contains deletion records"
+        );
+    }
     if !page.records.is_empty() {
         saw_history = true;
-        receive_peer_backfill_page(
+        let import_started = std::time::Instant::now();
+        match receive_peer_backfill_page(
             state,
             PeerBackfillImport {
                 identity: &identity,
@@ -523,7 +641,28 @@ pub(super) async fn pull_peer_initial_history(
             page.records,
             &mut stream_state,
         )
-        .await?;
+        .await
+        {
+            Ok(PeerBackfillPageOutcome::Imported) => {
+                tracing::info!(
+                    peer = %peer.node_id,
+                    records = page_record_count,
+                    elapsed_ms = import_started.elapsed().as_millis(),
+                    "peer history backfill page committed"
+                );
+            }
+            Ok(PeerBackfillPageOutcome::ResetAfterFork) => {
+                return Ok(InitialBackfillProgress::InProgress);
+            }
+            Err(error) => {
+                tracing::warn!(
+                    peer = %peer.node_id,
+                    error = %error,
+                    "peer history backfill page failed during import"
+                );
+                return Err(error);
+            }
+        }
     }
     let Some(next_page_cursor) = page.next_page_cursor else {
         state
@@ -560,12 +699,13 @@ pub(crate) fn should_restart_peer_backfill(
         && matches!(error, RepositoryDirectError::Application(_))
         && !ordering::is_transient_source_rejection(error)
 }
-pub(super) async fn receive_peer_backfill_page(
+async fn receive_peer_backfill_page(
     state: &AppState,
     import: PeerBackfillImport<'_>,
     records: Vec<RepositoryInitialBackfillRecord>,
     stream_state: &mut BTreeMap<String, (u64, Option<[u8; 32]>)>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<PeerBackfillPageOutcome> {
+    let tombstone_count = records.iter().filter(|record| record.tombstone).count();
     let mut grouped = BTreeMap::<(u64, String), Vec<SyncRecord>>::new();
     let mut tiered_records = Vec::new();
     for record in records {
@@ -592,6 +732,7 @@ pub(super) async fn receive_peer_backfill_page(
                 &state.cluster.node_id,
             )?;
     }
+    let mut wires = Vec::new();
     for ((observed_at, stream), records) in grouped {
         for records in records.chunks(32) {
             let (next_sequence, previous_hash) =
@@ -613,22 +754,65 @@ pub(super) async fn receive_peer_backfill_page(
             let wire = signed.wire_bytes()?;
             *next_sequence = next_sequence.saturating_add(u64::try_from(records.len())?);
             *previous_hash = Some(signed.segment_hash()?);
+            wires.push((wire, observed_at));
+        }
+    }
+    tracing::info!(
+        peer = %import.peer_node_id,
+        wires = wires.len(),
+        tombstones = tombstone_count,
+        "peer history backfill import starting"
+    );
+    let lock_started = std::time::Instant::now();
+    let mut replica = state.repository_replica.lock().await;
+    let lock_elapsed_ms = lock_started.elapsed().as_millis();
+    if lock_elapsed_ms >= 1_000 {
+        tracing::warn!(
+            peer = %import.peer_node_id,
+            lock_elapsed_ms,
+            "history repository runtime lock wait was slow"
+        );
+    }
+    let receive_started = std::time::Instant::now();
+    let receive_result = replica.receive_repair_wires_from_repository(
+        &state.cluster.cluster_id,
+        import.identity,
+        &wires,
+        import.ready_repository_ids,
+        &state.cluster.node_id,
+    );
+    drop(replica);
+    let receive_elapsed_ms = receive_started.elapsed().as_millis();
+    if receive_elapsed_ms >= 1_000 {
+        tracing::warn!(
+            peer = %import.peer_node_id,
+            receive_elapsed_ms,
+            "slow peer history backfill import"
+        );
+    }
+    if let Err(error) = receive_result {
+        if matches!(
+            error,
+            RepositoryRuntimeError::Protocol(ProtocolError::ForkDetected { .. })
+        ) {
             state
                 .repository_replica
                 .lock()
                 .await
-                .receive_repair_wire_from_repository_with_gaps(
-                    &state.cluster.cluster_id,
-                    import.identity,
-                    &wire,
-                    &[],
-                    observed_at,
-                    import.ready_repository_ids,
-                    &state.cluster.node_id,
+                .reset_initial_peer_backfill_after_fork(
+                    import.peer_node_id,
+                    import.identity.node_id().as_str(),
+                    import.epoch,
                 )?;
+            tracing::warn!(
+                peer = %import.peer_node_id,
+                "peer history backfill page fork reset to a clean synthetic generation"
+            );
+            return Ok(PeerBackfillPageOutcome::ResetAfterFork);
         }
+        return Err(error.into());
     }
-    Ok(())
+    Ok(PeerBackfillPageOutcome::Imported)
 }
 pub(crate) fn source_stream_for_schema(schema_id: &str) -> Option<&'static str> {
     Some(match schema_id {
@@ -695,7 +879,7 @@ pub(crate) async fn initial_backfill_page_stable(
         let now_unix_seconds = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
         let repair_cache_cutoff_unix_seconds = now_unix_seconds.saturating_sub(
             crate::state::history_repository::replica::RepositoryRetentionPolicy::default()
-                .minute_retention_seconds(),
+                .repair_cache_retention_seconds(),
         );
         let page = state.repository_replica.lock().await.tiered_backfill_page(
             page_cursor,
@@ -764,111 +948,4 @@ pub(crate) async fn initial_backfill_page_stable(
         next_page_cursor,
         deletion_snapshot: collected.deletion_snapshot,
     })
-}
-fn push_backfill_record(
-    records: &mut HistoricalBackfillCollector,
-    schema_id: &str,
-    node_id: &str,
-    observed_at: &str,
-    record_key: String,
-    payload: serde_json::Value,
-) -> anyhow::Result<()> {
-    let observed_at = chrono::DateTime::parse_from_rfc3339(observed_at)
-        .map_err(|error| {
-            anyhow::anyhow!("parse persisted history timestamp {observed_at}: {error}")
-        })?
-        .timestamp()
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("persisted history timestamp is before Unix epoch"))?;
-    records.push((
-        observed_at,
-        source_record_with_key(
-            schema_id,
-            node_id,
-            observed_at,
-            record_key.into_bytes(),
-            payload,
-            false,
-        )?,
-    ))?;
-    Ok(())
-}
-pub(super) fn historical_record_batches(
-    records: Vec<(u64, SyncRecord)>,
-) -> anyhow::Result<Vec<(u64, Vec<SyncRecord>)>> {
-    const MAX_RECORDS_PER_BACKFILL_SEGMENT: usize = 32;
-    let mut batches = Vec::new();
-    let mut current_timestamp = None;
-    let mut current_stream = None;
-    let mut current_records = Vec::new();
-    for (observed_at, record) in records {
-        let stream = if record.is_tombstone() {
-            "tombstone"
-        } else {
-            source_stream_for_schema(record.schema().0)
-                .ok_or_else(|| anyhow::anyhow!("unknown backfill schema"))?
-        };
-        let timestamp_changed = current_timestamp != Some(observed_at);
-        let stream_changed = current_stream != Some(stream);
-        let record_limit = current_records.len() == MAX_RECORDS_PER_BACKFILL_SEGMENT;
-        let exceeds_byte_limit = if current_records.is_empty()
-            || (!timestamp_changed && !stream_changed && !record_limit)
-        {
-            let mut candidate = current_records.clone();
-            candidate.push(record.clone());
-            backfill_segment_canonical_size(observed_at, stream, &candidate)?
-                > MAX_INITIAL_BACKFILL_PAGE_BYTES
-        } else {
-            false
-        };
-        if timestamp_changed || stream_changed || record_limit || exceeds_byte_limit {
-            if current_records.is_empty() {
-                if exceeds_byte_limit {
-                    anyhow::bail!("initial history backfill segment exceeds byte budget");
-                }
-            } else {
-                batches.push((
-                    current_timestamp.expect("backfill batch timestamp"),
-                    std::mem::take(&mut current_records),
-                ));
-            }
-            current_timestamp = Some(observed_at);
-            current_stream = Some(stream);
-        }
-        current_records.push(record);
-    }
-    if let Some(timestamp) = current_timestamp {
-        batches.push((timestamp, current_records));
-    }
-    Ok(batches)
-}
-
-pub(super) fn queued_history_backfill_batches(
-    batches: Vec<(u64, Vec<SyncRecord>)>,
-) -> Vec<(Vec<SyncRecord>, u64)> {
-    batches
-        .into_iter()
-        .map(|(observed_at_unix_seconds, records)| (records, observed_at_unix_seconds))
-        .collect()
-}
-
-fn backfill_segment_canonical_size(
-    timestamp: u64,
-    stream: &str,
-    records: &[SyncRecord],
-) -> anyhow::Result<usize> {
-    let result = CanonicalSegment::new(
-        "backfill",
-        Cursor::new("backfill", 0, stream, 0)?,
-        records.to_vec(),
-        None,
-        timestamp,
-        timestamp,
-    )
-    .and_then(|segment| segment.canonical_bytes());
-    match result {
-        Ok(bytes) => Ok(bytes.len()),
-        Err(ProtocolError::SegmentCanonicalLimit { actual }) => Ok(actual),
-        Err(error) => Err(error.into()),
-    }
 }

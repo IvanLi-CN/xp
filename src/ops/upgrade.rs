@@ -4,17 +4,17 @@ use crate::ops::runtime_activation::restart_xp_service;
 use crate::ops::upgrade_artifacts::{cleanup_managed_artifacts_for, workspace_path};
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, tmp_path_next_to};
 use anyhow::Context;
-use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::fs;
-use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+mod download;
+use download::{download_to_path, upgrade_http_client};
 mod failure;
+mod history_compatibility;
 mod inputs;
 mod managed_runtimes;
 mod reexec;
@@ -27,7 +27,8 @@ use failure::{
     unrestored_transaction_backup_error, write_upgrade_diagnostics,
 };
 use inputs::{
-    detect_platform, github_api_base, parse_owner_repo, resolve_repo, validate_release_args,
+    backup_path, detect_platform, github_api_base, parse_owner_repo, resolve_repo,
+    validate_release_args,
 };
 use managed_runtimes::{
     RuntimeBinaryBackup, rollback_complete_phase_binaries, upgrade_and_reconcile_managed_runtimes,
@@ -114,10 +115,7 @@ async fn fetch_release(
     repo: &str,
     args: &UpgradeReleaseArgs,
 ) -> anyhow::Result<GitHubRelease> {
-    let client = reqwest::Client::builder()
-        .user_agent("xp-ops")
-        .build()
-        .context("build http client")?;
+    let client = upgrade_http_client(Duration::from_secs(60))?;
 
     if args.version == "latest" {
         if !args.prerelease {
@@ -154,29 +152,6 @@ fn find_asset_url<'a>(release: &'a GitHubRelease, asset_name: &str) -> Option<&'
         .iter()
         .find(|a| a.name == asset_name)
         .map(|a| a.browser_download_url.as_str())
-}
-
-async fn download_to_path(url: &str, dest: &Path) -> anyhow::Result<()> {
-    let client = reqwest::Client::builder()
-        .user_agent("xp-ops")
-        .build()
-        .context("build http client")?;
-    let resp = client.get(url).send().await?.error_for_status()?;
-
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let tmp = tmp_path_next_to(dest);
-    let mut file = fs::File::create(&tmp)?;
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let buf = chunk?;
-        file.write_all(&buf)?;
-    }
-    file.flush()?;
-    fs::rename(&tmp, dest)?;
-    Ok(())
 }
 
 fn read_checksums(path: &Path) -> Result<HashMap<String, [u8; 32]>, ExitError> {
@@ -233,15 +208,6 @@ fn now_unix_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-fn backup_path(dest: &Path) -> PathBuf {
-    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
-    let name = dest
-        .file_name()
-        .unwrap_or_else(|| OsStr::new("bin"))
-        .to_string_lossy();
-    parent.join(format!("{name}.bak.{}", now_unix_secs()))
 }
 
 pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitError> {
@@ -341,6 +307,8 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             ""
         }
     );
+
+    history_compatibility::ensure_target(&lock_data_dir, &release.tag_name)?;
 
     if mode == Mode::DryRun {
         if args.allow_internal_auth_v2_cutover {
@@ -455,6 +423,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             &checksums,
             platform,
             &xp_backup,
+            &lock_data_dir,
             rollback_xp_on_runtime_failure,
         )
         .await?;
@@ -488,7 +457,11 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
                     service_backups: &service_backups,
                 },
             ) {
-                let error = match rollback_complete_phase_binaries(&paths, &service_backups) {
+                let error = match rollback_complete_phase_binaries(
+                    &paths,
+                    &lock_data_dir,
+                    &service_backups,
+                ) {
                     Ok(()) => error,
                     Err(rollback) => ExitError::new(
                         rollback.code,
@@ -650,6 +623,7 @@ async fn upgrade_xp(
 
     if (!is_test_root(paths.root()) || test_enable_service_restart()) && !restart_xp_service(paths)
     {
+        history_compatibility::ensure_rollback(&paths.map_abs(data_dir), backup)?;
         match crate::internal_auth_epoch::is_v2_epoch(data_dir) {
             Ok(true) => {
                 return Err(ExitError::new(

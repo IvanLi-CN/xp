@@ -21,7 +21,7 @@ where
         capacity,
         lifecycle,
         source,
-        super::REPOSITORY_REQUEST_BUDGET,
+        super::REPOSITORY_MAINTENANCE_BUDGET,
     )
     .await
 }
@@ -85,7 +85,7 @@ pub(super) fn spawn_local_source_worker(state: AppState) {
                 tracing::debug!(error = %error, "history repository capacity cycle skipped");
             }
             if let Err(error) = lifecycle_result {
-                tracing::debug!(error = %error, "history repository lifecycle cycle skipped");
+                tracing::warn!(error = %error, "history repository lifecycle cycle skipped");
             }
             if let Err(error) = source_result {
                 tracing::debug!(error = %error, "history source collection cycle skipped");
@@ -124,23 +124,31 @@ pub(super) async fn receive_local_source_segments(
     ready_repository_ids: &[String],
     now: u64,
 ) -> anyhow::Result<Vec<crate::state::history_repository::replica::RepositorySyncReceipt>> {
-    // Keep local apply bounded while avoiding the old four-segment/500ms cadence, which capped
-    // repository apply below the source's required ten-times headroom during backlog recovery.
-    const MAX_LOCAL_BATCH_SEGMENTS: usize = 4;
-    const LOCAL_BATCH_YIELD: Duration = Duration::from_millis(50);
+    // Keep local apply bounded while committing enough of the 1 MiB delivery page per SQLite
+    // transaction to drain a recovery backlog. Each batch remains a strict subset of the page
+    // budget, and the short yield preserves lifecycle/health scheduling between commits.
+    const MAX_LOCAL_BATCH_SEGMENTS: usize = 32;
+    const LOCAL_BATCH_YIELD: Duration = Duration::from_millis(10);
     let batch_count = segments.len().div_ceil(MAX_LOCAL_BATCH_SEGMENTS);
+    let verified_replay_streams = {
+        let mut runtime = state.repository_replica.lock().await;
+        super::repository_blocking(|| {
+            runtime.verified_local_source_replay_streams(&state.cluster.cluster_id, segments, now)
+        })?
+    };
     let mut receipts = Vec::with_capacity(segments.len());
     for (batch_index, batch) in segments.chunks(MAX_LOCAL_BATCH_SEGMENTS).enumerate() {
         let batch_gaps = if batch_index == 0 { gaps } else { &[] };
         let mut runtime = state.repository_replica.lock().await;
         let batch_receipts = super::repository_blocking(|| {
-            runtime.receive_wire_batch_from_repository_with_gaps(
+            runtime.receive_local_source_batch_from_repository_with_gaps(
                 &state.cluster.cluster_id,
                 batch,
                 batch_gaps,
                 now,
                 ready_repository_ids,
                 &state.cluster.node_id,
+                &verified_replay_streams,
             )
         })?;
         drop(runtime);

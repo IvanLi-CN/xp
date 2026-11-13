@@ -919,6 +919,7 @@ async fn set_bootstrap_node_access_host(store: &Arc<Mutex<JsonSnapshotStore>>, a
 }
 
 #[tokio::test]
+#[ignore = "requires generated web/dist assets"]
 async fn ui_serves_index_at_root_and_embedded_assets() {
     let tmp = TempDir::new().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
@@ -1008,6 +1009,7 @@ async fn ui_serves_index_at_root_and_embedded_assets() {
 }
 
 #[tokio::test]
+#[ignore = "requires generated web/dist assets"]
 async fn ui_serves_favicon_and_manifest() {
     let tmp = TempDir::new().unwrap();
     let app = app(&tmp);
@@ -6364,7 +6366,7 @@ rules: []
         "closed relay groups must not expose an external provider filter"
     );
 
-    for expected in ["🌟 Japan", "🔒 Japan", "🤯 Japan"] {
+    for expected in ["🌟 Japan", "🔒 Japan"] {
         assert!(
             groups
                 .iter()
@@ -6372,6 +6374,11 @@ rules: []
             "compat region group missing from output: {expected}"
         );
     }
+    assert!(!groups.iter().any(|g| {
+        g.get("name")
+            .and_then(YamlValue::as_str)
+            .is_some_and(|name| name == "🤯 Japan")
+    }));
 
     let proxies = yaml
         .get("proxies")

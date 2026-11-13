@@ -52,6 +52,7 @@ proxy-groups:
     tolerance: 0
     proxies:
       - 🔒 高质量
+      - 🔒 落地
       - 🤯 All
 
   # Visible regional leaves only consume direct Reality candidates.
@@ -161,57 +162,7 @@ proxy-groups:
       新加坡|🇸🇬|Singapore|SG|美国|🇺🇸|United States|USA|US)|(?:^(?:hinet\\-ss|hk2\\-ss|sg\\-ss)$)"
     proxies: [🔒 Other]
 
-  - name: 🤯 Japan
-    type: url-test
-    hidden: true
-    url: https://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 0
-    proxies: [🌟 Japan]
-  - name: 🤯 HongKong
-    type: url-test
-    hidden: true
-    url: https://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 0
-    proxies: [🌟 HongKong]
-  - name: 🤯 Taiwan
-    type: url-test
-    hidden: true
-    url: https://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 0
-    proxies: [🌟 Taiwan]
-  - name: 🤯 Korea
-    type: url-test
-    hidden: true
-    url: https://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 0
-    proxies: [🌟 Korea]
-  - name: 🤯 Singapore
-    type: url-test
-    hidden: true
-    url: https://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 0
-    proxies: [🌟 Singapore]
-  - name: 🤯 US
-    type: url-test
-    hidden: true
-    url: https://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 0
-    proxies: [🌟 US]
-  - name: 🤯 Other
-    type: url-test
-    hidden: true
-    url: https://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 0
-    proxies: [🌟 Other]
-
-  # A landing group exists only when its system provider payload has a chain node.
+  # A landing group exists when its system provider payload has Reality direct or a chain node.
   # Candidate order is Reality direct, SS chain, then Reality chain.
   - name: 🛬 hinet
     type: fallback
@@ -242,7 +193,7 @@ proxy-groups:
     filter: '^(?:sg\-reality|sg\-ss\-chain|sg\-reality\-chain)$'
 
   - name: 🔒 落地
-    type: select
+    type: url-test
     proxies: [🛬 hinet, 🛬 hk2, 🛬 sg]
   - name: 🤯 All
     type: url-test
@@ -251,13 +202,13 @@ proxy-groups:
     interval: 300
     tolerance: 0
     proxies:
-      - 🤯 Japan
-      - 🤯 HongKong
-      - 🤯 Taiwan
-      - 🤯 Korea
-      - 🤯 Singapore
-      - 🤯 US
-      - 🤯 Other
+      - 🌟 Japan
+      - 🌟 HongKong
+      - 🌟 Taiwan
+      - 🌟 Korea
+      - 🌟 Singapore
+      - 🌟 US
+      - 🌟 Other
 
   # `proxies` keeps the structural order. The `use` filter exposes only Reality
   # direct nodes from the system payload; it deliberately excludes *-ss.

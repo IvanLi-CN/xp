@@ -2,9 +2,9 @@
 
 ## Related ADRs
 
-None
+- [ADR 0033](../../adr/0033-committed-upgrade-backup-cleanup.md)
 
-## 背景 / 问题陈述
+## Context and Scope
 
 - `#n5mtq` 已经让 Web 顶栏展示当前 `xp` 版本并检查 stable GitHub Release，但更新发现后的行动仍需要离开 UI 手动执行。
 - `#ap63t` 已经把升级能力统一到 `xp-ops upgrade`，包含 release 锁定、`xp-ops` 自升级续跑、`xp` 替换、`xray` 静态配置收敛与失败回滚。
@@ -49,7 +49,10 @@ None
 - Docker image pull / Compose restart 自动化。
 - Web 回滚按钮。
 
-## 需求（Requirements）
+## Requirements
+
+- REQ-UPGRADE-BOUNDED-BACKUP-CLEANUP：所有 host-managed
+  升级收尾不得按备份体积累积内存；服务就绪后的备份清理须有持久守卫，失败时保留就绪程序、剩余备份和诊断。
 
 ### MUST
 
@@ -114,6 +117,9 @@ or persist a browser-supplied repo override.
 
 ### Durable files
 
+- 正式升级的 GitHub 请求共享 10 秒连接与 30 秒读取空闲上限；release 元数据请求总上限为 60 秒，每个 asset 下载总上限为 15 分钟，持续滴流不得延长总上限。
+- 下载超时、正文截断或写入失败必须返回现有失败路径，清理本次未完成文件并保留原目标文件；不得发布未完成 asset 或继续激活。
+
 Under `${XP_DATA_DIR}`:
 
 - `upgrade/request.json`: Web start API 写入的受限请求。
@@ -121,6 +127,11 @@ Under `${XP_DATA_DIR}`:
 - `support.storage` 是可选的加法字段，分别返回安装目录和下载工作区的可用空间、可回收历史
   artifact 空间、`128 MiB` 门槛与清理后是否可启动。Web 仅把它用于当前节点升级的预测；root
   runner 在清理后重新检查，作为最终事实。
+- 升级收尾不得把二进制备份整体读入内存；内存占用不随备份体积累加。
+- 服务激活、就绪检查和其他 artifact 清理完成后，第一个备份 unlink 前须同步有界诊断守卫。
+  守卫失败仍可按原有路径回滚；守卫之后删除失败返回 `cleanup_incomplete: committed_upgrade`，
+  保留就绪程序及未删除备份，不尝试通过已删除备份回滚。剩余备份和诊断共同阻止下一次升级，
+  直到 root 核验并精确清理；进程意外退出受同一守卫保护。
 - 所有 host-managed systemd/OpenRC 节点共享同一保留策略：二进制备份只存在于当前升级事务，
   成功或成功回滚后 `.bak.*` 与 `.failed.*` 均为零；不按总磁盘容量保留离线 fallback。失败时只
   保留一份不超过 `8 KiB` 的 `${XP_DATA_DIR}/upgrade/diagnostics.json`，下一次成功删除、下一次
@@ -161,7 +172,11 @@ Status states:
   `xp-ops upgrade` 后，必须由 root 显式运行一次 `xp-ops init`；readiness check 不得通过启动
   one-shot service 隐式迁移。
 
-## 验收标准（Acceptance Criteria）
+## Verification
+
+- VER-UPGRADE-BOUNDED-BACKUP-CLEANUP：covers: REQ-UPGRADE-BOUNDED-BACKUP-CLEANUP；Linux 隔离子进程在 64
+  MiB 数据段上限下删除两份各 128 MiB 的稀疏备份；后续 unlink 失败必须保留就绪程序和剩余备份，
+  写入失败诊断并阻止新升级；符号链接在任何删除前被拒绝，守卫未持久化前不得删除备份。
 
 - Given `update_available`，When 查看版本元素，Then 右侧显示升级/download icon。
 - Given 版本元素获得 hover/click/focus，

@@ -75,7 +75,7 @@ def latest_runs(payload: Any, target_sha: str) -> dict[str, WorkflowState]:
     selected: dict[str, dict[str, Any]] = {}
     for run in runs:
         if not isinstance(run, dict):
-            continue
+            raise ReadinessError("github_api_shape_failure:workflow_run")
         name = run.get("name")
         if name not in REQUIRED_WORKFLOWS:
             continue
@@ -156,12 +156,31 @@ def validate_resource_evidence(raw: str | None, target_sha: str) -> str:
         raise ReadinessError("resource_evidence_schema_mismatch")
     if evidence.get("target_sha") != target_sha:
         raise ReadinessError("resource_evidence_sha_mismatch")
+    if evidence.get("candidate_target") != "x86_64-unknown-linux-musl":
+        raise ReadinessError("resource_evidence_target_invalid")
+    digests = evidence.get("candidate_digests")
+    if (
+        not isinstance(digests, dict)
+        or any(
+            not isinstance(digests.get(name), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digests[name])
+            for name in ("xp", "xp-ops")
+        )
+    ):
+        raise ReadinessError("resource_evidence_candidate_digest_invalid")
     log_sha = evidence.get("log_sha")
     if not isinstance(log_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", log_sha):
         raise ReadinessError("resource_evidence_log_sha_invalid")
-    if evidence.get("window_seconds") != 300:
+    if not isinstance(evidence.get("window_seconds"), int) or isinstance(evidence.get("window_seconds"), bool) or evidence.get("window_seconds") != 300:
         raise ReadinessError("resource_evidence_window_invalid")
-    if evidence.get("memory_limit_mib") != 128 or evidence.get("swap_limit_mib") != 0:
+    if (
+        not isinstance(evidence.get("memory_limit_mib"), int)
+        or isinstance(evidence.get("memory_limit_mib"), bool)
+        or not isinstance(evidence.get("swap_limit_mib"), int)
+        or isinstance(evidence.get("swap_limit_mib"), bool)
+        or evidence.get("memory_limit_mib") != 128
+        or evidence.get("swap_limit_mib") != 0
+    ):
         raise ReadinessError("resource_evidence_resource_limit_invalid")
     required_gates = (
         "source_ack_meets_ten_x_segments",
@@ -192,7 +211,10 @@ def validate_resource_evidence_files(
     actual_log_sha = hashlib.sha256(log_bytes).hexdigest()
     if evidence["log_sha"] != actual_log_sha:
         raise ReadinessError("resource_evidence_log_sha_mismatch")
-    log_text = log_bytes.decode("utf-8", errors="replace")
+    try:
+        log_text = log_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ReadinessError("resource_evidence_log_invalid_utf8") from exc
     if "test result: ok" not in log_text or "source_journal_resource" not in log_text:
         raise ReadinessError("resource_evidence_log_incomplete")
     if re.search(r"^test result: FAILED\b", log_text, re.MULTILINE) or re.search(
@@ -207,17 +229,21 @@ def validate_resource_evidence_files(
             rf"^test {re.escape(workload)} \.\.\. ok$", log_text, re.MULTILINE
         ):
             raise ReadinessError(f"resource_evidence_workload_incomplete:{workload}")
-    metric_line = next(
-        (
-            line
-            for line in log_text.splitlines()
-            if line.startswith("source_journal_resource ")
-        ),
-        None,
-    )
-    if metric_line is None:
+    metric_lines = [
+        line for line in log_text.splitlines() if line.startswith("source_journal_resource ")
+    ]
+    if len(metric_lines) != 1:
         raise ReadinessError("resource_evidence_metrics_missing")
+    metric_line = metric_lines[0]
     metric_fields = (
+        "max_read_bytes",
+        "max_cycle_read_bytes",
+        "max_rss_delta",
+        "peak_pss_kib",
+        "memory_limit_bytes",
+        "swap_limit_bytes",
+        "backlog_segments",
+        "backlog_bytes",
         "sample_window_seconds",
         "generated_segments",
         "generated_bytes",
@@ -242,6 +268,10 @@ def validate_resource_evidence_files(
         metrics[field] = value
     if metrics["sample_window_seconds"] < 300:
         raise ReadinessError("resource_evidence_window_observed_invalid")
+    if metrics["memory_limit_bytes"] != 128 * 1024 * 1024 or metrics["swap_limit_bytes"] != 0:
+        raise ReadinessError("resource_evidence_observed_resource_limit_invalid")
+    if metrics["backlog_segments"] < 20_000 and metrics["backlog_bytes"] < 128 * 1024 * 1024:
+        raise ReadinessError("resource_evidence_backlog_invalid")
     if metrics["peak_generated_segments"] == 0 or metrics["peak_generated_bytes"] == 0:
         raise ReadinessError("resource_evidence_generation_missing")
     computed_gates = {

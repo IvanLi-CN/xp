@@ -69,9 +69,10 @@ fn embed_web_dist() -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
     let out_file = out_dir.join("embedded_web_assets.rs");
 
-    // Ensure cargo rebuilds when web assets change.
-    println!("cargo:rerun-if-changed=web/dist");
-    println!("cargo:rerun-if-changed=web/dist/assets");
+    // The web build updates this marker only when the complete asset tree changes. Watching
+    // every generated asset makes Cargo rebuild the Rust crate on every fresh CI runner even
+    // when the deterministic Web output is byte-for-byte identical.
+    println!("cargo:rerun-if-changed=web/.xp-dist-fingerprint");
 
     let index_html = dist_dir.join("index.html");
     if !index_html.is_file() {
@@ -104,7 +105,6 @@ fn embed_web_dist() -> Result<(), Box<dyn std::error::Error>> {
             .to_string();
         let include_suffix = format!("/web/dist/{rel_str}");
 
-        println!("cargo:rerun-if-changed=web/dist/{rel_str}");
         if should_gzip(&file) {
             let compressed_name = format!("{index}.gz");
             let compressed_path = compressed_dir.join(&compressed_name);

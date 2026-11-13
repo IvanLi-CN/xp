@@ -52,6 +52,7 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
     checksums: &HashMap<String, [u8; 32]>,
     platform: Platform,
     xp_backup: &Path,
+    data_dir: &Path,
     rollback_xp_on_failure: bool,
 ) -> Result<Vec<RuntimeBinaryBackup>, ExitError> {
     let backups = match upgrade_managed_runtime_binaries(paths, release, checksums, platform).await
@@ -61,6 +62,7 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
             return Err(finish_runtime_failure(
                 paths,
                 xp_backup,
+                data_dir,
                 err,
                 rollback_xp_on_failure,
                 true,
@@ -75,6 +77,7 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
             return Err(finish_runtime_failure(
                 paths,
                 xp_backup,
+                data_dir,
                 err,
                 rollback_xp_on_failure,
                 true,
@@ -90,10 +93,15 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
             ),
             rollback_runtime_binaries(&backups),
         );
-        return Err(
-            finish_runtime_failure(paths, xp_backup, err, rollback_xp_on_failure, true)
-                .expect_err("runtime failure helper must return an error"),
-        );
+        return Err(finish_runtime_failure(
+            paths,
+            xp_backup,
+            data_dir,
+            err,
+            rollback_xp_on_failure,
+            true,
+        )
+        .expect_err("runtime failure helper must return an error"));
     }
     if let Err(err) = reconcile_static_xray_config_and_restart(paths) {
         let runtime_rollback =
@@ -103,6 +111,7 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
         return Err(finish_runtime_failure(
             paths,
             xp_backup,
+            data_dir,
             err,
             rollback_xp_on_failure,
             restart_xp,
@@ -129,6 +138,7 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
         return Err(finish_runtime_failure(
             paths,
             xp_backup,
+            data_dir,
             err,
             rollback_xp_on_failure,
             restart_xp,
@@ -141,12 +151,13 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
 fn finish_runtime_failure(
     paths: &Paths,
     xp_backup: &Path,
+    data_dir: &Path,
     error: ExitError,
     rollback_xp_on_failure: bool,
     restart_xp: bool,
 ) -> Result<(), ExitError> {
     if rollback_xp_on_failure {
-        rollback_xp_after_runtime_failure(paths, xp_backup, error, restart_xp)
+        rollback_xp_after_runtime_failure(paths, data_dir, xp_backup, error, restart_xp)
     } else {
         Err(error)
     }
@@ -550,8 +561,16 @@ pub(super) fn rollback_runtime_binaries(backups: &[RuntimeBinaryBackup]) -> Resu
 
 pub(super) fn rollback_complete_phase_binaries(
     paths: &Paths,
+    data_dir: &Path,
     backups: &[RuntimeBinaryBackup],
 ) -> Result<(), ExitError> {
+    if let Some(backup) = backups
+        .iter()
+        .find(|item| item.dest == paths.usr_local_bin_xp())
+        .and_then(|item| item.backup.as_deref())
+    {
+        super::history_compatibility::ensure_rollback(data_dir, backup)?;
+    }
     rollback_runtime_binaries(backups)?;
     if !service_commands_are_disabled(paths) {
         if !stop_xp_service(paths) {

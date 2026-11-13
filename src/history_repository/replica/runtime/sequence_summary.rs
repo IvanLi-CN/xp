@@ -62,9 +62,22 @@ impl RepositoryReplicaRuntime {
         Ok(summary)
     }
 
+    #[cfg(test)]
     pub(crate) fn advance_sequence_summary_block_rebuild_page(
         &mut self,
     ) -> Result<bool, RepositoryRuntimeError> {
+        self.advance_sequence_summary_block_rebuild_slice(16)
+    }
+
+    pub(crate) fn advance_sequence_summary_block_rebuild_slice(
+        &mut self,
+        block_limit: usize,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        // The background worker releases the replica mutex between slices. Keep the
+        // ordinary page API for explicit bounded maintenance and resource workloads.
+        if block_limit == 0 {
+            return Ok(false);
+        }
         if self.uses_sqlite_history() {
             let mut metadata_changed = false;
             if self.snapshot.sequence_summary_version != 3 {
@@ -117,7 +130,7 @@ impl RepositoryReplicaRuntime {
         }
         let dirty = self
             .storage
-            .repository_history_dirty_sequence_summary_blocks(16)
+            .repository_history_dirty_sequence_summary_blocks(block_limit.min(16))
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         if dirty.is_empty() {
             self.snapshot.sequence_summary_blocks_complete = true;

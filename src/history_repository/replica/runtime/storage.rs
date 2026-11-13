@@ -1,11 +1,41 @@
+mod rows;
 use super::*;
 
 #[path = "storage_source.rs"]
 mod storage_source;
 
-const PARTITION_SUMMARY_REBUILD_PAGE_SIZE: usize = 32;
+// Initial source backfill is complete before this maintenance path runs. Keep the page bounded
+// like retention compaction, while avoiding a 32-row page that turns a large existing repository
+// into an unnecessarily long serialized rebuild.
+const PARTITION_SUMMARY_REBUILD_PAGE_SIZE: usize = 256;
 
 impl RepositoryReplicaRuntime {
+    pub(crate) fn set_repository_quota_bytes(
+        &mut self,
+        quota_bytes: u64,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let mut next = RepositoryCapacity::new(quota_bytes)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        self.refresh_capacity()?;
+        next.record_usage(
+            self.snapshot.capacity.used_bytes(),
+            self.snapshot.capacity.filesystem_available_bytes(),
+        )
+        .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let previous = std::mem::replace(&mut self.snapshot.capacity, next);
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot.capacity = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn compact_repository_payload_page(&self) -> Result<usize, RepositoryRuntimeError> {
+        self.storage
+            .compact_repository_payload_page()
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+    }
+
     const DELIVERY_METRICS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
     pub(super) fn mark_delivery_metrics_dirty(&mut self) {
@@ -127,6 +157,7 @@ impl RepositoryReplicaRuntime {
         if !self.uses_sqlite_history() || self.snapshot.partition_summaries_complete {
             return Ok(true);
         }
+        let started_at = std::time::Instant::now();
         let rows = self
             .storage
             .repository_history_records_for_partition_summary(
@@ -137,8 +168,13 @@ impl RepositoryReplicaRuntime {
         let Some(last_row) = rows.last() else {
             self.snapshot.partition_summaries_complete = true;
             self.persist_control_state()?;
+            tracing::info!(
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                "history partition summary rebuild completed"
+            );
             return Ok(true);
         };
+        let row_count = rows.len();
         let last_cursor = RepositoryHistoryCompactionCursor::from(last_row);
         let records = match rows
             .into_iter()
@@ -159,6 +195,13 @@ impl RepositoryReplicaRuntime {
         self.snapshot.partition_summaries = summaries.into_values().collect();
         self.snapshot.partition_summary_cursor = Some(last_cursor);
         self.persist_control_state()?;
+        tracing::info!(
+            rows = row_count,
+            page_size = PARTITION_SUMMARY_REBUILD_PAGE_SIZE,
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            complete = false,
+            "history partition summary rebuild page committed"
+        );
         Ok(false)
     }
 
@@ -435,6 +478,30 @@ impl RepositoryReplicaRuntime {
             .collect()
     }
 
+    pub(crate) fn history_source_stream_max_sequence(
+        &self,
+        source_node_id: &str,
+        source_epoch: u64,
+        stream: &str,
+    ) -> Result<Option<u64>, RepositoryRuntimeError> {
+        if !self.uses_sqlite_history() {
+            return Ok(self
+                .snapshot
+                .records
+                .iter()
+                .filter(|record| {
+                    record.source_node_id == source_node_id
+                        && record.source_epoch == source_epoch
+                        && record.stream == stream
+                })
+                .map(|record| record.sequence)
+                .max());
+        }
+        self.storage
+            .repository_history_source_stream_max_sequence(source_node_id, source_epoch, stream)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+    }
+
     pub(crate) fn sqlite_records_for_schema(
         &self,
         subject_node_id: Option<&str>,
@@ -507,7 +574,7 @@ impl RepositoryReplicaRuntime {
         // by compacted canonical SQLite rows; retaining minute-sized wire payloads for that full
         // period would defeat the repository quota before tiering can help.
         let repair_cache_cutoff = now_unix_seconds.saturating_sub(
-            super::super::RepositoryRetentionPolicy::default().minute_retention_seconds(),
+            super::super::RepositoryRetentionPolicy::default().repair_cache_retention_seconds(),
         );
         self.snapshot
             .segments
@@ -533,6 +600,8 @@ impl RepositoryReplicaRuntime {
         }
         let policy = super::super::RepositoryRetentionPolicy::default();
         let cutoff = now_unix_seconds.saturating_sub(policy.minute_retention_seconds());
+        let repair_cache_cutoff =
+            now_unix_seconds.saturating_sub(policy.repair_cache_retention_seconds());
         let after = self
             .snapshot
             .retention_compaction_cursor
@@ -551,7 +620,14 @@ impl RepositoryReplicaRuntime {
         if fetched_rows.is_empty() {
             self.snapshot.retention_compaction_cursor = None;
             self.snapshot.retention_compaction_continuation = None;
-            let result = self.persist_control_state();
+            let control_payload = serde_json::to_vec(&self.snapshot_for_persistence())
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            let outcome = self
+                .storage
+                .prune_repository_history_segments(repair_cache_cutoff, &control_payload)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            self.storage_degraded |= outcome.maintenance_degraded;
+            let result = Ok(());
             if result.is_ok() {
                 diagnostic.finish();
             }
@@ -705,13 +781,20 @@ impl RepositoryReplicaRuntime {
             if unchanged { &[] } else { &removed_rows },
             if unchanged { &[] } else { &retained },
             record_expiry_cutoff,
-            now_unix_seconds.saturating_sub(policy.minute_retention_seconds()),
+            repair_cache_cutoff,
             &control_payload,
         );
         match result {
             Ok(outcome) => {
                 self.storage_degraded |= outcome.maintenance_degraded;
                 diagnostic.finish();
+                tracing::info!(
+                    fetched_rows = fetched_row_count,
+                    processed_rows = rows.len(),
+                    unchanged,
+                    has_more,
+                    "history retention page committed"
+                );
                 Ok(())
             }
             Err(error) => {
@@ -845,149 +928,5 @@ pub(crate) fn record_received_at(record: &StoredRecord) -> u64 {
         record.observed_at_unix_seconds
     } else {
         record.received_at_unix_seconds
-    }
-}
-impl StoredRecord {
-    pub(crate) fn from_record(
-        observed_at_unix_seconds: u64,
-        received_at_unix_seconds: u64,
-        cursor: &ReplicaCursor,
-        record: &SyncRecord,
-    ) -> Self {
-        let (schema_id, schema_version) = record.schema();
-        Self {
-            observed_at_unix_seconds,
-            received_at_unix_seconds,
-            source_node_id: cursor.source_node_id().to_owned(),
-            source_epoch: cursor.source_epoch(),
-            stream: cursor.stream().to_owned(),
-            sequence: cursor.sequence(),
-            subject_node_id: record.subject_node_id().to_owned(),
-            observer_node_id: record.observer_node_id().to_owned(),
-            schema_id: schema_id.to_owned(),
-            schema_version,
-            record_key: record.record_key().to_vec(),
-            payload: record.payload_bytes().to_vec(),
-            tombstone: record.is_tombstone(),
-        }
-    }
-
-    pub(crate) fn matches_key(&self, key: &super::ReplicaRecordKey) -> bool {
-        key.known_sequence() == Some(self.sequence) && self.matches_tombstone_identity(key)
-    }
-
-    pub(crate) fn matches_tombstone_identity(&self, key: &super::ReplicaRecordKey) -> bool {
-        let (schema_id, schema_version) = key.schema();
-        self.source_node_id == key.source_node_id()
-            && self.source_epoch == key.source_epoch()
-            && self.stream == key.stream()
-            && self.subject_node_id == key.subject_node_id()
-            && self.observer_node_id == key.observer_node_id()
-            && self.schema_id == schema_id
-            && self.schema_version == schema_version
-            && self.record_key == key.record_key()
-            && self.tombstone
-    }
-
-    pub(crate) fn matches_tombstone_key(&self, key: &ReplicaRecordKey, prefix: bool) -> bool {
-        let (schema_id, schema_version) = key.schema();
-        let backfill_stream = format!("{}-backfill-{}", key.stream(), key.source_node_id());
-        (prefix || self.stream == key.stream() || self.stream == backfill_stream)
-            && self.subject_node_id == key.subject_node_id()
-            && self.observer_node_id == key.observer_node_id()
-            && self.schema_id == schema_id
-            && self.schema_version == schema_version
-            && if prefix {
-                self.record_key.starts_with(key.record_key())
-            } else {
-                self.record_key == key.record_key()
-            }
-    }
-
-    pub(crate) fn sqlite_row(&self) -> Result<RepositoryHistoryRecordRow, RepositoryRuntimeError> {
-        let (observed_start_unix_seconds, observed_end_unix_seconds) =
-            retention::record_time_range(self);
-        let aggregate_metadata = retention::aggregate_metadata(self);
-        Ok(RepositoryHistoryRecordRow {
-            source_node_id: self.source_node_id.clone(),
-            source_epoch: self.source_epoch,
-            stream: self.stream.clone(),
-            sequence: self.sequence,
-            subject_node_id: self.subject_node_id.clone(),
-            observer_node_id: self.observer_node_id.clone(),
-            schema_id: self.schema_id.clone(),
-            schema_version: self.schema_version,
-            record_key: self.record_key.clone(),
-            tombstone: self.tombstone,
-            observed_start_unix_seconds,
-            observed_end_unix_seconds,
-            received_at_unix_seconds: record_received_at(self),
-            // Newly persisted raw rows explicitly carry complete metadata. NULL is reserved for
-            // rows written before this metadata existed and is conservatively reported partial.
-            aggregate_complete: Some(aggregate_metadata.is_none_or(|(complete, _, _)| complete)),
-            aggregate_start_unix_seconds: aggregate_metadata.map(|(_, start, _)| start),
-            aggregate_end_unix_seconds: aggregate_metadata.map(|(_, _, end)| end),
-            payload: serde_json::to_vec(self)
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?,
-        })
-    }
-
-    pub(crate) fn from_sqlite_row(
-        row: RepositoryHistoryRecordRow,
-    ) -> Result<Self, RepositoryRuntimeError> {
-        serde_json::from_slice(&row.payload)
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-    }
-}
-
-impl StoredSegment {
-    pub(crate) fn sqlite_row(&self) -> Result<RepositoryHistorySegmentRow, RepositoryRuntimeError> {
-        let signed = SignedSegment::from_wire(&self.wire)?;
-        let first_cursor = signed.canonical().first_cursor();
-        Ok(RepositoryHistorySegmentRow {
-            id: self.id.clone(),
-            closed_at_unix_seconds: self.closed_at_unix_seconds,
-            contains_tombstone: signed
-                .canonical()
-                .records()
-                .iter()
-                .any(SyncRecord::is_tombstone),
-            source_node_id: first_cursor.source_node_id().to_owned(),
-            source_epoch: first_cursor.source_epoch(),
-            stream: first_cursor.stream().to_owned(),
-            first_sequence: first_cursor.sequence(),
-            payload: serde_json::to_vec(self)
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?,
-        })
-    }
-
-    pub(crate) fn from_sqlite_row(
-        row: RepositoryHistorySegmentRow,
-    ) -> Result<Self, RepositoryRuntimeError> {
-        let mut segment: Self = serde_json::from_slice(&row.payload)
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-        if segment.closed_at_unix_seconds == 0 {
-            segment.closed_at_unix_seconds = row.closed_at_unix_seconds;
-        }
-        Ok(segment)
-    }
-}
-
-impl From<StoredRecord> for RepositoryHistoryRecord {
-    fn from(record: StoredRecord) -> Self {
-        Self {
-            observed_at_unix_seconds: record.observed_at_unix_seconds,
-            source_node_id: record.source_node_id,
-            source_epoch: record.source_epoch,
-            stream: record.stream,
-            sequence: record.sequence,
-            subject_node_id: record.subject_node_id,
-            observer_node_id: record.observer_node_id,
-            schema_id: record.schema_id,
-            schema_version: record.schema_version,
-            record_key: record.record_key,
-            payload: record.payload,
-            tombstone: record.tombstone,
-        }
     }
 }

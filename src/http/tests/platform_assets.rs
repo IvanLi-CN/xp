@@ -9,6 +9,7 @@ use tower::ServiceExt;
 use super::{app, body_bytes, req};
 
 #[tokio::test]
+#[ignore = "requires generated web/dist assets"]
 async fn ui_serves_versioned_icon_manifest() {
     let tmp = TempDir::new().unwrap();
     let app = app(&tmp);

@@ -1172,9 +1172,15 @@ pub fn build_router_with_mesh_telemetry(
             "/_internal/history-repository/status",
             get(history_repository::admin_internal_history_repository_status),
         )
+        .merge(history_repository::original_source::routes())
+        .merge(history_repository::prefix_recovery::routes())
         .route(
             "/_internal/history-repository/recovery",
             post(history_repository::recovery::admin_internal_history_repository_recovery),
+        )
+        .route(
+            "/_internal/history-repository/quota",
+            post(history_repository::quota::admin_internal_history_repository_quota),
         )
         .route(
             "/_internal/history-repository/recovery-preflight",
@@ -1565,7 +1571,12 @@ async fn admin_auth(
                 .get(crate::reverse_mesh::RELAY_URI_HEADER)
                 .and_then(|value| value.to_str().ok())
                 .is_some_and(|uri| uri.starts_with("/raft/") || uri.contains("snapshot"));
-        let limit = if req.uri().path().contains("history-repository/sync-batch") {
+        let limit = if req.uri().path().contains("history-repository/sync-batch")
+            || req
+                .uri()
+                .path()
+                .ends_with("/history-repository/original-repair")
+        {
             // Batch wires are base64-encoded inside the signed JSON body. Keep a route-specific
             // envelope budget so the declared 1 MiB decoded wire limit remains usable.
             2 * 1024 * 1024
@@ -1963,11 +1974,7 @@ async fn admin_internal_capabilities(
         return Err(ApiError::unauthorized("internal auth required"));
     }
     let mut response = api_capabilities().await.0;
-    let summary_v2_ready = state
-        .repository_replica
-        .lock()
-        .await
-        .sequence_summary_blocks_ready();
+    let summary_v2_ready = capabilities::repository_summary_ready(&state.repository_replica);
     if summary_v2_ready {
         response
             .capabilities

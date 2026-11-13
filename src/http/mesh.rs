@@ -1573,7 +1573,11 @@ async fn run_mesh_health_probe(
         path_and_query: "/api/admin/_internal/mesh/health".to_string(),
         content_type: None,
         body: Vec::new(),
-        total_budget: Duration::from_secs(5),
+        total_budget: if public_only {
+            crate::control_plane_mesh::PUBLIC_HEALTH_PROBE_BUDGET
+        } else {
+            Duration::from_secs(5)
+        },
         allow_ambiguous_fallback: false,
         request_id: crate::id::new_ulid_string(),
         route: internal_auth::InternalRoute::HealthV2,

@@ -5,7 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite --host 127.0.0.1 --port 60080 --strictPort",
-		"build": "tsc -b && vite build",
+		"build": "tsc -b && vite build && ../scripts/update-web-dist-fingerprint.sh",
 		"dev:demo": "vite --mode demo --host 127.0.0.1 --port 60080 --strictPort",
 		"build:demo": "tsc -b && vite build --mode demo",
 		"preview:demo": "vite preview --mode demo --host 127.0.0.1",

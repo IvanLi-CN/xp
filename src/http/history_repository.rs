@@ -1,21 +1,5 @@
 pub(super) mod batch;
 mod summary;
-use axum::body::Body;
-use axum::http::{StatusCode, header};
-use axum::{
-    Json,
-    extract::{Extension, Query},
-    response::Response,
-};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::Utc;
-use ed25519_dalek::SigningKey;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
-use std::collections::BTreeMap;
-use summary::RepositorySummaryQuery;
-use x25519_dalek::{PublicKey as X25519DalekPublicKey, StaticSecret};
-
 use super::resource_history_capacity;
 use crate::{
     history_sync::{MAX_RESPONSE_WIRE_BYTES, PayloadEncoding},
@@ -33,18 +17,36 @@ use crate::{
         },
     },
 };
+use axum::body::Body;
+use axum::http::{StatusCode, header};
+use axum::{
+    Json,
+    extract::{Extension, Query},
+    response::Response,
+};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use chrono::Utc;
+use ed25519_dalek::SigningKey;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
+use std::collections::BTreeMap;
+use summary::RepositorySummaryQuery;
+use x25519_dalek::{PublicKey as X25519DalekPublicKey, StaticSecret};
 const MAX_HISTORY_SYNC_BASE64_BYTES: usize = MAX_RESPONSE_WIRE_BYTES.div_ceil(3) * 4;
 const MAX_REPAIR_REQUEST_IDS: usize = 64;
 const REPOSITORY_ED25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-ed25519-v1\0";
 const REPOSITORY_X25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-x25519-v1\0";
 pub(super) mod gaps;
 mod initial_backfill_query;
+pub(crate) mod original_repair;
+pub(crate) mod original_source;
+pub(crate) mod prefix_recovery;
+pub(crate) mod quota;
 pub(crate) mod recovery;
 pub(crate) mod recovery_preflight;
 mod worker;
 use initial_backfill_query::RepositoryInitialBackfillQuery;
 pub(crate) use worker::spawn_repository_replica_worker;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct RepositoryHistoryQuery {
     start_unix_seconds: u64,
@@ -278,7 +280,6 @@ fn ordinary_source_relay_batch_is_valid(
         .all(|segment| segment.identity.node_id().as_str() == source_node_id)
         && gaps::source_gaps_match_identity(&batch.gaps, source_node_id)
 }
-
 pub(super) async fn identity_is_pinned_for_node(
     state: &AppState,
     identity: &RepositoryNodeIdentity,
@@ -302,7 +303,6 @@ pub(super) async fn identity_is_pinned_for_node(
     };
     Ok(&expected == identity)
 }
-
 /// Historical repository rows can outlive the cluster member that originally produced them.
 /// Replay still verifies the deterministic cluster identity, but it must not require the source
 /// to remain in the current membership map. Live source delivery keeps the stricter pinned check.

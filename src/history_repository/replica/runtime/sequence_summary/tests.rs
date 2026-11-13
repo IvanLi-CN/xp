@@ -207,3 +207,93 @@ fn sequence_summary_migration_survives_late_writes_and_restart() {
     assert!(runtime.retained_partitions_converged(&summary).unwrap());
     assert!(runtime.history_is_truncated());
 }
+
+#[test]
+fn background_summary_slice_leaves_other_blocks_for_live_delivery_turns() {
+    let temporary = tempfile::tempdir().unwrap();
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    runtime.snapshot.sequence_summary_migration_complete = true;
+    let rows = (0..17_u64)
+        .map(|block| {
+            StoredRecord {
+                observed_at_unix_seconds: block,
+                received_at_unix_seconds: block + 1,
+                source_node_id: "source".to_owned(),
+                source_epoch: 1,
+                stream: "runtime".to_owned(),
+                sequence: block * 4096,
+                subject_node_id: "subject".to_owned(),
+                observer_node_id: "observer".to_owned(),
+                schema_id: "runtime.v1".to_owned(),
+                schema_version: 1,
+                record_key: block.to_be_bytes().to_vec(),
+                payload: b"retained".to_vec(),
+                tombstone: false,
+            }
+            .sqlite_row()
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .unwrap();
+    assert!(
+        !runtime
+            .advance_sequence_summary_block_rebuild_slice(0)
+            .unwrap()
+    );
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_dirty_sequence_summary_blocks(32)
+            .unwrap()
+            .len(),
+        17
+    );
+    runtime.prepare_for_replication(0).unwrap();
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_dirty_sequence_summary_blocks(32)
+            .unwrap()
+            .len(),
+        16
+    );
+    assert_eq!(
+        runtime
+            .replication_summary_for_version(None, true, Some(3))
+            .unwrap()
+            .summary_version,
+        1
+    );
+    drop(runtime);
+    let mut runtime = load(temporary.path());
+    assert!(
+        !runtime
+            .advance_sequence_summary_block_rebuild_slice(1)
+            .unwrap()
+    );
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_dirty_sequence_summary_blocks(32)
+            .unwrap()
+            .len(),
+        15
+    );
+    assert!(
+        runtime
+            .advance_sequence_summary_block_rebuild_page()
+            .unwrap()
+    );
+    assert_eq!(
+        runtime
+            .replication_summary_for_version(None, true, Some(3))
+            .unwrap()
+            .summary_version,
+        3
+    );
+}

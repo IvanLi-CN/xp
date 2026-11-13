@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import importlib.util
+import fnmatch
+import re
 import hashlib
 import json
 from pathlib import Path
@@ -133,7 +135,17 @@ class ReadinessTests(unittest.TestCase):
         valid = {
             "schema": readiness.RESOURCE_EVIDENCE_SCHEMA,
             "target_sha": sha,
+            "candidate_target": "x86_64-unknown-linux-musl",
+            "candidate_digests": {"xp": "3" * 64, "xp-ops": "4" * 64},
             "log_sha": "2" * 64,
+            "max_read_bytes": 1,
+            "max_cycle_read_bytes": 1,
+            "max_rss_delta": 1,
+            "peak_pss_kib": 1,
+            "memory_limit_bytes": 134217728,
+            "swap_limit_bytes": 0,
+            "backlog_segments": 20000,
+            "backlog_bytes": 134217728,
             "window_seconds": 300,
             "memory_limit_mib": 128,
             "swap_limit_mib": 0,
@@ -162,7 +174,9 @@ class ReadinessTests(unittest.TestCase):
             evidence_path = Path(directory) / "evidence.json"
             log_path = Path(directory) / "workload.log"
             log_path.write_text(
-                "source_journal_resource sample_window_seconds=303 generated_segments=12 "
+                "source_journal_resource max_read_bytes=1 max_cycle_read_bytes=1 max_rss_delta=1 "
+                "peak_pss_kib=1 memory_limit_bytes=134217728 swap_limit_bytes=0 "
+                "backlog_segments=20000 backlog_bytes=134217728 sample_window_seconds=303 generated_segments=12 "
                 "generated_bytes=58258 peak_generated_segments=12 peak_generated_bytes=58258 "
                 "acknowledged_segments=15300 acknowledged_bytes=51237772 "
                 "applied_segments=15348 applied_bytes=51398620\n"
@@ -304,13 +318,36 @@ class WorkflowIntegrationTests(unittest.TestCase):
 
     def test_static_web_gate_precedes_image_and_release(self) -> None:
         workflow = (Path(__file__).parents[1] / "workflows" / "release.yml").read_text()
+        helper = (Path(__file__).parents[1] / "scripts" / "deploy-edgeone.sh").read_text()
         self.assertIn("publish-static-web:", workflow)
         self.assertIn("needs: [prepare, build]", workflow)
         self.assertIn("needs: [prepare, build, publish-static-web]", workflow)
         self.assertIn("needs: [prepare, build, publish-static-web, publish-image]", workflow)
-        self.assertIn("edgeone@1.6.33 makers deploy", workflow)
+        self.assertIn("bash .github/scripts/deploy-edgeone.sh", workflow)
+        self.assertIn('with: {ref: "${{ github.workflow_sha }}"}', workflow)
+        self.assertIn('manifest.get("artifact") != expected_archive', workflow)
+        self.assertIn('cli_version="1.6.33"', helper)
+        self.assertIn('npx_bin="npx"', helper)
+        for failure_class in (
+            "credential_rejected",
+            "project_or_permission",
+            "endpoint_unavailable",
+            "deployment_ambiguous",
+            "auth_or_endpoint_ambiguous",
+        ):
+            self.assertIn(failure_class, helper)
         self.assertIn("static_web_smoke.py", workflow)
         self.assertIn("test \"${EDGEONE_MAKERS_PROJECT}\" = \"xp-web\"", workflow)
+
+    def test_release_downloads_every_required_publication_artifact(self) -> None:
+        workflow = (Path(__file__).parents[1] / "workflows" / "release.yml").read_text()
+        publication = workflow.split("  publish-release:", 1)[1]
+        selectors = re.findall(r'(?:name|pattern):\s*"([^"]+)"', publication)
+        selectors = [value.replace("${{ github.run_id }}", "123456") for value in selectors]
+        required = ["web-release-release-123456", "resource-evidence-123456"]
+        required += [f"{kind}-release-123456-{arch}" for kind in ("musl", "runtime") for arch in ("x86_64", "aarch64")]
+        for artifact in required:
+            self.assertTrue(any(fnmatch.fnmatchcase(artifact, selector) for selector in selectors), f"unpublished release artifact: {artifact}")
 
     def test_web_archive_has_manifest_and_is_built_from_target_sha(self) -> None:
         workflow = (Path(__file__).parents[1] / "workflows" / "release-build.yml").read_text()
@@ -324,7 +361,9 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("gh release download", workflow)
         self.assertIn("supported API compatibility window", workflow)
-        self.assertIn("edgeone@1.6.33 makers deploy", workflow)
+        self.assertIn("bash .github/scripts/deploy-edgeone.sh", workflow)
+        self.assertIn('with: {ref: "${{ github.workflow_sha }}"}', workflow)
+        self.assertIn('expected_archive = f"xp-web-{build_id}-{target_sha}.tar.gz"', workflow)
         self.assertNotIn("git push", workflow)
         self.assertNotIn("docker", workflow)
 

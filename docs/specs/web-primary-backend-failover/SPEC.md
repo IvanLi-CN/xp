@@ -217,10 +217,12 @@ ADR 0012 and does not alter this embedded-PWA contract.
   `cargo test http::tests::browser_cors_routes::reads_registered_origins_for_api_only`
   verify registered-origin preflight/actual requests, unknown origins, static
   resource isolation, and immediate rejection after node removal.
-- **VER-DOCUMENT-CSP** covers: REQ-DOCUMENT-CSP. `cargo test http::embedded_ui`
-  and `cargo test http::tests::ui_serves_index_at_root_and_embedded_assets`
-  verify exact origin normalization, invalid-origin exclusion, and the absence
-  of the dynamic header on assets and `sw.js`. The controlled
+- **VER-DOCUMENT-CSP** covers: REQ-DOCUMENT-CSP. `cargo test --lib http::embedded_ui`
+  covers the resource-independent handler unit tests; after `cd web && bun run build`,
+  `cargo test --lib http::tests::ui_serves_index_at_root_and_embedded_assets -- --ignored`
+  verifies the real embedded asset route and its CSP behavior. Together they verify
+  exact origin normalization, invalid-origin exclusion, and the absence of the
+  dynamic header on assets and `sw.js`. The controlled
   `primary-backend-switcher` browser test verifies that a listed origin is
   reachable when CSP and CORS agree and that an unlisted origin is blocked by
   the document policy.

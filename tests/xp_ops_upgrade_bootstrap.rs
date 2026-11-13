@@ -109,6 +109,7 @@ mod linux {
             "--repo",
             "o/r",
         ]);
+        command.arg("--data-dir").arg(temp.path().join("data"));
         command.assert().success();
 
         assert_eq!(fs::read(&installed).unwrap(), new_xp_ops);

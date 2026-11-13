@@ -137,9 +137,12 @@ rules: []
 }
 
 #[test]
-fn landing_candidates_require_a_chain_and_keep_reality_first() {
+fn landing_candidates_include_reality_only_and_keep_reality_first() {
     let direct_only = std::collections::BTreeSet::from(["Tokyo-A-reality".to_string()]);
-    assert!(base_landing_proxy_names("Tokyo-A", &direct_only).is_empty());
+    assert_eq!(
+        base_landing_proxy_names("Tokyo-A", &direct_only),
+        vec!["Tokyo-A-reality".to_string()]
+    );
 
     let proxy_names = std::collections::BTreeSet::from([
         "Tokyo-A-reality".to_string(),
