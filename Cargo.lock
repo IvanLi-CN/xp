@@ -5909,6 +5909,7 @@ dependencies = [
  "bytes",
  "hex",
  "hkdf",
+ "hmac",
  "serde",
  "serde_json",
  "sha2",

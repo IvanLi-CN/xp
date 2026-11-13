@@ -1,5 +1,6 @@
 use aes_gcm::{Aes128Gcm, Aes256Gcm, KeyInit, Nonce, aead::Aead};
 use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256, Sha384};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +37,8 @@ pub enum Tls13RecordError {
     SequenceOverflow,
     #[error("TLS record has no content type")]
     MissingContentType,
+    #[error("TLS Finished verify_data is invalid")]
+    InvalidFinished,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +53,54 @@ pub struct Tls13TrafficKeys {
     pub client: Tls13TrafficKey,
     pub server: Tls13TrafficKey,
     pub secret: Vec<u8>,
+}
+
+pub fn finished_key(suite: Tls13CipherSuite, traffic_secret: &[u8]) -> Vec<u8> {
+    hkdf_expand_label(suite, traffic_secret, b"finished", &[], suite.hash_len())
+}
+
+pub fn finished_verify_data(
+    suite: Tls13CipherSuite,
+    traffic_secret: &[u8],
+    transcript: &[u8],
+) -> Vec<u8> {
+    let key = finished_key(suite, traffic_secret);
+    let transcript_hash = match suite {
+        Tls13CipherSuite::Aes128GcmSha256 => Sha256::digest(transcript).to_vec(),
+        Tls13CipherSuite::Aes256GcmSha384 => Sha384::digest(transcript).to_vec(),
+    };
+    match suite {
+        Tls13CipherSuite::Aes128GcmSha256 => {
+            let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&key).expect("fixed HMAC key");
+            mac.update(&transcript_hash);
+            mac.finalize().into_bytes().to_vec()
+        }
+        Tls13CipherSuite::Aes256GcmSha384 => {
+            let mut mac = <Hmac<Sha384> as Mac>::new_from_slice(&key).expect("fixed HMAC key");
+            mac.update(&transcript_hash);
+            mac.finalize().into_bytes().to_vec()
+        }
+    }
+}
+
+pub fn verify_finished(
+    suite: Tls13CipherSuite,
+    traffic_secret: &[u8],
+    transcript: &[u8],
+    received: &[u8],
+) -> Result<(), Tls13RecordError> {
+    let expected = finished_verify_data(suite, traffic_secret, transcript);
+    if expected.len() != received.len() {
+        return Err(Tls13RecordError::InvalidFinished);
+    }
+    let mut mismatch = 0u8;
+    for (expected, received) in expected.iter().zip(received) {
+        mismatch |= expected ^ received;
+    }
+    if mismatch != 0 {
+        return Err(Tls13RecordError::InvalidFinished);
+    }
+    Ok(())
 }
 
 pub fn derive_handshake_traffic_keys(
@@ -287,6 +338,32 @@ mod tests {
         assert_eq!(
             application.server.open(&record, 0).unwrap(),
             (23, b"application".to_vec())
+        );
+    }
+
+    #[test]
+    fn finished_verify_data_roundtrips_and_rejects_mutation() {
+        let secret = [7u8; 32];
+        let transcript = b"client hello server hello encrypted extensions";
+        let finished = finished_verify_data(Tls13CipherSuite::Aes128GcmSha256, &secret, transcript);
+        verify_finished(
+            Tls13CipherSuite::Aes128GcmSha256,
+            &secret,
+            transcript,
+            &finished,
+        )
+        .unwrap();
+        let mut changed = finished.clone();
+        changed[0] ^= 1;
+        assert_eq!(
+            verify_finished(
+                Tls13CipherSuite::Aes128GcmSha256,
+                &secret,
+                transcript,
+                &changed,
+            )
+            .unwrap_err(),
+            Tls13RecordError::InvalidFinished
         );
     }
 }
