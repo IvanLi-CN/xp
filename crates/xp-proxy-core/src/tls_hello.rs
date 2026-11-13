@@ -9,6 +9,15 @@ pub struct ClientHelloInfo {
     pub x25519_key_share: Option<Vec<u8>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerHelloInfo {
+    pub record: Vec<u8>,
+    pub handshake: Vec<u8>,
+    pub random: [u8; 32],
+    pub cipher_suite: u16,
+    pub x25519_key_share: Option<Vec<u8>>,
+}
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ClientHelloError {
     #[error("TLS record is truncated")]
@@ -115,6 +124,109 @@ pub fn parse_client_hello(input: &[u8]) -> Result<ClientHelloInfo, ClientHelloEr
         server_name,
         x25519_key_share,
     })
+}
+
+pub fn parse_server_hello(input: &[u8]) -> Result<ServerHelloInfo, ClientHelloError> {
+    let (record, handshake) = collect_handshake(input, 2)?;
+    let body = &handshake[4..];
+    if body.len() < 38 {
+        return Err(ClientHelloError::Malformed);
+    }
+    let mut random = [0u8; 32];
+    random.copy_from_slice(&body[2..34]);
+    let mut cursor = 34;
+    let session_len = *body.get(cursor).ok_or(ClientHelloError::Malformed)? as usize;
+    cursor += 1;
+    cursor = cursor
+        .checked_add(session_len)
+        .ok_or(ClientHelloError::Malformed)?;
+    let cipher_suite = u16::from_be_bytes(
+        body.get(cursor..cursor + 2)
+            .ok_or(ClientHelloError::Truncated)?
+            .try_into()
+            .expect("fixed slice"),
+    );
+    cursor += 2;
+    cursor += 1;
+    let extensions_len = read_u16(body, &mut cursor)?;
+    let extensions_end = cursor
+        .checked_add(extensions_len)
+        .ok_or(ClientHelloError::Malformed)?;
+    if extensions_end > body.len() {
+        return Err(ClientHelloError::Truncated);
+    }
+    let mut x25519_key_share = None;
+    while cursor < extensions_end {
+        let extension_type = read_u16(body, &mut cursor)?;
+        let extension_len = read_u16(body, &mut cursor)?;
+        let extension_end = cursor
+            .checked_add(extension_len)
+            .ok_or(ClientHelloError::Malformed)?;
+        if extension_end > extensions_end {
+            return Err(ClientHelloError::Truncated);
+        }
+        let extension = &body[cursor..extension_end];
+        if extension_type == 0x0033 && extension.len() >= 4 {
+            let group = u16::from_be_bytes([extension[0], extension[1]]);
+            let key_len = u16::from_be_bytes([extension[2], extension[3]]) as usize;
+            if group == 0x001d && key_len == 32 && extension.len() == 4 + key_len {
+                x25519_key_share = Some(extension[4..].to_vec());
+            }
+        }
+        cursor = extension_end;
+    }
+    Ok(ServerHelloInfo {
+        record,
+        handshake,
+        random,
+        cipher_suite,
+        x25519_key_share,
+    })
+}
+
+fn collect_handshake(
+    input: &[u8],
+    expected_type: u8,
+) -> Result<(Vec<u8>, Vec<u8>), ClientHelloError> {
+    if input.len() < 5 {
+        return Err(ClientHelloError::Truncated);
+    }
+    let mut record_end = 0usize;
+    let mut handshake = Vec::new();
+    loop {
+        if input.len() < record_end + 5 {
+            return Err(ClientHelloError::Truncated);
+        }
+        let record_header = &input[record_end..record_end + 5];
+        if record_header[0] != 0x16 || record_header[1] != 0x03 {
+            return Err(ClientHelloError::UnexpectedType);
+        }
+        let record_len = u16::from_be_bytes([record_header[3], record_header[4]]) as usize;
+        let payload_start = record_end + 5;
+        let next_record_end = payload_start
+            .checked_add(record_len)
+            .ok_or(ClientHelloError::Malformed)?;
+        if input.len() < next_record_end {
+            return Err(ClientHelloError::Truncated);
+        }
+        handshake.extend_from_slice(&input[payload_start..next_record_end]);
+        record_end = next_record_end;
+        if handshake.len() < 4 {
+            continue;
+        }
+        if handshake[0] != expected_type {
+            return Err(ClientHelloError::UnexpectedType);
+        }
+        let message_len =
+            u32::from_be_bytes([0, handshake[1], handshake[2], handshake[3]]) as usize;
+        if message_len + 4 > handshake.len() {
+            continue;
+        }
+        return Ok((
+            input[..record_end].to_vec(),
+            handshake[..4 + message_len].to_vec(),
+        ));
+    }
 }
 
 fn read_u16(input: &[u8], cursor: &mut usize) -> Result<usize, ClientHelloError> {
@@ -230,5 +342,37 @@ mod tests {
         assert_eq!(info.record.len(), fragmented.len());
         assert_eq!(info.random, [7u8; 32]);
         assert_eq!(info.server_name.as_deref(), Some("xhttp.example"));
+    }
+
+    #[test]
+    fn parses_server_hello_cipher_and_x25519_key_share() {
+        let mut body = vec![0x03, 0x03];
+        body.extend_from_slice(&[8u8; 32]);
+        body.push(4);
+        body.extend_from_slice(&[1, 2, 3, 4]);
+        body.extend_from_slice(&[0x13, 0x01, 0]);
+        let mut extension = vec![0, 0x1d, 0, 32];
+        extension.extend_from_slice(&[6u8; 32]);
+        let extension_record = [0, 0x33, 0, extension.len() as u8]
+            .into_iter()
+            .chain(extension)
+            .collect::<Vec<_>>();
+        body.extend_from_slice(&(extension_record.len() as u16).to_be_bytes());
+        body.extend_from_slice(&extension_record);
+        let mut handshake = vec![2, 0, (body.len() >> 8) as u8, body.len() as u8];
+        handshake.extend_from_slice(&body);
+        let mut record = vec![
+            0x16,
+            0x03,
+            0x03,
+            (handshake.len() >> 8) as u8,
+            handshake.len() as u8,
+        ];
+        record.extend_from_slice(&handshake);
+
+        let info = parse_server_hello(&record).unwrap();
+        assert_eq!(info.random, [8u8; 32]);
+        assert_eq!(info.cipher_suite, 0x1301);
+        assert_eq!(info.x25519_key_share, Some(vec![6u8; 32]));
     }
 }
