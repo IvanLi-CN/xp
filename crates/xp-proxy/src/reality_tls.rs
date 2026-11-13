@@ -13,8 +13,11 @@ use tokio::net::TcpStream;
 use tokio::time::{Duration, timeout};
 
 use xp_proxy_core::{
-    reality::{AuthenticatedClientHello, build_server_hello},
-    tls_hello::parse_client_hello,
+    reality::{
+        AuthenticatedClientHello, RealityClientHelloConfig, build_client_hello, build_server_hello,
+        derive_client_handshake_keys,
+    },
+    tls_hello::{parse_client_hello, parse_server_hello},
     tls13::{
         Tls13CipherSuite, Tls13RecordReader, Tls13RecordWriter, derive_application_traffic_keys,
         derive_handshake_traffic_keys, finished_verify_data, verify_finished,
@@ -146,6 +149,136 @@ pub async fn accept(
     let (local, peer) = tokio::io::duplex(64 * 1024);
     tokio::spawn(run_record_bridge(wire, peer, application_keys));
     Ok(local)
+}
+
+/// Establishes the client side of the native REALITY TLS flight and returns a
+/// byte stream carrying decrypted TLS application data. The caller supplies
+/// the XHTTP layer on top of this stream.
+pub async fn connect(
+    mut stream: TcpStream,
+    config: RealityClientHelloConfig,
+    client_private_key: [u8; 32],
+) -> Result<DuplexStream> {
+    let mut random = [0u8; 32];
+    let mut random_tail = [0u8; 16];
+    OsRng.fill_bytes(&mut random);
+    OsRng.fill_bytes(&mut random_tail);
+    let (hello, _) = build_client_hello(&config, client_private_key, random, random_tail)?;
+    let client_hello = parse_client_hello(&hello).map_err(|error| anyhow!(error))?;
+    stream.write_all(&hello).await?;
+    stream.flush().await?;
+    let mut wire = WireReader::new(stream, Vec::new());
+    let server_hello_record = wire
+        .read_record()
+        .await
+        .map_err(|error| anyhow!("read REALITY ServerHello: {error}"))?;
+    let server_hello = parse_server_hello(&server_hello_record)
+        .map_err(|error| anyhow!("parse REALITY ServerHello: {error}"))?;
+    let handshake_keys =
+        derive_client_handshake_keys(client_private_key, &client_hello, &server_hello)?;
+    let suite = match server_hello.cipher_suite {
+        0x1301 => Tls13CipherSuite::Aes128GcmSha256,
+        0x1302 => Tls13CipherSuite::Aes256GcmSha384,
+        value => return Err(anyhow!("unsupported REALITY cipher suite {value:#x}")),
+    };
+    let mut transcript = [
+        client_hello.handshake.as_slice(),
+        server_hello.handshake.as_slice(),
+    ]
+    .concat();
+    let mut reader = Tls13RecordReader::new(handshake_keys.server.clone());
+    let server_finished = read_server_finished(&mut wire, &mut reader, &mut transcript)
+        .await
+        .map_err(|error| anyhow!("read REALITY server flight: {error}"))?;
+    verify_finished(
+        suite,
+        &handshake_keys.server_secret,
+        &transcript[..transcript.len() - server_finished.len() - 4],
+        &server_finished,
+    )?;
+    let finished = finished_verify_data(suite, &handshake_keys.client_secret, &transcript);
+    let finished_message = build_handshake_message(20, &finished);
+    let mut writer = Tls13RecordWriter::new(handshake_keys.client);
+    wire.stream
+        .write_all(&writer.seal(22, &finished_message)?)
+        .await?;
+    wire.stream.flush().await?;
+    let application_keys =
+        derive_application_traffic_keys(suite, &handshake_keys.secret, &transcript);
+    transcript.extend_from_slice(&finished_message);
+    let (local, peer) = tokio::io::duplex(64 * 1024);
+    tokio::spawn(run_client_record_bridge(wire, peer, application_keys));
+    Ok(local)
+}
+
+async fn read_server_finished(
+    wire: &mut WireReader,
+    reader: &mut Tls13RecordReader,
+    transcript: &mut Vec<u8>,
+) -> Result<Vec<u8>> {
+    loop {
+        let record = wire.read_record().await?;
+        if record.first() == Some(&20) {
+            continue;
+        }
+        let (content_type, plaintext) = reader.open(&record)?;
+        if content_type == 21 {
+            return Err(anyhow!("REALITY server sent TLS alert"));
+        }
+        if content_type != 22 {
+            continue;
+        }
+        let mut cursor = 0;
+        while cursor + 4 <= plaintext.len() {
+            let length = u32::from_be_bytes([
+                0,
+                plaintext[cursor + 1],
+                plaintext[cursor + 2],
+                plaintext[cursor + 3],
+            ]) as usize;
+            let end = cursor + 4 + length;
+            if end > plaintext.len() {
+                return Err(anyhow!("TLS encrypted handshake message is truncated"));
+            }
+            let message = &plaintext[cursor..end];
+            let body = &message[4..];
+            if message[0] == 20 {
+                let finished = body.to_vec();
+                transcript.extend_from_slice(message);
+                return Ok(finished);
+            }
+            transcript.extend_from_slice(message);
+            cursor = end;
+        }
+    }
+}
+
+async fn run_client_record_bridge(
+    mut wire: WireReader,
+    local: DuplexStream,
+    application_keys: xp_proxy_core::tls13::Tls13TrafficKeys,
+) {
+    let (mut local_read, mut local_write) = tokio::io::split(local);
+    let mut network_reader = Tls13RecordReader::new(application_keys.server);
+    let mut network_writer = Tls13RecordWriter::new(application_keys.client);
+    let mut buffer = [0u8; 16 * 1024];
+    loop {
+        tokio::select! {
+            record = wire.read_record() => {
+                let Ok(record) = record else { break };
+                let Ok((content_type, data)) = network_reader.open(&record) else { break };
+                if content_type == 21 { break; }
+                if content_type == 23 && local_write.write_all(&data).await.is_err() { break; }
+            }
+            read = local_read.read(&mut buffer) => {
+                let Ok(size) = read else { break };
+                if size == 0 { break; }
+                let Ok(record) = network_writer.seal(23, &buffer[..size]) else { break };
+                if wire.stream.write_all(&record).await.is_err() { break; }
+                if wire.stream.flush().await.is_err() { break; }
+            }
+        }
+    }
 }
 
 fn choose_cipher_suite(offered: &[u16]) -> Result<u16> {
@@ -429,7 +562,7 @@ mod tests {
                 server_public_key: server_public.to_bytes(),
                 short_id: vec![0xaa; 8],
                 unix_seconds: 1_700_000_000,
-                version: *b"1.8\0",
+                version: [1, 8, 0, 0],
                 alpn: vec!["h2".into()],
             },
             client_private,

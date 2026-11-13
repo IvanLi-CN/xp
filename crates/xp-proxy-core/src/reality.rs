@@ -405,7 +405,8 @@ mod tests {
         let server_key = derive_auth_key(server_private, client_public.to_bytes(), random);
         assert_eq!(client_key, server_key);
 
-        let session_id = build_session_id(*b"1.8\0", 1_700_000_000, &[1, 2, 3], &[4; 16]).unwrap();
+        let session_id =
+            build_session_id([1, 8, 0, 0], 1_700_000_000, &[1, 2, 3], &[4; 16]).unwrap();
         let hello = b"client hello bytes";
         let sealed = seal_session_id(client_key, random, &session_id, hello).unwrap();
         assert_eq!(sealed.len(), SESSION_ID_LEN);
@@ -426,9 +427,9 @@ mod tests {
 
     #[test]
     fn session_metadata_preserves_version_time_and_short_id() {
-        let session_id = build_session_id(*b"1.8\0", 123, &[0xaa, 0xbb], &[4; 16]).unwrap();
+        let session_id = build_session_id([1, 8, 0, 0], 123, &[0xaa, 0xbb], &[4; 16]).unwrap();
         let metadata = parse_session_metadata(&session_id[..SESSION_METADATA_LEN]).unwrap();
-        assert_eq!(metadata.version, *b"1.8\0");
+        assert_eq!(metadata.version, [1, 8, 0, 0]);
         assert_eq!(metadata.unix_seconds, 123);
         assert_eq!(&metadata.short_id[..2], &[0xaa, 0xbb]);
         assert_eq!(&metadata.short_id[2..], &[0; 6]);
@@ -441,7 +442,8 @@ mod tests {
         let client_public = PublicKey::from(&StaticSecret::from(client_private));
         let server_public = PublicKey::from(&StaticSecret::from(server_private));
         let random = [11u8; 32];
-        let session_id = build_session_id(*b"1.8\0", 1_700_000_000, &[0xaa; 8], &[0; 16]).unwrap();
+        let session_id =
+            build_session_id([1, 8, 0, 0], 1_700_000_000, &[0xaa; 8], &[0; 16]).unwrap();
         let original = vec![0u8; 4 + SESSION_ID_LEN + 35];
         let wire_offset = 4 + 35;
         let auth_key = derive_auth_key(client_private, server_public.to_bytes(), random);
@@ -471,7 +473,7 @@ mod tests {
         let client_public = PublicKey::from(&StaticSecret::from(client_private));
         let server_public = PublicKey::from(&StaticSecret::from(server_private));
         let random = [11u8; 32];
-        let session_id = build_session_id(*b"1.8\0", 100, &[0xaa; 8], &[0; 16]).unwrap();
+        let session_id = build_session_id([1, 8, 0, 0], 100, &[0xaa; 8], &[0; 16]).unwrap();
         let original = vec![0u8; 4 + SESSION_ID_LEN + 35];
         let auth_key = derive_auth_key(client_private, server_public.to_bytes(), random);
         let sealed = seal_session_id(auth_key, random, &session_id, &original).unwrap();
@@ -522,7 +524,7 @@ mod tests {
             server_public_key: server_public.to_bytes(),
             short_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
             unix_seconds: 1_700_000_000,
-            version: *b"1.8\0",
+            version: [1, 8, 0, 0],
             alpn: vec!["h2".into(), "http/1.1".into()],
         };
         let (hello, client_public) =
@@ -538,7 +540,7 @@ mod tests {
             &[config.short_id.clone().try_into().unwrap()],
         )
         .unwrap();
-        assert_eq!(authenticated.session.version, *b"1.8\0");
+        assert_eq!(authenticated.session.version, [1, 8, 0, 0]);
         assert_eq!(authenticated.session.short_id, [1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
@@ -587,7 +589,7 @@ mod tests {
             server_public_key: server_public.to_bytes(),
             short_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
             unix_seconds: 1_700_000_000,
-            version: *b"1.8\0",
+            version: [1, 8, 0, 0],
             alpn: vec!["h2".into()],
         };
         let (client_record, _) =

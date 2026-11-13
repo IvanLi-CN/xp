@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -29,6 +30,23 @@ struct Args {
     control_socket: Option<std::path::PathBuf>,
     #[arg(long)]
     snapshot: Option<std::path::PathBuf>,
+    /// Runs the explicit Rust outbound client instead of the control-plane listener.
+    #[arg(long)]
+    outbound_config: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OutboundConfig {
+    listen: std::net::SocketAddr,
+    remote: std::net::SocketAddr,
+    server_name: String,
+    server_public_key: String,
+    short_id: String,
+    private_key: String,
+    path: String,
+    uuid: uuid::Uuid,
+    destination_host: String,
+    destination_port: u16,
 }
 
 #[derive(Default)]
@@ -55,6 +73,10 @@ impl ListenerRuntime {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    if let Some(path) = args.outbound_config {
+        let config: OutboundConfig = serde_json::from_slice(&std::fs::read(path)?)?;
+        return run_outbound(config).await;
+    }
     if let Some(path) = args.validate_snapshot {
         let bytes = std::fs::read(path)?;
         let snapshot: ProxySnapshot = serde_json::from_slice(&bytes)?;
@@ -101,6 +123,130 @@ async fn main() -> Result<()> {
         }
     }
     let _ = std::fs::remove_file(socket);
+    Ok(())
+}
+
+async fn run_outbound(config: OutboundConfig) -> Result<()> {
+    let listener = TcpListener::bind(config.listen).await?;
+    loop {
+        let (local, _) = listener.accept().await?;
+        let config = OutboundConfig {
+            listen: config.listen,
+            remote: config.remote,
+            server_name: config.server_name.clone(),
+            server_public_key: config.server_public_key.clone(),
+            short_id: config.short_id.clone(),
+            private_key: config.private_key.clone(),
+            path: config.path.clone(),
+            uuid: config.uuid,
+            destination_host: config.destination_host.clone(),
+            destination_port: config.destination_port,
+        };
+        tokio::spawn(async move {
+            if let Err(error) = outbound_connection(local, config).await {
+                eprintln!("native outbound connection failed: {error}");
+            }
+        });
+    }
+}
+
+async fn outbound_connection(local: TcpStream, config: OutboundConfig) -> Result<()> {
+    use base64::Engine;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use xp_proxy_core::reality::RealityClientHelloConfig;
+    use xp_proxy_core::vless::encode_tcp_request;
+
+    let public_key =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(config.server_public_key)?;
+    let private_key =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(config.private_key)?;
+    let mut public_key_bytes = [0u8; 32];
+    let mut private_key_bytes = [0u8; 32];
+    public_key_bytes.copy_from_slice(&public_key);
+    private_key_bytes.copy_from_slice(&private_key);
+    let short_id = hex::decode(config.short_id.trim_start_matches("0x"))?;
+    let tls = reality_tls::connect(
+        TcpStream::connect(config.remote).await?,
+        RealityClientHelloConfig {
+            server_name: config.server_name.clone(),
+            server_public_key: public_key_bytes,
+            short_id,
+            unix_seconds: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as u32,
+            version: [1, 8, 0, 0],
+            alpn: vec!["h2".into()],
+        },
+        private_key_bytes,
+    )
+    .await?;
+    let (mut sender, connection) = h2::client::handshake(tls).await?;
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    let path = if config.path.ends_with('/') {
+        config.path.clone()
+    } else {
+        format!("{}/", config.path)
+    };
+    let authority = format!(
+        "https://{}{}?x_padding={}",
+        config.server_name,
+        path,
+        "x".repeat(100)
+    );
+    let request = http::Request::builder()
+        .method("POST")
+        .uri(authority)
+        .header("content-type", "application/octet-stream")
+        .body(())?;
+    let (response, mut send) = sender.send_request(request, false)?;
+    let header = encode_tcp_request(
+        config.uuid,
+        (&config.destination_host, config.destination_port),
+        &[],
+    )?;
+    send.send_data(bytes::Bytes::from(header), false)?;
+    let (mut local_read, mut local_write) = local.into_split();
+    let uplink = async move {
+        let mut buffer = [0u8; 16 * 1024];
+        loop {
+            let size = local_read.read(&mut buffer).await?;
+            if size == 0 {
+                break;
+            }
+            send.send_data(bytes::Bytes::copy_from_slice(&buffer[..size]), false)?;
+        }
+        send.send_data(bytes::Bytes::new(), true)?;
+        Ok::<(), anyhow::Error>(())
+    };
+    tokio::spawn(async move {
+        let _ = uplink.await;
+    });
+    let mut response = response.await?;
+    if !response.status().is_success() {
+        anyhow::bail!("remote XHTTP request returned {}", response.status());
+    }
+    let mut response_header = Vec::with_capacity(2);
+    while response_header.len() < 2 {
+        let Some(chunk) = response.body_mut().data().await else {
+            anyhow::bail!("remote XHTTP response ended before VLESS response header");
+        };
+        response_header.extend_from_slice(&chunk?);
+    }
+    if response_header[..2] != [0, 0] {
+        anyhow::bail!("remote XHTTP response has an invalid VLESS header");
+    }
+    if response_header.len() > 2 {
+        local_write.write_all(&response_header[2..]).await?;
+    }
+    let mut response_body = response.into_body();
+    let downlink = async move {
+        while let Some(chunk) = response_body.data().await {
+            local_write.write_all(&chunk?).await?;
+        }
+        local_write.shutdown().await?;
+        Ok::<(), anyhow::Error>(())
+    };
+    downlink.await?;
     Ok(())
 }
 
@@ -478,7 +624,7 @@ mod tests {
             server_public_key: PublicKey::from(&StaticSecret::from(server_private)).to_bytes(),
             short_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
             unix_seconds: 1_700_000_000,
-            version: *b"1.8\0",
+            version: [1, 8, 0, 0],
             alpn: vec!["h2".into()],
         };
         let (hello, _) = build_client_hello(&config, [7u8; 32], [3u8; 32], [4u8; 16]).unwrap();
