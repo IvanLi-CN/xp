@@ -72,6 +72,7 @@ uuid = { version = "1", features = ["v4"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 zstd = "0.13"
 zip = "7.1.0"
+xp-proxy-core = { path = "crates/xp-proxy-core" }
 
 [build-dependencies]
 flate2 = "1.1"

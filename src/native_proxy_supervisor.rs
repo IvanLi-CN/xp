@@ -1,7 +1,17 @@
 use std::{env, path::PathBuf, sync::Arc};
 
-use tokio::{process::Command, task::JoinHandle};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::UnixStream,
+    process::Command,
+    task::JoinHandle,
+};
 use tracing::{error, info};
+use uuid::Uuid;
+use xp_proxy_core::{
+    ProxySnapshot,
+    control::{ControlOperation, ControlRequest, ControlResponse, decode_frame, encode_frame},
+};
 
 use crate::config::Config;
 
@@ -41,14 +51,132 @@ async fn run(binary: String, socket: PathBuf) -> anyhow::Result<()> {
     anyhow::bail!("native proxy exited with {status}");
 }
 
+pub async fn publish_snapshot(
+    socket: &std::path::Path,
+    snapshot: ProxySnapshot,
+) -> anyhow::Result<()> {
+    let generation = snapshot.generation;
+    let mut stream = UnixStream::connect(socket).await?;
+    let request = ControlRequest {
+        protocol_version: snapshot.protocol_version,
+        request_id: Uuid::new_v4().to_string(),
+        generation,
+        operation: ControlOperation::Prepare { snapshot },
+    };
+    let response = send_request(&mut stream, request).await?;
+    if let Some(error) = response.error {
+        anyhow::bail!("native proxy prepare failed: {error}");
+    }
+    let request = ControlRequest {
+        protocol_version: response.protocol_version,
+        request_id: Uuid::new_v4().to_string(),
+        generation,
+        operation: ControlOperation::Activate,
+    };
+    let response = send_request(&mut stream, request).await?;
+    if let Some(error) = response.error {
+        anyhow::bail!("native proxy activate failed: {error}");
+    }
+    if response.generation != generation {
+        anyhow::bail!(
+            "native proxy activated generation {}, expected {generation}",
+            response.generation
+        );
+    }
+    Ok(())
+}
+
+async fn send_request(
+    stream: &mut UnixStream,
+    request: ControlRequest,
+) -> anyhow::Result<ControlResponse> {
+    stream.write_all(&encode_frame(&request)?).await?;
+    let mut header = [0u8; 4];
+    stream.read_exact(&mut header).await?;
+    let length = u32::from_be_bytes(header) as usize;
+    if length > 16 * 1024 * 1024 {
+        anyhow::bail!("native proxy control response is too large");
+    }
+    let mut body = vec![0u8; length];
+    stream.read_exact(&mut body).await?;
+    let mut frame = header.to_vec();
+    frame.extend_from_slice(&body);
+    decode_frame(&frame).map_err(anyhow::Error::msg)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::Parser;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::tempdir;
+    use tokio::net::UnixListener;
+    use xp_proxy_core::control::{GenerationState, ProxySnapshot};
 
     #[test]
     fn disabled_capability_does_not_spawn_a_process() {
         let config = Arc::new(crate::config::Cli::try_parse_from(["xp"]).unwrap().config);
         assert!(spawn_native_proxy_supervisor(config).is_none());
+    }
+
+    #[tokio::test]
+    async fn publishes_prepare_and_activate_over_control_socket() {
+        let dir = tempdir().unwrap();
+        let socket = dir.path().join("proxy.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            for expected in 0..2 {
+                let mut header = [0u8; 4];
+                stream.read_exact(&mut header).await.unwrap();
+                let length = u32::from_be_bytes(header) as usize;
+                let mut body = vec![0u8; length];
+                stream.read_exact(&mut body).await.unwrap();
+                let mut frame = header.to_vec();
+                frame.extend_from_slice(&body);
+                let request: ControlRequest = decode_frame(&frame).unwrap();
+                assert_eq!(request.generation, 7);
+                assert_eq!(request.protocol_version, 1);
+                assert!(matches!(
+                    (expected, request.operation),
+                    (0, ControlOperation::Prepare { .. }) | (1, ControlOperation::Activate)
+                ));
+                let response = ControlResponse {
+                    protocol_version: 1,
+                    request_id: request.request_id,
+                    generation: 7,
+                    state: if expected == 0 {
+                        GenerationState::Ready
+                    } else {
+                        GenerationState::Active
+                    },
+                    error: None,
+                    metrics: None,
+                };
+                stream
+                    .write_all(&encode_frame(&response).unwrap())
+                    .await
+                    .unwrap();
+            }
+        });
+        let snapshot: ProxySnapshot = serde_json::from_value(serde_json::json!({
+            "protocol_version": 1,
+            "generation": 7,
+            "listeners": [{
+                "bind": "127.0.0.1:0",
+                "path": "/xp-xhttp",
+                "reality": {
+                    "server_names": ["example.com"],
+                    "short_ids": ["0000000000000000"],
+                    "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                },
+                "fallbacks": []
+            }],
+            "users": [{"uuid": "00000000-0000-4000-8000-000000000000"}]
+        }))
+        .unwrap();
+        publish_snapshot(&socket, snapshot).await.unwrap();
+        task.await.unwrap();
     }
 }

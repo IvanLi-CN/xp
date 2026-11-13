@@ -5875,6 +5875,7 @@ dependencies = [
  "wiremock",
  "x25519-dalek",
  "x509-parser",
+ "xp-proxy-core",
  "xp-test-fixtures",
  "yaml-edit",
  "zip",
