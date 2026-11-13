@@ -29,8 +29,8 @@
 - 保持 `raw/base64/clash` 现有行为不变。
 - 管理 API 使用 `mixin_yaml` 与两个 `extra_*` 字段，拒绝旧字段 `template_yaml`。
 - 系统内置生成并覆盖 provider-only 模式下的动态地区组与落地组：
-  - 可见地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
-  - 兼容地区组：固定地区面对应的 `🔒/🤯` 隐藏 alias
+  - 可见地区组：`🔒 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
+  - 隐藏地区包装组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
   - 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择`、`🤯 All`
   - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
 - 保持 `extra_proxies_yaml` 为正式官方能力；`extra_proxy_providers_yaml` 保持可选。
@@ -80,14 +80,15 @@
   `Node.access_host` 聚合 relay。系统 relay 必须含其他已订阅节点 `*-reality`，外部 provider
   只能追加；无接入点时用 `REJECT`，provider 为空时仍生成可加载配置。
 - **REQ-MIHOMO-SUB-010**: `extra_proxies_yaml` 中的节点会并入最终 `proxies`。
-- **REQ-MIHOMO-SUB-011**: 落地组生成遵循 provider filter 合同：`🛬 {base}` 通过 system provider payload 稳定消费 `{base}-ss-chain` / `{base}-reality-chain`，并保持 ss-chain 在前、reality-chain 在后。
+- **REQ-MIHOMO-SUB-011**: 落地组生成遵循 provider filter 合同：存在 `{base}-reality` 或任一链式候选时生成 `🛬 {base}`，并保持 Reality 直连、ss-chain、reality-chain 的顺序。
 - **REQ-MIHOMO-SUB-012**: 节点名冲突自动稳定重命名并记录告警日志。
 - **REQ-MIHOMO-SUB-013**: mixin 缺失时 `format=mihomo` 回退 clash。
 - **REQ-MIHOMO-SUB-014**: `GET/PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 返回与存储原样一致的 profile；服务端不自动抽取、不自动规范化，也不隐式剥离系统托管引用。
 - **REQ-MIHOMO-SUB-018**: 用户资料保存区与 Mihomo 配置保存区 MUST 以同级区域呈现，各自的保存按钮只属于对应区域。
 - **REQ-MIHOMO-SUB-019**: `raw/clash/base64` 的输出语义与 content-type MUST 保持兼容。
-- **REQ-MIHOMO-SUB-020**: `🤯 All` 必须含当前输出的 `🛬 {base}`，并先于所有
-  `🤯 {Region}`；落地组按稳定 base 顺序去重。
+- **REQ-MIHOMO-SUB-020**: `🤯 All` 必须含当前输出的 `🛬 {base}`，并随后包含隐藏的
+  `🌟 {Region}`；地区组按固定地区顺序、落地组按稳定 base 顺序去重，且不得生成 `🤯 {Region}`。
+- **REQ-MIHOMO-SUB-022**: 用户 `proxy-groups[*].proxies` 中精确等于 `🌟 <region>` 或 `🛬 <node>` 的项必须在最终渲染阶段分别展开为有候选地区组和全部实际落地组；profile 原文保持不变。
 - **REQ-MIHOMO-SUB-021**: 系统 `🛣️` 必须用其他已订阅节点 `*-reality` 作为中转，
   排除目标、`*-chain`、`DIRECT` 和未订阅节点。无候选时用 `REJECT`；
   用户自定义 `🛣️` 组不受此系统规则改写。
@@ -177,6 +178,7 @@
   - 读取节点主动探测持久化状态，把每个落地节点映射到固定地区面；
   - 合并 `extra_proxies_yaml`；
   - 覆盖并注入系统保留动态组（可见地区组、隐藏 alias、高质量/节点选择聚合组、`🔒 落地` 与 `🛬 {base}`）；
+  - 在最终引用清理前展开用户组中的 `🌟 <region>` 与 `🛬 <node>` 占位项；
   - 裁剪或重映射 mixin 中残留的未知动态引用；
   - 输出可直接导入的 Mihomo YAML。
 
@@ -217,8 +219,8 @@
 - **VER-MIHOMO-SUB-008** (covers: `REQ-MIHOMO-SUB-006`): Given 用户组引用旧地区名或系统聚合别名，When 拉取 `format=mihomo`，Then 按 helper block 顺序重放并折叠为公开地区、高质量或节点选择组；缺少 helper 时只做最小替换，不暴露 hidden alias。
 - **VER-MIHOMO-SUB-009** (covers: `REQ-MIHOMO-SUB-010`): Given 仅存在 `extra_proxies_yaml`，When 拉取 `format=mihomo`，Then extra proxies 仍出现在最终 `proxies` 中，且不会额外生成由系统托管的 `🛬 {base}` 落地组。
 - **VER-MIHOMO-SUB-010** (covers: `REQ-MIHOMO-SUB-010`): Given `extra_proxies_yaml` 中包含名称看起来像系统动态后缀（如 `-chain` / `-reality`，或历史遗留的 `-JP`）的静态节点，When 业务组显式引用这些节点，Then 引用仍绑定到这些 extra proxies，而不会被错误重映射到系统生成节点。
-- **VER-MIHOMO-SUB-011** (covers: `REQ-MIHOMO-SUB-011`): Given 存在 `base-reality` 与 `base-ss` 同时可用，When 生成 `🛬 {base}`，Then `🛬 {base}` 必须包含 `base-reality`，且不得再把 `base-ss` 暴露为该组成员。
-- **VER-MIHOMO-SUB-012** (covers: `REQ-MIHOMO-SUB-011`): Given 仅存在 `base-ss`（无 `base-reality`），When 生成 `🛬 {base}`，Then `🛬 {base}` 继续沿用 `base-chain` 与 `base-ss` 的兼容回落路径。
+- **VER-MIHOMO-SUB-011** (covers: `REQ-MIHOMO-SUB-011`): Given 存在 `base-reality`（无链式候选也可），When 生成 `🛬 {base}`，Then `🛬 {base}` 必须存在且 Reality 位于首位，不得暴露 `base-ss`。
+- **VER-MIHOMO-SUB-012** (covers: `REQ-MIHOMO-SUB-011`): Given 用户组包含 `🌟 <region>` 与 `🛬 <node>`，When 生成最终订阅，Then 应用组自身必须显式列出所有有候选地区和全部实际落地组，且不包含未订阅节点或空地区。
 - **VER-MIHOMO-SUB-013** (covers: `REQ-MIHOMO-SUB-003`): Given 请求体只提供旧字段 `template_yaml`，When 保存 profile，Then 请求被拒绝。
 - **VER-MIHOMO-SUB-014** (covers: `REQ-MIHOMO-SUB-018`): Given 管理员打开 User Details，When 编辑用户资料或 Mihomo mixin，Then 用户资料保存区与 Mihomo 配置保存区以同级区域呈现，
   且各自的保存按钮只属于对应区域。
@@ -251,8 +253,8 @@
 
 - Method: 订阅渲染输出检查。
 - covers: `REQ-MIHOMO-SUB-020`
-- Pass condition: `🤯 All` 先按稳定 base 顺序包含实际 `🛬 {base}`，再包含七个
-  canonical `🤯 {Region}`，且没有重复或悬挂引用。
+- Pass condition: `🤯 All` 先按稳定 base 顺序包含实际 `🛬 {base}`，再包含七个隐藏
+  `🌟 {Region}`，且没有重复、`🤯 {Region}` 或悬挂引用。
 
 ### VER-MIHOMO-SUB-022 — Relay 候选范围与 fail-closed
 

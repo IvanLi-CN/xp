@@ -24,6 +24,19 @@ _Avoid_: Relay node, landing group
 The `🛬 {base}` group for one node base and its direct and chain candidates.
 _Avoid_: Access point group, relay group
 
+**Mihomo Group Interpolation**:
+The render-time expansion of reserved entries inside a user's Mihomo proxy group.
+It resolves to generated groups and preserves surrounding literal references.
+_Avoid_: YAML macro, provider substitution
+
+**Region Placeholder**:
+The reserved `🌟 <region>` entry that expands to hidden regional groups such as `🌟 Japan`.
+_Avoid_: `🤯 {region}` group, literal wildcard
+
+**Node Placeholder**:
+The reserved `🛬 <node>` entry that expands to every available landing group.
+_Avoid_: Node selector, relay placeholder
+
 **Relay Group**:
 The system `🛣️ {relay-base}` group used by chains; candidates are other nodes' Access Points.
 _Avoid_: Landing group, external relay

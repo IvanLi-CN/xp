@@ -6366,7 +6366,7 @@ rules: []
         "closed relay groups must not expose an external provider filter"
     );
 
-    for expected in ["🌟 Japan", "🔒 Japan", "🤯 Japan"] {
+    for expected in ["🌟 Japan", "🔒 Japan"] {
         assert!(
             groups
                 .iter()
@@ -6374,6 +6374,11 @@ rules: []
             "compat region group missing from output: {expected}"
         );
     }
+    assert!(!groups.iter().any(|g| {
+        g.get("name")
+            .and_then(YamlValue::as_str)
+            .is_some_and(|name| name == "🤯 Japan")
+    }));
 
     let proxies = yaml
         .get("proxies")

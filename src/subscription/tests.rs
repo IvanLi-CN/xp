@@ -608,13 +608,13 @@ providerB:
             .collect::<Vec<_>>(),
         vec![
             "🛬 Tokyo-A",
-            "🤯 Japan",
-            "🤯 HongKong",
-            "🤯 Taiwan",
-            "🤯 Korea",
-            "🤯 Singapore",
-            "🤯 US",
-            "🤯 Other",
+            "🌟 Japan",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 US",
+            "🌟 Other",
         ]
     );
     let japan_group = proxy_groups
@@ -1778,7 +1778,10 @@ providerA:
             .collect::<Vec<_>>()
     };
 
-    assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
+    assert_eq!(
+        group_refs("💎 高质量"),
+        vec!["🔒 高质量", "🔒 落地", "🤯 All"]
+    );
     assert_eq!(
         groups
             .iter()
@@ -1791,7 +1794,7 @@ providerA:
             .collect::<Vec<_>>(),
         vec![MIHOMO_SYSTEM_PROVIDER_NAME, "providerA"]
     );
-    assert!(group_refs("🤯 All").contains(&"🤯 Japan"));
+    assert!(group_refs("🤯 All").contains(&"🌟 Japan"));
     assert_eq!(
         group_refs("🚀 节点选择"),
         vec![
@@ -2052,7 +2055,7 @@ providerA:
         .collect::<Vec<_>>();
 
     assert_eq!(
-        &names[0..25],
+        &names[0..18],
         &[
             "🔒 高质量",
             "💎 高质量",
@@ -2070,19 +2073,12 @@ providerA:
             "🌟 Singapore",
             "🌟 US",
             "🌟 Other",
-            "🤯 Japan",
-            "🤯 HongKong",
-            "🤯 Taiwan",
-            "🤯 Korea",
-            "🤯 Singapore",
-            "🤯 US",
-            "🤯 Other",
             "🛬 Osaka-B",
             "🛬 Tokyo-A",
         ]
     );
     assert_eq!(
-        &names[25..30],
+        &names[18..23],
         &[
             "🔒 落地",
             "🤯 All",
@@ -2111,13 +2107,13 @@ providerA:
         vec![
             "🛬 Osaka-B",
             "🛬 Tokyo-A",
-            "🤯 Japan",
-            "🤯 HongKong",
-            "🤯 Taiwan",
-            "🤯 Korea",
-            "🤯 Singapore",
-            "🤯 US",
-            "🤯 Other",
+            "🌟 Japan",
+            "🌟 HongKong",
+            "🌟 Taiwan",
+            "🌟 Korea",
+            "🌟 Singapore",
+            "🌟 US",
+            "🌟 Other",
         ]
     );
     assert!(
@@ -2830,25 +2826,18 @@ rules: []
             "💎 高质量",
             "🔒 Japan",
             "🌟 Japan",
-            "🤯 Japan",
             "🔒 HongKong",
             "🌟 HongKong",
-            "🤯 HongKong",
             "🔒 Taiwan",
             "🌟 Taiwan",
-            "🤯 Taiwan",
             "🔒 Korea",
             "🌟 Korea",
-            "🤯 Korea",
             "🔒 Singapore",
             "🌟 Singapore",
-            "🤯 Singapore",
             "🔒 US",
             "🌟 US",
-            "🤯 US",
             "🔒 Other",
             "🌟 Other",
-            "🤯 Other",
             "🔒 落地",
             "🤯 All",
             "🗽 大流量",
@@ -2944,25 +2933,18 @@ rules: []
             matches!(
                 *name,
                 "🔒 Japan"
-                    | "🤯 Japan"
                     | "🛣️ Japan"
                     | "🔒 HongKong"
-                    | "🤯 HongKong"
                     | "🛣️ HongKong"
                     | "🔒 Taiwan"
-                    | "🤯 Taiwan"
                     | "🛣️ Taiwan"
                     | "🔒 Korea"
-                    | "🤯 Korea"
                     | "🛣️ Korea"
                     | "🔒 Singapore"
-                    | "🤯 Singapore"
                     | "🛣️ Singapore"
                     | "🔒 US"
-                    | "🤯 US"
                     | "🛣️ US"
                     | "🔒 Other"
-                    | "🤯 Other"
                     | "🛣️ Other"
             )
         }));
@@ -3347,7 +3329,10 @@ fn build_mihomo_yaml_injects_default_high_quality_candidates() {
             "Tokyo-A-reality",
         ]
     );
-    assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
+    assert_eq!(
+        group_refs("💎 高质量"),
+        vec!["🔒 高质量", "🔒 落地", "🤯 All"]
+    );
 }
 
 #[test]
@@ -4532,6 +4517,10 @@ fn build_mihomo_yaml_does_not_generate_landing_groups_for_extra_proxies() {
         .iter()
         .find(|g| g.get("name").and_then(Value::as_str) == Some("🔒 落地"))
         .expect("landing pool must exist");
+    assert_eq!(
+        landing.get("type").and_then(Value::as_str),
+        Some("url-test")
+    );
     let landing_proxies = landing
         .get("proxies")
         .and_then(Value::as_sequence)
