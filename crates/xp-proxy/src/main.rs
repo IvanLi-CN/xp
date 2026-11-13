@@ -114,7 +114,7 @@ async fn handle_tls_or_fallback(
     listener: xp_proxy_core::control::ListenerSnapshot,
     traffic: Arc<TrafficCounter>,
 ) -> Result<()> {
-    let hello = read_tls_client_hello(&mut inbound).await?;
+    let (hello, buffered_extra) = read_tls_client_hello(&mut inbound).await?;
     let reality = listener.reality;
     let private_key = reality.private_key_bytes().map_err(anyhow::Error::msg)?;
     let short_ids = reality.short_id_bytes().map_err(anyhow::Error::msg)?;
@@ -150,6 +150,10 @@ async fn handle_tls_or_fallback(
     let mut outbound = TcpStream::connect(&target.authority).await?;
     outbound.write_all(&hello).await?;
     traffic.add_uplink(hello.len() as u64);
+    if !buffered_extra.is_empty() {
+        outbound.write_all(&buffered_extra).await?;
+        traffic.add_uplink(buffered_extra.len() as u64);
+    }
     let (mut ri, mut wi) = inbound.into_split();
     let (mut ro, mut wo) = outbound.into_split();
     let uplink_counter = traffic.clone();
@@ -168,7 +172,7 @@ async fn handle_tls_or_fallback(
     Ok(())
 }
 
-async fn read_tls_client_hello(inbound: &mut TcpStream) -> Result<Vec<u8>> {
+async fn read_tls_client_hello(inbound: &mut TcpStream) -> Result<(Vec<u8>, Vec<u8>)> {
     const MAX_HELLO: usize = 64 * 1024;
     let mut bytes = Vec::with_capacity(4096);
     loop {
@@ -181,8 +185,9 @@ async fn read_tls_client_hello(inbound: &mut TcpStream) -> Result<Vec<u8>> {
             anyhow::bail!("truncated TLS ClientHello");
         }
         bytes.extend_from_slice(&chunk[..read]);
-        if parse_client_hello(&bytes).is_ok() {
-            return Ok(bytes);
+        if let Ok(info) = parse_client_hello(&bytes) {
+            let consumed = info.record.len();
+            return Ok((bytes[..consumed].to_vec(), bytes[consumed..].to_vec()));
         }
     }
 }
