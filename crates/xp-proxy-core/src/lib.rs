@@ -2,6 +2,7 @@
 
 pub mod control;
 pub mod fallback;
+pub mod reality;
 pub mod transport;
 pub mod vless;
 
