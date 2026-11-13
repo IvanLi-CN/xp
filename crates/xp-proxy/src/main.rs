@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -29,6 +30,27 @@ struct Args {
     snapshot: Option<std::path::PathBuf>,
 }
 
+#[derive(Default)]
+struct ListenerRuntime {
+    bound: Mutex<HashSet<std::net::SocketAddr>>,
+}
+
+impl ListenerRuntime {
+    fn register(&self, bind: std::net::SocketAddr) -> bool {
+        self.bound
+            .lock()
+            .expect("listener runtime lock poisoned")
+            .insert(bind)
+    }
+
+    fn unregister(&self, bind: std::net::SocketAddr) {
+        self.bound
+            .lock()
+            .expect("listener runtime lock poisoned")
+            .remove(&bind);
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -49,41 +71,29 @@ async fn main() -> Result<()> {
     std::fs::set_permissions(&socket, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
     let manager = GenerationManager::new();
     let traffic = Arc::new(TrafficCounter::default());
+    let listener_runtime = Arc::new(ListenerRuntime::default());
     if let Some(path) = args.snapshot {
         let snapshot: ProxySnapshot = serde_json::from_slice(&std::fs::read(path)?)?;
         manager.prepare(snapshot).map_err(anyhow::Error::msg)?;
         manager.activate().map_err(anyhow::Error::msg)?;
         let active = manager.active_snapshot().expect("activated snapshot");
-        let users = active.users.clone();
-        for listener in active.listeners {
-            let users = users.clone();
-            let listener_snapshot = listener.clone();
-            let bind = listener.bind.parse::<std::net::SocketAddr>()?;
-            let tcp = TcpListener::bind(bind).await?;
-            let traffic = traffic.clone();
-            tokio::spawn(async move {
-                loop {
-                    let Ok((stream, _)) = tcp.accept().await else {
-                        break;
-                    };
-                    let users = users.clone();
-                    let listener_snapshot = listener_snapshot.clone();
-                    let traffic = traffic.clone();
-                    tokio::spawn(async move {
-                        let _ = handle_connection(stream, users, listener_snapshot, traffic).await;
-                    });
-                }
-            });
-        }
+        start_snapshot_listeners(
+            active,
+            manager.clone(),
+            listener_runtime.clone(),
+            traffic.clone(),
+        )
+        .await?;
     }
     loop {
         tokio::select! {
             accepted = listener.accept() => {
                 let (stream, _) = accepted?;
                 let manager = manager.clone();
+                let listener_runtime = listener_runtime.clone();
                 let traffic = traffic.clone();
                 tokio::spawn(async move {
-                    let _ = handle_control(stream, manager, traffic).await;
+                    let _ = handle_control(stream, manager, listener_runtime, traffic).await;
                 });
             }
             _ = tokio::signal::ctrl_c() => break,
@@ -329,9 +339,59 @@ async fn read_vless_request(
     }
 }
 
+async fn start_snapshot_listeners(
+    snapshot: ProxySnapshot,
+    manager: GenerationManager,
+    runtime: Arc<ListenerRuntime>,
+    traffic: Arc<TrafficCounter>,
+) -> Result<()> {
+    for listener in snapshot.listeners {
+        let bind = listener.bind.parse::<std::net::SocketAddr>()?;
+        if !runtime.register(bind) {
+            continue;
+        }
+        let tcp = match TcpListener::bind(bind).await {
+            Ok(tcp) => tcp,
+            Err(error) => {
+                runtime.unregister(bind);
+                return Err(error.into());
+            }
+        };
+        let manager = manager.clone();
+        let runtime = runtime.clone();
+        let traffic = traffic.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = tcp.accept().await else {
+                    runtime.unregister(bind);
+                    break;
+                };
+                let Some(active) = manager.active_snapshot() else {
+                    continue;
+                };
+                let Some(listener) = active
+                    .listeners
+                    .iter()
+                    .find(|candidate| candidate.bind == bind.to_string())
+                    .cloned()
+                else {
+                    continue;
+                };
+                let users = active.users;
+                let traffic = traffic.clone();
+                tokio::spawn(async move {
+                    let _ = handle_connection(stream, users, listener, traffic).await;
+                });
+            }
+        });
+    }
+    Ok(())
+}
+
 async fn handle_control(
     mut stream: UnixStream,
     manager: GenerationManager,
+    listener_runtime: Arc<ListenerRuntime>,
     traffic: Arc<TrafficCounter>,
 ) -> Result<()> {
     loop {
@@ -356,7 +416,19 @@ async fn handle_control(
             ControlOperation::Prepare { snapshot } => manager
                 .prepare(snapshot)
                 .map(|_| manager.state().1.unwrap_or(request.generation)),
-            ControlOperation::Activate => manager.activate(),
+            ControlOperation::Activate => {
+                let snapshot = manager
+                    .prepared_snapshot()
+                    .ok_or_else(|| anyhow::anyhow!("no prepared generation"))?;
+                start_snapshot_listeners(
+                    snapshot,
+                    manager.clone(),
+                    listener_runtime.clone(),
+                    traffic.clone(),
+                )
+                .await?;
+                manager.activate()
+            }
             ControlOperation::Drain => Ok(manager.drain().or(active).unwrap_or(request.generation)),
             ControlOperation::Stop => Ok(manager.stop().or(active).unwrap_or(request.generation)),
             ControlOperation::Status => Ok(active.unwrap_or(request.generation)),

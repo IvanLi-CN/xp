@@ -197,6 +197,14 @@ impl GenerationManager {
             .clone()
     }
 
+    pub fn prepared_snapshot(&self) -> Option<ProxySnapshot> {
+        self.inner
+            .read()
+            .expect("generation lock poisoned")
+            .prepared
+            .clone()
+    }
+
     pub fn drain(&self) -> Option<u64> {
         let mut inner = self.inner.write().expect("generation lock poisoned");
         if inner.active.is_some() {
