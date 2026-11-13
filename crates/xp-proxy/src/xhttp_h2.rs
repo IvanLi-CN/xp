@@ -51,6 +51,9 @@ async fn open_stream(
     request: Request<Incoming>,
     users: Vec<UserSnapshot>,
 ) -> Result<Response<ResponseBody>> {
+    if request.method() != hyper::Method::POST {
+        return Err(anyhow!("XHTTP stream-one requires POST"));
+    }
     let mut body = request.into_body();
     let mut buffered = Vec::with_capacity(256);
     let (vless, consumed) = loop {
@@ -94,7 +97,9 @@ async fn open_stream(
     let body = StreamBody::new(stream).boxed();
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header("content-type", "application/octet-stream")
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-store")
+        .header("x-accel-buffering", "no")
         .body(body)?)
 }
 
@@ -193,6 +198,9 @@ mod tests {
 
         let mut response = response.await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "text/event-stream");
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert_eq!(response.headers()["x-accel-buffering"], "no");
         let mut received = Vec::new();
         while let Some(chunk) = response.body_mut().data().await {
             received.extend_from_slice(&chunk.unwrap());
