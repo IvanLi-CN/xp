@@ -28,6 +28,7 @@ pub mod mihomo_import;
 pub mod mihomo_policy;
 pub mod mihomo_redact;
 pub mod mihomo_resources;
+pub mod native_proxy_supervisor;
 pub mod node_egress_probe;
 pub mod node_history;
 pub mod node_runtime;

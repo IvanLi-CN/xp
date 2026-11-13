@@ -385,6 +385,8 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     }
     let (xray_health, _xray_supervisor_task) =
         xp::xray_supervisor::spawn_xray_supervisor(config_arc.clone(), reconcile.clone());
+    let _native_proxy_supervisor_task =
+        xp::native_proxy_supervisor::spawn_native_proxy_supervisor(config_arc.clone());
     let (cloudflared_health, _cloudflared_supervisor_task) =
         xp::cloudflared_supervisor::spawn_cloudflared_supervisor(config_arc.clone());
     let (ddns_health, _ddns_supervisor_task) =
