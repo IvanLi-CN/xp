@@ -6,6 +6,13 @@ use x25519_dalek::{PublicKey, StaticSecret};
 pub const REALITY_INFO: &[u8] = b"REALITY";
 pub const SESSION_ID_LEN: usize = 32;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionMetadata {
+    pub version: [u8; 4],
+    pub unix_seconds: u32,
+    pub short_id: [u8; 8],
+}
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum RealityCryptoError {
     #[error("short id must contain at most 8 bytes")]
@@ -93,6 +100,22 @@ pub fn open_session_id(
     Ok(plaintext)
 }
 
+pub fn parse_session_metadata(session_id: &[u8]) -> Result<SessionMetadata, RealityCryptoError> {
+    if session_id.len() != SESSION_ID_LEN {
+        return Err(RealityCryptoError::InvalidSessionId);
+    }
+    let mut version = [0u8; 4];
+    version.copy_from_slice(&session_id[..4]);
+    let unix_seconds = u32::from_be_bytes(session_id[4..8].try_into().expect("fixed slice"));
+    let mut short_id = [0u8; 8];
+    short_id.copy_from_slice(&session_id[8..16]);
+    Ok(SessionMetadata {
+        version,
+        unix_seconds,
+        short_id,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +147,15 @@ mod tests {
         let session_id = [2u8; 32];
         let sealed = seal_session_id(key, random, &session_id, b"hello").unwrap();
         assert!(open_session_id(key, random, &sealed, b"changed").is_err());
+    }
+
+    #[test]
+    fn session_metadata_preserves_version_time_and_short_id() {
+        let session_id = build_session_id(*b"1.8\0", 123, &[0xaa, 0xbb], &[4; 16]).unwrap();
+        let metadata = parse_session_metadata(&session_id).unwrap();
+        assert_eq!(metadata.version, *b"1.8\0");
+        assert_eq!(metadata.unix_seconds, 123);
+        assert_eq!(&metadata.short_id[..2], &[0xaa, 0xbb]);
+        assert_eq!(&metadata.short_id[2..], &[0; 6]);
     }
 }
