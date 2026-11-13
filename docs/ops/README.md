@@ -910,6 +910,13 @@ Notes:
   coverage, watermarks, gaps, clock skew and `complete` / `partial` / `local_only` query quality
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
+- 缺口报告必须先分类：仍有原始 wire、source journal 或 Ready 副本可验证的为
+  `recoverable_gap`，应继续 recovery；经过正式来源、签名和保留边界证据确认无法恢复的为
+  `permanent_gap`，属于设计允许的历史不完整性，必须保留并让受影响查询维持 `partial` 与
+  `replica_converged=false`；证据不足的为 `unclassified_gap`，必须继续调查。只有
+  `recoverable_gap` 与 `unclassified_gap` 均为零，且没有待处理 repair/outbox 或未解释的
+  `history_truncated`，才能报告没有未解决的同步异常。`ready`、无新错误或空间下降本身不能
+  证明历史已经完整收敛。
 - Only configured repository members defer their live journal replay for a missing initial-source
   baseline. Ordinary source nodes and former repositories do not import every peer baseline; a
   newly joined node must not suspend their durable outbox replay. This applies to systemd, OpenRC
@@ -935,7 +942,7 @@ Notes:
   their intended control-plane concurrency.
 - Normal history connections use a 1 MiB retained-journal limit in every deployment mode.
 - Repository signed wire segments use a 24-hour anti-entropy cache; canonical rollup rows retain the
-  separate 7-day minute, 90-day five-minute and two-year hourly history contract.
+  separate 3-day minute, 90-day five-minute and two-year hourly history contract.
 - Repository record and signed-segment BLOBs use a checksummed Zstandard level-1 envelope when
   smaller.
   Reads restore exact bytes before queries, export and hashing. Signed wires and keys are unchanged.

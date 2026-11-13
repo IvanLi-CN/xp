@@ -88,7 +88,7 @@ Raft 也不应承载高频 Observation。
   复用签名、cursor、ack 与 fork 防护。
 - REQ-MONITOR-ROLLUP: Repository 以 source epoch、stream、sequence 幂等接收，并保存完整已知
   并集。
-- 保存 7 天分钟级、90 天五分钟级、随后小时级，默认最长两年。
+- 保存 3 天分钟级、90 天五分钟级、随后小时级，默认最长两年。
 - child 层必须先成功 rollup 并校验，再删除；
   rollup 必须可重放且不重复累计。
 - bucket 保存 expected、executed、success、failure、unsupported、suspended 与延迟分布。

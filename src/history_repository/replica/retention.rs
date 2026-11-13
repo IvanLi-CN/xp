@@ -21,7 +21,7 @@ pub(crate) struct RepositoryRetentionPolicy {
 impl Default for RepositoryRetentionPolicy {
     fn default() -> Self {
         Self {
-            minute_retention_seconds: 7 * DAY_SECONDS,
+            minute_retention_seconds: 3 * DAY_SECONDS,
             five_minute_retention_seconds: 90 * DAY_SECONDS,
             max_retention_seconds: 2 * 365 * DAY_SECONDS,
             repair_cache_retention_seconds: DAY_SECONDS,
