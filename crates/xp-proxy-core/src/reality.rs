@@ -3,7 +3,10 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
 
-use crate::tls_hello::ClientHelloInfo;
+use crate::{
+    tls_hello::{ClientHelloInfo, ServerHelloInfo},
+    tls13::{Tls13CipherSuite, Tls13TrafficKeys, derive_handshake_traffic_keys},
+};
 
 pub const REALITY_INFO: &[u8] = b"REALITY";
 pub const SESSION_ID_LEN: usize = 32;
@@ -46,6 +49,37 @@ pub enum RealityCryptoError {
     ServerNameTooLong,
     #[error("ALPN value is invalid")]
     InvalidAlpn,
+    #[error("TLS ServerHello does not contain an X25519 key share")]
+    MissingServerKeyShare,
+    #[error("unsupported TLS 1.3 cipher suite: {0:#06x}")]
+    UnsupportedCipherSuite(u16),
+}
+
+pub fn derive_client_handshake_keys(
+    client_private_key: [u8; 32],
+    client_hello: &ClientHelloInfo,
+    server_hello: &ServerHelloInfo,
+) -> Result<Tls13TrafficKeys, RealityCryptoError> {
+    let server_public: [u8; 32] = server_hello
+        .x25519_key_share
+        .as_ref()
+        .ok_or(RealityCryptoError::MissingServerKeyShare)?
+        .as_slice()
+        .try_into()
+        .map_err(|_| RealityCryptoError::MissingServerKeyShare)?;
+    let suite = match server_hello.cipher_suite {
+        0x1301 => Tls13CipherSuite::Aes128GcmSha256,
+        0x1302 => Tls13CipherSuite::Aes256GcmSha384,
+        suite => return Err(RealityCryptoError::UnsupportedCipherSuite(suite)),
+    };
+    let shared = StaticSecret::from(client_private_key)
+        .diffie_hellman(&PublicKey::from(server_public))
+        .to_bytes();
+    let mut transcript =
+        Vec::with_capacity(client_hello.handshake.len() + server_hello.handshake.len());
+    transcript.extend_from_slice(&client_hello.handshake);
+    transcript.extend_from_slice(&server_hello.handshake);
+    Ok(derive_handshake_traffic_keys(suite, &shared, &transcript))
 }
 
 pub fn build_client_hello(
@@ -454,5 +488,37 @@ mod tests {
         .unwrap();
         assert_eq!(authenticated.session.version, *b"1.8\0");
         assert_eq!(authenticated.session.short_id, [1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn derives_client_handshake_keys_from_server_x25519_share() {
+        let client_private = [7u8; 32];
+        let server_private = [9u8; 32];
+        let client_public = PublicKey::from(&StaticSecret::from(client_private));
+        let server_public = PublicKey::from(&StaticSecret::from(server_private));
+        let client_hello = ClientHelloInfo {
+            record: Vec::new(),
+            handshake: b"client hello".to_vec(),
+            session_id_offset: 39,
+            random: [3u8; 32],
+            session_id: vec![0; 32],
+            server_name: Some("origin.example".into()),
+            x25519_key_share: Some(client_public.to_bytes().to_vec()),
+        };
+        let server_hello = ServerHelloInfo {
+            record: Vec::new(),
+            handshake: b"server hello".to_vec(),
+            random: [4u8; 32],
+            cipher_suite: 0x1301,
+            x25519_key_share: Some(server_public.to_bytes().to_vec()),
+        };
+        let keys =
+            derive_client_handshake_keys(client_private, &client_hello, &server_hello).unwrap();
+        let record = keys.server.seal(22, b"encrypted handshake", 0).unwrap();
+        assert_eq!(
+            keys.server.open(&record, 0).unwrap(),
+            (22, b"encrypted handshake".to_vec())
+        );
+        assert_ne!(keys.client, keys.server);
     }
 }
