@@ -25,23 +25,39 @@ pub fn parse_client_hello(input: &[u8]) -> Result<ClientHelloInfo, ClientHelloEr
     if input.len() < 5 {
         return Err(ClientHelloError::Truncated);
     }
-    if input[0] != 0x16 || input[1] != 0x03 {
-        return Err(ClientHelloError::UnexpectedType);
-    }
-    let record_len = u16::from_be_bytes([input[3], input[4]]) as usize;
-    if input.len() < 5 + record_len {
-        return Err(ClientHelloError::Truncated);
-    }
-    let record = &input[..5 + record_len];
-    let payload = &record[5..];
-    if payload.len() < 4 || payload[0] != 1 {
-        return Err(ClientHelloError::UnexpectedType);
-    }
-    let hello_len = u32::from_be_bytes([0, payload[1], payload[2], payload[3]]) as usize;
-    if hello_len + 4 > payload.len() {
-        return Err(ClientHelloError::Truncated);
-    }
-    let hello = &payload[4..4 + hello_len];
+    let mut record_end = 0usize;
+    let mut handshake = Vec::new();
+    let hello_len = loop {
+        if input.len() < record_end + 5 {
+            return Err(ClientHelloError::Truncated);
+        }
+        let record_header = &input[record_end..record_end + 5];
+        if record_header[0] != 0x16 || record_header[1] != 0x03 {
+            return Err(ClientHelloError::UnexpectedType);
+        }
+        let record_len = u16::from_be_bytes([record_header[3], record_header[4]]) as usize;
+        let payload_start = record_end + 5;
+        let next_record_end = payload_start
+            .checked_add(record_len)
+            .ok_or(ClientHelloError::Malformed)?;
+        if input.len() < next_record_end {
+            return Err(ClientHelloError::Truncated);
+        }
+        handshake.extend_from_slice(&input[payload_start..next_record_end]);
+        record_end = next_record_end;
+        if handshake.len() < 4 {
+            continue;
+        }
+        if handshake[0] != 1 {
+            return Err(ClientHelloError::UnexpectedType);
+        }
+        let hello_len = u32::from_be_bytes([0, handshake[1], handshake[2], handshake[3]]) as usize;
+        if hello_len + 4 > handshake.len() {
+            continue;
+        }
+        break hello_len;
+    };
+    let hello = &handshake[4..4 + hello_len];
     if hello.len() < 34 {
         return Err(ClientHelloError::Malformed);
     }
@@ -91,8 +107,8 @@ pub fn parse_client_hello(input: &[u8]) -> Result<ClientHelloInfo, ClientHelloEr
         cursor = extension_end;
     }
     Ok(ClientHelloInfo {
-        record: record.to_vec(),
-        handshake: payload[..4 + hello_len].to_vec(),
+        record: input[..record_end].to_vec(),
+        handshake: handshake[..4 + hello_len].to_vec(),
         session_id_offset: 39,
         random,
         session_id,
@@ -197,5 +213,22 @@ mod tests {
         assert_eq!(info.session_id, vec![1, 2, 3, 4]);
         assert_eq!(info.server_name.as_deref(), Some("xhttp.example"));
         assert_eq!(info.x25519_key_share, Some(vec![9u8; 32]));
+    }
+
+    #[test]
+    fn parses_client_hello_split_across_tls_records() {
+        let single_record = client_hello();
+        let payload = &single_record[5..];
+        let split = 19;
+        let mut fragmented = Vec::with_capacity(single_record.len() + 5);
+        for chunk in [&payload[..split], &payload[split..]] {
+            fragmented.extend_from_slice(&[0x16, 0x03, 0x03]);
+            fragmented.extend_from_slice(&(chunk.len() as u16).to_be_bytes());
+            fragmented.extend_from_slice(chunk);
+        }
+        let info = parse_client_hello(&fragmented).unwrap();
+        assert_eq!(info.record.len(), fragmented.len());
+        assert_eq!(info.random, [7u8; 32]);
+        assert_eq!(info.server_name.as_deref(), Some("xhttp.example"));
     }
 }
