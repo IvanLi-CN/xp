@@ -37,7 +37,32 @@ pub struct ListenerSnapshot {
     pub path: String,
     pub reality: RealitySnapshot,
     #[serde(default)]
+    pub xmux: XmuxSnapshot,
+    #[serde(default)]
     pub fallbacks: Vec<FallbackSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct XmuxSnapshot {
+    pub max_connections: u16,
+    pub max_concurrency: u16,
+    pub c_max_reuse_times: u32,
+    pub h_max_request_times: u32,
+    pub h_max_reusable_secs: u32,
+    pub h_keep_alive_period: i32,
+}
+
+impl Default for XmuxSnapshot {
+    fn default() -> Self {
+        Self {
+            max_connections: 1,
+            max_concurrency: 0,
+            c_max_reuse_times: 0,
+            h_max_request_times: 0,
+            h_max_reusable_secs: 0,
+            h_keep_alive_period: -1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,6 +275,9 @@ impl ProxySnapshot {
                     listener.path
                 ));
             }
+            if listener.xmux.h_keep_alive_period < -1 {
+                return Err("XMUX h_keep_alive_period must be -1 or non-negative".into());
+            }
             if listener.reality.server_names.is_empty() || listener.reality.short_ids.is_empty() {
                 return Err("REALITY server_names and short_ids must not be empty".into());
             }
@@ -310,6 +338,7 @@ mod tests {
                     short_ids: vec!["0123456789abcdef".into()],
                     private_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
                 },
+                xmux: XmuxSnapshot::default(),
                 fallbacks: Vec::new(),
             }],
             users: vec![UserSnapshot {

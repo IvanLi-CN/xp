@@ -13,7 +13,7 @@ pub mod xhttp;
 pub use control::{
     CONTROL_PROTOCOL_VERSION, ControlOperation, ControlRequest, ControlResponse, FallbackSnapshot,
     GenerationManager, GenerationState, ListenerSnapshot, ProxySnapshot, RealitySnapshot,
-    UserSnapshot,
+    UserSnapshot, XmuxSnapshot,
 };
 pub use metrics::{TrafficCounter, TrafficSnapshot};
 pub use transport::{RealityConfig, XhttpConfig, XmuxSettings};

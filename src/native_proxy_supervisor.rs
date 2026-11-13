@@ -18,7 +18,7 @@ use tracing::{error, info};
 use uuid::Uuid;
 use xp_proxy_core::{
     CONTROL_PROTOCOL_VERSION, FallbackSnapshot, ListenerSnapshot, ProxySnapshot, RealitySnapshot,
-    UserSnapshot,
+    UserSnapshot, XmuxSnapshot,
     control::{ControlOperation, ControlRequest, ControlResponse, decode_frame, encode_frame},
 };
 
@@ -143,6 +143,11 @@ pub fn build_snapshot(
                 authorities: meta.accepted_authorities.clone(),
             })
             .collect();
+        let xmux = meta
+            .mihomo_xmux
+            .as_ref()
+            .map(xmux_snapshot)
+            .unwrap_or_default();
         listeners.push(ListenerSnapshot {
             bind: format!("0.0.0.0:{}", endpoint.port),
             path: crate::protocol::VLESS_XHTTP_PATH.to_string(),
@@ -151,6 +156,7 @@ pub fn build_snapshot(
                 short_ids: meta.short_ids,
                 private_key: meta.reality_keys.private_key,
             },
+            xmux,
             fallbacks,
         });
         endpoint_ids.insert(endpoint.endpoint_id.clone(), ());
@@ -180,6 +186,25 @@ pub fn build_snapshot(
         listeners,
         users: snapshot_users,
     })
+}
+
+fn xmux_snapshot(config: &crate::protocol::MihomoXmuxConfig) -> XmuxSnapshot {
+    fn upper_bound(value: &str) -> u32 {
+        value
+            .split('-')
+            .next_back()
+            .and_then(|part| part.parse::<u32>().ok())
+            .unwrap_or(0)
+    }
+
+    XmuxSnapshot {
+        max_connections: upper_bound(&config.max_connections).min(u16::MAX as u32) as u16,
+        max_concurrency: upper_bound(&config.max_concurrency).min(u16::MAX as u32) as u16,
+        c_max_reuse_times: upper_bound(&config.c_max_reuse_times),
+        h_max_request_times: 0,
+        h_max_reusable_secs: upper_bound(&config.h_max_reusable_secs),
+        h_keep_alive_period: config.h_keep_alive_period,
+    }
 }
 
 pub async fn publish_reconciled_snapshot(
@@ -333,6 +358,13 @@ mod tests {
                 "transport": "xhttp",
                 "canary_upstream": {"url": "https://canary.example/"},
                 "accepted_authorities": ["canary.example"]
+                ,"mihomo_xmux": {
+                    "max_connections": "2-4",
+                    "max_concurrency": "0",
+                    "c_max_reuse_times": "5-7",
+                    "h_max_reusable_secs": "60-120",
+                    "h_keep_alive_period": 30
+                }
             }),
         };
         let user = User {
@@ -354,6 +386,10 @@ mod tests {
         assert_eq!(snapshot.listeners.len(), 1);
         assert_eq!(snapshot.listeners[0].bind, "0.0.0.0:443");
         assert_eq!(snapshot.listeners[0].path, "/xp-xhttp");
+        assert_eq!(snapshot.listeners[0].xmux.max_connections, 4);
+        assert_eq!(snapshot.listeners[0].xmux.c_max_reuse_times, 7);
+        assert_eq!(snapshot.listeners[0].xmux.h_max_reusable_secs, 120);
+        assert_eq!(snapshot.listeners[0].xmux.h_keep_alive_period, 30);
         assert_eq!(
             snapshot.listeners[0].fallbacks[0].target,
             "https://canary.example/"
