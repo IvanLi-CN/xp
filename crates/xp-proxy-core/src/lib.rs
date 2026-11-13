@@ -5,6 +5,7 @@ pub mod fallback;
 pub mod reality;
 pub mod transport;
 pub mod vless;
+pub mod xhttp;
 
 pub use control::{
     ControlOperation, ControlRequest, ControlResponse, GenerationManager, GenerationState,
