@@ -55,6 +55,60 @@ pub struct Tls13TrafficKeys {
     pub secret: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tls13RecordReader {
+    key: Tls13TrafficKey,
+    sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tls13RecordWriter {
+    key: Tls13TrafficKey,
+    sequence: u64,
+}
+
+impl Tls13RecordReader {
+    pub fn new(key: Tls13TrafficKey) -> Self {
+        Self { key, sequence: 0 }
+    }
+
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub fn open(&mut self, record: &[u8]) -> Result<(u8, Vec<u8>), Tls13RecordError> {
+        if self.sequence == u64::MAX {
+            return Err(Tls13RecordError::SequenceOverflow);
+        }
+        let opened = self.key.open(record, self.sequence)?;
+        self.sequence += 1;
+        Ok(opened)
+    }
+}
+
+impl Tls13RecordWriter {
+    pub fn new(key: Tls13TrafficKey) -> Self {
+        Self { key, sequence: 0 }
+    }
+
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub fn seal(
+        &mut self,
+        content_type: u8,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, Tls13RecordError> {
+        if self.sequence == u64::MAX {
+            return Err(Tls13RecordError::SequenceOverflow);
+        }
+        let sealed = self.key.seal(content_type, plaintext, self.sequence)?;
+        self.sequence += 1;
+        Ok(sealed)
+    }
+}
+
 pub fn finished_key(suite: Tls13CipherSuite, traffic_secret: &[u8]) -> Vec<u8> {
     hkdf_expand_label(suite, traffic_secret, b"finished", &[], suite.hash_len())
 }
@@ -387,5 +441,19 @@ mod tests {
             old_key.open(&record, 0).unwrap_err(),
             Tls13RecordError::AuthenticationFailed
         );
+    }
+
+    #[test]
+    fn stateful_record_reader_and_writer_advance_sequences() {
+        let secret = [8u8; 32];
+        let key = Tls13TrafficKey::from_secret(Tls13CipherSuite::Aes128GcmSha256, &secret);
+        let mut writer = Tls13RecordWriter::new(key.clone());
+        let mut reader = Tls13RecordReader::new(key);
+        let first = writer.seal(23, b"one").unwrap();
+        let second = writer.seal(23, b"two").unwrap();
+        assert_eq!(reader.open(&first).unwrap(), (23, b"one".to_vec()));
+        assert_eq!(reader.open(&second).unwrap(), (23, b"two".to_vec()));
+        assert_eq!(writer.sequence(), 2);
+        assert_eq!(reader.sequence(), 2);
     }
 }
