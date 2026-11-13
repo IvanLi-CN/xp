@@ -52,6 +52,30 @@ pub struct RealitySnapshot {
     pub private_key: String,
 }
 
+impl RealitySnapshot {
+    pub fn private_key_bytes(&self) -> Result<[u8; 32], String> {
+        let bytes = URL_SAFE_NO_PAD
+            .decode(&self.private_key)
+            .map_err(|_| "REALITY private_key must be base64url without padding".to_string())?;
+        bytes
+            .try_into()
+            .map_err(|_| "REALITY private_key must decode to 32 bytes".to_string())
+    }
+
+    pub fn short_id_bytes(&self) -> Result<Vec<[u8; 8]>, String> {
+        self.short_ids
+            .iter()
+            .map(|short_id| {
+                let bytes = hex::decode(short_id)
+                    .map_err(|_| format!("invalid REALITY short_id: {short_id}"))?;
+                bytes
+                    .try_into()
+                    .map_err(|_| format!("REALITY short_id must be 8 bytes: {short_id}"))
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserSnapshot {
     pub uuid: String,
@@ -224,12 +248,8 @@ impl ProxySnapshot {
             }) {
                 return Err("REALITY short_id must be 16 hexadecimal characters".into());
             }
-            let private_key = URL_SAFE_NO_PAD
-                .decode(&listener.reality.private_key)
-                .map_err(|_| "REALITY private_key must be base64url without padding".to_string())?;
-            if private_key.len() != 32 {
-                return Err("REALITY private_key must decode to 32 bytes".into());
-            }
+            listener.reality.private_key_bytes()?;
+            listener.reality.short_id_bytes()?;
             for fallback in &listener.fallbacks {
                 let target = crate::fallback::FallbackTarget::parse(&fallback.target)?;
                 let authorities = fallback
@@ -302,5 +322,18 @@ mod tests {
         let mut invalid = snapshot(1);
         invalid.listeners[0].reality.private_key = "key".into();
         assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn reality_snapshot_decodes_runtime_key_material() {
+        let snapshot = snapshot(1);
+        assert_eq!(
+            snapshot.listeners[0].reality.private_key_bytes().unwrap(),
+            [0; 32]
+        );
+        assert_eq!(
+            snapshot.listeners[0].reality.short_id_bytes().unwrap(),
+            vec![[0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]]
+        );
     }
 }
