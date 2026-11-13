@@ -8,6 +8,9 @@ use tokio::{
 use xp_proxy_core::{
     GenerationManager, ProxySnapshot, TrafficCounter,
     control::{ControlOperation, ControlRequest, ControlResponse, decode_frame, encode_frame},
+    fallback::FallbackTarget,
+    reality::authenticate_client_hello,
+    tls_hello::parse_client_hello,
     vless::{decode_request, is_authorized},
 };
 
@@ -52,7 +55,7 @@ async fn main() -> Result<()> {
         let users = active.users.clone();
         for listener in active.listeners {
             let users = users.clone();
-            let path = listener.path.clone();
+            let listener_snapshot = listener.clone();
             let bind = listener.bind.parse::<std::net::SocketAddr>()?;
             let tcp = TcpListener::bind(bind).await?;
             let traffic = traffic.clone();
@@ -62,10 +65,10 @@ async fn main() -> Result<()> {
                         break;
                     };
                     let users = users.clone();
-                    let path = path.clone();
+                    let listener_snapshot = listener_snapshot.clone();
                     let traffic = traffic.clone();
                     tokio::spawn(async move {
-                        let _ = handle_connection(stream, users, path, traffic).await;
+                        let _ = handle_connection(stream, users, listener_snapshot, traffic).await;
                     });
                 }
             });
@@ -91,15 +94,87 @@ async fn main() -> Result<()> {
 async fn handle_connection(
     stream: TcpStream,
     users: Vec<xp_proxy_core::control::UserSnapshot>,
-    path: String,
+    listener: xp_proxy_core::control::ListenerSnapshot,
     traffic: Arc<TrafficCounter>,
 ) -> Result<()> {
     let mut probe = [0u8; 4];
     let size = stream.peek(&mut probe).await?;
     if size == 4 && &probe == b"PRI " {
-        return xhttp_h2::serve(stream, users, path, traffic).await;
+        return xhttp_h2::serve(stream, users, listener.path, traffic).await;
+    }
+    if size == 1 && probe[0] == 0x16 {
+        return handle_tls_or_fallback(stream, listener, traffic).await;
     }
     handle_vless(stream, users, traffic).await
+}
+
+async fn handle_tls_or_fallback(
+    mut inbound: TcpStream,
+    listener: xp_proxy_core::control::ListenerSnapshot,
+    traffic: Arc<TrafficCounter>,
+) -> Result<()> {
+    let hello = read_tls_client_hello(&mut inbound).await?;
+    let reality = listener.reality;
+    let private_key = reality.private_key_bytes().map_err(anyhow::Error::msg)?;
+    let short_ids = reality.short_id_bytes().map_err(anyhow::Error::msg)?;
+    let parsed = parse_client_hello(&hello);
+    let authenticated = parsed
+        .as_ref()
+        .is_ok_and(|hello| authenticate_client_hello(hello, private_key, &short_ids).is_ok());
+    if authenticated {
+        anyhow::bail!("REALITY handshake requires native TLS relay");
+    }
+    let fallback = listener
+        .fallbacks
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("unauthenticated TLS has no fallback"))?;
+    let target = FallbackTarget::parse(&fallback.target).map_err(anyhow::Error::msg)?;
+    if !fallback.authorities.is_empty()
+        && !fallback
+            .authorities
+            .iter()
+            .any(|authority| authority == &target.authority)
+    {
+        anyhow::bail!("fallback authority is not allowlisted");
+    }
+    let mut outbound = TcpStream::connect(&target.authority).await?;
+    outbound.write_all(&hello).await?;
+    traffic.add_uplink(hello.len() as u64);
+    let (mut ri, mut wi) = inbound.into_split();
+    let (mut ro, mut wo) = outbound.into_split();
+    let uplink_counter = traffic.clone();
+    let uplink = async move {
+        let bytes = tokio::io::copy(&mut ri, &mut wo).await?;
+        uplink_counter.add_uplink(bytes);
+        Ok::<u64, std::io::Error>(bytes)
+    };
+    let downlink_counter = traffic;
+    let downlink = async move {
+        let bytes = tokio::io::copy(&mut ro, &mut wi).await?;
+        downlink_counter.add_downlink(bytes);
+        Ok::<u64, std::io::Error>(bytes)
+    };
+    let _ = tokio::try_join!(uplink, downlink)?;
+    Ok(())
+}
+
+async fn read_tls_client_hello(inbound: &mut TcpStream) -> Result<Vec<u8>> {
+    const MAX_HELLO: usize = 64 * 1024;
+    let mut bytes = Vec::with_capacity(4096);
+    loop {
+        if bytes.len() >= MAX_HELLO {
+            anyhow::bail!("TLS ClientHello exceeds {MAX_HELLO} bytes");
+        }
+        let mut chunk = [0u8; 2048];
+        let read = inbound.read(&mut chunk).await?;
+        if read == 0 {
+            anyhow::bail!("truncated TLS ClientHello");
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+        if parse_client_hello(&bytes).is_ok() {
+            return Ok(bytes);
+        }
+    }
 }
 
 async fn handle_vless(
