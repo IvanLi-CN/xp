@@ -82,6 +82,51 @@ pub fn derive_client_handshake_keys(
     Ok(derive_handshake_traffic_keys(suite, &shared, &transcript))
 }
 
+pub fn build_server_hello(
+    client_hello: &ClientHelloInfo,
+    server_random: [u8; 32],
+    server_private_key: [u8; 32],
+    cipher_suite: u16,
+) -> Result<(Vec<u8>, [u8; 32]), RealityCryptoError> {
+    if !matches!(cipher_suite, 0x1301 | 0x1302)
+        || !client_hello.cipher_suites.is_empty()
+            && !client_hello.cipher_suites.contains(&cipher_suite)
+    {
+        return Err(RealityCryptoError::UnsupportedCipherSuite(cipher_suite));
+    }
+    let client_session_id = &client_hello.session_id;
+    if client_session_id.len() > u8::MAX as usize {
+        return Err(RealityCryptoError::InvalidSessionId);
+    }
+    let server_private = StaticSecret::from(server_private_key);
+    let server_public = PublicKey::from(&server_private).to_bytes();
+    let mut body = Vec::with_capacity(128);
+    body.extend_from_slice(&[0x03, 0x03]);
+    body.extend_from_slice(&server_random);
+    body.push(client_session_id.len() as u8);
+    body.extend_from_slice(client_session_id);
+    body.extend_from_slice(&cipher_suite.to_be_bytes());
+    body.push(0);
+    let mut extensions = vec![0, 0x2b, 0, 2, 3, 4, 0, 0x33, 0, 36, 0, 0x1d, 0, 32];
+    extensions.extend_from_slice(&server_public);
+    body.extend_from_slice(
+        &u16::try_from(extensions.len())
+            .map_err(|_| RealityCryptoError::InvalidCiphertext)?
+            .to_be_bytes(),
+    );
+    body.extend_from_slice(&extensions);
+    let mut handshake = vec![2, 0, 0, 0];
+    let length = u32::try_from(body.len()).map_err(|_| RealityCryptoError::InvalidCiphertext)?;
+    handshake[1..].copy_from_slice(&length.to_be_bytes()[1..]);
+    handshake.extend_from_slice(&body);
+    let record_len =
+        u16::try_from(handshake.len()).map_err(|_| RealityCryptoError::InvalidCiphertext)?;
+    let mut record = vec![0x16, 0x03, 0x03];
+    record.extend_from_slice(&record_len.to_be_bytes());
+    record.extend_from_slice(&handshake);
+    Ok((record, server_public))
+}
+
 pub fn build_client_hello(
     config: &RealityClientHelloConfig,
     client_private_key: [u8; 32],
@@ -407,7 +452,10 @@ mod tests {
             session_id_offset: wire_offset,
             random,
             session_id: sealed,
+            cipher_suites: Vec::new(),
             server_name: Some("example.com".to_owned()),
+            alpn: Vec::new(),
+            signature_schemes: None,
             x25519_key_share: Some(client_public.to_bytes().to_vec()),
         };
         let authenticated =
@@ -433,7 +481,10 @@ mod tests {
             session_id_offset: 4 + 35,
             random,
             session_id: sealed,
+            cipher_suites: Vec::new(),
             server_name: Some("example.com".to_owned()),
+            alpn: Vec::new(),
+            signature_schemes: None,
             x25519_key_share: Some(client_public.to_bytes().to_vec()),
         };
         let names = vec!["example.com".to_owned()];
@@ -503,7 +554,10 @@ mod tests {
             session_id_offset: 39,
             random: [3u8; 32],
             session_id: vec![0; 32],
+            cipher_suites: Vec::new(),
             server_name: Some("origin.example".into()),
+            alpn: Vec::new(),
+            signature_schemes: None,
             x25519_key_share: Some(client_public.to_bytes().to_vec()),
         };
         let server_hello = ServerHelloInfo {
@@ -521,5 +575,33 @@ mod tests {
             (22, b"encrypted handshake".to_vec())
         );
         assert_ne!(keys.client, keys.server);
+    }
+
+    #[test]
+    fn builds_a_tls13_server_hello_with_matching_session_and_key_share() {
+        let client_private = [7u8; 32];
+        let server_private = [9u8; 32];
+        let server_public = PublicKey::from(&StaticSecret::from(server_private));
+        let config = RealityClientHelloConfig {
+            server_name: "origin.example".into(),
+            server_public_key: server_public.to_bytes(),
+            short_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            unix_seconds: 1_700_000_000,
+            version: *b"1.8\0",
+            alpn: vec!["h2".into()],
+        };
+        let (client_record, _) =
+            build_client_hello(&config, client_private, [3u8; 32], [4u8; 16]).unwrap();
+        let client_hello = crate::tls_hello::parse_client_hello(&client_record).unwrap();
+        let (server_record, server_public_bytes) =
+            build_server_hello(&client_hello, [8u8; 32], server_private, 0x1301).unwrap();
+        let server_hello = crate::tls_hello::parse_server_hello(&server_record).unwrap();
+        assert_eq!(server_hello.random, [8u8; 32]);
+        assert_eq!(server_hello.cipher_suite, 0x1301);
+        assert_eq!(
+            server_hello.x25519_key_share.as_deref(),
+            Some(server_public_bytes.as_slice())
+        );
+        assert_eq!(server_hello.handshake[4], client_hello.handshake[4]);
     }
 }

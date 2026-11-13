@@ -5,7 +5,10 @@ pub struct ClientHelloInfo {
     pub session_id_offset: usize,
     pub random: [u8; 32],
     pub session_id: Vec<u8>,
+    pub cipher_suites: Vec<u16>,
     pub server_name: Option<String>,
+    pub alpn: Vec<String>,
+    pub signature_schemes: Option<Vec<u16>>,
     pub x25519_key_share: Option<Vec<u8>>,
 }
 
@@ -84,9 +87,20 @@ pub fn parse_client_hello(input: &[u8]) -> Result<ClientHelloInfo, ClientHelloEr
         .to_vec();
     cursor += session_len;
     let cipher_len = read_u16(hello, &mut cursor)?;
-    cursor = cursor
+    if !cipher_len.is_multiple_of(2) {
+        return Err(ClientHelloError::Malformed);
+    }
+    let cipher_end = cursor
         .checked_add(cipher_len)
         .ok_or(ClientHelloError::Malformed)?;
+    if cipher_end > hello.len() {
+        return Err(ClientHelloError::Truncated);
+    }
+    let cipher_suites = hello[cursor..cipher_end]
+        .chunks_exact(2)
+        .map(|bytes| u16::from_be_bytes([bytes[0], bytes[1]]))
+        .collect();
+    cursor = cipher_end;
     let compression_len = *hello.get(cursor).ok_or(ClientHelloError::Truncated)? as usize;
     cursor += 1 + compression_len;
     let extensions_len = read_u16(hello, &mut cursor)?;
@@ -97,6 +111,8 @@ pub fn parse_client_hello(input: &[u8]) -> Result<ClientHelloInfo, ClientHelloEr
         return Err(ClientHelloError::Truncated);
     }
     let mut server_name = None;
+    let mut alpn = Vec::new();
+    let mut signature_schemes = None;
     let mut x25519_key_share = None;
     while cursor < extensions_end {
         let extension_type = read_u16(hello, &mut cursor)?;
@@ -110,6 +126,8 @@ pub fn parse_client_hello(input: &[u8]) -> Result<ClientHelloInfo, ClientHelloEr
         let extension = &hello[cursor..extension_end];
         match extension_type {
             0x0000 => server_name = parse_server_name(extension),
+            0x000d => signature_schemes = parse_signature_schemes(extension),
+            0x0010 => alpn = parse_alpn(extension),
             0x0033 => x25519_key_share = parse_x25519_key_share(extension),
             _ => {}
         }
@@ -121,7 +139,10 @@ pub fn parse_client_hello(input: &[u8]) -> Result<ClientHelloInfo, ClientHelloEr
         session_id_offset: 39,
         random,
         session_id,
+        cipher_suites,
         server_name,
+        alpn,
+        signature_schemes,
         x25519_key_share,
     })
 }
@@ -249,6 +270,47 @@ fn parse_server_name(extension: &[u8]) -> Option<String> {
     std::str::from_utf8(extension.get(5..5 + name_len)?)
         .ok()
         .map(str::to_owned)
+}
+
+fn parse_signature_schemes(extension: &[u8]) -> Option<Vec<u16>> {
+    if extension.len() < 2 {
+        return None;
+    }
+    let length = u16::from_be_bytes([extension[0], extension[1]]) as usize;
+    if length != extension.len().saturating_sub(2) || !length.is_multiple_of(2) {
+        return None;
+    }
+    Some(
+        extension[2..]
+            .chunks_exact(2)
+            .map(|bytes| u16::from_be_bytes([bytes[0], bytes[1]]))
+            .collect(),
+    )
+}
+
+fn parse_alpn(extension: &[u8]) -> Vec<String> {
+    if extension.len() < 2 {
+        return Vec::new();
+    }
+    let length = u16::from_be_bytes([extension[0], extension[1]]) as usize;
+    if length != extension.len().saturating_sub(2) {
+        return Vec::new();
+    }
+    let mut cursor = 2;
+    let mut protocols = Vec::new();
+    while cursor < extension.len() {
+        let Some(&length) = extension.get(cursor) else {
+            return Vec::new();
+        };
+        let length = length as usize;
+        cursor += 1;
+        let Some(protocol) = extension.get(cursor..cursor + length) else {
+            return Vec::new();
+        };
+        protocols.push(String::from_utf8_lossy(protocol).into_owned());
+        cursor += length;
+    }
+    protocols
 }
 
 fn parse_x25519_key_share(extension: &[u8]) -> Option<Vec<u8>> {
