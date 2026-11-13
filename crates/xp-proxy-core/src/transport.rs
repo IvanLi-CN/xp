@@ -40,7 +40,12 @@ pub struct XhttpConfig {
 
 impl XhttpConfig {
     pub fn validate(&self) -> Result<(), String> {
-        if !self.path.starts_with('/') || self.path.contains("..") {
+        if !self.path.starts_with('/')
+            || self.path.contains("..")
+            || self.path.contains('?')
+            || self.path.contains('#')
+            || self.path.chars().any(|ch| ch.is_ascii_whitespace())
+        {
             return Err("XHTTP path must be absolute and cannot contain '..'".into());
         }
         if self.mode != "stream-one" {
@@ -48,6 +53,9 @@ impl XhttpConfig {
         }
         if self.xmux.max_connections == 0 {
             return Err("XMUX max_connections must be non-zero".into());
+        }
+        if self.xmux.h_keep_alive_period < -1 {
+            return Err("XMUX h_keep_alive_period must be -1 or non-negative".into());
         }
         Ok(())
     }
@@ -94,6 +102,19 @@ mod tests {
             private_key: [0; 32],
             dest: "127.0.0.1:443".into(),
         };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn xhttp_rejects_query_fragment_and_invalid_keep_alive() {
+        let mut config = XhttpConfig {
+            path: "/xp-xhttp?bad".into(),
+            mode: "stream-one".into(),
+            xmux: XmuxSettings::default(),
+        };
+        assert!(config.validate().is_err());
+        config.path = "/xp-xhttp".into();
+        config.xmux.h_keep_alive_period = -2;
         assert!(config.validate().is_err());
     }
 }
