@@ -17,6 +17,7 @@ use xp_proxy_core::{
     vless::{decode_request, is_authorized},
 };
 
+mod reality_tls;
 mod xhttp_h2;
 
 #[derive(Debug, Parser)]
@@ -114,7 +115,7 @@ async fn handle_connection(
         return xhttp_h2::serve(stream, users, listener.path, listener.xmux.into(), traffic).await;
     }
     if size >= 1 && probe[0] == 0x16 {
-        return handle_tls_or_fallback(stream, listener, traffic).await;
+        return handle_tls_or_fallback(stream, users, listener, traffic).await;
     }
     if size >= 1 && is_http_request_byte(probe[0]) {
         return handle_raw_fallback(stream, listener, traffic).await;
@@ -191,6 +192,7 @@ async fn relay_tcp(
 
 async fn handle_tls_or_fallback(
     mut inbound: TcpStream,
+    users: Vec<xp_proxy_core::control::UserSnapshot>,
     listener: xp_proxy_core::control::ListenerSnapshot,
     traffic: Arc<TrafficCounter>,
 ) -> Result<()> {
@@ -200,7 +202,7 @@ async fn handle_tls_or_fallback(
     let short_ids = reality.short_id_bytes().map_err(anyhow::Error::msg)?;
     let parsed = parse_client_hello(&hello);
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    let authenticated = parsed.as_ref().is_ok_and(|hello| {
+    let authenticated = parsed.as_ref().ok().and_then(|hello| {
         authenticate_client_hello_with_policy(
             hello,
             private_key,
@@ -209,10 +211,23 @@ async fn handle_tls_or_fallback(
             Some(120),
             now,
         )
-        .is_ok()
+        .ok()
     });
-    if authenticated {
-        anyhow::bail!("REALITY handshake requires native TLS relay");
+    if let Some(authenticated) = authenticated {
+        let server_name = parsed
+            .as_ref()
+            .ok()
+            .and_then(|hello| hello.server_name.as_deref())
+            .unwrap_or_else(|| {
+                reality
+                    .server_names
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or("localhost")
+            });
+        let tls = reality_tls::accept(hello, buffered_extra, inbound, &authenticated, server_name)
+            .await?;
+        return xhttp_h2::serve(tls, users, listener.path, listener.xmux.into(), traffic).await;
     }
     let fallback = listener
         .fallbacks
