@@ -495,19 +495,22 @@ async fn initial_backfill_exports_historical_data_from_an_authenticated_peer() {
     cluster.save(tmp.path()).expect("save cluster");
     let peer_id = xp_test_fixtures::secondary_node_id().to_owned();
     let history = crate::node_history::NodeHistoryHandle::from_config(&config);
+    let observed_at = chrono::Utc::now();
+    let observed_date = observed_at.date_naive().to_string();
+    let observed_timestamp = observed_at.to_rfc3339();
     history
         .replace_node_snapshot(
-            chrono::Utc::now(),
+            observed_at,
             &cluster.node_id,
             crate::node_history::NodeHistorySnapshot {
                 node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
-                last_synced_at: Some("2026-08-14T00:00:00Z".to_owned()),
+                last_synced_at: Some(observed_timestamp.clone()),
                 last_sync_error: None,
                 daily_traffic: vec![crate::node_history::NodeHistoryDailyTraffic {
-                    date: "2026-08-14".to_owned(),
+                    date: observed_date,
                     uplink_bytes: 42,
                     downlink_bytes: 24,
-                    updated_at: "2026-08-14T00:00:00Z".to_owned(),
+                    updated_at: observed_timestamp,
                 }],
                 daily_component_status: Vec::new(),
                 component_status_events: Vec::new(),
