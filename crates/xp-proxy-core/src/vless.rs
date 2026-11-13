@@ -14,6 +14,41 @@ pub fn is_authorized(request: &VlessRequest, users: &[Uuid]) -> bool {
     users.iter().any(|user| user == &request.user)
 }
 
+pub fn encode_tcp_request(
+    user: Uuid,
+    destination: (&str, u16),
+    addons: &[u8],
+) -> Result<Vec<u8>, VlessRequestError> {
+    if addons.len() > u8::MAX as usize {
+        return Err(VlessRequestError::InvalidAddress);
+    }
+    let (host, port) = destination;
+    let ip = host.parse::<IpAddr>().ok();
+    let (address_type, address_bytes): (u8, Vec<u8>) = match ip {
+        Some(IpAddr::V4(address)) => (1, address.octets().to_vec()),
+        Some(IpAddr::V6(address)) => (3, address.octets().to_vec()),
+        None => {
+            if host.is_empty() || host.len() > u8::MAX as usize || host.contains(':') {
+                return Err(VlessRequestError::InvalidAddress);
+            }
+            let mut bytes = Vec::with_capacity(host.len() + 1);
+            bytes.push(host.len() as u8);
+            bytes.extend_from_slice(host.as_bytes());
+            (2, bytes)
+        }
+    };
+    let mut output = Vec::with_capacity(24 + addons.len() + address_bytes.len());
+    output.push(1);
+    output.extend_from_slice(user.as_bytes());
+    output.push(addons.len() as u8);
+    output.extend_from_slice(addons);
+    output.push(1);
+    output.extend_from_slice(&port.to_be_bytes());
+    output.push(address_type);
+    output.extend_from_slice(&address_bytes);
+    Ok(output)
+}
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum VlessRequestError {
     #[error("request is truncated")]
@@ -118,5 +153,13 @@ mod tests {
         let (request, used) = decode_request(&input).unwrap();
         assert_eq!(request.destination, ("example.com".into(), 443));
         assert_eq!(used, input.len());
+    }
+
+    #[test]
+    fn encodes_and_decodes_ipv6_request() {
+        let encoded = encode_tcp_request(Uuid::nil(), ("2001:db8::1", 443), &[]).unwrap();
+        let (request, used) = decode_request(&encoded).unwrap();
+        assert_eq!(request.destination, ("2001:db8::1".into(), 443));
+        assert_eq!(used, encoded.len());
     }
 }
