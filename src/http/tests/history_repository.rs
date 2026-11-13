@@ -484,6 +484,7 @@ async fn repository_relay_bypasses_collector_gate_only_for_ready_repository_sour
 async fn initial_backfill_exports_historical_data_from_an_authenticated_peer() {
     let tmp = tempfile::tempdir().expect("temporary directory");
     let config = test_config(tmp.path().to_path_buf());
+    // Keep synthetic traffic inside the bounded history retention window as time advances.
     let now = chrono::Utc::now();
     let traffic_at = now - chrono::Duration::days(1);
     let mut cluster = ClusterMetadata::init_new_cluster(
