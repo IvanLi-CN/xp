@@ -29,6 +29,7 @@ RUN apt-get update \
 
 COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml .xp-source-marker ./
 COPY proto ./proto
+COPY crates ./crates
 COPY src ./src
 COPY tests ./tests
 COPY test-fixtures ./test-fixtures
@@ -40,9 +41,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \
   --mount=type=cache,target=/app/target \
   mkdir -p /out \
-  && cargo build --release --locked --bin xp --bin xp-ops \
+  && cargo build --workspace --release --locked --bins \
   && cp /app/target/release/xp /out/xp \
-  && cp /app/target/release/xp-ops /out/xp-ops
+  && cp /app/target/release/xp-ops /out/xp-ops \
+  && cp /app/target/release/xp-proxy /out/xp-proxy
 
 FROM builder-base AS builder-ci
 ENV CARGO_INCREMENTAL=0 \
@@ -51,9 +53,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \
   --mount=type=cache,target=/app/target \
   mkdir -p /out \
-  && cargo build --locked --bin xp --bin xp-ops \
+  && cargo build --workspace --locked --bins \
   && cp /app/target/debug/xp /out/xp \
-  && cp /app/target/debug/xp-ops /out/xp-ops
+  && cp /app/target/debug/xp-ops /out/xp-ops \
+  && cp /app/target/debug/xp-proxy /out/xp-proxy
 
 FROM ghcr.io/xtls/xray-core:${XRAY_DOCKER_TAG} AS xray
 
@@ -84,10 +87,12 @@ ENTRYPOINT ["tini", "--", "/usr/local/bin/xp-ops", "container", "run"]
 FROM runtime-base AS runtime-from-source
 COPY --from=builder /out/xp /usr/local/bin/xp
 COPY --from=builder /out/xp-ops /usr/local/bin/xp-ops
+COPY --from=builder /out/xp-proxy /usr/local/bin/xp-proxy
 
 FROM runtime-base AS runtime-from-ci
 COPY --from=builder-ci /out/xp /usr/local/bin/xp
 COPY --from=builder-ci /out/xp-ops /usr/local/bin/xp-ops
+COPY --from=builder-ci /out/xp-proxy /usr/local/bin/xp-proxy
 
 FROM runtime-base AS runtime-from-prebuilt
 ARG TARGETARCH

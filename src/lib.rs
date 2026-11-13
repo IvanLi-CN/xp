@@ -28,6 +28,7 @@ pub mod mihomo_import;
 pub mod mihomo_policy;
 pub mod mihomo_redact;
 pub mod mihomo_resources;
+pub mod native_proxy_supervisor;
 pub mod node_egress_probe;
 pub mod node_history;
 pub mod node_runtime;
@@ -60,3 +61,9 @@ pub mod version;
 pub mod vless_https_canary;
 pub mod xray;
 pub mod xray_supervisor;
+
+#[cfg(test)]
+#[ctor::ctor]
+fn install_test_rustls_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}

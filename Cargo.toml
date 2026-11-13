@@ -3,6 +3,10 @@ name = "xp"
 version = "0.2.0"
 edition = "2024"
 
+[workspace]
+members = [".", "crates/xp-proxy-core", "crates/xp-proxy"]
+resolver = "2"
+
 [features]
 resource-fixture = []
 
@@ -68,6 +72,7 @@ uuid = { version = "1", features = ["v4"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 zstd = "0.13"
 zip = "7.1.0"
+xp-proxy-core = { path = "crates/xp-proxy-core" }
 
 [build-dependencies]
 flate2 = "1.1"
@@ -83,6 +88,7 @@ panic = "abort"
 strip = "symbols"
 
 [dev-dependencies]
+ctor = "0.4"
 tokio = { version = "1", features = ["test-util"] }
 assert_cmd = "2.1.2"
 bytes = "1"

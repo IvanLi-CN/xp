@@ -29,8 +29,16 @@ const DIAGNOSTIC_RETRY_BASE_MILLISECONDS: u64 = 1_000;
 const DIAGNOSTIC_RETRY_MAX_MILLISECONDS: u64 = 60_000;
 #[cfg(not(test))]
 const SLOW_OPERATION_MILLISECONDS: u64 = 1_000;
+
+#[cfg(not(test))]
+fn is_slow_operation(elapsed_ms: u64) -> bool {
+    elapsed_ms >= SLOW_OPERATION_MILLISECONDS
+}
+
 #[cfg(test)]
-const SLOW_OPERATION_MILLISECONDS: u64 = 0;
+fn is_slow_operation(_elapsed_ms: u64) -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum HistoryStorageDiagnosticOperation {
@@ -403,7 +411,7 @@ impl HistoryStorageDiagnostics {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let mut state = self.lock_state();
             state.completed_operations = state.completed_operations.saturating_add(1);
-            if elapsed_ms >= SLOW_OPERATION_MILLISECONDS {
+            if is_slow_operation(elapsed_ms) {
                 state.slow_operations = state.slow_operations.saturating_add(1);
                 state.last_slow_event = Some(event.clone());
                 if !event.composite {

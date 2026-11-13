@@ -981,5 +981,21 @@
   "docs/adr/0001-mihomo-landing-and-relay-group-contract.md": {
     "long_line_count": 10,
     "max_line_length": 470
+  },
+  "docs/adr/0031-native-vless-xhttp-data-plane.md": {
+    "long_line_count": 1,
+    "max_line_length": 368
+  },
+  "docs/specs/native-vless-xhttp-proxy/IMPLEMENTATION.md": {
+    "long_line_count": 1,
+    "max_line_length": 105
+  },
+  "docs/specs/native-vless-xhttp-proxy/HISTORY.md": {
+    "long_line_count": 1,
+    "max_line_length": 180
+  },
+  "docs/specs/native-vless-xhttp-proxy/SPEC.md": {
+    "long_line_count": 8,
+    "max_line_length": 219
   }
 }

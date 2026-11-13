@@ -644,6 +644,11 @@ async fn reconcile_once_with_runtime(
     let reverse_mesh_enabled = config.reverse_mesh_enabled
         && cluster_mesh_enabled
         && crate::reverse_mesh::NATIVE_REVERSE_ENABLED;
+    let native_snapshot_inputs = (
+        snapshot.endpoints.clone(),
+        snapshot.users_by_id.clone(),
+        snapshot.memberships.clone(),
+    );
     let outcome = reconcile_snapshot(
         config.xray_api_addr,
         cluster_ca_key_pem,
@@ -663,6 +668,14 @@ async fn reconcile_once_with_runtime(
     }
 
     if let Ok(outcome) = &outcome {
+        crate::native_proxy_supervisor::publish_reconciled_snapshot(
+            &local_node_id,
+            &native_snapshot_inputs.0,
+            &native_snapshot_inputs.1,
+            &native_snapshot_inputs.2,
+            cluster_ca_key_pem,
+        )
+        .await;
         // Only advance the hash cache when we are confident the inbound was rebuilt. This ensures
         // we keep retrying rebuilds when xray calls fail.
         last_applied_hash_by_endpoint_id
