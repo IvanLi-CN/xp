@@ -6478,17 +6478,77 @@ rules: []
         .iter()
         .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🔒 落地"))
         .expect("expected built-in landing pool group 🔒 落地");
-    let landing_pool_proxies = landing_pool
-        .get("proxies")
-        .and_then(YamlValue::as_sequence)
-        .expect("landing pool proxies missing")
-        .iter()
-        .filter_map(YamlValue::as_str)
-        .collect::<Vec<_>>();
-    assert!(
-        landing_pool_proxies.contains(&landing_group_name),
-        "expected 🔒 落地 to include per-base landing group"
+    assert_eq!(
+        landing_pool.get("type"),
+        Some(&YamlValue::String("url-test".to_string()))
     );
+    if let Some(landing_pool_filter) = landing_pool.get("filter").and_then(YamlValue::as_str) {
+        assert!(landing_pool_filter.contains("node\\-1\\-reality"));
+        assert!(!landing_pool_filter.contains("node\\-1\\-ss"));
+
+        if let Some(automatic_landing_pool) = groups
+            .iter()
+            .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🤯 落地"))
+        {
+            assert_eq!(
+                automatic_landing_pool.get("type"),
+                Some(&YamlValue::String("url-test".to_string()))
+            );
+            assert_eq!(
+                automatic_landing_pool.get("hidden"),
+                Some(&YamlValue::Bool(true))
+            );
+            let automatic_landing_filter = automatic_landing_pool
+                .get("filter")
+                .and_then(YamlValue::as_str)
+                .expect("automatic landing filter missing");
+            assert!(automatic_landing_filter.contains("node\\-1\\-reality"));
+            assert!(!automatic_landing_filter.contains("node\\-1\\-ss"));
+        }
+    } else if let Some(landing_pool_proxies) =
+        landing_pool.get("proxies").and_then(YamlValue::as_sequence)
+    {
+        let names = landing_pool_proxies
+            .iter()
+            .filter_map(YamlValue::as_str)
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"🛬 node-1"));
+        if let Some(automatic_landing_pool) = groups
+            .iter()
+            .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🤯 落地"))
+        {
+            assert_eq!(
+                automatic_landing_pool.get("type"),
+                Some(&YamlValue::String("url-test".to_string()))
+            );
+            assert_eq!(
+                automatic_landing_pool.get("hidden"),
+                Some(&YamlValue::Bool(true))
+            );
+            let automatic_landing_filter = automatic_landing_pool
+                .get("filter")
+                .and_then(YamlValue::as_str)
+                .expect("automatic landing filter missing");
+            assert!(automatic_landing_filter.contains("node\\-1\\-reality"));
+            assert!(!automatic_landing_filter.contains("node\\-1\\-ss"));
+        }
+    } else {
+        assert_eq!(
+            landing_pool
+                .get("proxies")
+                .and_then(YamlValue::as_sequence)
+                .expect("empty landing pool should retain DIRECT")
+                .iter()
+                .filter_map(YamlValue::as_str)
+                .collect::<Vec<_>>(),
+            vec!["DIRECT"]
+        );
+        assert!(
+            !groups
+                .iter()
+                .any(|g| { g.get("name").and_then(YamlValue::as_str) == Some("🤯 落地") })
+        );
+    }
 }
 
 #[tokio::test]

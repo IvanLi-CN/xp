@@ -89,7 +89,9 @@ rules: []
             group
                 .get("name")
                 .and_then(Value::as_str)
-                .is_some_and(|name| name.starts_with("🤯 ") && name != "🤯 All")
+                .is_some_and(|name| {
+                    name.starts_with("🤯 ") && name != "🤯 All" && name != "🤯 落地"
+                })
         }));
         let landing = groups
             .iter()
@@ -99,15 +101,45 @@ rules: []
             landing.get("type").and_then(Value::as_str),
             Some("url-test")
         );
+        let automatic = groups
+            .iter()
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("🤯 落地"))
+            .expect("automatic landing pool should exist");
         assert_eq!(
-            landing
-                .get("proxies")
-                .and_then(Value::as_sequence)
-                .expect("landing pool proxies should exist")
+            automatic.get("type").and_then(Value::as_str),
+            Some("url-test")
+        );
+        assert_eq!(automatic.get("hidden").and_then(Value::as_bool), Some(true));
+        for (group, expected_proxies) in [
+            (landing, vec!["🛬 Tokyo-A", "🛬 Tokyo-B"]),
+            (automatic, vec!["Tokyo-A-reality", "Tokyo-B-reality"]),
+        ] {
+            if let Some(proxies) = group.get("proxies").and_then(Value::as_sequence) {
+                assert_eq!(
+                    proxies.iter().filter_map(Value::as_str).collect::<Vec<_>>(),
+                    expected_proxies
+                );
+            } else {
+                let filter = group
+                    .get("filter")
+                    .and_then(Value::as_str)
+                    .expect("provider-backed group should have an exact filter");
+                assert!(filter.contains(r"Tokyo\-A\-reality"));
+                assert!(filter.contains(r"Tokyo\-B\-reality"));
+            }
+        }
+        let node_selector_fallback = groups
+            .iter()
+            .find(|group| group.get("name").and_then(Value::as_str) == Some("💎 节点选择"))
+            .and_then(|group| group.get("proxies"))
+            .and_then(Value::as_sequence)
+            .expect("node selector fallback should expose proxies");
+        assert_eq!(
+            node_selector_fallback
                 .iter()
                 .filter_map(Value::as_str)
                 .collect::<Vec<_>>(),
-            vec!["🛬 Tokyo-A", "🛬 Tokyo-B"]
+            vec!["🚀 节点选择", "🤯 落地", "🤯 All"]
         );
     };
 

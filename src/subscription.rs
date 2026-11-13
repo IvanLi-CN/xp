@@ -1363,6 +1363,7 @@ const MIHOMO_LEGACY_FALLBACK_REGION_GROUPS: [MihomoRegionGroup; 4] = [
 ];
 
 const MIHOMO_LANDING_POOL_GROUP: &str = "🔒 落地";
+const MIHOMO_AUTOMATIC_LANDING_POOL_GROUP: &str = "🤯 落地";
 const MIHOMO_APP_PROXY_GROUP_MATCHERS: [&str; 4] =
     ["💎 节点选择", "🗽 大流量", "🎯 全球直连", "🛑 全球拦截"];
 
@@ -1488,6 +1489,7 @@ fn inject_mihomo_proxy_groups(
 
     let mut override_names = std::collections::BTreeSet::<String>::new();
     override_names.insert(MIHOMO_LANDING_POOL_GROUP.to_string());
+    override_names.insert(MIHOMO_AUTOMATIC_LANDING_POOL_GROUP.to_string());
     override_names.extend(
         MIHOMO_REGION_GROUP_NAMES
             .iter()
@@ -1548,6 +1550,7 @@ fn inject_mihomo_proxy_groups(
         &provider_values,
         &landing_groups,
         direct_reality_names.clone(),
+        !direct_reality_names.is_empty(),
     );
     inject_mihomo_relay_groups(
         &mut groups,
@@ -1564,6 +1567,13 @@ fn inject_mihomo_proxy_groups(
         &landing_groups,
     );
     inject_mihomo_landing_pool_group(&mut groups, &landing_groups);
+    if !direct_reality_names.is_empty() {
+        groups.push(mihomo_url_test_group(
+            MIHOMO_AUTOMATIC_LANDING_POOL_GROUP,
+            true,
+            direct_reality_names.clone(),
+        ));
+    }
 
     root.insert(
         serde_yaml::Value::String("proxy-groups".to_string()),
@@ -1588,6 +1598,7 @@ fn inject_mihomo_provider_proxy_groups(
 
     let mut override_names = std::collections::BTreeSet::<String>::new();
     override_names.insert(MIHOMO_LANDING_POOL_GROUP.to_string());
+    override_names.insert(MIHOMO_AUTOMATIC_LANDING_POOL_GROUP.to_string());
     override_names.extend(
         MIHOMO_REGION_GROUP_NAMES
             .iter()
@@ -1652,6 +1663,7 @@ fn inject_mihomo_provider_proxy_groups(
         &provider_values,
         &landing_groups,
         Vec::new(),
+        !direct_reality_names.is_empty(),
     );
     inject_mihomo_relay_groups(
         &mut groups,
@@ -1673,6 +1685,14 @@ fn inject_mihomo_provider_proxy_groups(
         &landing_groups,
     );
     inject_mihomo_landing_pool_group(&mut groups, &landing_groups);
+    if !direct_reality_names.is_empty() {
+        groups.push(mihomo_provider_url_test_group(
+            MIHOMO_AUTOMATIC_LANDING_POOL_GROUP,
+            true,
+            &system_provider_values,
+            &direct_reality_names,
+        ));
+    }
 
     root.insert(
         serde_yaml::Value::String("proxy-groups".to_string()),
@@ -2617,15 +2637,61 @@ fn mihomo_url_test_group(
     serde_yaml::Value::Mapping(map)
 }
 
+fn mihomo_provider_url_test_group(
+    name: &str,
+    hidden: bool,
+    provider_values: &[serde_yaml::Value],
+    access_point_names: &[String],
+) -> serde_yaml::Value {
+    let mut map = serde_yaml::Mapping::new();
+    map.insert(
+        serde_yaml::Value::String("name".to_string()),
+        serde_yaml::Value::String(name.to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("type".to_string()),
+        serde_yaml::Value::String("url-test".to_string()),
+    );
+    if hidden {
+        map.insert(
+            serde_yaml::Value::String("hidden".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+    }
+    map.insert(
+        serde_yaml::Value::String("url".to_string()),
+        serde_yaml::Value::String(MIHOMO_DEFAULT_HEALTH_CHECK_URL.to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("interval".to_string()),
+        serde_yaml::Value::Number(serde_yaml::Number::from(300)),
+    );
+    map.insert(
+        serde_yaml::Value::String("tolerance".to_string()),
+        serde_yaml::Value::Number(serde_yaml::Number::from(0)),
+    );
+    map.insert(
+        serde_yaml::Value::String("use".to_string()),
+        serde_yaml::Value::Sequence(provider_values.to_vec()),
+    );
+    map.insert(
+        serde_yaml::Value::String("filter".to_string()),
+        serde_yaml::Value::String(exact_proxy_names_filter(access_point_names)),
+    );
+    serde_yaml::Value::Mapping(map)
+}
+
 fn inject_mihomo_default_aggregate_groups(
     groups: &mut Vec<serde_yaml::Value>,
     provider_values: &[serde_yaml::Value],
     landing_groups: &[String],
     high_quality_proxies: Vec<String>,
+    has_access_points: bool,
 ) {
-    const SYSTEM_AGGREGATE_GROUPS: [&str; 5] = [
+    const SYSTEM_AGGREGATE_GROUPS: [&str; 6] = [
         "🔒 高质量",
         "💎 高质量",
+        MIHOMO_AUTOMATIC_LANDING_POOL_GROUP,
         "🤯 All",
         "🚀 节点选择",
         "💎 节点选择",
@@ -2646,24 +2712,27 @@ fn inject_mihomo_default_aggregate_groups(
         remaining.push(group);
     }
 
-    let generated = vec![
+    let mut generated = vec![
         mihomo_high_quality_group(
             existing_high_quality,
             provider_values,
             landing_groups,
             high_quality_proxies,
         ),
-        mihomo_fallback_group(
-            "💎 高质量",
-            true,
-            [
-                "🔒 高质量".to_string(),
-                MIHOMO_LANDING_POOL_GROUP.to_string(),
-                "🤯 All".to_string(),
-            ],
-        ),
-        mihomo_url_test_group("🤯 All", true, default_all_group_names(landing_groups)),
+        mihomo_fallback_group("💎 高质量", true, {
+            let mut proxies = vec!["🔒 高质量".to_string()];
+            if has_access_points {
+                proxies.push(MIHOMO_AUTOMATIC_LANDING_POOL_GROUP.to_string());
+            }
+            proxies.push("🤯 All".to_string());
+            proxies
+        }),
     ];
+    generated.push(mihomo_url_test_group(
+        "🤯 All",
+        true,
+        default_all_group_names(landing_groups),
+    ));
     let insert_at = insert_at.unwrap_or(remaining.len());
     remaining.splice(insert_at..insert_at, generated);
     *groups = remaining;
@@ -2741,6 +2810,7 @@ fn is_mihomo_system_region_cluster_group(
     relay_group_names.contains(name)
         || is_mihomo_legacy_outer_group_reference(name)
         || name == MIHOMO_LANDING_POOL_GROUP
+        || name == MIHOMO_AUTOMATIC_LANDING_POOL_GROUP
         || MIHOMO_REGION_GROUP_NAMES.contains(&name)
         || MIHOMO_LEGACY_REGION_GROUP_NAMES.contains(&name)
 }
@@ -2812,6 +2882,7 @@ fn has_relay_proxy_group_shape(
 ) -> bool {
     proxy_names.iter().any(|name| {
         name == MIHOMO_LANDING_POOL_GROUP
+            || name == MIHOMO_AUTOMATIC_LANDING_POOL_GROUP
             || name.starts_with("🛬 ")
             || (generated_proxy_names.contains(name) && classify_proxy_ref_name(name).is_some())
     })
@@ -3066,17 +3137,20 @@ fn mihomo_provider_system_group_rank(
     if name == MIHOMO_LANDING_POOL_GROUP {
         return Some((6, 0));
     }
-    if name == "🤯 All" {
+    if name == MIHOMO_AUTOMATIC_LANDING_POOL_GROUP {
         return Some((7, 0));
     }
-    if name == "🚀 节点选择" {
+    if name == "🤯 All" {
         return Some((8, 0));
     }
-    if name == "💎 节点选择" {
+    if name == "🚀 节点选择" {
         return Some((9, 0));
     }
-    if relay_group_names.contains(name) {
+    if name == "💎 节点选择" {
         return Some((10, 0));
+    }
+    if relay_group_names.contains(name) {
+        return Some((11, 0));
     }
     if name.strip_prefix("🛬 ").is_some() {
         return Some((5, 0));

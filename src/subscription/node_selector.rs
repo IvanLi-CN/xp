@@ -8,7 +8,7 @@ pub(super) fn inject_mihomo_default(
     let mut proxies = node_selector_proxy_names(landing_groups);
     proxies.extend(direct_reality_names.iter().cloned());
     proxies.push("💎 高质量".to_string());
-    inject_node_selector_groups(groups, proxies);
+    inject_node_selector_groups(groups, proxies, !direct_reality_names.is_empty());
 }
 
 pub(super) fn inject_mihomo_provider(
@@ -36,11 +36,12 @@ pub(super) fn inject_mihomo_provider(
         );
     }
     groups.push(node_selector);
-    groups.push(mihomo_fallback_group(
-        "💎 节点选择",
-        true,
-        ["🚀 节点选择".to_string(), "🤯 All".to_string()],
-    ));
+    let mut fallback_proxies = vec!["🚀 节点选择".to_string()];
+    if !direct_reality_names.is_empty() {
+        fallback_proxies.push("🤯 落地".to_string());
+    }
+    fallback_proxies.push("🤯 All".to_string());
+    groups.push(mihomo_fallback_group("💎 节点选择", true, fallback_proxies));
 }
 
 pub(super) fn provider_reality_access_names(
@@ -63,11 +64,16 @@ fn node_selector_proxy_names(landing_groups: &[String]) -> Vec<String> {
     proxies
 }
 
-fn inject_node_selector_groups(groups: &mut Vec<serde_yaml::Value>, proxies: Vec<String>) {
+fn inject_node_selector_groups(
+    groups: &mut Vec<serde_yaml::Value>,
+    proxies: Vec<String>,
+    has_access_points: bool,
+) {
     groups.push(mihomo_select_group("🚀 节点选择", false, proxies));
-    groups.push(mihomo_fallback_group(
-        "💎 节点选择",
-        true,
-        ["🚀 节点选择".to_string(), "🤯 All".to_string()],
-    ));
+    let mut fallback_proxies = vec!["🚀 节点选择".to_string()];
+    if has_access_points {
+        fallback_proxies.push("🤯 落地".to_string());
+    }
+    fallback_proxies.push("🤯 All".to_string());
+    groups.push(mihomo_fallback_group("💎 节点选择", true, fallback_proxies));
 }

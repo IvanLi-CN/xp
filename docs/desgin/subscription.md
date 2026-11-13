@@ -239,11 +239,11 @@ proxy-groups:
 系统只生成以下分组：
 
 - 地区组：可见的 `🔒 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}` 与隐藏的 `🌟 {Region}`。
-- 落地组：每个节点一个 `🛬 {base}`，以及汇总全部落地组的 `🔒 落地` `url-test` 组。
-- 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择` 与 `🤯 All`。
+- 落地组：每个节点一个 `🛬 {base}`、原有的 `🔒 落地` `url-test` 汇总组，以及隐藏的 `🤯 落地` `url-test` 接入点汇总组。
+- 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择`、`🤯 落地` 与 `🤯 All`。
 - 中转组：按 `Node.access_host` 聚合的隐藏 `🛣️ {relay-base}`。
 
-`🤯 {Region}` 不生成。`🤯 All` 先列实际 `🛬 {base}`，再列七个 `🌟 {Region}`，按稳定顺序去重。`💎 高质量` 的 fallback 顺序固定为 `🔒 高质量`、`🔒 落地`、`🤯 All`。
+`🤯 {Region}` 不生成。`🔒 落地` 继续列实际 `🛬 {base}`；`🤯 落地` 只列当前订阅实际生成的 `*-reality` 接入点，没有接入点时不生成。`🤯 All` 继续先列实际 `🛬 {base}`，再列七个 `🌟 {Region}`，按稳定顺序去重。`💎 高质量` 的 fallback 顺序固定为 `🔒 高质量`、`🤯 落地`、`🤯 All`；`💎 节点选择` 的 fallback 顺序固定为 `🚀 节点选择`、`🤯 落地`、`🤯 All`。
 
 每个存在 Reality access proxy 或链式候选的订阅节点都生成 `🛬 {base}`；如果存在 Reality access proxy，Reality 直连必须排在该落地组首位。`🚀 节点选择` 在落地组后追加 Reality 直连，不追加 `{base}-ss`。
 
@@ -267,14 +267,15 @@ proxy-groups:
 - 同一 `access_host` 下的节点共享 `🛣️ {relay-base}`；不同 `access_host` 使用不同 relay 组。
 - Relay 必须使用其他订阅节点的 `*-reality`，排除目标节点、链式节点和 `DIRECT`。
 - 没有合法 relay 候选时使用 `REJECT` 与 `empty-fallback: REJECT`，不得因为外部 provider 存在而回退直连。
-- `🔒 落地` 使用 `url-test`，成员必须完整覆盖最终生成的所有 `🛬 {base}`。
+- `🔒 落地` 使用原有 `url-test`，成员必须完整覆盖最终生成的所有 `🛬 {base}`。
+- `🤯 落地` 使用隐藏 `url-test`，成员必须完整覆盖最终生成的所有 `*-reality` 接入点；没有接入点时省略该组及其 fallback 引用。
 
 #### 6.4.3 输入与兼容校验
 
 - Mixin 中的 `proxies` 与 `proxy-providers` 不直接作为系统节点来源；系统节点由 `xp-system-generated` 承载。
 - 用户输入命中系统保留 proxy/provider 名称，或最终配置存在未定义引用时，返回 `400 invalid_request`。
 - `GET /api/admin/users/{user_id}/subscription-mihomo-profile` 返回原始存储值；`PUT` 只执行 YAML 结构校验与最终渲染校验。
-- Provider 主配置必须保留 `💎 高质量` 的兜底语义，不得退化为只包含 `🔒 高质量` 的单层入口。
+- Provider 主配置必须保留 `💎 高质量` 与 `💎 节点选择` 的兜底语义，不得退化为只包含人工选择组的单层入口。
 
 ### 6.5 脱敏 Provider 示例
 
