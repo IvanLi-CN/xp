@@ -185,11 +185,16 @@ async fn read_tls_client_hello(inbound: &mut TcpStream) -> Result<(Vec<u8>, Vec<
             anyhow::bail!("truncated TLS ClientHello");
         }
         bytes.extend_from_slice(&chunk[..read]);
-        if let Ok(info) = parse_client_hello(&bytes) {
-            let consumed = info.record.len();
-            return Ok((bytes[..consumed].to_vec(), bytes[consumed..].to_vec()));
+        if let Some(split) = split_tls_client_hello(&bytes) {
+            return Ok(split);
         }
     }
+}
+
+fn split_tls_client_hello(bytes: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+    let info = parse_client_hello(bytes).ok()?;
+    let consumed = info.record.len();
+    Some((bytes[..consumed].to_vec(), bytes[consumed..].to_vec()))
 }
 
 async fn handle_vless(
@@ -294,5 +299,32 @@ async fn handle_control(
             metrics: Some(traffic.snapshot()),
         };
         stream.write_all(&encode_frame(&response)?).await?;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use x25519_dalek::{PublicKey, StaticSecret};
+    use xp_proxy_core::reality::{RealityClientHelloConfig, build_client_hello};
+
+    #[test]
+    fn split_client_hello_preserves_buffered_tail() {
+        let server_private = [9u8; 32];
+        let config = RealityClientHelloConfig {
+            server_name: "origin.example".into(),
+            server_public_key: PublicKey::from(&StaticSecret::from(server_private)).to_bytes(),
+            short_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            unix_seconds: 1_700_000_000,
+            version: *b"1.8\0",
+            alpn: vec!["h2".into()],
+        };
+        let (hello, _) = build_client_hello(&config, [7u8; 32], [3u8; 32], [4u8; 16]).unwrap();
+        let tail = b"buffered application bytes";
+        let mut input = hello.clone();
+        input.extend_from_slice(tail);
+        let (parsed, buffered) = split_tls_client_hello(&input).unwrap();
+        assert_eq!(parsed, hello);
+        assert_eq!(buffered, tail);
     }
 }

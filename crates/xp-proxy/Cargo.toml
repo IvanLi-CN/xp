@@ -24,4 +24,5 @@ uuid = "1"
 xp-proxy-core = { path = "../xp-proxy-core" }
 
 [dev-dependencies]
+x25519-dalek = { version = "2", features = ["static_secrets"] }
 h2 = "0.4"
