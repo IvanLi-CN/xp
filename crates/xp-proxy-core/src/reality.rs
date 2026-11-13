@@ -158,6 +158,7 @@ fn client_hello_extensions(
     extensions.extend_from_slice(&sni);
     extensions.extend_from_slice(&[0, 0x2b, 0, 3, 2, 3, 4]);
     extensions.extend_from_slice(&[0, 0x0a, 0, 4, 0, 2, 0, 0x1d]);
+    extensions.extend_from_slice(&[0, 0x0d, 0, 8, 0, 6, 0x04, 0x03, 0x08, 0x07, 0x04, 0x01]);
     extensions.extend_from_slice(&[0, 0x33, 0, 38, 0, 36, 0, 0x1d, 0, 32]);
     extensions.extend_from_slice(public_key);
     extensions.extend_from_slice(&[0, 0x2d, 0, 2, 1, 1]);

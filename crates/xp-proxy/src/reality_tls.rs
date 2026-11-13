@@ -13,6 +13,7 @@ use xp_proxy_core::reality::AuthenticatedClientHello;
 
 type HmacSha512 = Hmac<Sha512>;
 
+#[derive(Debug)]
 pub struct PrefixedTcpStream {
     prefix: Vec<u8>,
     offset: usize,
@@ -194,6 +195,14 @@ fn der_value_range(input: &[u8], start: usize) -> Result<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncReadExt;
+    use tokio::net::TcpListener;
+    use tokio::time::{Duration, timeout};
+    use x25519_dalek::{PublicKey, StaticSecret};
+    use xp_proxy_core::reality::{
+        RealityClientHelloConfig, authenticate_client_hello_with_policy, build_client_hello,
+    };
+    use xp_proxy_core::tls_hello::parse_client_hello;
 
     #[test]
     fn reality_certificate_signature_is_replaced_with_authenticator() {
@@ -206,5 +215,52 @@ mod tests {
         assert_ne!(patched, original);
         let (_, parsed) = x509_parser::parse_x509_certificate(&patched).unwrap();
         assert_eq!(parsed.signature_value.data.len(), 64);
+    }
+
+    #[tokio::test]
+    async fn authenticated_reality_acceptor_emits_tls_server_flight() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server_private = [9u8; 32];
+        let client_private = [7u8; 32];
+        let server_public = PublicKey::from(&StaticSecret::from(server_private));
+        let (hello, _) = build_client_hello(
+            &RealityClientHelloConfig {
+                server_name: "example.test".into(),
+                server_public_key: server_public.to_bytes(),
+                short_id: vec![0xaa; 8],
+                unix_seconds: 1_700_000_000,
+                version: *b"1.8\0",
+                alpn: vec!["h2".into()],
+            },
+            client_private,
+            [3; 32],
+            [4; 16],
+        )
+        .unwrap();
+        let parsed = parse_client_hello(&hello).unwrap();
+        let authenticated = authenticate_client_hello_with_policy(
+            &parsed,
+            server_private,
+            &[[0xaa; 8]],
+            &["example.test".into()],
+            None,
+            0,
+        )
+        .unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            accept(hello, Vec::new(), stream, &authenticated, "example.test").await
+        });
+        let mut client = TcpStream::connect(address).await.unwrap();
+        let mut header = [0u8; 5];
+        let read_result = timeout(Duration::from_secs(2), client.read_exact(&mut header)).await;
+        drop(client);
+        let _server_result = timeout(Duration::from_secs(2), server)
+            .await
+            .expect("REALITY TLS accept did not terminate")
+            .unwrap();
+        assert!(read_result.is_ok(), "server did not emit a TLS flight");
+        assert_eq!(header[0], 22);
     }
 }
