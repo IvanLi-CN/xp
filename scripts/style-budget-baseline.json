@@ -1,6 +1,6 @@
 {
   "GLOSSARY.md": {
-    "long_line_count": 8,
+    "long_line_count": 4,
     "max_line_length": 146
   },
   ".github/workflows/notify-release-failure.yml": {
@@ -125,7 +125,7 @@
   },
   "docs/specs/mihomo-provider-dual-track/contracts/final-mihomo-config.md": {
     "long_line_count": 9,
-    "max_line_length": 162
+    "max_line_length": 204
   },
   "docs/specs/mihomo-provider-dual-track/contracts/http-apis.md": {
     "long_line_count": 16,
@@ -276,7 +276,7 @@
     "max_line_length": 122
   },
   "docs/specs/mihomo-subscription-template/contracts/http-apis.md": {
-    "long_line_count": 2,
+    "long_line_count": 3,
     "max_line_length": 310
   },
   "docs/specs/quota-policy-node-ratio-editor/SPEC.md": {
@@ -353,7 +353,7 @@
   "src/http/tests.rs": {
     "long_line_count": 3,
     "max_line_length": 142,
-    "source_lines": 9968
+    "source_lines": 10015
   },
   "src/inbound_ip_usage.rs": {
     "long_line_count": 1,
@@ -503,14 +503,14 @@
     "source_lines": 2472
   },
   "src/subscription.rs": {
-    "long_line_count": 5,
-    "max_line_length": 133,
-    "source_lines": 5393
+    "long_line_count": 4,
+    "max_line_length": 124,
+    "source_lines": 5486
   },
   "src/subscription/tests.rs": {
-    "long_line_count": 45,
-    "max_line_length": 150,
-    "source_lines": 5350
+    "long_line_count": 1,
+    "max_line_length": 105,
+    "source_lines": 5263
   },
   "src/vless_https_canary.rs": {
     "long_line_count": 5,
@@ -977,6 +977,10 @@
   },
   "web/src/api/releaseInventories.ts": {
     "source_lines": 1126
+  },
+  "docs/adr/0001-mihomo-landing-and-relay-group-contract.md": {
+    "long_line_count": 10,
+    "max_line_length": 470
   },
   "docs/adr/0031-native-vless-xhttp-data-plane.md": {
     "long_line_count": 1,

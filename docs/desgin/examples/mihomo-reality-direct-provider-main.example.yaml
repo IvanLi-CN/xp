@@ -52,7 +52,7 @@ proxy-groups:
     tolerance: 0
     proxies:
       - 🔒 高质量
-      - 🔒 落地
+      - 🤯 落地
       - 🤯 All
 
   # Visible regional leaves only consume direct Reality candidates.
@@ -195,6 +195,14 @@ proxy-groups:
   - name: 🔒 落地
     type: url-test
     proxies: [🛬 hinet, 🛬 hk2, 🛬 sg]
+  - name: 🤯 落地
+    type: url-test
+    hidden: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 0
+    use: [xp-system-generated]
+    filter: '^(?:hinet\-reality|hk2\-reality|sg\-reality)$'
   - name: 🤯 All
     type: url-test
     hidden: true
@@ -234,7 +242,7 @@ proxy-groups:
     url: https://www.gstatic.com/generate_204
     interval: 300
     tolerance: 0
-    proxies: [🚀 节点选择, 🤯 All]
+    proxies: [🚀 节点选择, 🤯 落地, 🤯 All]
 
   # Relay groups are hidden and live at the end of the system-managed sequence.
   - name: 🛣️ hinet-example-invalid
