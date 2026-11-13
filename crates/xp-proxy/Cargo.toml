@@ -22,3 +22,6 @@ tokio = { version = "1", features = [
 tokio-stream = "0.1"
 uuid = "1"
 xp-proxy-core = { path = "../xp-proxy-core" }
+
+[dev-dependencies]
+h2 = "0.4"

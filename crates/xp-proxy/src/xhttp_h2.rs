@@ -126,10 +126,7 @@ async fn relay_body(
         write_out.shutdown().await?;
         Ok::<(), anyhow::Error>(())
     };
-    let _ = tokio::select! {
-        result = downlink => result,
-        result = uplink => result,
-    };
+    let _ = tokio::join!(downlink, uplink);
 }
 
 fn simple_response(status: StatusCode, message: &str) -> Response<ResponseBody> {
@@ -138,4 +135,66 @@ fn simple_response(status: StatusCode, message: &str) -> Response<ResponseBody> 
         .header("content-type", "text/plain; charset=utf-8")
         .body(http_body_util::Full::new(Bytes::copy_from_slice(message.as_bytes())).boxed())
         .expect("static response is valid")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+    use xp_proxy_core::vless::encode_tcp_request;
+
+    #[tokio::test]
+    async fn h2_body_reaches_tcp_destination_and_returns_response_body() {
+        let echo_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let echo_addr = echo_listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = echo_listener.accept().await.unwrap();
+            let mut buffer = [0u8; 4096];
+            loop {
+                let read = stream.read(&mut buffer).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                stream.write_all(&buffer[..read]).await.unwrap();
+            }
+        });
+
+        let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = proxy_listener.local_addr().unwrap();
+        let user = uuid::Uuid::new_v4();
+        let users = vec![UserSnapshot {
+            uuid: user.to_string(),
+        }];
+        tokio::spawn(async move {
+            let (stream, _) = proxy_listener.accept().await.unwrap();
+            serve(stream, users, "/xp-xhttp".into()).await.unwrap();
+        });
+
+        let client = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut sender, connection) = h2::client::handshake(client).await.unwrap();
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri("http://xhttp.test/xp-xhttp")
+            .body(())
+            .unwrap();
+        let (response, mut body) = sender.send_request(request, false).unwrap();
+        let header =
+            encode_tcp_request(user, (&echo_addr.ip().to_string(), echo_addr.port()), &[]).unwrap();
+        let payload = b"h2-xhttp-payload";
+        let mut request_body = header;
+        request_body.extend_from_slice(payload);
+        body.send_data(Bytes::from(request_body), true).unwrap();
+
+        let mut response = response.await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut received = Vec::new();
+        while let Some(chunk) = response.body_mut().data().await {
+            received.extend_from_slice(&chunk.unwrap());
+        }
+        assert_eq!(&received[..2], &[1, 0]);
+        assert_eq!(&received[2..], payload);
+    }
 }
