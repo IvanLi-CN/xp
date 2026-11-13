@@ -41,7 +41,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \
   --mount=type=cache,target=/app/target \
   mkdir -p /out \
-  && cargo build --release --locked --bin xp --bin xp-ops --bin xp-proxy \
+  && cargo build --workspace --release --locked --bins \
   && cp /app/target/release/xp /out/xp \
   && cp /app/target/release/xp-ops /out/xp-ops \
   && cp /app/target/release/xp-proxy /out/xp-proxy
@@ -53,7 +53,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \
   --mount=type=cache,target=/app/target \
   mkdir -p /out \
-  && cargo build --locked --bin xp --bin xp-ops --bin xp-proxy \
+  && cargo build --workspace --locked --bins \
   && cp /app/target/debug/xp /out/xp \
   && cp /app/target/debug/xp-ops /out/xp-ops \
   && cp /app/target/debug/xp-proxy /out/xp-proxy
