@@ -5129,6 +5129,7 @@ dependencies = [
  "atomic",
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 
@@ -5869,6 +5870,29 @@ dependencies = [
  "yaml-edit",
  "zip",
  "zstd",
+]
+
+[[package]]
+name = "xp-proxy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde_json",
+ "tokio",
+ "xp-proxy-core",
+]
+
+[[package]]
+name = "xp-proxy-core"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

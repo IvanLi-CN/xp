@@ -3,6 +3,10 @@ name = "xp"
 version = "0.2.0"
 edition = "2024"
 
+[workspace]
+members = [".", "crates/xp-proxy-core", "crates/xp-proxy"]
+resolver = "2"
+
 [features]
 resource-fixture = []
 

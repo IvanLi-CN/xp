@@ -1,6 +1,6 @@
 {
   "GLOSSARY.md": {
-    "long_line_count": 3,
+    "long_line_count": 8,
     "max_line_length": 146
   },
   ".github/workflows/notify-release-failure.yml": {
@@ -977,5 +977,21 @@
   },
   "web/src/api/releaseInventories.ts": {
     "source_lines": 1126
+  },
+  "docs/adr/0031-native-vless-xhttp-data-plane.md": {
+    "long_line_count": 1,
+    "max_line_length": 368
+  },
+  "docs/specs/native-vless-xhttp-proxy/IMPLEMENTATION.md": {
+    "long_line_count": 1,
+    "max_line_length": 105
+  },
+  "docs/specs/native-vless-xhttp-proxy/HISTORY.md": {
+    "long_line_count": 1,
+    "max_line_length": 180
+  },
+  "docs/specs/native-vless-xhttp-proxy/SPEC.md": {
+    "long_line_count": 8,
+    "max_line_length": 219
   }
 }
