@@ -74,6 +74,7 @@ pub struct FallbackSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RealitySnapshot {
+    pub dest: String,
     pub server_names: Vec<String>,
     pub short_ids: Vec<String>,
     pub private_key: String,
@@ -100,6 +101,16 @@ impl RealitySnapshot {
                     .map_err(|_| format!("REALITY short_id must be 8 bytes: {short_id}"))
             })
             .collect()
+    }
+
+    pub fn validate_dest(&self) -> Result<(), String> {
+        crate::transport::RealityConfig {
+            server_names: self.server_names.clone(),
+            short_ids: self.short_ids.clone(),
+            private_key: self.private_key_bytes()?,
+            dest: self.dest.clone(),
+        }
+        .validate()
     }
 }
 
@@ -288,6 +299,7 @@ impl ProxySnapshot {
             }
             listener.reality.private_key_bytes()?;
             listener.reality.short_id_bytes()?;
+            listener.reality.validate_dest()?;
             for fallback in &listener.fallbacks {
                 let target = crate::fallback::FallbackTarget::parse(&fallback.target)?;
                 let authorities = fallback
@@ -334,6 +346,7 @@ mod tests {
                 bind: "127.0.0.1:443".into(),
                 path: "/xp-xhttp".into(),
                 reality: RealitySnapshot {
+                    dest: "127.0.0.1:443".into(),
                     server_names: vec!["example.test".into()],
                     short_ids: vec!["0123456789abcdef".into()],
                     private_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),

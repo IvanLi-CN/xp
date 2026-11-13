@@ -152,6 +152,7 @@ pub fn build_snapshot(
             bind: format!("0.0.0.0:{}", endpoint.port),
             path: crate::protocol::VLESS_XHTTP_PATH.to_string(),
             reality: RealitySnapshot {
+                dest: meta.reality.dest,
                 server_names: meta.reality.server_names,
                 short_ids: meta.short_ids,
                 private_key: meta.reality_keys.private_key,
@@ -322,6 +323,7 @@ mod tests {
                 "bind": "127.0.0.1:0",
                 "path": "/xp-xhttp",
                 "reality": {
+                    "dest": "127.0.0.1:443",
                     "server_names": ["example.com"],
                     "short_ids": ["0000000000000000"],
                     "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
