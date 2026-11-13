@@ -322,15 +322,10 @@ mod tests {
             "listeners": [{
                 "bind": "127.0.0.1:0",
                 "path": "/xp-xhttp",
-                "reality": {
-                    "dest": "127.0.0.1:443",
-                    "server_names": ["example.com"],
-                    "short_ids": ["0000000000000000"],
-                    "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-                },
+                "reality": xp_test_fixtures::endpoint_reality(),
                 "fallbacks": []
             }],
-            "users": [{"uuid": "00000000-0000-4000-8000-000000000000"}]
+            "users": [{"uuid": xp_test_fixtures::primary_user_id()}]
         }))
         .unwrap();
         publish_snapshot(&socket, snapshot).await.unwrap();
@@ -340,26 +335,19 @@ mod tests {
     #[test]
     fn builds_xhttp_snapshot_from_local_endpoint_membership() {
         let endpoint = Endpoint {
-            endpoint_id: "endpoint-1".into(),
-            node_id: "node-1".into(),
-            tag: "vless-xhttp".into(),
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().into(),
+            node_id: xp_test_fixtures::primary_node_id().into(),
+            tag: xp_test_fixtures::primary_endpoint_tag().into(),
             kind: EndpointKind::VlessRealityVisionTcp,
             port: 443,
             meta: serde_json::json!({
-                "reality": {
-                    "dest": "origin.example:443",
-                    "server_names": ["origin.example"],
-                    "fingerprint": "chrome"
-                },
-                "reality_keys": {
-                    "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-                    "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-                },
-                "short_ids": ["0000000000000000"],
-                "active_short_id": "0000000000000000",
+                "reality": xp_test_fixtures::endpoint_reality(),
+                "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+                "short_ids": xp_test_fixtures::endpoint_short_ids(),
+                "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
                 "transport": "xhttp",
-                "canary_upstream": {"url": "https://canary.example/"},
-                "accepted_authorities": ["canary.example"]
+                "canary_upstream": {"url": xp_test_fixtures::canary_http_loopback_url()},
+                "accepted_authorities": [xp_test_fixtures::endpoint_authority_alias()]
                 ,"mihomo_xmux": {
                     "max_connections": "2-4",
                     "max_concurrency": "0",
@@ -370,18 +358,18 @@ mod tests {
             }),
         };
         let user = User {
-            user_id: "user-1".into(),
+            user_id: xp_test_fixtures::primary_user_id().into(),
             display_name: "User".into(),
-            subscription_token: "token".into(),
+            subscription_token: xp_test_fixtures::token_fixture512().into(),
             credential_epoch: 3,
             priority_tier: Default::default(),
             quota_reset: Default::default(),
         };
         let users = BTreeMap::from([(user.user_id.clone(), user)]);
         let memberships = vec![NodeUserEndpointMembership {
-            user_id: "user-1".into(),
-            node_id: "node-1".into(),
-            endpoint_id: "endpoint-1".into(),
+            user_id: xp_test_fixtures::primary_user_id().into(),
+            node_id: xp_test_fixtures::primary_node_id().into(),
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().into(),
         }];
         let snapshot =
             build_snapshot("node-1", &[endpoint], &users, &memberships, "cluster-key").unwrap();
