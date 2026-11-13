@@ -7,7 +7,7 @@ This document defines the owner-facing Mihomo topology that `xp` must render aft
 For every managed region in `{Japan, HongKong, Taiwan, Korea, Singapore, US, Other}`, the generated region groups must obey the same one-way graph:
 
 ```text
-🤯 {Region}  --hidden url-test-->  🌟 {Region}  --hidden fallback-->  🔒 {Region}  --visible select-->  leaf proxies
+🌟 {Region}  --hidden fallback-->  🔒 {Region}  --visible select-->  leaf proxies
 ```
 
 Required constraints:
@@ -21,9 +21,7 @@ Required constraints:
 - `🌟 {Region}` is a hidden wrapper group.
 - `🌟 {Region}` must be `type: fallback`.
 - `🌟 {Region}` must contain exactly one proxy reference: `🔒 {Region}`.
-- `🤯 {Region}` is a hidden probe group.
-- `🤯 {Region}` must be `type: url-test`.
-- `🤯 {Region}` must contain exactly one proxy reference: `🌟 {Region}`.
+- No region-level `🤯 {Region}` group is generated.
 - `🔒 {Region}` may only be referenced by its corresponding `🌟 {Region}` system wrapper.
 
 ## High Quality And Node Selector
@@ -40,11 +38,11 @@ The generated system aggregate groups must obey these contracts:
 - `🔒 高质量` must not be hidden.
 - `💎 高质量` is hidden.
 - `💎 高质量` must be `type: fallback`.
-- `💎 高质量` must contain exactly `["🔒 高质量", "🤯 All"]` in that order.
+- `💎 高质量` must contain exactly `["🔒 高质量", "🔒 落地", "🤯 All"]` in that order.
 - `🤯 All` is hidden.
 - `🤯 All` must be `type: url-test`.
 - `🤯 All` must reference each generated `🛬 {base}` first in deterministic base order, followed
-  by hidden per-region probe groups `🤯 {Region}` in canonical region order.
+  by hidden region wrapper groups `🌟 {Region}` in canonical region order.
 - `🚀 节点选择` is the visible owner-facing node selector.
 - `🚀 节点选择` must be `type: select`.
 - `🚀 节点选择` must contain hidden region wrapper groups `🌟 {Region}`.
@@ -55,8 +53,8 @@ The generated system aggregate groups must obey these contracts:
   `use: [xp-system-generated]` and an exact Reality-only filter.
 - `🚀 节点选择` must contain every direct Reality candidate when present. It must not add
   `{base}-ss` as a direct candidate.
-- A base with no chain proxy must not produce `🛬 {base}`. Its Reality direct candidate remains a
-  node-selector candidate.
+- A base with a Reality direct proxy produces `🛬 {base}` even when no chain proxy exists. Reality
+  remains the first candidate in that landing group.
 - `🚀 节点选择` must retain `💎 高质量` after system landing and direct Reality
   candidates.
 - `💎 节点选择` is hidden.
@@ -74,7 +72,6 @@ Required constraints:
   `-> 💎 高质量`
   `-> all visible region groups in canonical region order`
   `-> all hidden fallback region groups in canonical region order`
-  `-> all hidden probe region groups in canonical region order`
 - `-> all landing groups \`🛬 {base}\` in deterministic base order`
 - `-> 🔒 落地`
 - `-> 🤯 All`
@@ -112,6 +109,8 @@ Required constraints:
 
 - Legacy `🌟 {Region}` references from helper sections or user groups must normalize to canonical `🌟 {Region}`.
 - Legacy `🤯 {Region}` references from helper sections or user groups must normalize to canonical `🌟 {Region}`.
+- Exact user proxy-group entries `🌟 <region>` and `🛬 <node>` expand during final rendering.
+  They resolve to available hidden region groups and generated landing groups; the stored mixin remains unchanged.
 - No generated system group named `🌟 节点选择` may appear.
 - `💎 节点选择` must remain the only hidden fallback wrapper for node selection.
 - User groups such as `🐟 漏网之鱼` and `🤖 AI` may reference `💎 节点选择`, but must not be rewritten to `🚀 节点选择` unless the user explicitly authored that visible selector.

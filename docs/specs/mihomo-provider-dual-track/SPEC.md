@@ -60,7 +60,7 @@
 ### MUST
 
 - **REQ-MIHOMO-PROVIDER-001**: `🤯 All` 必须先列出所有实际生成的 `🛬 {base}`，再按既有顺序列出
-  canonical `🤯 {Region}` 组；候选名称必须稳定去重。
+  隐藏 `🌟 {Region}` 组；候选名称必须稳定去重，且不得生成 `🤯 {Region}`。
 - **REQ-MIHOMO-PROVIDER-002**: 每个系统 `🛣️ {relay-base}` 必须只使用其他已订阅节点实际生成的
   `*-reality` 代理作为系统候选；排除组内目标节点、`*-chain`、SS、`DIRECT` 与未生成代理，
   无合格候选时必须使用 `[REJECT]` 与 `empty-fallback: REJECT`，外部 provider 不得绕过该闭锁。
@@ -74,21 +74,21 @@
   - 顶层 `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
   - 顶层 `proxies` = `extra_proxies_yaml`，不枚举系统生成节点
   - `xp-system-generated` payload = 系统 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`
-  - per-base relay 组 `🛣️ {relay-base}`、hidden source 组 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、owner-facing `🔒 {Region}`、hidden `🤯 {Region}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
+  - per-base relay 组 `🛣️ {relay-base}`、hidden source 组 `🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、owner-facing `🔒 {Region}`、`💎 高质量`、`🚀 节点选择`、`🤯 All`、`🛬 {base}`、`🔒 落地` 保持可用
 - provider 方案必须按 `Node.access_host` 聚合生成 per-base relay 组；同一 `access_host` 下的多个落地节点共享同一个 `🛣️ {relay-base}`，不同 `access_host` 不得合并到同一个 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名；不得直接占用 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other` 等历史地区 alias 名称，命中保留名时必须加内部前缀做消歧。
-- provider 方案下 `🛬 {base}` 仅在存在至少一个链式候选时生成，并通过
+- provider 方案下 `🛬 {base}` 在存在 `{base}-reality` 或至少一个链式候选时生成，并通过
   `use: [xp-system-generated]` 与精确 filter 消费 `{base}-reality`、`{base}-ss-chain` /
   `{base}-reality-chain`；候选顺序固定为 reality 直连、ss-chain、reality-chain。
 - `🚀 节点选择` 在全部 `🛬 {base}` 后通过同一 system provider 的精确 Reality filter，按稳定
   base 顺序直接列出 `{base}-reality`，而不暴露 `{base}-ss`。
 - provider 方案下 `🔒 高质量` 与 `🔒 {Region}` 必须能通过 `xp-system-generated` 动态消费 `{base}-reality` 直连接入点；`{base}-ss` 仍只作为 provider payload 原料，不作为本次接入点目标。
-- `🤯 All` 必须含当前输出的 `🛬 {base}`，并先于所有 `🤯 {Region}`。
+- `🤯 All` 必须含当前输出的 `🛬 {base}`，并先于所有隐藏 `🌟 {Region}`。
   Landing Group 按稳定 base 顺序去重，随后保持既有 canonical region order。
 - `💎 高质量` 作为 owner-facing 高质量入口必须保留兜底层：无论用户 mixin 是否显式声明，它都必须至少包含 `🔒 高质量`，并且在最终输出中还必须提供一个非地区直连接入面的兜底聚合入口；当前命名族中该兜底入口为 `🤯 All`。若未来重命名或替换聚合组，仍必须保留“高质量入口之上存在全局兜底层”的语义，不能让 `💎 高质量` 退化成仅剩单一路径且无兜底的壳组。
 - 最终 Mihomo 配置图的强约束由 [contracts/final-mihomo-config.md](./contracts/final-mihomo-config.md) 定义：
   - `🔒 {Region}` 是 visible `select` 叶子组，只承载直连 reality 候选
   - `🌟 {Region}` 是 hidden `fallback`，且只能包装 `🔒 {Region}`
-  - `🤯 {Region}` 是 hidden `url-test`，且只能包装 `🌟 {Region}`
+  - 不生成地区级 `🤯 {Region}`；`🤯 All` 直接引用隐藏 `🌟 {Region}`
   - `🔒 高质量` 是 visible `select`
   - `💎 高质量` 是 hidden `fallback`
   - `🤯 All` 是 hidden `url-test`
@@ -193,7 +193,7 @@
   引用 `{base}-reality`，provider 路径通过 `use: [xp-system-generated]` 与精确 filter 直接暴露
   `{base}-reality`。
 - Given 某个 base 只有 `{base}-reality`、不存在任何链式节点，When 渲染 Mihomo 配置，Then
-  `🚀 节点选择` 保留该 Reality 直连候选，但不生成 `🛬 {base}`。
+  `🚀 节点选择` 保留该 Reality 直连候选，并生成 `🛬 {base}`。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🔒 高质量`，Then 该组能动态包含 `{base}-reality` 接入点，且不会把 `{base}-ss` 作为系统直连接入候选。
 - Given provider 方案同时存在 `base-reality` 与 `base-ss`，When 检查 `🔒 {Region}`，Then 对应地区组能动态包含 `{base}-reality` 接入点。
 - Given 用户订阅 A、B，When 检查 A 的 `🛣️`，Then 含 B 的 `*-reality`，不含 A、
@@ -202,7 +202,7 @@
 - Given 节点 C 没有用户 membership，When 渲染输出，Then C 不生成于系统 provider，
   也不能成为任何 `🛣️` 的中转候选。
 - Given `🤯 All` 有 Landing Group，When 检查顺序，Then `🛬 {base}` 先于七个
-  canonical `🤯 {Region}` 组。
+  隐藏 `🌟 {Region}` 组。
 - Given 两节点共享 host，When 请求 provider，Then relay 只生成一个且两条 chain
   指向它；共用 host 属于部署缺陷，不新增兼容语义。
 - Given 两个落地节点使用不同 `Node.access_host`，When 请求 provider 主配置与 system payload，Then 生成不同 per-base relay 组，且链式节点不会合并到共享 `🛣️ JP/HK/SG`。
@@ -227,7 +227,6 @@
   `-> 💎 高质量`
   `-> 🔒 {Japan..Other}`
   `-> 🌟 {Japan..Other}`
-  `-> 🤯 {Japan..Other}`
   `-> 🛬 {base}`
   `-> 🔒 落地`
   `-> 🤯 All`
@@ -238,7 +237,7 @@
 - Given 新增节点完成主动探测并被归类到 `Taiwan`，When 请求 provider 主配置，Then `🌟 Taiwan`、
   `💎 高质量` 与 `🚀 节点选择` 会自动包含对应 `🛬 {base}` 和 Reality 直连入口，无需更新用户模板。
 - Given provider 主配置，When 检查 `💎 高质量` 相关聚合语义，Then 最终输出必须保留“高质量入口 + 全局兜底入口”两层结构；若 `💎 高质量` 本身不直接引用 `🤯 All`，则必须存在另一个 owner-facing 包装组稳定同时暴露 `💎 高质量` 与 `🤯 All`，不能让最终可见入口缺失全局兜底。
-- Given 任一最终 Mihomo 配置，When 检查地区组三元关系，Then 必须满足 `🤯 {Region} -> 🌟 {Region} -> 🔒 {Region} -> leaf proxies`，且 `🔒` 只能被 `🌟` 作为单跳包装引用。
+- Given 任一最终 Mihomo 配置，When 检查地区组关系，Then 必须满足 `🌟 {Region} -> 🔒 {Region} -> leaf proxies`，且不得存在地区级 `🤯 {Region}`。
 - Given 托管 VLESS endpoint 已启用，When 请求 `https://<access_host[:port]>/generate_204`，Then 现有 VLESS/REALITY 接入点会把未认证 HTTPS 流量转到 xp 进程内 loopback TLS canary 并返回 `204`，且不新增公网 probe listener。
 - Given 托管 VLESS endpoint 被创建或 reconcile，When 检查 Xray inbound Reality 配置，Then `dest` 必须等于 `XP_VLESS_CANARY_BIND`，`server_names` 必须等于 `[node.access_host]`，且 SNI 不包含端口。
 - Given Admin UI/API 新建托管 VLESS endpoint，When 请求只提供 `node_id`、`port` 与可选的 `canary_upstream` / `accepted_authorities`，Then 后端必须按节点 `access_host` 自动派生 `reality.dest=XP_VLESS_CANARY_BIND`、`server_names=[node.access_host]`、`managed_default=true`，且不能要求调用方自行提交托管 Reality 字段。

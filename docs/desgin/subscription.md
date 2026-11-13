@@ -184,66 +184,97 @@ MVP 建议输出“可直接导入”的最小 YAML：
 
 ### 6.3 Provider 方案
 
-- provider 方案中，系统直连节点（`{base}-ss` / `{base}-reality`）与链式节点（`{base}-ss-chain` / `{base}-reality-chain`）都由 `GET /api/sub/{subscription_token}/mihomo/provider/system` 返回的 `proxies:` payload 动态承载。
-- provider 主配置顶层：
-  - `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`
-  - `proxies` = `extra_proxies_yaml`
-- `🔒 高质量` 与地区组继续通过 `use:` 消费 provider；`🔒 高质量` / `🔒 {Region}` 必须能动态包含系统 `{base}-reality` 接入点，`{base}-ss` 不作为接入点目标。
-- per-base relay 组按 `Node.access_host` 聚合生成，命名为 `🛣️ {relay-base}`；同一 `access_host` 下的多个落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 的 host slug 会保留 `.` 与 `-` 等分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 随当前订阅集合发生计数式重命名；若等于历史地区 alias 基名，会加内部前缀消歧，避免重新输出 `🛣️ {Region}`。
-- relay 必含其他订阅节点 `*-reality`，排除目标、`*-chain`、`DIRECT`。
-  provider 可追加但不能独占；无候选用 `[REJECT]` 与 `empty-fallback: REJECT`，
-  不得因 provider 存在而回落直连。健康检查 URL 选择顺序为：
-  - 同一 `access_host` 下存在托管 VLESS endpoint 时，选择最小 VLESS 端口，并使用 `https://<access_host[:port]>/generate_204`
-  - 否则当同组只有一个公开 `api_base_url` 时，使用 `<api_base_url>/api/health`
-  - 否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204`
-- 系统托管的地区面固定为：visible leaf `🔒 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`、hidden `fallback` 包装 `🌟 {Region}`、hidden `url-test` 包装 `🤯 {Region}`；同时生成 `🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择` 与 `🤯 All`。
-- `🤯 All` 先列实际 `🛬 {base}`，再列七个 `🤯 {Region}`，按稳定顺序去重。
-- `💎 高质量` 必须保留 owner-facing 兜底层语义，不能退化成只剩 `🔒 高质量` 的单层入口；若 `💎 高质量` 本身不直接挂 `🤯 All`，则最终输出必须另有一个稳定包装入口同时暴露 `💎 高质量` 与 `🤯 All`。
-- 地区归类以节点主动探测出口公网 IP 后得到的 `subscription_region` 为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后回退到 legacy slug fallback / `Other`。
-- `🛬 {base}` 仅在存在至少一个链式候选时生成。它通过 `use: [xp-system-generated]`
-  与精确 `filter` 消费 `{base}-reality`、`{base}-ss-chain` / `{base}-reality-chain`，并依赖
-  system provider payload 的稳定排序让 Mihomo 运行时按 reality、ss-chain、reality-chain 顺序展示。
-- `🚀 节点选择` 在全部 `🛬 {base}` 后追加 Reality 直连候选，不追加 `{base}-ss`：非 provider
-  输出直接追加 `{base}-reality`，provider 主配置通过 system provider 的精确 filter 直接追加
-  `{base}-reality`。
-- provider URL 必须由请求对外 origin 构造（优先 `Forwarded` / `X-Forwarded-*` / `Host`，必要时回退 `api_base_url`）。
-- provider 方案的原始系统直连节点保留在 provider payload；主配置不承诺手写 `{base}-ss` / `{base}-reality` 业务引用继续稳定，但 `🚀 节点选择` 会通过 system provider 的精确 filter 稳定提供 `{base}-reality` 的可见直连入口。
+Provider 方案将系统生成的代理放入 `xp-system-generated`，主配置只保留用户扩展与动态分组。系统节点通过 `/api/sub/{subscription_token}/mihomo/provider/system` 提供，主配置通过 `proxy-providers` 引用。
 
-### 6.4 Provider 渲染规则
+#### 6.3.1 用户模板插值
 
-- 渲染时忽略 mixin 中的 `proxies` 与 `proxy-providers`，由系统重建：
-  - 系统节点：
-    - reality direct：`<node_slug>-reality`
-    - ss direct：`<node_slug>-ss`
-    - ss chain：`<node_slug>-ss-chain`，并设置 `dialer-proxy` 到该节点 `access_host` 对应的 per-base relay 组 `🛣️ {relay-base}`
-    - reality chain：`<node_slug>-reality-chain`，并设置 `dialer-proxy` 到该节点 `access_host` 对应的 per-base relay 组 `🛣️ {relay-base}`
-  - 用户扩展：
-    - 追加 `extra_proxies_yaml` 到主配置顶层 `proxies`
-    - 以 `extra_proxy_providers_yaml` 追加到最终 `proxy-providers`
-- 用户输入若命中系统保留 proxy / provider 名称，或最终配置中存在未定义引用，保存阶段直接返回 `400 invalid_request`；服务端不做自动重命名。
-- 外部 provider 可追加到 per-base relay 的 `use`，但不能成为唯一中转来源。
-- 系统会覆盖并注入一组“动态相关”的 `proxy-groups`（mixin config 不要求包含这些组定义）：
-  - per-base relay 组：`🛣️ {relay-base}`，按 `Node.access_host` 聚合，同机共享
-- hidden fallback 地区组：`🌟 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
-- 可见地区组：`🔒 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`
-- hidden probe 组：`🤯 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}`；`🛣️ {Region}` 兼容别名不再生成
-- 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择`、`🤯 All`
-  - 落地组：`🛬 {base}` 与落地池 `🔒 落地`
-- 地区组成员来自节点主动探测得到的 `subscription_region`；仅对尚未出现首次成功探测结果的历史节点保留 legacy slug fallback，未命中 fallback 的节点才落入 `🌟 Other`
-- 最终输出不再对用户 profile 做 helper replay、legacy relay remap、legacy landing remap 或系统托管引用剥离；用户输入原样存储，坏数据只在最终 provider 主配置 + system payload 联合校验阶段显式失败。
-- `GET /api/admin/users/{user_id}/subscription-mihomo-profile` 返回原始存储值；`PUT` 只做 YAML 结构校验与最终渲染校验，不做自动抽取或规范化。
-- `🔒 高质量` 若由用户模板提供，provider 渲染会为其追加 `xp-system-generated` 并用 `filter` / `exclude-filter` 显式放行系统 `{base}-reality`、排除系统 `{base}-ss`，保留原有外部 provider 语义。
-- 落地组生成策略：仅当同一 base 存在链式候选时，通过 provider `use + filter` 匹配
-  `{base}-reality`、`{base}-ss-chain` / `{base}-reality-chain`；system provider payload 顺序必须
-  保证过滤后 reality 直连在首位、ss-chain 在 reality-chain 前。
-- 顶层 `🚀 节点选择` 在全部落地组后稳定列出 Reality 直连：非 provider 直接为
-  `{base}-reality`，provider 通过 `xp-system-generated` 的精确 Reality filter 直接列出
-  `{base}-reality`；系统不向用户自定义分组注入任何候选。
-- hidden per-base relay 组 `🛣️ {relay-base}` 会在最终 `proxy-groups` 中统一移动到系统托管组尾部，位于地区组、`🛬 {base}`、`🔒 落地`、`🤯 All`、`🚀 节点选择` 之后。
-- `💎 高质量` 的兜底要求不依赖用户 mixin 是否显式写入 `🤯 All`；这是系统输出合同本身的一部分。
-- 旧 `-JP/-HK/-KR/-TW` 链式代理不再生成；旧链式引用会继续被裁剪；地区组合同固定为 `🔒 {Region}` visible select leaf、`🌟 {Region}` hidden `fallback` wrapper、`🤯 {Region}` hidden `url-test` wrapper。
-- `/api/health` 与 `/api/admin/config` 都会增量暴露 `vless_https_canary` 运行态，便于运维审计证书有效期、loopback bind 与最近一次续期错误；这些字段只读。
-- Mihomo 不提供“纯被动、零主动探测”的自动回落；当前方案接受“失败后触发主动补检”，以换取显著减少主动测速带来的额外入站连接。
+用户 `mixin_yaml` 的 `proxy-groups[*].proxies` 可以使用两个保留占位项：
+
+- `🌟 <region>`：展开为当前用户可用的隐藏地区组，例如 `🌟 Japan`、`🌟 Singapore`。
+- `🛬 <node>`：展开为当前用户每个实际落地节点的组，例如 `🛬 Tokyo-A`、`🛬 Singapore-B`。
+
+占位项只在最终订阅渲染时展开；保存 profile 时保留原始文本。展开结果保留模板中其他字面量及其相对顺序。未订阅节点不得出现在任何展开结果中。
+
+```yaml
+proxy-groups:
+  - name: "🎵 Spotify"
+    type: select
+    proxies:
+      - "💎 节点选择"
+      - "🌟 <region>"
+      - "🛬 <node>"
+      - "🎯 全球直连"
+      - "🛑 全球拦截"
+```
+
+当用户拥有 Tokyo-A（Japan）和 Singapore-B（Singapore）时，最终应用组必须展开为：
+
+```yaml
+proxy-groups:
+  - name: "🎵 Spotify"
+    type: select
+    proxies:
+      - "💎 节点选择"
+      - "🌟 Japan"
+      - "🌟 Singapore"
+      - "🛬 Tokyo-A"
+      - "🛬 Singapore-B"
+      - "🎯 全球直连"
+      - "🛑 全球拦截"
+```
+
+应用组验证必须检查最终应用组自身的 `proxies`，不能只检查 `🚀 节点选择` 或 `🤯 All`。
+
+#### 6.3.2 Provider 数据边界
+
+- `proxy-providers` = `xp-system-generated` + `extra_proxy_providers_yaml`。
+- 主配置 `proxies` = `extra_proxies_yaml`。
+- 系统直连节点使用 `<node_slug>-reality` 与 `<node_slug>-ss` 命名。
+- 系统链式节点使用 `<node_slug>-ss-chain` 与 `<node_slug>-reality-chain` 命名，并通过 `dialer-proxy` 指向对应的 `🛣️ {relay-base}`。
+- `🔒 高质量`、`🔒 {Region}` 与落地组通过 `use: [xp-system-generated]` 消费系统 provider。
+- Provider URL 使用请求对外 origin 构造，优先级为 `Forwarded`、`X-Forwarded-*`、`Host`，最后回退到 `api_base_url`。
+
+#### 6.3.3 系统分组
+
+系统只生成以下分组：
+
+- 地区组：可见的 `🔒 {Japan|HongKong|Taiwan|Korea|Singapore|US|Other}` 与隐藏的 `🌟 {Region}`。
+- 落地组：每个节点一个 `🛬 {base}`，以及汇总全部落地组的 `🔒 落地` `url-test` 组。
+- 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择` 与 `🤯 All`。
+- 中转组：按 `Node.access_host` 聚合的隐藏 `🛣️ {relay-base}`。
+
+`🤯 {Region}` 不生成。`🤯 All` 先列实际 `🛬 {base}`，再列七个 `🌟 {Region}`，按稳定顺序去重。`💎 高质量` 的 fallback 顺序固定为 `🔒 高质量`、`🔒 落地`、`🤯 All`。
+
+每个存在 Reality access proxy 或链式候选的订阅节点都生成 `🛬 {base}`；如果存在 Reality access proxy，Reality 直连必须排在该落地组首位。`🚀 节点选择` 在落地组后追加 Reality 直连，不追加 `{base}-ss`。
+
+地区归类以节点主动探测得到的 `subscription_region` 为主。尚未产生首次成功探测结果的历史节点可以使用 legacy slug fallback；未命中 fallback 的节点归入 `Other`。
+
+### 6.4 Provider 渲染与校验
+
+#### 6.4.1 渲染流程
+
+1. 读取并保留用户 profile 中的 `mixin_yaml`、`extra_proxies_yaml` 与 `extra_proxy_providers_yaml`。
+2. 生成系统 proxy、landing、relay、地区和聚合分组。
+3. 将 `🌟 <region>` 与 `🛬 <node>` 展开为当前订阅实际存在的分组名。
+4. 合并用户扩展、系统 provider 和最终分组。
+5. 在最终主配置与 system provider payload 合并视图上执行引用校验。
+
+渲染保留现有 legacy relay/region 引用的兼容归一化，但不修改用户存储值；占位项展开后，坏引用在最终校验阶段显式失败。
+
+#### 6.4.2 Landing 与 Relay 规则
+
+- `🛬 {base}` 使用精确 filter 匹配 `{base}-reality`、`{base}-ss-chain` 与 `{base}-reality-chain`。
+- 同一 `access_host` 下的节点共享 `🛣️ {relay-base}`；不同 `access_host` 使用不同 relay 组。
+- Relay 必须使用其他订阅节点的 `*-reality`，排除目标节点、链式节点和 `DIRECT`。
+- 没有合法 relay 候选时使用 `REJECT` 与 `empty-fallback: REJECT`，不得因为外部 provider 存在而回退直连。
+- `🔒 落地` 使用 `url-test`，成员必须完整覆盖最终生成的所有 `🛬 {base}`。
+
+#### 6.4.3 输入与兼容校验
+
+- Mixin 中的 `proxies` 与 `proxy-providers` 不直接作为系统节点来源；系统节点由 `xp-system-generated` 承载。
+- 用户输入命中系统保留 proxy/provider 名称，或最终配置存在未定义引用时，返回 `400 invalid_request`。
+- `GET /api/admin/users/{user_id}/subscription-mihomo-profile` 返回原始存储值；`PUT` 只执行 YAML 结构校验与最终渲染校验。
+- Provider 主配置必须保留 `💎 高质量` 的兜底语义，不得退化为只包含 `🔒 高质量` 的单层入口。
 
 ### 6.5 脱敏 Provider 示例
 

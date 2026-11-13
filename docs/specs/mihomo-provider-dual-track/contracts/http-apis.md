@@ -97,14 +97,15 @@ Response:
 - 顶层 `proxy-providers` 必含系统 provider `xp-system-generated` 与用户 `extra_proxy_providers_yaml`。
 - 顶层 `proxies` 仅保留 `extra_proxies_yaml`；系统动态节点不写入主配置顶层。
 - 系统 provider 的 `url` 必须指向当前请求对外 origin 下的 `/api/sub/{token}/mihomo/provider/system`。
-- `🛬 {base}` 仅在存在链式候选时生成，并通过 `use: [xp-system-generated]` 与精确 `filter`
+- `🛬 {base}` 在存在 `{base}-reality` 或链式候选时生成，并通过 `use: [xp-system-generated]` 与精确 `filter`
   消费 `{base}-reality`、`{base}-ss-chain` / `{base}-reality-chain`，且 Mihomo 运行时按
   reality、ss-chain、reality-chain 顺序展示。
 - `🚀 节点选择` 在全部 `🛬 {base}` 后追加 Reality 直连候选，不追加 `{base}-ss`。非 provider
   输出直接列出 `{base}-reality`，provider 主配置则通过 `use: [xp-system-generated]` 和精确
   `filter` 直接暴露对应 `{base}-reality`。
 - `🤯 All` 的 `proxies` 必须先列出当前输出中所有 `🛬 {base}`，再列出七个
-  `🤯 {Region}` 组；两类引用均按稳定顺序去重。
+  `🌟 {Region}` 组；两类引用均按稳定顺序去重，且不生成地区级 `🤯 {Region}`。
+- 用户 `proxy-groups[*].proxies` 中精确等于 `🌟 <region>` 或 `🛬 <node>` 的占位项在最终渲染阶段展开为当前用户有候选的地区组和全部实际落地组。
 - `🔒 高质量` 与 `🔒 {Region}` 通过 `use: [xp-system-generated]` 与 `filter` 动态包含 `{base}-reality` 接入点，并通过 `exclude-filter` 排除系统 `{base}-ss` 直连接入候选。
 - `💎 高质量` 作为 owner-facing 高质量入口不得失去兜底层；最终主配置必须稳定提供“高质量入口 + 全局兜底入口”两层语义。若 `💎 高质量` 本身不直接引用 `🤯 All`，则必须存在另一个稳定 owner-facing 包装组同时暴露 `💎 高质量` 与 `🤯 All`，不能让最终入口仅剩 `🔒 高质量` 单一路径。
 - per-base relay 组 `🛣️ {relay-base}` 按 `Node.access_host` 聚合生成；同一 `access_host` 下的落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名。若 `relay-base` 等于历史地区 alias 基名，则输出必须加内部前缀消歧，不得重新生成 `🛣️ {Region}`。
@@ -122,7 +123,7 @@ Response:
   `server_names_source=manual`、`fingerprint=chrome`，并把 endpoint 标记为
   `managed_default=true`。
 - 托管 VLESS HTTPS canary 的公共反代面只接受 canonical `access_host[:endpoint_port]` 和 endpoint 自身声明的 `accepted_authorities` 别名集合。`accepted_authorities` 是普通 HTTPS `host[:port]` 无序集合；省略端口时按 HTTPS 默认 `443` 解释。它只影响 Host 匹配，不影响 REALITY `server_names`、`reality.dest` 或 provider 生成的 canonical `/generate_204` URL。未命中、authority 冲突和缺少 `canary_upstream` 的公共响应统一收敛为纯文本 `404 Not Found`。
-- 系统托管地区组的最终形态由 [final-mihomo-config.md](./final-mihomo-config.md) 定义：`🔒 {Region}` 是 visible leaf `select`，`🌟 {Region}` 是 hidden `fallback` 包装，`🤯 {Region}` 是 hidden `url-test` 包装；这些组以节点主动探测得到的 `subscription_region` 为主，但对尚未产生首次成功探测结果的历史节点，渲染阶段会保留 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以兼容滚动升级；probe stale 后同样回退到 legacy slug fallback / `Other`。
+- 系统托管地区组的最终形态由 [final-mihomo-config.md](./final-mihomo-config.md) 定义：`🔒 {Region}` 是 visible leaf `select`，`🌟 {Region}` 是 hidden `fallback` 包装，不生成地区级 `🤯 {Region}`；这些组以节点主动探测得到的 `subscription_region` 为主，但对尚未产生首次成功探测结果的历史节点，渲染阶段会保留 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以兼容滚动升级；probe stale 后同样回退到 legacy slug fallback / `Other`。
 - 输出不得生成共享 `🛣️ JP/HK/SG` 主路径或 `🛣️ {Region}` 兼容地区别名；旧共享外层与旧地区 relay alias 引用只允许被清理或移除。
 - PUT 保存阶段不会自动抽取 `mixin_yaml.proxies` / `mixin_yaml.proxy-providers`，也不会把 legacy relay alias、旧 landing 引用或保留名冲突做隐含转换。
 - hidden per-base relay 组必须统一移动到系统托管组尾部，不能插在 `💎 高质量` 与地区组之间。

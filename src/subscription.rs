@@ -438,6 +438,11 @@ pub fn build_mihomo_yaml_with_node_probes(
             preserved_custom_relay_group_names: &preserved_custom_relay_group_names,
         },
     );
+    expand_mihomo_proxy_group_placeholders(
+        &mut root,
+        &mihomo_dynamic_region_group_names(&generated_proxy_name_set, &base_region_map),
+        &collect_mihomo_landing_group_names(&generated_proxy_name_set),
+    );
     // Make the resulting subscription self-contained: avoid leaving template references to
     // providers/proxies that are not present in the final output (e.g. when the admin clears
     // `extra_*` after auto-splitting a full config into the template).
@@ -660,6 +665,11 @@ fn build_mihomo_provider_roots_with_node_probes(
     );
     normalize_mihomo_provider_proxy_group_sequence(&mut root, &relay_group_names);
     move_hidden_relay_groups_to_end(&mut root, &relay_group_names);
+    expand_mihomo_proxy_group_placeholders(
+        &mut root,
+        &mihomo_dynamic_region_group_names(&generated_system_provider_name_set, &base_region_map),
+        &collect_mihomo_landing_group_names(&generated_system_provider_name_set),
+    );
     dedupe_proxy_refs_in_mapping(&mut root);
     ensure_proxy_groups_have_candidates(&mut root, &provider_name_set);
     let system_root = build_mihomo_provider_system_root(generated.clone());
@@ -1246,27 +1256,29 @@ const MIHOMO_RELAY_REJECT_FALLBACK: &str = "REJECT";
 const MIHOMO_PROXY_GROUP_HELPER_KEY: &str = "proxy-group";
 const MIHOMO_PROXY_GROUP_WITH_RELAY_HELPER_KEY: &str = "proxy-group_with_relay";
 const MIHOMO_APP_PROXY_GROUP_HELPER_KEY: &str = "app-proxy-group";
-const MIHOMO_REGION_GROUP_NAMES: [&str; 21] = [
+const MIHOMO_REGION_GROUP_NAMES: [&str; 14] = [
     "🌟 Japan",
     "🔒 Japan",
-    "🤯 Japan",
     "🌟 HongKong",
     "🔒 HongKong",
-    "🤯 HongKong",
     "🌟 Taiwan",
     "🔒 Taiwan",
-    "🤯 Taiwan",
     "🌟 Korea",
     "🔒 Korea",
-    "🤯 Korea",
     "🌟 Singapore",
     "🔒 Singapore",
-    "🤯 Singapore",
     "🌟 US",
     "🔒 US",
-    "🤯 US",
     "🌟 Other",
     "🔒 Other",
+];
+const MIHOMO_LEGACY_REGION_GROUP_NAMES: [&str; 7] = [
+    "🤯 Japan",
+    "🤯 HongKong",
+    "🤯 Taiwan",
+    "🤯 Korea",
+    "🤯 Singapore",
+    "🤯 US",
     "🤯 Other",
 ];
 
@@ -1481,6 +1493,11 @@ fn inject_mihomo_proxy_groups(
             .iter()
             .map(|name| (*name).to_string()),
     );
+    override_names.extend(
+        MIHOMO_LEGACY_REGION_GROUP_NAMES
+            .iter()
+            .map(|name| (*name).to_string()),
+    );
 
     groups.retain(|value| {
         let serde_yaml::Value::Mapping(map) = value else {
@@ -1573,6 +1590,11 @@ fn inject_mihomo_provider_proxy_groups(
     override_names.insert(MIHOMO_LANDING_POOL_GROUP.to_string());
     override_names.extend(
         MIHOMO_REGION_GROUP_NAMES
+            .iter()
+            .map(|name| (*name).to_string()),
+    );
+    override_names.extend(
+        MIHOMO_LEGACY_REGION_GROUP_NAMES
             .iter()
             .map(|name| (*name).to_string()),
     );
@@ -1948,11 +1970,6 @@ fn inject_mihomo_region_groups(
             serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(visible_name.clone())]),
         );
         groups.push(serde_yaml::Value::Mapping(source_map));
-        groups.push(mihomo_url_test_group(
-            &format!("🤯 {}", region.name),
-            true,
-            [source_name.clone()],
-        ));
     }
 }
 
@@ -2050,11 +2067,11 @@ fn base_landing_proxy_names(
     proxy_name_set: &std::collections::BTreeSet<String>,
 ) -> Vec<String> {
     let chain_names = base_chain_proxy_names(base, proxy_name_set);
-    if chain_names.is_empty() {
+    let reality_name = format!("{base}-reality");
+    if !proxy_name_set.contains(&reality_name) && chain_names.is_empty() {
         return Vec::new();
     }
 
-    let reality_name = format!("{base}-reality");
     let mut names = Vec::with_capacity(chain_names.len() + 1);
     if proxy_name_set.contains(&reality_name) {
         names.push(reality_name);
@@ -2234,11 +2251,6 @@ fn inject_mihomo_provider_region_groups(
             serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(visible_name.clone())]),
         );
         groups.push(serde_yaml::Value::Mapping(source_map));
-        groups.push(mihomo_url_test_group(
-            &format!("🤯 {}", region.name),
-            true,
-            [source_name.clone()],
-        ));
     }
 }
 
@@ -2354,7 +2366,7 @@ fn inject_mihomo_landing_pool_group(
     );
     map.insert(
         serde_yaml::Value::String("type".to_string()),
-        serde_yaml::Value::String("select".to_string()),
+        serde_yaml::Value::String("url-test".to_string()),
     );
     map.insert(
         serde_yaml::Value::String("proxies".to_string()),
@@ -2412,7 +2424,7 @@ fn default_region_wrapper_group_names() -> impl Iterator<Item = String> {
 fn default_all_region_group_names() -> impl Iterator<Item = String> {
     MIHOMO_REGION_GROUPS
         .iter()
-        .map(|region| format!("🤯 {}", region.name))
+        .map(|region| format!("🌟 {}", region.name))
 }
 
 fn default_all_group_names(landing_groups: &[String]) -> Vec<String> {
@@ -2428,6 +2440,91 @@ fn default_all_group_names(landing_groups: &[String]) -> Vec<String> {
         }
     }
     names
+}
+
+fn mihomo_dynamic_region_group_names(
+    proxy_name_set: &std::collections::BTreeSet<String>,
+    base_region_map: &std::collections::BTreeMap<String, NodeSubscriptionRegion>,
+) -> Vec<String> {
+    MIHOMO_REGION_GROUPS
+        .iter()
+        .filter(|region| {
+            proxy_name_set.iter().any(|name| {
+                let Some((kind, base)) = classify_proxy_ref_name(name) else {
+                    return false;
+                };
+                matches!(kind, ProxyRefKind::Reality)
+                    && resolved_subscription_region_for_base(&base, base_region_map)
+                        == region.subscription_region
+            })
+        })
+        .map(|region| format!("🌟 {}", region.name))
+        .collect()
+}
+
+fn collect_mihomo_landing_group_names(
+    proxy_name_set: &std::collections::BTreeSet<String>,
+) -> Vec<String> {
+    collect_mihomo_base_names(proxy_name_set)
+        .into_iter()
+        .filter(|base| !base_landing_proxy_names(base, proxy_name_set).is_empty())
+        .map(|base| format!("🛬 {base}"))
+        .collect()
+}
+
+fn expand_mihomo_proxy_group_placeholders(
+    root: &mut serde_yaml::Mapping,
+    region_groups: &[String],
+    landing_groups: &[String],
+) {
+    const REGION_PLACEHOLDER: &str = "🌟 <region>";
+    const LANDING_PLACEHOLDER: &str = "🛬 <node>";
+
+    let Some(serde_yaml::Value::Sequence(groups)) =
+        root.get_mut(serde_yaml::Value::String("proxy-groups".to_string()))
+    else {
+        return;
+    };
+
+    for group in groups {
+        let serde_yaml::Value::Mapping(map) = group else {
+            continue;
+        };
+        let Some(serde_yaml::Value::Sequence(proxies)) =
+            map.get_mut(serde_yaml::Value::String("proxies".to_string()))
+        else {
+            continue;
+        };
+
+        let original = std::mem::take(proxies);
+        let mut expanded = Vec::with_capacity(original.len());
+        let mut seen = std::collections::BTreeSet::<String>::new();
+        for value in original {
+            let Some(name) = value.as_str() else {
+                expanded.push(value);
+                continue;
+            };
+            let mut push_replacement = |replacement: &str| {
+                if seen.insert(replacement.to_string()) {
+                    expanded.push(serde_yaml::Value::String(replacement.to_string()));
+                }
+            };
+            match name {
+                REGION_PLACEHOLDER => {
+                    for replacement in region_groups {
+                        push_replacement(replacement);
+                    }
+                }
+                LANDING_PLACEHOLDER => {
+                    for replacement in landing_groups {
+                        push_replacement(replacement);
+                    }
+                }
+                _ => push_replacement(name),
+            }
+        }
+        *proxies = expanded;
+    }
 }
 
 fn mihomo_fallback_group(
@@ -2559,7 +2656,11 @@ fn inject_mihomo_default_aggregate_groups(
         mihomo_fallback_group(
             "💎 高质量",
             true,
-            ["🔒 高质量".to_string(), "🤯 All".to_string()],
+            [
+                "🔒 高质量".to_string(),
+                MIHOMO_LANDING_POOL_GROUP.to_string(),
+                "🤯 All".to_string(),
+            ],
         ),
         mihomo_url_test_group("🤯 All", true, default_all_group_names(landing_groups)),
     ];
@@ -2641,6 +2742,7 @@ fn is_mihomo_system_region_cluster_group(
         || is_mihomo_legacy_outer_group_reference(name)
         || name == MIHOMO_LANDING_POOL_GROUP
         || MIHOMO_REGION_GROUP_NAMES.contains(&name)
+        || MIHOMO_LEGACY_REGION_GROUP_NAMES.contains(&name)
 }
 
 fn is_mihomo_system_proxy_group(
@@ -2961,12 +3063,6 @@ fn mihomo_provider_system_group_rank(
             return Some((3, idx));
         }
     }
-    for (idx, region) in MIHOMO_REGION_GROUPS.iter().enumerate() {
-        if name == format!("🤯 {}", region.name) {
-            return Some((4, idx));
-        }
-    }
-
     if name == MIHOMO_LANDING_POOL_GROUP {
         return Some((6, 0));
     }
@@ -3907,7 +4003,7 @@ fn collect_template_landing_group_refs_in_sequence(
         let serde_yaml::Value::String(name) = item else {
             continue;
         };
-        if name.starts_with("🛬 ") && !out.contains(name) {
+        if name.starts_with("🛬 ") && name != "🛬 <node>" && !out.contains(name) {
             out.push(name.clone());
         }
     }
@@ -5267,6 +5363,8 @@ struct ClashConfig {
     proxies: Vec<ClashProxy>,
 }
 
+#[cfg(test)]
+mod mihomo_interpolation_tests;
 #[cfg(test)]
 mod mihomo_relay_tests;
 mod node_selector;
