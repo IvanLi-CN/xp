@@ -9,7 +9,7 @@ use hyper::{
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpStream,
     sync::mpsc,
 };
@@ -19,7 +19,10 @@ use xp_proxy_core::vless::{VlessRequestError, decode_request, is_authorized};
 
 type ResponseBody = BoxBody<Bytes, Infallible>;
 
-pub async fn serve(stream: TcpStream, users: Vec<UserSnapshot>, path: String) -> Result<()> {
+pub async fn serve<S>(stream: S, users: Vec<UserSnapshot>, path: String) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let io = TokioIo::new(stream);
     let service = service_fn(move |request| handle_request(request, users.clone(), path.clone()));
     http2::Builder::new(TokioExecutor::new())
