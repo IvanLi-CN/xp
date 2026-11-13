@@ -11,8 +11,8 @@ pub mod vless;
 pub mod xhttp;
 
 pub use control::{
-    ControlOperation, ControlRequest, ControlResponse, GenerationManager, GenerationState,
-    ProxySnapshot,
+    ControlOperation, ControlRequest, ControlResponse, FallbackSnapshot, GenerationManager,
+    GenerationState, ListenerSnapshot, ProxySnapshot, RealitySnapshot, UserSnapshot,
 };
 pub use metrics::{TrafficCounter, TrafficSnapshot};
 pub use transport::{RealityConfig, XhttpConfig, XmuxSettings};

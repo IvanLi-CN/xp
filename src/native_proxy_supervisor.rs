@@ -1,4 +1,12 @@
-use std::{env, path::PathBuf, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    env,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -9,11 +17,13 @@ use tokio::{
 use tracing::{error, info};
 use uuid::Uuid;
 use xp_proxy_core::{
-    ProxySnapshot,
+    FallbackSnapshot, ListenerSnapshot, ProxySnapshot, RealitySnapshot, UserSnapshot,
     control::{ControlOperation, ControlRequest, ControlResponse, decode_frame, encode_frame},
 };
 
 use crate::config::Config;
+
+static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 /// Starts the independent `xp-proxy` process only when the explicit capability is enabled.
 /// Snapshot publication is deliberately separate; this supervisor owns process lifecycle only.
@@ -84,6 +94,109 @@ pub async fn publish_snapshot(
         );
     }
     Ok(())
+}
+
+pub fn build_snapshot(
+    local_node_id: &str,
+    endpoints: &[crate::domain::Endpoint],
+    users: &BTreeMap<String, crate::domain::User>,
+    memberships: &[crate::state::NodeUserEndpointMembership],
+    cluster_ca_key_pem: &str,
+) -> anyhow::Result<ProxySnapshot> {
+    let mut listeners = Vec::new();
+    let mut endpoint_ids = BTreeMap::new();
+    for endpoint in endpoints
+        .iter()
+        .filter(|endpoint| endpoint.node_id == local_node_id)
+    {
+        if endpoint.kind != crate::domain::EndpointKind::VlessRealityVisionTcp {
+            continue;
+        }
+        let meta: crate::protocol::VlessRealityVisionTcpEndpointMeta =
+            serde_json::from_value(endpoint.meta.clone())?;
+        if !matches!(
+            meta.transport,
+            crate::protocol::VlessRealityTransport::Xhttp
+        ) {
+            continue;
+        }
+        let fallbacks = meta
+            .canary_upstream
+            .iter()
+            .map(|fallback| FallbackSnapshot {
+                target: fallback.url.clone(),
+                authorities: meta.accepted_authorities.clone(),
+            })
+            .collect();
+        listeners.push(ListenerSnapshot {
+            bind: format!("0.0.0.0:{}", endpoint.port),
+            path: crate::protocol::VLESS_XHTTP_PATH.to_string(),
+            reality: RealitySnapshot {
+                server_names: meta.reality.server_names,
+                short_ids: meta.short_ids,
+                private_key: meta.reality_keys.private_key,
+            },
+            fallbacks,
+        });
+        endpoint_ids.insert(endpoint.endpoint_id.clone(), ());
+    }
+    let mut snapshot_users = Vec::new();
+    for membership in memberships.iter().filter(|membership| {
+        membership.node_id == local_node_id && endpoint_ids.contains_key(&membership.endpoint_id)
+    }) {
+        let Some(user) = users.get(&membership.user_id) else {
+            continue;
+        };
+        let uuid = crate::credentials::derive_vless_uuid(
+            cluster_ca_key_pem,
+            &user.user_id,
+            user.credential_epoch,
+        )?;
+        if !snapshot_users
+            .iter()
+            .any(|item: &UserSnapshot| item.uuid == uuid)
+        {
+            snapshot_users.push(UserSnapshot { uuid });
+        }
+    }
+    Ok(ProxySnapshot {
+        protocol_version: 1,
+        generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
+        listeners,
+        users: snapshot_users,
+    })
+}
+
+pub async fn publish_reconciled_snapshot(
+    local_node_id: &str,
+    endpoints: &[crate::domain::Endpoint],
+    users: &BTreeMap<String, crate::domain::User>,
+    memberships: &[crate::state::NodeUserEndpointMembership],
+    cluster_ca_key_pem: &str,
+) {
+    let enabled = env::var("XP_NATIVE_PROXY_ENABLED")
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes"));
+    if !enabled {
+        return;
+    }
+    let socket = env::var_os("XP_NATIVE_PROXY_CONTROL_SOCKET")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/run/xp/xp-proxy.sock"));
+    match build_snapshot(
+        local_node_id,
+        endpoints,
+        users,
+        memberships,
+        cluster_ca_key_pem,
+    ) {
+        Ok(snapshot) => {
+            if let Err(error) = publish_snapshot(&socket, snapshot).await {
+                tracing::warn!(%error, "native proxy snapshot publication failed");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "native proxy snapshot construction failed"),
+    }
 }
 
 async fn send_request(
