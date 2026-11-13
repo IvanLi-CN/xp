@@ -2,6 +2,8 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
+use crate::metrics::TrafficSnapshot;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GenerationState {
@@ -80,6 +82,8 @@ pub struct ControlResponse {
     pub generation: u64,
     pub state: GenerationState,
     pub error: Option<String>,
+    #[serde(default)]
+    pub metrics: Option<TrafficSnapshot>,
 }
 
 pub fn encode_frame<T: Serialize>(value: &T) -> Result<Vec<u8>, serde_json::Error> {

@@ -76,7 +76,10 @@ async fn main() -> Result<()> {
             accepted = listener.accept() => {
                 let (stream, _) = accepted?;
                 let manager = manager.clone();
-                tokio::spawn(async move { let _ = handle_control(stream, manager).await; });
+                let traffic = traffic.clone();
+                tokio::spawn(async move {
+                    let _ = handle_control(stream, manager, traffic).await;
+                });
             }
             _ = tokio::signal::ctrl_c() => break,
         }
@@ -161,7 +164,11 @@ async fn read_vless_request(
     }
 }
 
-async fn handle_control(mut stream: UnixStream, manager: GenerationManager) -> Result<()> {
+async fn handle_control(
+    mut stream: UnixStream,
+    manager: GenerationManager,
+    traffic: Arc<TrafficCounter>,
+) -> Result<()> {
     loop {
         let mut header = [0u8; 4];
         if stream.read_exact(&mut header).await.is_err() {
@@ -194,6 +201,7 @@ async fn handle_control(mut stream: UnixStream, manager: GenerationManager) -> R
             generation: generation.or(result.ok()).unwrap_or(request.generation),
             state,
             error,
+            metrics: Some(traffic.snapshot()),
         };
         stream.write_all(&encode_frame(&response)?).await?;
     }

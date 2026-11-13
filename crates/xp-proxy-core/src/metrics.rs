@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug, Default)]
@@ -6,7 +7,7 @@ pub struct TrafficCounter {
     downlink_bytes: AtomicU64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrafficSnapshot {
     pub uplink_bytes: u64,
     pub downlink_bytes: u64,
