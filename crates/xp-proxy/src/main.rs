@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream, UnixListener, UnixStream},
@@ -9,7 +10,7 @@ use xp_proxy_core::{
     GenerationManager, ProxySnapshot, TrafficCounter,
     control::{ControlOperation, ControlRequest, ControlResponse, decode_frame, encode_frame},
     fallback::FallbackTarget,
-    reality::authenticate_client_hello,
+    reality::authenticate_client_hello_with_policy,
     tls_hello::parse_client_hello,
     vless::{decode_request, is_authorized},
 };
@@ -118,9 +119,18 @@ async fn handle_tls_or_fallback(
     let private_key = reality.private_key_bytes().map_err(anyhow::Error::msg)?;
     let short_ids = reality.short_id_bytes().map_err(anyhow::Error::msg)?;
     let parsed = parse_client_hello(&hello);
-    let authenticated = parsed
-        .as_ref()
-        .is_ok_and(|hello| authenticate_client_hello(hello, private_key, &short_ids).is_ok());
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    let authenticated = parsed.as_ref().is_ok_and(|hello| {
+        authenticate_client_hello_with_policy(
+            hello,
+            private_key,
+            &short_ids,
+            &reality.server_names,
+            Some(120),
+            now,
+        )
+        .is_ok()
+    });
     if authenticated {
         anyhow::bail!("REALITY handshake requires native TLS relay");
     }
