@@ -103,20 +103,17 @@ async fn handle_connection(
     if size == 4 && &probe == b"PRI " {
         return xhttp_h2::serve(stream, users, listener.path, traffic).await;
     }
-    if size == 1 && probe[0] == 0x16 {
+    if size >= 1 && probe[0] == 0x16 {
         return handle_tls_or_fallback(stream, listener, traffic).await;
     }
-    if size == 4 && is_http_request(&probe) {
+    if size >= 1 && is_http_request_byte(probe[0]) {
         return handle_raw_fallback(stream, listener, traffic).await;
     }
     handle_vless(stream, users, traffic).await
 }
 
-fn is_http_request(probe: &[u8; 4]) -> bool {
-    matches!(
-        probe,
-        b"GET " | b"POST" | b"HEAD" | b"PUT " | b"DELE" | b"CONN" | b"OPTI" | b"PATC"
-    )
+fn is_http_request_byte(byte: u8) -> bool {
+    matches!(byte, b'G' | b'P' | b'H' | b'D' | b'C' | b'O')
 }
 
 async fn handle_raw_fallback(
@@ -384,10 +381,10 @@ mod tests {
 
     #[test]
     fn recognizes_http_methods_without_treating_vless_as_fallback() {
-        assert!(is_http_request(b"GET "));
-        assert!(is_http_request(b"POST"));
-        assert!(is_http_request(b"CONN"));
-        assert!(!is_http_request(&[1, 0, 0, 0]));
-        assert!(!is_http_request(b"PRI "));
+        assert!(is_http_request_byte(b'G'));
+        assert!(is_http_request_byte(b'P'));
+        assert!(is_http_request_byte(b'C'));
+        assert!(!is_http_request_byte(1));
+        assert!(!is_http_request_byte(b'Z'));
     }
 }
