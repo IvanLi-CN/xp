@@ -1,11 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
+use std::sync::Arc;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream, UnixListener, UnixStream},
 };
 use xp_proxy_core::{
-    GenerationManager, ProxySnapshot,
+    GenerationManager, ProxySnapshot, TrafficCounter,
     control::{ControlOperation, ControlRequest, ControlResponse, decode_frame, encode_frame},
     vless::{decode_request, is_authorized},
 };
@@ -42,6 +43,7 @@ async fn main() -> Result<()> {
     let listener = UnixListener::bind(&socket)?;
     std::fs::set_permissions(&socket, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
     let manager = GenerationManager::new();
+    let traffic = Arc::new(TrafficCounter::default());
     if let Some(path) = args.snapshot {
         let snapshot: ProxySnapshot = serde_json::from_slice(&std::fs::read(path)?)?;
         manager.prepare(snapshot).map_err(anyhow::Error::msg)?;
@@ -53,6 +55,7 @@ async fn main() -> Result<()> {
             let path = listener.path.clone();
             let bind = listener.bind.parse::<std::net::SocketAddr>()?;
             let tcp = TcpListener::bind(bind).await?;
+            let traffic = traffic.clone();
             tokio::spawn(async move {
                 loop {
                     let Ok((stream, _)) = tcp.accept().await else {
@@ -60,8 +63,9 @@ async fn main() -> Result<()> {
                     };
                     let users = users.clone();
                     let path = path.clone();
+                    let traffic = traffic.clone();
                     tokio::spawn(async move {
-                        let _ = handle_connection(stream, users, path).await;
+                        let _ = handle_connection(stream, users, path, traffic).await;
                     });
                 }
             });
@@ -85,18 +89,20 @@ async fn handle_connection(
     stream: TcpStream,
     users: Vec<xp_proxy_core::control::UserSnapshot>,
     path: String,
+    traffic: Arc<TrafficCounter>,
 ) -> Result<()> {
     let mut probe = [0u8; 4];
     let size = stream.peek(&mut probe).await?;
     if size == 4 && &probe == b"PRI " {
-        return xhttp_h2::serve(stream, users, path).await;
+        return xhttp_h2::serve(stream, users, path, traffic).await;
     }
-    handle_vless(stream, users).await
+    handle_vless(stream, users, traffic).await
 }
 
 async fn handle_vless(
     mut inbound: TcpStream,
     users: Vec<xp_proxy_core::control::UserSnapshot>,
+    traffic: Arc<TrafficCounter>,
 ) -> Result<()> {
     let (header, request, consumed) = read_vless_request(&mut inbound).await?;
     let allowed = users
@@ -110,12 +116,24 @@ async fn handle_vless(
     let mut outbound = TcpStream::connect(destination).await?;
     inbound.write_all(&[1, 0]).await?;
     if consumed < header.len() {
-        outbound.write_all(&header[consumed..]).await?;
+        let payload = &header[consumed..];
+        outbound.write_all(payload).await?;
+        traffic.add_uplink(payload.len() as u64);
     }
     let (mut ri, mut wi) = inbound.into_split();
     let (mut ro, mut wo) = outbound.into_split();
-    let uplink = tokio::io::copy(&mut ri, &mut wo);
-    let downlink = tokio::io::copy(&mut ro, &mut wi);
+    let uplink_counter = traffic.clone();
+    let downlink_counter = traffic;
+    let uplink = async move {
+        let bytes = tokio::io::copy(&mut ri, &mut wo).await?;
+        uplink_counter.add_uplink(bytes);
+        Ok::<u64, std::io::Error>(bytes)
+    };
+    let downlink = async move {
+        let bytes = tokio::io::copy(&mut ro, &mut wi).await?;
+        downlink_counter.add_downlink(bytes);
+        Ok::<u64, std::io::Error>(bytes)
+    };
     let _ = tokio::try_join!(uplink, downlink)?;
     Ok(())
 }

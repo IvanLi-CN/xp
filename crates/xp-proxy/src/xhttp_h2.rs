@@ -1,4 +1,5 @@
 use std::convert::Infallible;
+use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
@@ -14,17 +15,25 @@ use tokio::{
     sync::mpsc,
 };
 
+use xp_proxy_core::TrafficCounter;
 use xp_proxy_core::control::UserSnapshot;
 use xp_proxy_core::vless::{VlessRequestError, decode_request, is_authorized};
 
 type ResponseBody = BoxBody<Bytes, Infallible>;
 
-pub async fn serve<S>(stream: S, users: Vec<UserSnapshot>, path: String) -> Result<()>
+pub async fn serve<S>(
+    stream: S,
+    users: Vec<UserSnapshot>,
+    path: String,
+    traffic: Arc<TrafficCounter>,
+) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let io = TokioIo::new(stream);
-    let service = service_fn(move |request| handle_request(request, users.clone(), path.clone()));
+    let service = service_fn(move |request| {
+        handle_request(request, users.clone(), path.clone(), traffic.clone())
+    });
     http2::Builder::new(TokioExecutor::new())
         .serve_connection(io, service)
         .await
@@ -36,11 +45,12 @@ async fn handle_request(
     request: Request<Incoming>,
     users: Vec<UserSnapshot>,
     path: String,
+    traffic: Arc<TrafficCounter>,
 ) -> Result<Response<ResponseBody>, Infallible> {
     if request.uri().path() != path {
         return Ok(simple_response(StatusCode::NOT_FOUND, "path not found"));
     }
-    let response = match open_stream(request, users).await {
+    let response = match open_stream(request, users, traffic).await {
         Ok(response) => response,
         Err(error) => simple_response(StatusCode::BAD_REQUEST, &error.to_string()),
     };
@@ -50,6 +60,7 @@ async fn handle_request(
 async fn open_stream(
     request: Request<Incoming>,
     users: Vec<UserSnapshot>,
+    traffic: Arc<TrafficCounter>,
 ) -> Result<Response<ResponseBody>> {
     if request.method() != hyper::Method::POST {
         return Err(anyhow!("XHTTP stream-one requires POST"));
@@ -92,7 +103,7 @@ async fn open_stream(
         .send(Ok(Frame::data(Bytes::from_static(&[1, 0]))))
         .await
         .map_err(|_| anyhow!("HTTP/2 response stream closed"))?;
-    tokio::spawn(relay_body(body, outbound, sender));
+    tokio::spawn(relay_body(body, outbound, sender, traffic));
     let stream = tokio_stream::wrappers::ReceiverStream::new(receiver);
     let body = StreamBody::new(stream).boxed();
     Ok(Response::builder()
@@ -107,9 +118,11 @@ async fn relay_body(
     mut body: Incoming,
     outbound: TcpStream,
     sender: mpsc::Sender<Result<Frame<Bytes>, Infallible>>,
+    traffic: Arc<TrafficCounter>,
 ) {
     let (mut read_in, mut write_out) = outbound.into_split();
     let sender_for_downlink = sender;
+    let downlink_traffic = traffic.clone();
     let downlink = async move {
         let mut buffer = [0u8; 16 * 1024];
         loop {
@@ -117,12 +130,14 @@ async fn relay_body(
             if size == 0 {
                 break Ok::<(), anyhow::Error>(());
             }
+            downlink_traffic.add_downlink(size as u64);
             sender_for_downlink
                 .send(Ok(Frame::data(Bytes::copy_from_slice(&buffer[..size]))))
                 .await
                 .map_err(|_| anyhow!("HTTP/2 response stream closed"))?;
         }
     };
+    let uplink_traffic = traffic;
     let uplink = async move {
         while let Some(frame) = body.frame().await {
             let frame = frame?;
@@ -130,6 +145,7 @@ async fn relay_body(
                 .into_data()
                 .map_err(|_| anyhow!("XHTTP request contained a non-data frame"))?;
             write_out.write_all(&data).await?;
+            uplink_traffic.add_uplink(data.len() as u64);
         }
         write_out.shutdown().await?;
         Ok::<(), anyhow::Error>(())
@@ -175,7 +191,14 @@ mod tests {
         }];
         tokio::spawn(async move {
             let (stream, _) = proxy_listener.accept().await.unwrap();
-            serve(stream, users, "/xp-xhttp".into()).await.unwrap();
+            serve(
+                stream,
+                users,
+                "/xp-xhttp".into(),
+                Arc::new(TrafficCounter::default()),
+            )
+            .await
+            .unwrap();
         });
 
         let client = TcpStream::connect(proxy_addr).await.unwrap();
