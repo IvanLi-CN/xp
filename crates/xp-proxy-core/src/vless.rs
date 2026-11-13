@@ -38,7 +38,8 @@ pub fn encode_tcp_request(
         }
     };
     let mut output = Vec::with_capacity(24 + addons.len() + address_bytes.len());
-    output.push(1);
+    // Xray VLESS uses protocol version 0 for the request/response header.
+    output.push(0);
     output.extend_from_slice(user.as_bytes());
     output.push(addons.len() as u8);
     output.extend_from_slice(addons);
@@ -67,7 +68,7 @@ pub fn decode_request(input: &[u8]) -> Result<(VlessRequest, usize), VlessReques
     if input.len() < 1 + 16 + 1 + 1 + 2 + 1 {
         return Err(VlessRequestError::Truncated);
     }
-    if input[0] != 1 {
+    if input[0] != 0 {
         return Err(VlessRequestError::UnsupportedVersion(input[0]));
     }
     let user = Uuid::from_slice(&input[1..17]).map_err(|_| VlessRequestError::InvalidUuid)?;
@@ -146,7 +147,7 @@ mod tests {
     #[test]
     fn decodes_domain_request() {
         let uuid = Uuid::nil();
-        let mut input = vec![1];
+        let mut input = vec![0];
         input.extend_from_slice(uuid.as_bytes());
         input.extend_from_slice(&[0, 1, 0x01, 0xbb, 2, 11]);
         input.extend_from_slice(b"example.com");

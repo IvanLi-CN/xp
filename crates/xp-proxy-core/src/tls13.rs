@@ -1,4 +1,4 @@
-use aes_gcm::{Aes128Gcm, Aes256Gcm, KeyInit, Nonce, aead::Aead};
+use aes_gcm::{Aes128Gcm, Aes256Gcm, KeyInit, Nonce, aead::AeadInPlace};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256, Sha384};
@@ -53,6 +53,8 @@ pub struct Tls13TrafficKeys {
     pub client: Tls13TrafficKey,
     pub server: Tls13TrafficKey,
     pub secret: Vec<u8>,
+    pub client_secret: Vec<u8>,
+    pub server_secret: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,6 +188,8 @@ pub fn derive_handshake_traffic_keys(
         client: Tls13TrafficKey::from_secret(suite, &client_secret),
         server: Tls13TrafficKey::from_secret(suite, &server_secret),
         secret: handshake_secret,
+        client_secret,
+        server_secret,
     }
 }
 
@@ -213,6 +217,8 @@ pub fn derive_application_traffic_keys(
         client: Tls13TrafficKey::from_secret(suite, &client_secret),
         server: Tls13TrafficKey::from_secret(suite, &server_secret),
         secret: master_secret,
+        client_secret,
+        server_secret,
     }
 }
 
@@ -235,21 +241,29 @@ impl Tls13TrafficKey {
         let mut inner = Vec::with_capacity(plaintext.len() + 1);
         inner.extend_from_slice(plaintext);
         inner.push(content_type);
-        let ciphertext = match self.suite {
-            Tls13CipherSuite::Aes128GcmSha256 => Aes128Gcm::new_from_slice(&self.key)
-                .expect("AES-128 key length is fixed")
-                .encrypt(Nonce::from_slice(&nonce), inner.as_ref())
-                .map_err(|_| Tls13RecordError::AuthenticationFailed)?,
-            Tls13CipherSuite::Aes256GcmSha384 => Aes256Gcm::new_from_slice(&self.key)
-                .expect("AES-256 key length is fixed")
-                .encrypt(Nonce::from_slice(&nonce), inner.as_ref())
-                .map_err(|_| Tls13RecordError::AuthenticationFailed)?,
-        };
         let length =
-            u16::try_from(ciphertext.len()).map_err(|_| Tls13RecordError::InvalidHeader)?;
+            u16::try_from(inner.len() + 16).map_err(|_| Tls13RecordError::InvalidHeader)?;
+        let header = [23, 3, 3, (length >> 8) as u8, length as u8];
+        let ciphertext = match self.suite {
+            Tls13CipherSuite::Aes128GcmSha256 => {
+                let cipher =
+                    Aes128Gcm::new_from_slice(&self.key).expect("AES-128 key length is fixed");
+                cipher
+                    .encrypt_in_place(Nonce::from_slice(&nonce), &header, &mut inner)
+                    .map_err(|_| Tls13RecordError::AuthenticationFailed)?;
+                inner
+            }
+            Tls13CipherSuite::Aes256GcmSha384 => {
+                let cipher =
+                    Aes256Gcm::new_from_slice(&self.key).expect("AES-256 key length is fixed");
+                cipher
+                    .encrypt_in_place(Nonce::from_slice(&nonce), &header, &mut inner)
+                    .map_err(|_| Tls13RecordError::AuthenticationFailed)?;
+                inner
+            }
+        };
         let mut record = Vec::with_capacity(5 + ciphertext.len());
-        record.extend_from_slice(&[23, 3, 3]);
-        record.extend_from_slice(&length.to_be_bytes());
+        record.extend_from_slice(&header);
         record.extend_from_slice(&ciphertext);
         Ok(record)
     }
@@ -266,16 +280,18 @@ impl Tls13TrafficKey {
             return Err(Tls13RecordError::Truncated);
         }
         let nonce = self.nonce(sequence)?;
-        let plaintext = match self.suite {
+        let header = &record[..5];
+        let mut plaintext = record[5..5 + length].to_vec();
+        match self.suite {
             Tls13CipherSuite::Aes128GcmSha256 => Aes128Gcm::new_from_slice(&self.key)
                 .expect("AES-128 key length is fixed")
-                .decrypt(Nonce::from_slice(&nonce), &record[5..5 + length])
+                .decrypt_in_place(Nonce::from_slice(&nonce), header, &mut plaintext)
                 .map_err(|_| Tls13RecordError::AuthenticationFailed)?,
             Tls13CipherSuite::Aes256GcmSha384 => Aes256Gcm::new_from_slice(&self.key)
                 .expect("AES-256 key length is fixed")
-                .decrypt(Nonce::from_slice(&nonce), &record[5..5 + length])
+                .decrypt_in_place(Nonce::from_slice(&nonce), header, &mut plaintext)
                 .map_err(|_| Tls13RecordError::AuthenticationFailed)?,
-        };
+        }
         let Some(content_type_index) = plaintext.iter().rposition(|byte| *byte != 0) else {
             return Err(Tls13RecordError::MissingContentType);
         };

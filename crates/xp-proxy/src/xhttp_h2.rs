@@ -59,7 +59,14 @@ async fn handle_request(
     session: Arc<Mutex<StreamOneSession>>,
     traffic: Arc<TrafficCounter>,
 ) -> Result<Response<ResponseBody>, Infallible> {
-    if request.uri().path() != path {
+    let request_path = request.uri().path();
+    let configured_path = path.trim_end_matches('/');
+    let valid_path = request_path == path
+        || request_path == format!("{configured_path}/")
+        || request_path
+            .strip_prefix(&format!("{configured_path}/"))
+            .is_some();
+    if !valid_path {
         return Ok(simple_response(StatusCode::NOT_FOUND, "path not found"));
     }
     let response = match open_stream(request, users, session, traffic).await {
@@ -118,7 +125,7 @@ async fn open_stream(
     }
     let (sender, receiver) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(16);
     sender
-        .send(Ok(Frame::data(Bytes::from_static(&[1, 0]))))
+        .send(Ok(Frame::data(Bytes::from_static(&[0, 0]))))
         .await
         .map_err(|_| anyhow!("HTTP/2 response stream closed"))?;
     tokio::spawn(relay_body(body, outbound, sender, traffic, session, permit));
@@ -252,7 +259,7 @@ mod tests {
         while let Some(chunk) = response.body_mut().data().await {
             received.extend_from_slice(&chunk.unwrap());
         }
-        assert_eq!(&received[..2], &[1, 0]);
+        assert_eq!(&received[..2], &[0, 0]);
         assert_eq!(&received[2..], payload);
     }
 }

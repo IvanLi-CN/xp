@@ -12,6 +12,7 @@ hmac = "0.12"
 hyper = { version = "1", features = ["http2", "server"] }
 hyper-util = { version = "0.1", features = ["http2", "server", "tokio"] }
 rcgen = "0.14"
+rand = "0.8"
 rustls = { version = "0.23.35", default-features = false, features = [
   "logging",
   "ring",
@@ -31,6 +32,7 @@ tokio = { version = "1", features = [
 tokio-stream = "0.1"
 tokio-rustls = "0.26.4"
 uuid = "1"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
 xp-proxy-core = { path = "../xp-proxy-core" }
 
 [dev-dependencies]

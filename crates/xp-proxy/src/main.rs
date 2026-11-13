@@ -307,7 +307,7 @@ async fn handle_vless(
     }
     let destination = format!("{}:{}", request.destination.0, request.destination.1);
     let mut outbound = TcpStream::connect(destination).await?;
-    inbound.write_all(&[1, 0]).await?;
+    inbound.write_all(&[0, 0]).await?;
     if consumed < header.len() {
         let payload = &header[consumed..];
         outbound.write_all(payload).await?;
