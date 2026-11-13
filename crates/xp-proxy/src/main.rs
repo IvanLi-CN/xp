@@ -2,11 +2,12 @@ use anyhow::Result;
 use clap::Parser;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{UnixListener, UnixStream},
+    net::{TcpListener, TcpStream, UnixListener, UnixStream},
 };
 use xp_proxy_core::{
     GenerationManager, ProxySnapshot,
     control::{ControlOperation, ControlRequest, ControlResponse, decode_frame, encode_frame},
+    vless::{decode_request, is_authorized},
 };
 
 #[derive(Debug, Parser)]
@@ -16,6 +17,8 @@ struct Args {
     validate_snapshot: Option<std::path::PathBuf>,
     #[arg(long)]
     control_socket: Option<std::path::PathBuf>,
+    #[arg(long)]
+    snapshot: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -37,6 +40,29 @@ async fn main() -> Result<()> {
     let listener = UnixListener::bind(&socket)?;
     std::fs::set_permissions(&socket, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
     let manager = GenerationManager::new();
+    if let Some(path) = args.snapshot {
+        let snapshot: ProxySnapshot = serde_json::from_slice(&std::fs::read(path)?)?;
+        manager.prepare(snapshot).map_err(anyhow::Error::msg)?;
+        manager.activate().map_err(anyhow::Error::msg)?;
+        let active = manager.active_snapshot().expect("activated snapshot");
+        let users = active.users.clone();
+        for listener in active.listeners {
+            let users = users.clone();
+            let bind = listener.bind.parse::<std::net::SocketAddr>()?;
+            let tcp = TcpListener::bind(bind).await?;
+            tokio::spawn(async move {
+                loop {
+                    let Ok((stream, _)) = tcp.accept().await else {
+                        break;
+                    };
+                    let users = users.clone();
+                    tokio::spawn(async move {
+                        let _ = handle_vless(stream, users).await;
+                    });
+                }
+            });
+        }
+    }
     loop {
         tokio::select! {
             accepted = listener.accept() => {
@@ -48,6 +74,38 @@ async fn main() -> Result<()> {
         }
     }
     let _ = std::fs::remove_file(socket);
+    Ok(())
+}
+
+async fn handle_vless(
+    mut inbound: TcpStream,
+    users: Vec<xp_proxy_core::control::UserSnapshot>,
+) -> Result<()> {
+    let mut header = vec![0u8; 8192];
+    let used = inbound.read(&mut header).await?;
+    if used == 0 {
+        anyhow::bail!("empty VLESS request");
+    }
+    let (request, consumed) =
+        decode_request(&header[..used]).map_err(|error| anyhow::anyhow!(error))?;
+    let allowed = users
+        .iter()
+        .filter_map(|user| uuid::Uuid::parse_str(&user.uuid).ok())
+        .collect::<Vec<_>>();
+    if !is_authorized(&request, &allowed) {
+        anyhow::bail!("unauthorized VLESS user");
+    }
+    let destination = format!("{}:{}", request.destination.0, request.destination.1);
+    let mut outbound = TcpStream::connect(destination).await?;
+    inbound.write_all(&[1, 0]).await?;
+    if consumed < used {
+        outbound.write_all(&header[consumed..used]).await?;
+    }
+    let (mut ri, mut wi) = inbound.into_split();
+    let (mut ro, mut wo) = outbound.into_split();
+    let uplink = tokio::io::copy(&mut ri, &mut wo);
+    let downlink = tokio::io::copy(&mut ro, &mut wi);
+    let _ = tokio::try_join!(uplink, downlink)?;
     Ok(())
 }
 

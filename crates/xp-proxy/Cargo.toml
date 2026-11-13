@@ -8,4 +8,5 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal"] }
+uuid = "1"
 xp-proxy-core = { path = "../xp-proxy-core" }

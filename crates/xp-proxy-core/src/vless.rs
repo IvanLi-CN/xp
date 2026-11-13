@@ -10,6 +10,10 @@ pub struct VlessRequest {
     pub addons: Bytes,
 }
 
+pub fn is_authorized(request: &VlessRequest, users: &[Uuid]) -> bool {
+    users.iter().any(|user| user == &request.user)
+}
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum VlessRequestError {
     #[error("request is truncated")]

@@ -5880,6 +5880,7 @@ dependencies = [
  "clap",
  "serde_json",
  "tokio",
+ "uuid",
  "xp-proxy-core",
 ]
 
