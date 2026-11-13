@@ -5886,9 +5886,14 @@ name = "xp-proxy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "clap",
+ "http-body-util",
+ "hyper 1.10.1",
+ "hyper-util",
  "serde_json",
  "tokio",
+ "tokio-stream",
  "uuid",
  "xp-proxy-core",
 ]

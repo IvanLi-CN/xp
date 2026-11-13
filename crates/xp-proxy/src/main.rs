@@ -10,6 +10,8 @@ use xp_proxy_core::{
     vless::{decode_request, is_authorized},
 };
 
+mod xhttp_h2;
+
 #[derive(Debug, Parser)]
 #[command(name = "xp-proxy")]
 struct Args {
@@ -48,6 +50,7 @@ async fn main() -> Result<()> {
         let users = active.users.clone();
         for listener in active.listeners {
             let users = users.clone();
+            let path = listener.path.clone();
             let bind = listener.bind.parse::<std::net::SocketAddr>()?;
             let tcp = TcpListener::bind(bind).await?;
             tokio::spawn(async move {
@@ -56,8 +59,9 @@ async fn main() -> Result<()> {
                         break;
                     };
                     let users = users.clone();
+                    let path = path.clone();
                     tokio::spawn(async move {
-                        let _ = handle_vless(stream, users).await;
+                        let _ = handle_connection(stream, users, path).await;
                     });
                 }
             });
@@ -75,6 +79,19 @@ async fn main() -> Result<()> {
     }
     let _ = std::fs::remove_file(socket);
     Ok(())
+}
+
+async fn handle_connection(
+    stream: TcpStream,
+    users: Vec<xp_proxy_core::control::UserSnapshot>,
+    path: String,
+) -> Result<()> {
+    let mut probe = [0u8; 4];
+    let size = stream.peek(&mut probe).await?;
+    if size == 4 && &probe == b"PRI " {
+        return xhttp_h2::serve(stream, users, path).await;
+    }
+    handle_vless(stream, users).await
 }
 
 async fn handle_vless(

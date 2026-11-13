@@ -2,9 +2,10 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GenerationState {
+    #[default]
     Idle,
     Preparing,
     Validating,
@@ -115,12 +116,6 @@ struct GenerationInner {
     state: GenerationState,
 }
 
-impl Default for GenerationState {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
-
 impl GenerationManager {
     pub fn new() -> Self {
         Self {
@@ -187,6 +182,12 @@ impl GenerationManager {
             inner.state = GenerationState::Stopped;
         }
         generation
+    }
+}
+
+impl Default for GenerationManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
