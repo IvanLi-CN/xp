@@ -11,6 +11,22 @@ The file is `${XP_DATA_DIR}/history.sqlite3.diagnostics.json`.
 
 ## Summary repair status
 
+### 缺口分类与报告口径
+
+运维排障必须先分类再报告，不能把所有 `gap_count` 都称为运行异常。
+`recoverable_gap` 是仍可从原始 wire、source journal 或 Ready 仓库副本验证并恢复的缺口；
+`permanent_gap` 是已通过正式签名、保留边界和来源证据确认无法恢复的历史前缀；
+`unclassified_gap` 是证据不足的缺口，必须继续调查。
+
+`recoverable_gap` 和 `unclassified_gap` 仍属于未解决问题。`permanent_gap` 是设计允许保留的历史不完整性，
+不是当前运行故障，但必须继续显示在完整性结果中，受影响查询必须为 `partial`，
+`replica_converged` 必须为 `false`。不得因为它不可恢复就删除 gap、清理原始证据、伪造 ACK 或把结果改成
+complete。
+
+报告必须分别给出实时投递、可恢复缺口、未分类缺口和已确认永久缺口。只有未分类与可恢复缺口均为零、
+没有待处理 repair/outbox、没有未解释的 `history_truncated`，才能报告“没有未解决的同步异常”。
+`ready`、单次无新错误、空间回收或稳定记录数都不能替代这项判定。
+
 Ready lifecycle alone does not prove that source delivery or deep verification has finished.
 
 - Compare pending segment count, last ACK time and oldest cursor across status samples.

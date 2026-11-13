@@ -21,6 +21,23 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - 让 ready 仓库通过 anti-entropy、tombstone 和分层聚合最终收敛。
 - 为历史查询和管理界面返回完整性、覆盖范围、缺口和同步质量。
 
+### Gap classification and reporting
+
+历史缺口本身不是统一的运行故障。实现和运维报告必须把缺口分为三类：`recoverable_gap` 表示按当前
+保留策略仍有可验证的原始 wire、有效 source journal 或 Ready 仓库副本，必须继续重试或执行正式 recovery；
+`permanent_gap` 表示已通过签名、保留边界和来源证据确认原始前缀不可恢复，允许保留并继续提供已知并集，
+但受影响查询必须保持 `partial` 且 `replica_converged=false`；`unclassified_gap` 表示证据不足，
+必须继续调查，不能当作永久缺口，也不能报告为已解决。
+
+只有 `recoverable_gap`、`unclassified_gap` 或伴随 transport、storage、ACK、outbox、quota、worker 停滞的状态
+才应报告为当前异常。已确认的 `permanent_gap` 应报告为“设计允许的历史不完整性”，同时单独列出数量、
+来源、stream、序号范围和确认依据；它不是新的运行告警，也不能通过删除 gap、伪造 ACK、改写 checkpoint
+或降低完整性标志来消除。
+
+当报告“历史同步正常”时，必须同时说明实时投递、可恢复缺口和永久缺口三项结果。`ready`、无新错误或
+数据库空间下降都不能单独证明历史完整收敛；只有 `unclassified_gap=0`、`recoverable_gap=0`，并且没有
+未解释的 `history_truncated` 或待处理 repair，才可以报告“没有未解决的同步异常”。
+
 ### Non-goals
 
 - 不改变普通节点数据保留策略或业务流量配额。
@@ -78,7 +95,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   下调不删除已保留历史或未 ACK outbox；已用空间达到新配额时停止新增历史写入。
   配额是事务前准入，不能充当文件系统硬上限；外部体积要求须为 WAL、SHM 和事务预留余量。
   例如总文件不得超过十进制 10 GB 时可设为 9,000,000,000 字节，不能把默认 10 GiB 当作 10 GB。
-- 仓库保存 7 天分钟级、随后 90 天五分钟级、随后小时级，默认最长两年；原始 signed wire 仅保留 24 小时作为 anti-entropy 修复缓存，不参与长期查询保留。
+- 仓库保存 3 天分钟级、随后 90 天五分钟级、随后小时级，默认最长两年；原始 signed wire 仅保留 24 小时作为 anti-entropy 修复缓存，不参与长期查询保留。
   普通节点的既有窗口不变。
 - 初始源回填优先级只适用于当前配置的仓库成员。普通源节点和已退出仓库的节点不承担
   全部 peer baseline 导入；新节点加入后缺少此类 checkpoint 不得暂停其持久化 outbox 投递。

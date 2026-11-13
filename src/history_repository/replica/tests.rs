@@ -231,19 +231,19 @@ fn repository_retention_is_tiered_without_changing_ordinary_node_windows() {
     let retention = RepositoryRetentionPolicy::default();
     assert_eq!(retention.max_age_seconds(), 2 * 365 * 24 * 60 * 60);
     assert_eq!(
-        retention.resolution_for_age(7 * 24 * 60 * 60),
+        retention.resolution_for_age(3 * 24 * 60 * 60),
         Some(RetentionResolution::Minute)
     );
     assert_eq!(
-        retention.resolution_for_age(7 * 24 * 60 * 60 + 1),
+        retention.resolution_for_age(3 * 24 * 60 * 60 + 1),
         Some(RetentionResolution::FiveMinutes)
     );
     assert_eq!(
-        retention.resolution_for_age((7 + 90) * 24 * 60 * 60),
+        retention.resolution_for_age((3 + 90) * 24 * 60 * 60),
         Some(RetentionResolution::FiveMinutes)
     );
     assert_eq!(
-        retention.resolution_for_age((7 + 90) * 24 * 60 * 60 + 1),
+        retention.resolution_for_age((3 + 90) * 24 * 60 * 60 + 1),
         Some(RetentionResolution::Hour)
     );
     assert_eq!(
