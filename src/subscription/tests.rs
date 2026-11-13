@@ -1778,10 +1778,7 @@ providerA:
             .collect::<Vec<_>>()
     };
 
-    assert_eq!(
-        group_refs("💎 高质量"),
-        vec!["🔒 高质量", "🔒 落地", "🤯 All"]
-    );
+    assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
     assert_eq!(
         groups
             .iter()
@@ -2078,13 +2075,14 @@ providerA:
         ]
     );
     assert_eq!(
-        &names[18..23],
+        &names[18..24],
         &[
             "🔒 落地",
+            "🤯 落地",
             "🤯 All",
             "🚀 节点选择",
             "💎 节点选择",
-            "Custom Select"
+            "Custom Select",
         ]
     );
     let all_group = root
@@ -2839,6 +2837,7 @@ rules: []
             "🔒 Other",
             "🌟 Other",
             "🔒 落地",
+            "🤯 落地",
             "🤯 All",
             "🗽 大流量",
             "🎯 全球直连",
@@ -3331,7 +3330,7 @@ fn build_mihomo_yaml_injects_default_high_quality_candidates() {
     );
     assert_eq!(
         group_refs("💎 高质量"),
-        vec!["🔒 高质量", "🔒 落地", "🤯 All"]
+        vec!["🔒 高质量", "🤯 落地", "🤯 All"]
     );
 }
 
@@ -4529,6 +4528,11 @@ fn build_mihomo_yaml_does_not_generate_landing_groups_for_extra_proxies() {
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
     assert_eq!(landing_proxies, vec!["DIRECT"]);
+    assert!(
+        !groups
+            .iter()
+            .any(|g| g.get("name").and_then(Value::as_str) == Some("🤯 落地"))
+    );
 
     let proxies = v
         .get("proxies")

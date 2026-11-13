@@ -21,8 +21,16 @@ The direct Reality proxy generated for a Subscription Node and exposed as its `*
 _Avoid_: Relay node, landing group
 
 **Landing Group**:
-The `🛬 {base}` group for one node base and its direct and chain candidates.
+The `🛬 {base}` group for one subscription node base and its direct and chain candidates.
 _Avoid_: Access point group, relay group
+
+**Manual Landing Group**:
+The `🔒 落地` `url-test` group that health-tests the generated `🛬 {base}` groups.
+_Avoid_: Automatic landing pool, access point pool
+
+**Automatic Landing Pool**:
+The hidden `🤯 落地` group that health-tests every subscribed `*-reality` Access Point.
+_Avoid_: Manual landing group, `🤯 All`
 
 **Mihomo Group Interpolation**:
 The render-time expansion of reserved entries inside a user's Mihomo proxy group.
