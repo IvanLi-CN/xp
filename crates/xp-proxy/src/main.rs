@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream, UnixListener, UnixStream},
+    time::{Duration, timeout},
 };
 use xp_proxy_core::{
     GenerationManager, ProxySnapshot, TrafficCounter,
@@ -98,8 +99,7 @@ async fn handle_connection(
     listener: xp_proxy_core::control::ListenerSnapshot,
     traffic: Arc<TrafficCounter>,
 ) -> Result<()> {
-    let mut probe = [0u8; 4];
-    let size = stream.peek(&mut probe).await?;
+    let (size, probe) = peek_probe(&stream).await?;
     if size == 4 && &probe == b"PRI " {
         return xhttp_h2::serve(stream, users, listener.path, traffic).await;
     }
@@ -110,6 +110,25 @@ async fn handle_connection(
         return handle_raw_fallback(stream, listener, traffic).await;
     }
     handle_vless(stream, users, traffic).await
+}
+
+async fn peek_probe(stream: &TcpStream) -> Result<(usize, [u8; 4])> {
+    let mut probe = [0u8; 4];
+    let first = stream.peek(&mut probe).await?;
+    if first == 0 || first >= 4 || probe[0] != b'P' {
+        return Ok((first, probe));
+    }
+    let result = timeout(Duration::from_millis(100), async {
+        loop {
+            let size = stream.peek(&mut probe).await?;
+            if size >= 4 || size == 0 {
+                return Ok::<usize, std::io::Error>(size);
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    Ok((result.unwrap_or(Ok(first))?, probe))
 }
 
 fn is_http_request_byte(byte: u8) -> bool {
