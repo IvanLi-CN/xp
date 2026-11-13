@@ -81,13 +81,7 @@ async fn handle_vless(
     mut inbound: TcpStream,
     users: Vec<xp_proxy_core::control::UserSnapshot>,
 ) -> Result<()> {
-    let mut header = vec![0u8; 8192];
-    let used = inbound.read(&mut header).await?;
-    if used == 0 {
-        anyhow::bail!("empty VLESS request");
-    }
-    let (request, consumed) =
-        decode_request(&header[..used]).map_err(|error| anyhow::anyhow!(error))?;
+    let (header, request, consumed) = read_vless_request(&mut inbound).await?;
     let allowed = users
         .iter()
         .filter_map(|user| uuid::Uuid::parse_str(&user.uuid).ok())
@@ -98,8 +92,8 @@ async fn handle_vless(
     let destination = format!("{}:{}", request.destination.0, request.destination.1);
     let mut outbound = TcpStream::connect(destination).await?;
     inbound.write_all(&[1, 0]).await?;
-    if consumed < used {
-        outbound.write_all(&header[consumed..used]).await?;
+    if consumed < header.len() {
+        outbound.write_all(&header[consumed..]).await?;
     }
     let (mut ri, mut wi) = inbound.into_split();
     let (mut ro, mut wo) = outbound.into_split();
@@ -107,6 +101,29 @@ async fn handle_vless(
     let downlink = tokio::io::copy(&mut ro, &mut wi);
     let _ = tokio::try_join!(uplink, downlink)?;
     Ok(())
+}
+
+async fn read_vless_request(
+    inbound: &mut TcpStream,
+) -> Result<(Vec<u8>, xp_proxy_core::vless::VlessRequest, usize)> {
+    const MAX_HEADER: usize = 8192;
+    let mut header = Vec::with_capacity(256);
+    loop {
+        if header.len() == MAX_HEADER {
+            anyhow::bail!("VLESS request header exceeds {MAX_HEADER} bytes");
+        }
+        let mut chunk = [0u8; 512];
+        let read = inbound.read(&mut chunk).await?;
+        if read == 0 {
+            anyhow::bail!("empty or truncated VLESS request");
+        }
+        header.extend_from_slice(&chunk[..read]);
+        match decode_request(&header) {
+            Ok((request, consumed)) => return Ok((header, request, consumed)),
+            Err(xp_proxy_core::vless::VlessRequestError::Truncated) => continue,
+            Err(error) => return Err(anyhow::anyhow!(error)),
+        }
+    }
 }
 
 async fn handle_control(mut stream: UnixStream, manager: GenerationManager) -> Result<()> {
