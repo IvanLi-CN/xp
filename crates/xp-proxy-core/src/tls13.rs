@@ -45,6 +45,68 @@ pub struct Tls13TrafficKey {
     iv: [u8; 12],
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tls13TrafficKeys {
+    pub client: Tls13TrafficKey,
+    pub server: Tls13TrafficKey,
+    pub secret: Vec<u8>,
+}
+
+pub fn derive_handshake_traffic_keys(
+    suite: Tls13CipherSuite,
+    shared_secret: &[u8],
+    client_hello_and_server_hello: &[u8],
+) -> Tls13TrafficKeys {
+    let zero = vec![0u8; suite.hash_len()];
+    let early_secret = hkdf_extract(suite, &zero, &zero);
+    let derived = derive_secret(suite, &early_secret, b"derived", &[]);
+    let handshake_secret = hkdf_extract(suite, &derived, shared_secret);
+    let client_secret = derive_secret(
+        suite,
+        &handshake_secret,
+        b"c hs traffic",
+        client_hello_and_server_hello,
+    );
+    let server_secret = derive_secret(
+        suite,
+        &handshake_secret,
+        b"s hs traffic",
+        client_hello_and_server_hello,
+    );
+    Tls13TrafficKeys {
+        client: Tls13TrafficKey::from_secret(suite, &client_secret),
+        server: Tls13TrafficKey::from_secret(suite, &server_secret),
+        secret: handshake_secret,
+    }
+}
+
+pub fn derive_application_traffic_keys(
+    suite: Tls13CipherSuite,
+    handshake_secret: &[u8],
+    transcript_through_server_finished: &[u8],
+) -> Tls13TrafficKeys {
+    let zero = vec![0u8; suite.hash_len()];
+    let derived = derive_secret(suite, handshake_secret, b"derived", &[]);
+    let master_secret = hkdf_extract(suite, &derived, &zero);
+    let client_secret = derive_secret(
+        suite,
+        &master_secret,
+        b"c ap traffic",
+        transcript_through_server_finished,
+    );
+    let server_secret = derive_secret(
+        suite,
+        &master_secret,
+        b"s ap traffic",
+        transcript_through_server_finished,
+    );
+    Tls13TrafficKeys {
+        client: Tls13TrafficKey::from_secret(suite, &client_secret),
+        server: Tls13TrafficKey::from_secret(suite, &server_secret),
+        secret: master_secret,
+    }
+}
+
 impl Tls13TrafficKey {
     pub fn from_secret(suite: Tls13CipherSuite, secret: &[u8]) -> Self {
         let key = hkdf_expand_label(suite, secret, b"key", &[], suite.key_len());
@@ -153,6 +215,19 @@ pub fn hkdf_expand_label(
     output
 }
 
+fn hkdf_extract(suite: Tls13CipherSuite, salt: &[u8], input: &[u8]) -> Vec<u8> {
+    match suite {
+        Tls13CipherSuite::Aes128GcmSha256 => Hkdf::<Sha256>::extract(Some(salt), input)
+            .0
+            .as_slice()
+            .to_vec(),
+        Tls13CipherSuite::Aes256GcmSha384 => Hkdf::<Sha384>::extract(Some(salt), input)
+            .0
+            .as_slice()
+            .to_vec(),
+    }
+}
+
 pub fn derive_secret(
     suite: Tls13CipherSuite,
     secret: &[u8],
@@ -192,5 +267,26 @@ mod tests {
             16,
         );
         assert_eq!(output.len(), 16);
+    }
+
+    #[test]
+    fn tls13_handshake_and_application_key_schedule_has_expected_lengths() {
+        let handshake = derive_handshake_traffic_keys(
+            Tls13CipherSuite::Aes128GcmSha256,
+            &[3u8; 32],
+            b"client hello server hello",
+        );
+        assert_eq!(handshake.secret.len(), 32);
+        let application = derive_application_traffic_keys(
+            Tls13CipherSuite::Aes128GcmSha256,
+            &handshake.secret,
+            b"complete handshake transcript",
+        );
+        assert_eq!(application.secret.len(), 32);
+        let record = application.server.seal(23, b"application", 0).unwrap();
+        assert_eq!(
+            application.server.open(&record, 0).unwrap(),
+            (23, b"application".to_vec())
+        );
     }
 }
