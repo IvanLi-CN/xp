@@ -1,3 +1,4 @@
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
@@ -213,6 +214,17 @@ impl ProxySnapshot {
             if listener.reality.server_names.is_empty() || listener.reality.short_ids.is_empty() {
                 return Err("REALITY server_names and short_ids must not be empty".into());
             }
+            if listener.reality.short_ids.iter().any(|short_id| {
+                short_id.len() != 16 || !short_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+            }) {
+                return Err("REALITY short_id must be 16 hexadecimal characters".into());
+            }
+            let private_key = URL_SAFE_NO_PAD
+                .decode(&listener.reality.private_key)
+                .map_err(|_| "REALITY private_key must be base64url without padding".to_string())?;
+            if private_key.len() != 32 {
+                return Err("REALITY private_key must decode to 32 bytes".into());
+            }
             for fallback in &listener.fallbacks {
                 let target = crate::fallback::FallbackTarget::parse(&fallback.target)?;
                 let authorities = fallback
@@ -261,7 +273,7 @@ mod tests {
                 reality: RealitySnapshot {
                     server_names: vec!["example.test".into()],
                     short_ids: vec!["0123456789abcdef".into()],
-                    private_key: "key".into(),
+                    private_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
                 },
                 fallbacks: Vec::new(),
             }],
@@ -278,5 +290,12 @@ mod tests {
         manager.activate().unwrap();
         assert!(manager.prepare(snapshot(1)).is_err());
         assert_eq!(manager.state(), (GenerationState::Active, Some(1)));
+    }
+
+    #[test]
+    fn snapshot_validation_rejects_malformed_reality_key() {
+        let mut invalid = snapshot(1);
+        invalid.listeners[0].reality.private_key = "key".into();
+        assert!(invalid.validate().is_err());
     }
 }

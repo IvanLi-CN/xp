@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+base64 = "0.22"
 bytes = "1"
 aes-gcm = "0.10"
 hkdf = "0.12"
