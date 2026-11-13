@@ -17,7 +17,8 @@ use tokio::{
 use tracing::{error, info};
 use uuid::Uuid;
 use xp_proxy_core::{
-    FallbackSnapshot, ListenerSnapshot, ProxySnapshot, RealitySnapshot, UserSnapshot,
+    CONTROL_PROTOCOL_VERSION, FallbackSnapshot, ListenerSnapshot, ProxySnapshot, RealitySnapshot,
+    UserSnapshot,
     control::{ControlOperation, ControlRequest, ControlResponse, decode_frame, encode_frame},
 };
 
@@ -68,22 +69,36 @@ pub async fn publish_snapshot(
     let generation = snapshot.generation;
     let mut stream = UnixStream::connect(socket).await?;
     let request = ControlRequest {
-        protocol_version: snapshot.protocol_version,
+        protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: Uuid::new_v4().to_string(),
         generation,
         operation: ControlOperation::Prepare { snapshot },
     };
+    let request_id = request.request_id.clone();
     let response = send_request(&mut stream, request).await?;
+    if response.request_id != request_id {
+        anyhow::bail!("native proxy prepare response request_id mismatch");
+    }
+    if response.protocol_version != CONTROL_PROTOCOL_VERSION {
+        anyhow::bail!("native proxy prepare returned unsupported protocol version");
+    }
     if let Some(error) = response.error {
         anyhow::bail!("native proxy prepare failed: {error}");
     }
     let request = ControlRequest {
-        protocol_version: response.protocol_version,
+        protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: Uuid::new_v4().to_string(),
         generation,
         operation: ControlOperation::Activate,
     };
+    let request_id = request.request_id.clone();
     let response = send_request(&mut stream, request).await?;
+    if response.request_id != request_id {
+        anyhow::bail!("native proxy activate response request_id mismatch");
+    }
+    if response.protocol_version != CONTROL_PROTOCOL_VERSION {
+        anyhow::bail!("native proxy activate returned unsupported protocol version");
+    }
     if let Some(error) = response.error {
         anyhow::bail!("native proxy activate failed: {error}");
     }

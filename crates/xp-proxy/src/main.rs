@@ -8,7 +8,7 @@ use tokio::{
     time::{Duration, timeout},
 };
 use xp_proxy_core::{
-    GenerationManager, ProxySnapshot, TrafficCounter,
+    CONTROL_PROTOCOL_VERSION, GenerationManager, ProxySnapshot, TrafficCounter,
     control::{ControlOperation, ControlRequest, ControlResponse, decode_frame, encode_frame},
     fallback::FallbackTarget,
     reality::authenticate_client_hello_with_policy,
@@ -348,6 +348,9 @@ async fn handle_control(
         let mut frame = header.to_vec();
         frame.extend_from_slice(&body);
         let request: ControlRequest = decode_frame(&frame).map_err(anyhow::Error::msg)?;
+        if request.protocol_version != CONTROL_PROTOCOL_VERSION {
+            anyhow::bail!("unsupported control protocol version");
+        }
         let (_, active) = manager.state();
         let result = match request.operation {
             ControlOperation::Prepare { snapshot } => manager

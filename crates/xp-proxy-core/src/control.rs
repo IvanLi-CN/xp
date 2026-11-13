@@ -4,6 +4,8 @@ use std::sync::{Arc, RwLock};
 
 use crate::metrics::TrafficSnapshot;
 
+pub const CONTROL_PROTOCOL_VERSION: u16 = 1;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GenerationState {
