@@ -61,3 +61,9 @@ pub mod version;
 pub mod vless_https_canary;
 pub mod xray;
 pub mod xray_supervisor;
+
+#[cfg(test)]
+#[ctor::ctor]
+fn install_test_rustls_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
