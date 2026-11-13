@@ -726,7 +726,6 @@ fn quiet_sqlite_repository_compacts_at_the_exact_tiered_retention_boundaries() {
     let identity = identity(&key);
     let policy = super::super::RepositoryRetentionPolicy::default();
     let now = policy.max_age_seconds().saturating_add(10_000);
-    let day = 24 * 60 * 60;
     let timestamps = [
         now.saturating_sub(policy.max_age_seconds())
             .saturating_sub(1),
@@ -775,11 +774,9 @@ fn quiet_sqlite_repository_compacts_at_the_exact_tiered_retention_boundaries() {
         .collect::<Vec<_>>();
     resolutions.sort();
     assert_eq!(resolutions, vec!["five_minutes", "hour"]);
-    assert!(
-        records
-            .iter()
-            .any(|record| record.observed_at_unix_seconds == now.saturating_sub(7 * day))
-    );
+    assert!(records.iter().any(|record| {
+        record.observed_at_unix_seconds == now.saturating_sub(policy.minute_retention_seconds())
+    }));
 }
 
 #[test]
