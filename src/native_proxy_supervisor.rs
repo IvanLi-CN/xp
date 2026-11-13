@@ -220,6 +220,8 @@ async fn send_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{Endpoint, EndpointKind, User};
+    use crate::state::NodeUserEndpointMembership;
     use clap::Parser;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
@@ -291,5 +293,57 @@ mod tests {
         .unwrap();
         publish_snapshot(&socket, snapshot).await.unwrap();
         task.await.unwrap();
+    }
+
+    #[test]
+    fn builds_xhttp_snapshot_from_local_endpoint_membership() {
+        let endpoint = Endpoint {
+            endpoint_id: "endpoint-1".into(),
+            node_id: "node-1".into(),
+            tag: "vless-xhttp".into(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::json!({
+                "reality": {
+                    "dest": "origin.example:443",
+                    "server_names": ["origin.example"],
+                    "fingerprint": "chrome"
+                },
+                "reality_keys": {
+                    "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                    "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                },
+                "short_ids": ["0000000000000000"],
+                "active_short_id": "0000000000000000",
+                "transport": "xhttp",
+                "canary_upstream": {"url": "https://canary.example/"},
+                "accepted_authorities": ["canary.example"]
+            }),
+        };
+        let user = User {
+            user_id: "user-1".into(),
+            display_name: "User".into(),
+            subscription_token: "token".into(),
+            credential_epoch: 3,
+            priority_tier: Default::default(),
+            quota_reset: Default::default(),
+        };
+        let users = BTreeMap::from([(user.user_id.clone(), user)]);
+        let memberships = vec![NodeUserEndpointMembership {
+            user_id: "user-1".into(),
+            node_id: "node-1".into(),
+            endpoint_id: "endpoint-1".into(),
+        }];
+        let snapshot =
+            build_snapshot("node-1", &[endpoint], &users, &memberships, "cluster-key").unwrap();
+        assert_eq!(snapshot.listeners.len(), 1);
+        assert_eq!(snapshot.listeners[0].bind, "0.0.0.0:443");
+        assert_eq!(snapshot.listeners[0].path, "/xp-xhttp");
+        assert_eq!(
+            snapshot.listeners[0].fallbacks[0].target,
+            "https://canary.example/"
+        );
+        assert_eq!(snapshot.users.len(), 1);
+        assert!(uuid::Uuid::parse_str(&snapshot.users[0].uuid).is_ok());
     }
 }
