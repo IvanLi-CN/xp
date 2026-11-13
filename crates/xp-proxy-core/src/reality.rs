@@ -130,6 +130,32 @@ pub fn authenticate_client_hello(
     server_private_key: [u8; 32],
     allowed_short_ids: &[[u8; 8]],
 ) -> Result<AuthenticatedClientHello, RealityCryptoError> {
+    authenticate_client_hello_with_policy(
+        hello,
+        server_private_key,
+        allowed_short_ids,
+        &[],
+        None,
+        0,
+    )
+}
+
+pub fn authenticate_client_hello_with_policy(
+    hello: &ClientHelloInfo,
+    server_private_key: [u8; 32],
+    allowed_short_ids: &[[u8; 8]],
+    allowed_server_names: &[String],
+    max_time_diff_secs: Option<u64>,
+    now_unix_secs: u64,
+) -> Result<AuthenticatedClientHello, RealityCryptoError> {
+    if !allowed_server_names.is_empty()
+        && !hello
+            .server_name
+            .as_ref()
+            .is_some_and(|name| allowed_server_names.iter().any(|allowed| allowed == name))
+    {
+        return Err(RealityCryptoError::InvalidCiphertext);
+    }
     let client_public = hello
         .x25519_key_share
         .as_ref()
@@ -162,6 +188,12 @@ pub fn authenticate_client_hello(
         .any(|short_id| short_id == &metadata.short_id)
     {
         return Err(RealityCryptoError::InvalidCiphertext);
+    }
+    if let Some(max_time_diff_secs) = max_time_diff_secs {
+        let diff = now_unix_secs.abs_diff(u64::from(metadata.unix_seconds));
+        if diff > max_time_diff_secs {
+            return Err(RealityCryptoError::InvalidCiphertext);
+        }
     }
     Ok(AuthenticatedClientHello {
         auth_key,
@@ -238,5 +270,50 @@ mod tests {
             authenticate_client_hello(&hello, server_private, &[[0xaa; 8]]).unwrap();
         assert_eq!(authenticated.auth_key, auth_key);
         assert_eq!(authenticated.session.short_id, [0xaa; 8]);
+    }
+
+    #[test]
+    fn policy_checks_server_name_and_session_time() {
+        let client_private = [5u8; 32];
+        let server_private = [6u8; 32];
+        let client_public = PublicKey::from(&StaticSecret::from(client_private));
+        let server_public = PublicKey::from(&StaticSecret::from(server_private));
+        let random = [11u8; 32];
+        let session_id = build_session_id(*b"1.8\0", 100, &[0xaa; 8], &[0; 16]).unwrap();
+        let original = vec![0u8; 4 + SESSION_ID_LEN + 35];
+        let auth_key = derive_auth_key(client_private, server_public.to_bytes(), random);
+        let sealed = seal_session_id(auth_key, random, &session_id, &original).unwrap();
+        let hello = ClientHelloInfo {
+            record: Vec::new(),
+            handshake: original,
+            session_id_offset: 4 + 35,
+            random,
+            session_id: sealed,
+            server_name: Some("example.com".to_owned()),
+            x25519_key_share: Some(client_public.to_bytes().to_vec()),
+        };
+        let names = vec!["example.com".to_owned()];
+        assert!(
+            authenticate_client_hello_with_policy(
+                &hello,
+                server_private,
+                &[[0xaa; 8]],
+                &names,
+                Some(5),
+                103,
+            )
+            .is_ok()
+        );
+        assert!(
+            authenticate_client_hello_with_policy(
+                &hello,
+                server_private,
+                &[[0xaa; 8]],
+                &names,
+                Some(2),
+                103,
+            )
+            .is_err()
+        );
     }
 }
