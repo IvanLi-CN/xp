@@ -59,6 +59,10 @@ pub fn finished_key(suite: Tls13CipherSuite, traffic_secret: &[u8]) -> Vec<u8> {
     hkdf_expand_label(suite, traffic_secret, b"finished", &[], suite.hash_len())
 }
 
+pub fn update_traffic_secret(suite: Tls13CipherSuite, traffic_secret: &[u8]) -> Vec<u8> {
+    hkdf_expand_label(suite, traffic_secret, b"traffic upd", &[], suite.hash_len())
+}
+
 pub fn finished_verify_data(
     suite: Tls13CipherSuite,
     traffic_secret: &[u8],
@@ -364,6 +368,24 @@ mod tests {
             )
             .unwrap_err(),
             Tls13RecordError::InvalidFinished
+        );
+    }
+
+    #[test]
+    fn traffic_update_changes_key_material_and_preserves_record_roundtrip() {
+        let secret = [7u8; 32];
+        let next = update_traffic_secret(Tls13CipherSuite::Aes128GcmSha256, &secret);
+        assert_ne!(next, secret);
+        let old_key = Tls13TrafficKey::from_secret(Tls13CipherSuite::Aes128GcmSha256, &secret);
+        let next_key = Tls13TrafficKey::from_secret(Tls13CipherSuite::Aes128GcmSha256, &next);
+        let record = next_key.seal(23, b"after key update", 0).unwrap();
+        assert_eq!(
+            next_key.open(&record, 0).unwrap(),
+            (23, b"after key update".to_vec())
+        );
+        assert_eq!(
+            old_key.open(&record, 0).unwrap_err(),
+            Tls13RecordError::AuthenticationFailed
         );
     }
 }
