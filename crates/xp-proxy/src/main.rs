@@ -72,8 +72,8 @@ async fn handle_control(mut stream: UnixStream, manager: GenerationManager) -> R
                 .prepare(snapshot)
                 .map(|_| manager.state().1.unwrap_or(request.generation)),
             ControlOperation::Activate => manager.activate(),
-            ControlOperation::Drain => Ok(active.unwrap_or(request.generation)),
-            ControlOperation::Stop => Ok(active.unwrap_or(request.generation)),
+            ControlOperation::Drain => Ok(manager.drain().or(active).unwrap_or(request.generation)),
+            ControlOperation::Stop => Ok(manager.stop().or(active).unwrap_or(request.generation)),
             ControlOperation::Status => Ok(active.unwrap_or(request.generation)),
         };
         let error = result.as_ref().err().cloned();

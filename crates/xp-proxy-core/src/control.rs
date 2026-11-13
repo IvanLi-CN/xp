@@ -153,6 +153,23 @@ impl GenerationManager {
             inner.active.as_ref().map(|snapshot| snapshot.generation),
         )
     }
+
+    pub fn drain(&self) -> Option<u64> {
+        let mut inner = self.inner.write().expect("generation lock poisoned");
+        if inner.active.is_some() {
+            inner.state = GenerationState::Draining;
+        }
+        inner.active.as_ref().map(|snapshot| snapshot.generation)
+    }
+
+    pub fn stop(&self) -> Option<u64> {
+        let mut inner = self.inner.write().expect("generation lock poisoned");
+        let generation = inner.active.as_ref().map(|snapshot| snapshot.generation);
+        if generation.is_some() {
+            inner.state = GenerationState::Stopped;
+        }
+        generation
+    }
 }
 
 impl ProxySnapshot {
@@ -201,5 +218,33 @@ mod tests {
             users: vec![],
         };
         assert!(snapshot.validate().is_err());
+    }
+
+    fn snapshot(generation: u64) -> ProxySnapshot {
+        ProxySnapshot {
+            protocol_version: 1,
+            generation,
+            listeners: vec![ListenerSnapshot {
+                bind: "127.0.0.1:443".into(),
+                path: "/xp-xhttp".into(),
+                reality: RealitySnapshot {
+                    server_names: vec!["example.test".into()],
+                    short_ids: vec!["0123456789abcdef".into()],
+                    private_key: "key".into(),
+                },
+            }],
+            users: vec![UserSnapshot {
+                uuid: uuid::Uuid::nil().to_string(),
+            }],
+        }
+    }
+
+    #[test]
+    fn failed_prepare_preserves_active_generation() {
+        let manager = GenerationManager::new();
+        manager.prepare(snapshot(1)).unwrap();
+        manager.activate().unwrap();
+        assert!(manager.prepare(snapshot(1)).is_err());
+        assert_eq!(manager.state(), (GenerationState::Active, Some(1)));
     }
 }
