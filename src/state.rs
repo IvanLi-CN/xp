@@ -2409,6 +2409,7 @@ impl DesiredStateCommand {
 
                 let mut endpoint = endpoint.clone();
                 if endpoint.kind == EndpointKind::VlessRealityVisionTcp {
+                    let ingress_owner = endpoint.meta.get("ingress_owner").cloned();
                     let had_mihomo_smux = endpoint.meta.get("mihomo_smux").is_some();
                     let mut meta: VlessRealityVisionTcpEndpointMeta =
                         serde_json::from_value(endpoint.meta.clone())?;
@@ -2496,6 +2497,9 @@ impl DesiredStateCommand {
                         .into());
                     }
                     endpoint.meta = serialize_vless_meta_preserving_smux(meta, had_mihomo_smux)?;
+                    if let Some(ingress_owner) = ingress_owner {
+                        endpoint.meta["ingress_owner"] = ingress_owner;
+                    }
                 }
 
                 state
