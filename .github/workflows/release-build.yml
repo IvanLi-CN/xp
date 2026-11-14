@@ -132,11 +132,13 @@ jobs:
           CROSS_CONTAINER_OPTS: -e XP_BUILD_VERSION=${{ inputs.build_version }}
           CARGO_TARGET_DIR: target/cross-${{ matrix.target }}
         run: |
-          cross build --release --locked --target "${{ matrix.target }}" --bin xp --bin xp-ops
+          cross build --release --locked --target "${{ matrix.target }}" \
+            --bin xp --bin xp-ops --bin xp-proxy
           mkdir release
           source_dir="${CARGO_TARGET_DIR}/${{ matrix.target }}/release"
           cp "${source_dir}/xp" "release/xp-linux-${{ matrix.suffix }}"
           cp "${source_dir}/xp-ops" "release/xp-ops-linux-${{ matrix.suffix }}"
+          cp "${source_dir}/xp-proxy" "release/xp-proxy-linux-${{ matrix.suffix }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with: {name: "musl-${{ inputs.artifact_prefix }}-${{ matrix.suffix }}", path: release}
 
