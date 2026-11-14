@@ -1,6 +1,10 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, RwLock},
+};
 
 use crate::metrics::TrafficSnapshot;
 
@@ -173,20 +177,52 @@ pub fn decode_frame<T: for<'de> Deserialize<'de>>(frame: &[u8]) -> Result<T, Str
 #[derive(Debug, Clone)]
 pub struct GenerationManager {
     inner: Arc<RwLock<GenerationInner>>,
+    persistence_path: Option<Arc<PathBuf>>,
 }
 
 #[derive(Debug, Default)]
 struct GenerationInner {
     active: Option<ProxySnapshot>,
     prepared: Option<ProxySnapshot>,
+    last_successful: Option<ProxySnapshot>,
     state: GenerationState,
 }
 
 impl GenerationManager {
     pub fn new() -> Self {
+        Self::with_persistence(None).expect("in-memory generation manager must initialize")
+    }
+
+    pub fn new_with_persistence(path: impl Into<PathBuf>) -> Result<Self, String> {
+        Self::with_persistence(Some(path.into()))
+    }
+
+    fn with_persistence(path: Option<PathBuf>) -> Result<Self, String> {
+        let last_successful = path
+            .as_deref()
+            .filter(|path| path.exists())
+            .map(|path| -> Result<ProxySnapshot, String> {
+                let snapshot: ProxySnapshot = serde_json::from_slice(
+                    &fs::read(path).map_err(|error| format!("read persisted snapshot: {error}"))?,
+                )
+                .map_err(|error| format!("decode persisted snapshot: {error}"))?;
+                snapshot.validate()?;
+                Ok(snapshot)
+            })
+            .transpose()?;
         Self {
             inner: Arc::new(RwLock::new(GenerationInner::default())),
+            persistence_path: path.map(Arc::new),
         }
+        .with_last_successful(last_successful)
+    }
+
+    fn with_last_successful(self, snapshot: Option<ProxySnapshot>) -> Result<Self, String> {
+        self.inner
+            .write()
+            .map_err(|_| "generation lock poisoned".to_string())?
+            .last_successful = snapshot;
+        Ok(self)
     }
 
     pub fn prepare(&self, snapshot: ProxySnapshot) -> Result<(), String> {
@@ -209,9 +245,15 @@ impl GenerationManager {
         let mut inner = self.inner.write().expect("generation lock poisoned");
         let snapshot = inner
             .prepared
-            .take()
+            .as_ref()
+            .cloned()
             .ok_or_else(|| "no prepared generation".to_string())?;
+        if let Some(path) = self.persistence_path.as_deref() {
+            persist_snapshot(path, &snapshot)?;
+        }
         let generation = snapshot.generation;
+        inner.prepared.take();
+        inner.last_successful = Some(snapshot.clone());
         inner.active = Some(snapshot);
         inner.state = GenerationState::Active;
         Ok(generation)
@@ -241,6 +283,14 @@ impl GenerationManager {
             .clone()
     }
 
+    pub fn last_successful_snapshot(&self) -> Option<ProxySnapshot> {
+        self.inner
+            .read()
+            .expect("generation lock poisoned")
+            .last_successful
+            .clone()
+    }
+
     pub fn drain(&self) -> Option<u64> {
         let mut inner = self.inner.write().expect("generation lock poisoned");
         if inner.active.is_some() {
@@ -257,6 +307,41 @@ impl GenerationManager {
         }
         generation
     }
+}
+
+fn persist_snapshot(path: &Path, snapshot: &ProxySnapshot) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "persisted snapshot has no parent directory".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("create snapshot directory: {error}"))?;
+    let mut directory_permissions = fs::metadata(parent)
+        .map_err(|error| format!("stat snapshot directory: {error}"))?
+        .permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        directory_permissions.set_mode(0o700);
+    }
+    fs::set_permissions(parent, directory_permissions)
+        .map_err(|error| format!("protect snapshot directory: {error}"))?;
+    let temporary = path.with_extension("tmp");
+    fs::write(
+        &temporary,
+        serde_json::to_vec(snapshot)
+            .map_err(|error| format!("encode persisted snapshot: {error}"))?,
+    )
+    .map_err(|error| format!("write persisted snapshot: {error}"))?;
+    let mut permissions = fs::metadata(&temporary)
+        .map_err(|error| format!("stat persisted snapshot: {error}"))?
+        .permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o600);
+    }
+    fs::set_permissions(&temporary, permissions)
+        .map_err(|error| format!("protect persisted snapshot: {error}"))?;
+    fs::rename(&temporary, path).map_err(|error| format!("commit persisted snapshot: {error}"))
 }
 
 impl Default for GenerationManager {
@@ -364,6 +449,21 @@ mod tests {
         manager.activate().unwrap();
         assert!(manager.prepare(snapshot(1)).is_err());
         assert_eq!(manager.state(), (GenerationState::Active, Some(1)));
+    }
+
+    #[test]
+    fn persistence_restores_diagnostics_without_reactivating_snapshot() {
+        let directory = std::env::temp_dir().join(format!("xp-proxy-{}", uuid::Uuid::new_v4()));
+        let path = directory.join("last-successful-snapshot.json");
+        let manager = GenerationManager::new_with_persistence(&path).unwrap();
+        manager.prepare(snapshot(7)).unwrap();
+        manager.activate().unwrap();
+        assert_eq!(manager.state(), (GenerationState::Active, Some(7)));
+
+        let restarted = GenerationManager::new_with_persistence(&path).unwrap();
+        assert_eq!(restarted.state(), (GenerationState::Idle, None));
+        assert_eq!(restarted.last_successful_snapshot().unwrap().generation, 7);
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

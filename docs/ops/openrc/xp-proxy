@@ -4,7 +4,7 @@ name="xp-proxy"
 description="xp-proxy native VLESS XHTTP data plane"
 
 command="/usr/local/bin/xp-proxy"
-command_args="--control-socket /run/xp-proxy/xp-proxy.sock"
+command_args="--control-socket /run/xp-proxy/xp-proxy.sock --state-file /var/lib/xp-proxy/last-successful-snapshot.json"
 command_user="xp-proxy:xp-proxy"
 supervisor=supervise-daemon
 respawn_delay=2

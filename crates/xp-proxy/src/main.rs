@@ -29,6 +29,11 @@ struct Args {
     validate_snapshot: Option<std::path::PathBuf>,
     #[arg(long)]
     control_socket: Option<std::path::PathBuf>,
+    #[arg(
+        long,
+        default_value = "/var/lib/xp-proxy/last-successful-snapshot.json"
+    )]
+    state_file: std::path::PathBuf,
     #[arg(long)]
     snapshot: Option<std::path::PathBuf>,
     /// Runs the explicit Rust outbound client instead of the control-plane listener.
@@ -113,7 +118,8 @@ async fn main() -> Result<()> {
     }
     let listener = UnixListener::bind(&socket)?;
     std::fs::set_permissions(&socket, std::os::unix::fs::PermissionsExt::from_mode(0o660))?;
-    let manager = GenerationManager::new();
+    let manager =
+        GenerationManager::new_with_persistence(&args.state_file).map_err(anyhow::Error::msg)?;
     let traffic = Arc::new(TrafficCounter::default());
     let listener_runtime = Arc::new(ListenerRuntime::default());
     if let Some(path) = args.snapshot {
