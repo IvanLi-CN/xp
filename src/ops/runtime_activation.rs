@@ -19,7 +19,10 @@ enum OpenrcServiceState {
 
 pub fn reload_systemd_units(paths: &Paths) -> bool {
     let systemd = paths.systemd_unit_dir();
-    if !systemd.join("xray.service").exists() && !systemd.join("cloudflared.service").exists() {
+    if !systemd.join("xray.service").exists()
+        && !systemd.join("cloudflared.service").exists()
+        && !systemd.join("xp-proxy.service").exists()
+    {
         return true;
     }
     if service_commands_are_disabled(paths) {
@@ -42,6 +45,25 @@ pub fn start_xp_service(paths: &Paths) -> bool {
 
 pub fn stop_xp_service(paths: &Paths) -> bool {
     stop_service(paths, "xp.service", "xp")
+}
+
+pub fn start_xp_proxy_service(paths: &Paths) -> bool {
+    if !xp_proxy_service_installed(paths) {
+        return true;
+    }
+    start_service(paths, "xp-proxy.service", "xp-proxy")
+}
+
+pub fn stop_xp_proxy_service(paths: &Paths) -> bool {
+    if !xp_proxy_service_installed(paths) {
+        return true;
+    }
+    stop_service(paths, "xp-proxy.service", "xp-proxy")
+}
+
+fn xp_proxy_service_installed(paths: &Paths) -> bool {
+    paths.systemd_unit_dir().join("xp-proxy.service").exists()
+        || paths.openrc_initd_dir().join("xp-proxy").exists()
 }
 
 pub fn restart_cloudflared_service(paths: &Paths) -> bool {
