@@ -462,14 +462,15 @@ pub(super) async fn upgrade_managed_runtime_binaries(
     }
 
     let mut installed = Vec::new();
-    for (asset, dest) in [
+    let mut assets = vec![
         (xray_asset, paths.usr_local_bin_xray()),
         (cloudflared_asset, managed_cloudflared_dest(paths)),
-        (
-            xp_proxy_asset_name(platform),
-            paths.usr_local_bin_xp_proxy(),
-        ),
-    ] {
+    ];
+    let xp_proxy_asset = xp_proxy_asset_name(platform);
+    if find_asset_url(release, xp_proxy_asset).is_some() && checksums.contains_key(xp_proxy_asset) {
+        assets.push((xp_proxy_asset, paths.usr_local_bin_xp_proxy()));
+    }
+    for (asset, dest) in assets {
         match install_release_binary(release, checksums, asset, &dest).await {
             Ok(backup) => installed.push(backup),
             Err(err) => {
