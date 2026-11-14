@@ -623,14 +623,30 @@ raise SystemExit("node meta sync failed: updated node not found")
   compose exec -T tool curl -fsS --cacert /vol/xp1/cluster/cluster_ca.pem \
     https://xp1-alt:6443/api/cluster/info >/dev/null
 
-  # Write from follower must still succeed (tests follower->leader forwarding).
+  # Write from follower must still succeed (tests follower->leader forwarding). Node metadata
+  # mutations intentionally require the local leader, so use a regular desired-state write here.
+  user_id="$(
+    compose exec -T xp1-app curl -fsS \
+      --cacert /data/cluster/cluster_ca.pem \
+      -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
+      https://xp1:6443/api/admin/users | python3 -c '
+import json
+import sys
+
+for user in json.load(sys.stdin).get("items", []):
+    if user.get("display_name") == "alice":
+        print(user["user_id"])
+        raise SystemExit(0)
+raise SystemExit("alice not found")
+'
+  )"
   compose exec -T tool curl -fsS \
     --cacert /vol/xp1/cluster/cluster_ca.pem \
     -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
     -H "Content-Type: application/json" \
     -X PATCH \
-    -d '{"quota_reset":{"policy":"unlimited"}}' \
-    "https://xp2:6443/api/admin/nodes/${node1_id}" >/dev/null
+    -d '{"display_name":"alice"}' \
+    "https://xp2:6443/api/admin/users/${user_id}" >/dev/null
 
   echo "meta sync ok (API edit blocked; xp-ops sync updates state+membership; forwarding works)"
 }
