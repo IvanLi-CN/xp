@@ -463,13 +463,16 @@ impl ManagedEndpointSpec for DefaultVlessEndpointSpec {
             transport: crate::protocol::VlessRealityTransport::Xhttp,
             managed_default: true,
         };
+        let mut meta =
+            serde_json::to_value(meta).context("serialize managed default VLESS endpoint")?;
+        meta["ingress_owner"] = serde_json::json!("xray");
         Ok(Endpoint {
             endpoint_id: endpoint_id.clone(),
             node_id,
             tag: managed_endpoint_tag(ManagedDefaultEndpointKind::Vless, &endpoint_id),
             kind: EndpointKind::VlessRealityVisionTcp,
             port: self.port,
-            meta: serde_json::to_value(meta).context("serialize managed default VLESS endpoint")?,
+            meta,
         })
     }
 

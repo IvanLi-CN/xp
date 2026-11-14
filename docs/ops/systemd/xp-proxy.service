@@ -1,0 +1,20 @@
+[Unit]
+Description=xp-proxy native VLESS XHTTP data plane
+Wants=network-online.target
+After=network-online.target
+Before=xp.service
+
+[Service]
+Type=simple
+User=xp-proxy
+Group=xp-proxy
+RuntimeDirectory=xp-proxy
+RuntimeDirectoryMode=0770
+ExecStart=/usr/local/bin/xp-proxy --control-socket /run/xp-proxy/xp-proxy.sock
+Restart=always
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+#!/sbin/openrc-run
+
+name="xp-proxy"
+description="xp-proxy native VLESS XHTTP data plane"
+
+command="/usr/local/bin/xp-proxy"
+command_args="--control-socket /run/xp-proxy/xp-proxy.sock"
+command_user="xp-proxy:xp-proxy"
+supervisor=supervise-daemon
+respawn_delay=2
+respawn_max=0
+
+start_pre() {
+  checkpath -d -m 0770 -o xp-proxy:xp-proxy /run/xp-proxy
+}
+
+depend() {
+  need net
+  before xp
+}
