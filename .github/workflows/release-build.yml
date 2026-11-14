@@ -132,8 +132,8 @@ jobs:
           CROSS_CONTAINER_OPTS: -e XP_BUILD_VERSION=${{ inputs.build_version }}
           CARGO_TARGET_DIR: target/cross-${{ matrix.target }}
         run: |
-          cross build --release --locked --target "${{ matrix.target }}" \
-            --bin xp --bin xp-ops --bin xp-proxy
+          cross build --release --locked --target "${{ matrix.target }}" --bin xp --bin xp-ops
+          cross build --release --locked --target "${{ matrix.target }}" -p xp-proxy
           mkdir release
           source_dir="${CARGO_TARGET_DIR}/${{ matrix.target }}/release"
           cp "${source_dir}/xp" "release/xp-linux-${{ matrix.suffix }}"
