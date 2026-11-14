@@ -80,7 +80,7 @@ jobs:
         with: {pattern: "*-${{ github.run_id }}-*", path: release, merge-multiple: true}
       - name: verify asset manifest
         run: |
-          test "$(find release -maxdepth 1 -type f | wc -l)" -eq 8
+          test "$(find release -maxdepth 1 -type f | wc -l)" -eq 10
           (cd release && sha256sum -- *-linux-* > checksums.txt && sha256sum --check checksums.txt)
       - uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
