@@ -11,6 +11,7 @@ use crate::{
 };
 
 use anyhow::Context;
+use axum::http::{HeaderMap, Uri};
 use openraft::{
     RaftNetwork, RaftNetworkFactory,
     error::{RPCError, RaftError, RemoteError},
@@ -200,6 +201,7 @@ impl HttpNetwork {
         let resp = if let Some(mesh_auth) = &self.mesh_auth {
             let body = serde_json::to_vec(req).context("serialize raft rpc")?;
             let target = mesh_target_for_raft(&mesh_auth.store, self.target).await?;
+            let request_id = ulid::Ulid::new().to_string();
             match self
                 .client
                 .send_peer_request(
@@ -208,12 +210,12 @@ impl HttpNetwork {
                         method: reqwest::Method::POST,
                         path_and_query: path.to_string(),
                         content_type: Some("application/json".to_string()),
-                        body,
+                        body: body.clone(),
                         total_budget: option.hard_ttl(),
                         // Raft RPCs are protocol-idempotent. The same request id is preserved
                         // across the Mesh/public attempt inside this call.
                         allow_ambiguous_fallback: true,
-                        request_id: ulid::Ulid::new().to_string(),
+                        request_id: request_id.clone(),
                         route: InternalRoute::MeshV2,
                         cluster_id: mesh_auth.cluster_id.clone(),
                         sender_id: mesh_auth.sender_id.clone(),
@@ -225,15 +227,43 @@ impl HttpNetwork {
                 .await
             {
                 Ok(response) => response,
-                Err(MeshRequestError::CircuitOpen { .. }) => self
-                    .client
-                    .direct()
-                    .post(url.clone())
-                    .timeout(option.hard_ttl())
-                    .json(req)
-                    .send()
-                    .await
-                    .context("Raft direct recovery request")?,
+                Err(MeshRequestError::CircuitOpen { .. }) => {
+                    let uri = path.parse::<Uri>().context("parse Raft request URI")?;
+                    let mut headers = HeaderMap::new();
+                    headers.insert("content-type", "application/json".parse()?);
+                    headers.insert("content-length", body.len().to_string().parse()?);
+                    let context = crate::internal_auth::RequestContext::now(
+                        InternalRoute::MeshV2,
+                        mesh_auth.cluster_id.clone(),
+                        mesh_auth.sender_id.clone(),
+                        target.node_id.clone(),
+                        request_id,
+                    );
+                    crate::internal_auth::sign_request_v2(
+                        &mesh_auth.cluster_ca_key_pem,
+                        &mesh_auth.cluster_ca_cert_pem,
+                        &reqwest::Method::POST,
+                        &uri,
+                        Some("application/json"),
+                        &body,
+                        &context,
+                        &mut headers,
+                    )
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                    let mut request = self
+                        .client
+                        .direct()
+                        .post(url.clone())
+                        .timeout(option.hard_ttl())
+                        .body(body);
+                    for (name, value) in &headers {
+                        request = request.header(name, value);
+                    }
+                    request
+                        .send()
+                        .await
+                        .context("Raft direct recovery request")?
+                }
                 Err(error) => return Err(anyhow::anyhow!(error.to_string())),
             }
         } else {
