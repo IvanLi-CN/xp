@@ -3,7 +3,18 @@ use std::collections::BTreeMap;
 use axum::{Extension, Json};
 use serde::Deserialize;
 
+use crate::raft::types::{NodeId, NodeMeta as RaftNodeMeta};
+
 use super::*;
+
+fn replace_membership_node(
+    mut nodes: BTreeMap<NodeId, RaftNodeMeta>,
+    node_id: NodeId,
+    node_meta: RaftNodeMeta,
+) -> BTreeMap<NodeId, RaftNodeMeta> {
+    nodes.insert(node_id, node_meta);
+    nodes
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,21 +85,66 @@ pub(super) async fn admin_internal_update_node_metadata(
     )
     .await?;
 
+    let membership_nodes = metrics
+        .membership_config
+        .nodes()
+        .map(|(node_id, node_meta)| (*node_id, node_meta.clone()))
+        .collect::<BTreeMap<NodeId, RaftNodeMeta>>();
+    let membership_nodes = replace_membership_node(
+        membership_nodes,
+        raft_node_id,
+        RaftNodeMeta {
+            name: request.node_name,
+            api_base_url: request.api_base_url.clone(),
+            raft_endpoint: request.api_base_url,
+        },
+    );
+
     state
         .raft
-        .change_membership(
-            openraft::ChangeMembers::SetNodes(BTreeMap::from([(
-                raft_node_id,
-                RaftNodeMeta {
-                    name: request.node_name,
-                    api_base_url: request.api_base_url.clone(),
-                    raft_endpoint: request.api_base_url,
-                },
-            )])),
-            true,
-        )
+        .change_membership(openraft::ChangeMembers::SetNodes(membership_nodes), true)
         .await
         .map_err(|error| ApiError::internal(format!("set node metadata: {error}")))?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_update_preserves_the_other_members() {
+        let nodes = BTreeMap::from([
+            (
+                1,
+                RaftNodeMeta {
+                    name: "node-1".into(),
+                    api_base_url: "https://xp1:6443".into(),
+                    raft_endpoint: "https://xp1:6443".into(),
+                },
+            ),
+            (
+                2,
+                RaftNodeMeta {
+                    name: "node-2".into(),
+                    api_base_url: "https://xp2:6443".into(),
+                    raft_endpoint: "https://xp2:6443".into(),
+                },
+            ),
+        ]);
+        let nodes = replace_membership_node(
+            nodes,
+            1,
+            RaftNodeMeta {
+                name: "node-1".into(),
+                api_base_url: "https://xp1-alt:6443".into(),
+                raft_endpoint: "https://xp1-alt:6443".into(),
+            },
+        );
+
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes.get(&2).unwrap().api_base_url, "https://xp2:6443");
+        assert_eq!(nodes.get(&1).unwrap().api_base_url, "https://xp1-alt:6443");
+    }
 }
