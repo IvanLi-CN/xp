@@ -85,8 +85,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "${EVIDENCE_REF}" =~ ^[0-9a-f]{40}$ ]]
-          git fetch --no-tags origin "${EVIDENCE_REF}"
-          evidence_commit="$(git rev-parse "${EVIDENCE_REF}^{commit}")"
+          git fetch --no-tags origin "${EVIDENCE_REF}:refs/tmp/release-evidence"
+          evidence_commit="$(git rev-parse refs/tmp/release-evidence^{commit})"
+          git cat-file -e "${evidence_commit}^{tree}"
           parents=( $(git rev-list --parents -n1 "${evidence_commit}") )
           test "${#parents[@]}" -eq 2
           test "${parents[1]}" = "${RELEASE_HEAD_SHA}"
@@ -99,10 +100,10 @@ jobs:
           test "${evidence_paths[0]}" = "resource-evidence.json"
           test "${evidence_paths[1]}" = "resource-workload.log"
           mkdir -p .release-evidence
-          git show \
-            "${evidence_commit}:resource-evidence.json" \
+          git cat-file blob "${evidence_commit}:resource-evidence.json" \
             > .release-evidence/evidence.json
-          git show "${evidence_commit}:resource-workload.log" > .release-evidence/workload.log
+          git cat-file blob "${evidence_commit}:resource-workload.log" \
+            > .release-evidence/workload.log
           echo "${evidence_commit}" > .release-evidence/commit
       - name: verify signed resource evidence commit
         if: steps.intent.outputs.should_release == 'true'
