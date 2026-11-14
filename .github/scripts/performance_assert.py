@@ -389,8 +389,10 @@ def assert_release(
     }
     limits = {
         "web": 120,
-        "musl-x86_64": 600,
-        "musl-aarch64": 600,
+        # The native proxy is a separately compiled Rust binary in the release
+        # matrix; keep the musl budget aligned with the expanded artifact set.
+        "musl-x86_64": 660,
+        "musl-aarch64": 660,
         "runtime-x86_64": 180,
         "runtime-aarch64": 180,
         "assemble": 300,
