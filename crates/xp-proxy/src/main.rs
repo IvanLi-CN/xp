@@ -1,12 +1,13 @@
 use anyhow::Result;
 use clap::Parser;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream, UnixListener, UnixStream},
+    sync::Notify,
     time::{Duration, timeout},
 };
 use xp_proxy_core::{
@@ -51,22 +52,42 @@ struct OutboundConfig {
 
 #[derive(Default)]
 struct ListenerRuntime {
-    bound: Mutex<HashSet<std::net::SocketAddr>>,
+    bound: Mutex<HashMap<std::net::SocketAddr, Arc<Notify>>>,
 }
 
 impl ListenerRuntime {
     fn register(&self, bind: std::net::SocketAddr) -> bool {
-        self.bound
-            .lock()
-            .expect("listener runtime lock poisoned")
-            .insert(bind)
+        let mut bound = self.bound.lock().expect("listener runtime lock poisoned");
+        if bound.contains_key(&bind) {
+            return false;
+        }
+        bound.insert(bind, Arc::new(Notify::new()));
+        true
     }
 
-    fn unregister(&self, bind: std::net::SocketAddr) {
+    fn stop_token(&self, bind: std::net::SocketAddr) -> Option<Arc<Notify>> {
         self.bound
             .lock()
             .expect("listener runtime lock poisoned")
-            .remove(&bind);
+            .remove(&bind)
+    }
+
+    async fn stop_all(&self) {
+        let tokens = self
+            .bound
+            .lock()
+            .expect("listener runtime lock poisoned")
+            .drain()
+            .map(|(_, token)| token)
+            .collect::<Vec<_>>();
+        for token in tokens {
+            token.notify_waiters();
+        }
+        // The accept loops observe the notification and drop their TcpListener. Yielding twice
+        // gives the kernel a deterministic opportunity to release every bound port before the
+        // next generation is activated.
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
     }
 }
 
@@ -91,7 +112,7 @@ async fn main() -> Result<()> {
         std::fs::remove_file(&socket)?;
     }
     let listener = UnixListener::bind(&socket)?;
-    std::fs::set_permissions(&socket, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+    std::fs::set_permissions(&socket, std::os::unix::fs::PermissionsExt::from_mode(0o660))?;
     let manager = GenerationManager::new();
     let traffic = Arc::new(TrafficCounter::default());
     let listener_runtime = Arc::new(ListenerRuntime::default());
@@ -514,17 +535,28 @@ async fn start_snapshot_listeners(
         let tcp = match TcpListener::bind(bind).await {
             Ok(tcp) => tcp,
             Err(error) => {
-                runtime.unregister(bind);
+                let _ = runtime.stop_token(bind);
+                runtime.stop_all().await;
                 return Err(error.into());
             }
         };
+        let stop = runtime
+            .bound
+            .lock()
+            .expect("listener runtime lock poisoned")
+            .get(&bind)
+            .cloned()
+            .expect("listener token registered before bind");
         let manager = manager.clone();
         let runtime = runtime.clone();
         let traffic = traffic.clone();
         tokio::spawn(async move {
             loop {
-                let Ok((stream, _)) = tcp.accept().await else {
-                    runtime.unregister(bind);
+                let accepted = tokio::select! {
+                    _ = stop.notified() => break,
+                    accepted = tcp.accept() => accepted,
+                };
+                let Ok((stream, _)) = accepted else {
                     break;
                 };
                 let Some(active) = manager.active_snapshot() else {
@@ -546,6 +578,7 @@ async fn start_snapshot_listeners(
                     }
                 });
             }
+            let _ = runtime.stop_token(bind);
         });
     }
     Ok(())
@@ -583,6 +616,7 @@ async fn handle_control(
                 let snapshot = manager
                     .prepared_snapshot()
                     .ok_or_else(|| anyhow::anyhow!("no prepared generation"))?;
+                listener_runtime.stop_all().await;
                 start_snapshot_listeners(
                     snapshot,
                     manager.clone(),
@@ -593,7 +627,10 @@ async fn handle_control(
                 manager.activate()
             }
             ControlOperation::Drain => Ok(manager.drain().or(active).unwrap_or(request.generation)),
-            ControlOperation::Stop => Ok(manager.stop().or(active).unwrap_or(request.generation)),
+            ControlOperation::Stop => {
+                listener_runtime.stop_all().await;
+                Ok(manager.stop().or(active).unwrap_or(request.generation))
+            }
             ControlOperation::Status => Ok(active.unwrap_or(request.generation)),
         };
         let error = result.as_ref().err().cloned();

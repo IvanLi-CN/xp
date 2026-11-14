@@ -273,9 +273,6 @@ impl ProxySnapshot {
         if self.generation == 0 {
             return Err("generation must be non-zero".into());
         }
-        if self.listeners.is_empty() {
-            return Err("at least one listener is required".into());
-        }
         for listener in &self.listeners {
             if listener.bind.parse::<std::net::SocketAddr>().is_err() {
                 return Err(format!("invalid listener bind: {}", listener.bind));

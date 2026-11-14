@@ -6,6 +6,7 @@ description="xp (Xray cluster manager)"
 command="/bin/sh"
 command_args="-c 'set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; exec /usr/local/bin/xp run --data-dir /var/lib/xp/data'"
 command_user="xp:xp"
+extra_groups="xp-proxy"
 supervisor=supervise-daemon
 respawn_delay=2
 respawn_max=0
