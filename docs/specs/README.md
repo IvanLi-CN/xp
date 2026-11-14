@@ -73,6 +73,7 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 | Xray stale TCP        | active     | complete       | [Spec][53] | -          |              |
 | Mihomo mirror         | active     | unverified     | [Spec][54] | -          |              |
 | Mihomo import         | active     | complete       | [Spec][56] | -          | Pasted nodes |
+| Native VLESS XHTTP    | active     | design locked  | [Spec][57] | -          | Host gate    |
 
 [1]: access-model-hardcut-v9/SPEC.md
 [2]: admin-delete-node/SPEC.md
@@ -130,3 +131,4 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 [54]: mihomo-external-resource-mirror/SPEC.md
 [55]: web-demo-runtime/SPEC.md
 [56]: mihomo-subscription-import/SPEC.md
+[57]: native-vless-xhttp-proxy/SPEC.md
