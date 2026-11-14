@@ -119,17 +119,17 @@ mod tests {
             (
                 1,
                 RaftNodeMeta {
-                    name: "node-1".into(),
-                    api_base_url: "https://xp1:6443".into(),
-                    raft_endpoint: "https://xp1:6443".into(),
+                    name: xp_test_fixtures::primary_node_name().to_owned(),
+                    api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+                    raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
                 },
             ),
             (
                 2,
                 RaftNodeMeta {
-                    name: "node-2".into(),
-                    api_base_url: "https://xp2:6443".into(),
-                    raft_endpoint: "https://xp2:6443".into(),
+                    name: xp_test_fixtures::secondary_node_name().to_owned(),
+                    api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                    raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
                 },
             ),
         ]);
@@ -137,14 +137,20 @@ mod tests {
             nodes,
             1,
             RaftNodeMeta {
-                name: "node-1".into(),
-                api_base_url: "https://xp1-alt:6443".into(),
-                raft_endpoint: "https://xp1-alt:6443".into(),
+                name: xp_test_fixtures::primary_node_name().to_owned(),
+                api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+                raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
             },
         );
 
         assert_eq!(nodes.len(), 2);
-        assert_eq!(nodes.get(&2).unwrap().api_base_url, "https://xp2:6443");
-        assert_eq!(nodes.get(&1).unwrap().api_base_url, "https://xp1-alt:6443");
+        assert_eq!(
+            nodes.get(&2).unwrap().api_base_url,
+            xp_test_fixtures::secondary_api_url()
+        );
+        assert_eq!(
+            nodes.get(&1).unwrap().api_base_url,
+            xp_test_fixtures::primary_api_url()
+        );
     }
 }
