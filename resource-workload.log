@@ -1,102 +1,84 @@
-[1m[92m    Finished[0m `release` profile [optimized] target(s) in 0.34s
-[1m[92m     Running[0m tests/mesh_transport_resource_e2e.rs (target/release/deps/mesh_transport_resource_e2e-2594c9c06444c5c1)
+[1m[92m    Finished[0m `release` profile [optimized] target(s) in 0.23s
+[1m[92m     Running[0m tests/mesh_transport_resource_e2e.rs (target/release/deps/mesh_transport_resource_e2e-64d720d6eb2c75bc)
 
 running 1 test
-source journal baseline PSS Some(PssSample { total_kib: 28264, anon_kib: 8968, file_kib: 19296 })
-source journal warm status pending=9870
-source journal warm status pending=9740
-source journal warm status pending=9610
+source journal baseline PSS Some(PssSample { total_kib: 29256, anon_kib: 10216, file_kib: 19040 })
+source journal warm status pending=9805
+source journal warm status pending=9675
 source journal warm status pending=9480
 source journal warm status pending=9350
 source journal warm status pending=9220
-source journal warm status pending=9090
-source journal warm status pending=8960
+source journal warm status pending=9025
 source journal warm status pending=8830
 source journal warm status pending=8700
-source journal warm status pending=8570
 source journal warm status pending=8505
-source journal warm status pending=8375
-source journal warm status pending=8245
-source journal warm status pending=8115
+source journal warm status pending=8310
+source journal warm status pending=8180
 source journal warm status pending=7985
 source journal warm status pending=7855
-source journal warm status pending=7725
-source journal warm status pending=7595
-source journal warm status pending=7465
+source journal warm status pending=7660
+source journal warm status pending=7530
 source journal warm status pending=7335
-source journal warm status pending=7205
-source journal warm status pending=7075
-source journal warm status pending=6945
+source journal warm status pending=7140
+source journal warm status pending=7010
 source journal warm status pending=6815
 source journal warm status pending=6685
-source journal warm status pending=6555
-source journal warm status pending=6425
-source journal warm status pending=6295
+source journal warm status pending=6490
+source journal warm status pending=6360
 source journal warm status pending=6165
-source journal warm status pending=6035
 source journal warm status pending=5970
 source journal warm status pending=5846
-source journal warm status pending=5711
-source journal warm status pending=5581
-source journal warm status pending=5451
+source journal warm status pending=5646
+source journal warm status pending=5516
 source journal warm status pending=5321
-source journal warm status pending=5191
-source journal warm status pending=5061
-source journal warm status pending=4931
-source journal warm status pending=4806
+source journal warm status pending=5126
+source journal warm status pending=4996
+source journal warm status pending=4866
 source journal warm status pending=4672
 source journal warm status pending=4542
-source journal warm status pending=4477
 source journal warm status pending=4347
-source journal warm status pending=4217
-source journal warm status pending=4087
-source journal warm status pending=3957
-source journal warm status pending=3827
+source journal warm status pending=4152
+source journal warm status pending=4022
+source journal warm status pending=3892
 source journal warm status pending=3702
-source journal warm status pending=3568
-source journal warm status pending=3438
-source journal warm status pending=3308
+source journal warm status pending=3503
+source journal warm status pending=3373
 source journal warm status pending=3178
-source journal warm status pending=3048
-source journal warm status pending=2918
-test xp_source_delivery_journal_memory_e2e has been running for over 60 seconds
-source journal warm status pending=2788
+source journal warm status pending=2983
+source journal warm status pending=2853
 source journal warm status pending=2663
 source journal warm status pending=2529
-source journal warm status pending=2399
-source journal warm status pending=2269
+source journal warm status pending=2334
 source journal warm status pending=2139
-source journal warm status pending=2074
 source journal warm status pending=1944
 source journal warm status pending=1814
-source journal warm status pending=1689
-source journal warm status pending=1555
+source journal warm status pending=1624
 source journal warm status pending=1425
 source journal warm status pending=1295
-source journal warm status pending=1165
-source journal warm status pending=1035
-source journal warm status pending=905
+source journal warm status pending=1100
+source journal warm status pending=970
 source journal warm status pending=775
-source journal warm status pending=650
-source journal warm status pending=516
-source journal warm status pending=386
+source journal warm status pending=585
+test xp_source_delivery_journal_memory_e2e has been running for over 60 seconds
+source journal warm status pending=451
 source journal warm status pending=256
-source journal warm status pending=126
-source journal warm status pending=67
-source journal warm status pending=67
-source journal warm status pending=67
-source journal warm status pending=67
-source journal warm status pending=67
-source journal warm status pending=72
-source journal warm status pending=72
-source journal warm status pending=72
-source journal warm status pending=72
-source journal warm status pending=72
-source journal warm status pending=77
-source journal warm status pending=77
-source journal warm status pending=77
-source journal warm status pending=77
-source journal warm status pending=77
+source journal warm status pending=61
+source journal warm status pending=61
+source journal warm status pending=66
+source journal warm status pending=66
+source journal warm status pending=66
+source journal warm status pending=66
+source journal warm status pending=66
+source journal warm status pending=71
+source journal warm status pending=71
+source journal warm status pending=71
+source journal warm status pending=71
+source journal warm status pending=71
+source journal warm status pending=76
+source journal warm status pending=76
+source journal warm status pending=76
+source journal warm status pending=76
+source journal warm status pending=76
 source journal warm status pending=82
 source journal warm status pending=82
 source journal warm status pending=82
@@ -142,21 +124,21 @@ source journal warm status pending=122
 source journal warm status pending=122
 source journal warm status pending=122
 source journal warm status pending=122
-source journal warm status pending=128
-source journal warm status pending=128
-source journal warm status pending=128
-source journal warm status pending=128
-source journal warm status pending=128
-source journal warm status pending=133
-source journal warm status pending=133
-source journal warm status pending=133
-source journal warm status pending=133
-source journal warm status pending=133
-source journal warm status pending=138
-source journal warm status pending=138
-source journal warm status pending=138
-source journal warm status pending=138
-source journal warm status pending=138
+source journal warm status pending=127
+source journal warm status pending=127
+source journal warm status pending=127
+source journal warm status pending=127
+source journal warm status pending=127
+source journal warm status pending=132
+source journal warm status pending=132
+source journal warm status pending=132
+source journal warm status pending=132
+source journal warm status pending=132
+source journal warm status pending=137
+source journal warm status pending=137
+source journal warm status pending=137
+source journal warm status pending=137
+source journal warm status pending=137
 source journal warm status pending=143
 source journal warm status pending=143
 source journal warm status pending=143
@@ -202,21 +184,21 @@ source journal warm status pending=183
 source journal warm status pending=183
 source journal warm status pending=183
 source journal warm status pending=183
-source journal warm status pending=189
-source journal warm status pending=189
-source journal warm status pending=189
-source journal warm status pending=189
-source journal warm status pending=189
-source journal warm status pending=194
-source journal warm status pending=194
-source journal warm status pending=194
-source journal warm status pending=194
-source journal warm status pending=194
-source journal warm status pending=199
-source journal warm status pending=199
-source journal warm status pending=199
-source journal warm status pending=199
-source journal warm status pending=199
+source journal warm status pending=188
+source journal warm status pending=188
+source journal warm status pending=188
+source journal warm status pending=188
+source journal warm status pending=188
+source journal warm status pending=193
+source journal warm status pending=193
+source journal warm status pending=193
+source journal warm status pending=193
+source journal warm status pending=193
+source journal warm status pending=198
+source journal warm status pending=198
+source journal warm status pending=198
+source journal warm status pending=198
+source journal warm status pending=198
 source journal warm status pending=204
 source journal warm status pending=204
 source journal warm status pending=204
@@ -262,21 +244,21 @@ source journal warm status pending=244
 source journal warm status pending=244
 source journal warm status pending=244
 source journal warm status pending=244
-source journal warm status pending=250
-source journal warm status pending=250
-source journal warm status pending=250
-source journal warm status pending=250
-source journal warm status pending=250
-source journal warm status pending=255
-source journal warm status pending=255
-source journal warm status pending=255
-source journal warm status pending=255
-source journal warm status pending=255
-source journal warm status pending=260
-source journal warm status pending=260
-source journal warm status pending=260
-source journal warm status pending=260
-source journal warm status pending=260
+source journal warm status pending=249
+source journal warm status pending=249
+source journal warm status pending=249
+source journal warm status pending=249
+source journal warm status pending=249
+source journal warm status pending=254
+source journal warm status pending=254
+source journal warm status pending=254
+source journal warm status pending=254
+source journal warm status pending=254
+source journal warm status pending=259
+source journal warm status pending=259
+source journal warm status pending=259
+source journal warm status pending=259
+source journal warm status pending=259
 source journal warm status pending=265
 source journal warm status pending=265
 source journal warm status pending=265
@@ -304,19 +286,37 @@ source journal warm status pending=285
 source journal warm status pending=285
 source journal warm status pending=290
 source journal warm status pending=290
-source journal window generated=260 / 1270779 bytes, peak=260 / 1270779 bytes, ack=9970 / 155530105 bytes, apply=10162 / 156457129 bytes, source_ack=true / true, repository_apply=true / true
-source_journal_resource cpu_p95_percent=92.93 max_read_bytes=0 max_cycle_read_bytes=0 max_rss_delta=3358720 peak_pss_kib=32072 memory_limit_bytes=134217728 swap_limit_bytes=0 backlog_segments=10000 backlog_bytes=157038596 sample_window_seconds=300 generated_segments=260 generated_bytes=1270779 peak_generated_segments=260 peak_generated_bytes=1270779 acknowledged_segments=9970 acknowledged_bytes=155530105 applied_segments=10162 applied_bytes=156457129
-source_journal_resource_candidate_peak_pss_kib=32072
+source journal warm status pending=290
+source journal warm status pending=290
+source journal warm status pending=290
+source journal warm status pending=295
+source journal warm status pending=295
+source journal warm status pending=295
+source journal warm status pending=295
+source journal warm status pending=295
+source journal warm status pending=300
+source journal warm status pending=300
+source journal warm status pending=300
+source journal warm status pending=300
+source journal warm status pending=300
+source journal warm status pending=305
+source journal warm status pending=305
+source journal warm status pending=305
+source journal warm status pending=305
+source journal warm status pending=305
+source journal window generated=275 / 1343705 bytes, peak=275 / 1343705 bytes, ack=9970 / 155530101 bytes, apply=10171 / 156461151 bytes, source_ack=true / true, repository_apply=true / true
+source_journal_resource cpu_p95_percent=90.89 max_read_bytes=0 max_cycle_read_bytes=0 max_rss_delta=2293760 peak_pss_kib=32104 memory_limit_bytes=134217728 swap_limit_bytes=0 backlog_segments=10000 backlog_bytes=157038596 sample_window_seconds=300 generated_segments=280 generated_bytes=1368646 peak_generated_segments=275 peak_generated_bytes=1343705 acknowledged_segments=9970 acknowledged_bytes=155530101 applied_segments=10171 applied_bytes=156461151
+source_journal_resource_candidate_peak_pss_kib=32104
 test xp_source_delivery_journal_memory_e2e ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 305.36s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 305.08s
 
-[1m[92m    Finished[0m `release` profile [optimized] target(s) in 0.32s
-[1m[92m     Running[0m tests/mesh_transport_resource_e2e.rs (target/release/deps/mesh_transport_resource_e2e-2594c9c06444c5c1)
+[1m[92m    Finished[0m `release` profile [optimized] target(s) in 0.23s
+[1m[92m     Running[0m tests/mesh_transport_resource_e2e.rs (target/release/deps/mesh_transport_resource_e2e-64d720d6eb2c75bc)
 
 running 1 test
-repository_summary_resource_candidate_peak_pss_kib=30148
+repository_summary_resource_candidate_peak_pss_kib=29948
 test xp_repository_summary_memory_e2e ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 5.76s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 5.88s
 
