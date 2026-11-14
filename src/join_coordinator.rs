@@ -8,6 +8,7 @@ use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 mod legacy;
+mod recovery;
 async fn write_applied(
     raft: &Arc<dyn RaftFacade>,
     command: DesiredStateCommand,
@@ -18,41 +19,6 @@ async fn write_applied(
             anyhow::bail!("join coordinator state write rejected: {code}: {message}")
         }
     }
-}
-async fn transition_join_operation(
-    raft: &Arc<dyn RaftFacade>,
-    store: &Arc<Mutex<JsonSnapshotStore>>,
-    node_id: u64,
-    phase: crate::state::MembershipOperationPhase,
-    evidence: &str,
-) -> anyhow::Result<()> {
-    let Some(mut operation) = store
-        .lock()
-        .await
-        .state()
-        .active_membership_operation()
-        .filter(|operation| {
-            operation.raft_node_id == node_id
-                && operation.kind == crate::state::MembershipOperationKind::Join
-        })
-        .cloned()
-    else {
-        return Ok(());
-    };
-    raft.ensure_linearizable().await?;
-    operation.expected_membership =
-        crate::raft_membership_guard::membership_revision(&raft.metrics().borrow().clone())?;
-    operation.phase = phase;
-    operation.evidence = Some(evidence.to_string());
-    if operation.phase.is_terminal() {
-        operation.terminal_at = Some(Utc::now().to_rfc3339());
-    }
-    write_applied(
-        raft,
-        DesiredStateCommand::TransitionMembershipOperation { operation },
-    )
-    .await?;
-    Ok(())
 }
 pub fn spawn_join_coordinator(
     raft: Arc<dyn RaftFacade>,
@@ -210,10 +176,23 @@ async fn reconcile_once(
         .cloned()
         .collect::<Vec<_>>();
     for mut session in sessions {
+        let node_id = raft_node_id_from_ulid(&session.node_id)?;
+        let voters = metrics
+            .membership_config
+            .membership()
+            .voter_ids()
+            .collect::<BTreeSet<_>>();
         if !session.status.is_pending() {
+            recovery::complete_consumed_join(
+                &raft,
+                &store,
+                &session,
+                node_id,
+                voters.contains(&node_id),
+            )
+            .await?;
             continue;
         }
-        let node_id = raft_node_id_from_ulid(&session.node_id)?;
         let Some(mut operation) = store
             .lock()
             .await
@@ -235,11 +214,6 @@ async fn reconcile_once(
             );
             continue;
         };
-        let voters = metrics
-            .membership_config
-            .membership()
-            .voter_ids()
-            .collect::<BTreeSet<_>>();
         let registered = metrics
             .membership_config
             .nodes()
@@ -259,7 +233,7 @@ async fn reconcile_once(
             };
             match operation.phase {
                 crate::state::MembershipOperationPhase::LearnerRegistered => {
-                    transition_join_operation(
+                    recovery::transition_join_operation(
                         &raft,
                         &store,
                         node_id,
@@ -285,6 +259,14 @@ async fn reconcile_once(
             }
             session.status = JoinSessionStatus::Consumed;
             session.terminal_at = Some(Utc::now().to_rfc3339());
+            recovery::transition_join_operation(
+                &raft,
+                &store,
+                node_id,
+                crate::state::MembershipOperationPhase::Completed,
+                "join voter observed after recovery",
+            )
+            .await?;
             let node = store
                 .lock()
                 .await
@@ -296,14 +278,6 @@ async fn reconcile_once(
                     node,
                     join_session: Some(session),
                 },
-            )
-            .await?;
-            transition_join_operation(
-                &raft,
-                &store,
-                node_id,
-                crate::state::MembershipOperationPhase::Completed,
-                "join voter observed after recovery",
             )
             .await?;
             continue;
@@ -365,7 +339,7 @@ async fn reconcile_once(
                 },
             )
             .await?;
-            transition_join_operation(
+            recovery::transition_join_operation(
                 &raft,
                 &store,
                 node_id,
@@ -470,7 +444,7 @@ async fn reconcile_once(
                 // is observable, so its fingerprint cannot be recorded from the old membership.
                 continue;
             }
-            transition_join_operation(
+            recovery::transition_join_operation(
                 &raft,
                 &store,
                 node_id,
@@ -537,7 +511,7 @@ async fn reconcile_once(
                 continue;
             }
             raft.add_voters(BTreeSet::from([node_id])).await?;
-            transition_join_operation(
+            recovery::transition_join_operation(
                 &raft,
                 &store,
                 node_id,
@@ -547,6 +521,14 @@ async fn reconcile_once(
             .await?;
             session.status = JoinSessionStatus::Consumed;
             session.terminal_at = Some(Utc::now().to_rfc3339());
+            recovery::transition_join_operation(
+                &raft,
+                &store,
+                node_id,
+                crate::state::MembershipOperationPhase::Completed,
+                "join completed",
+            )
+            .await?;
             let node = store
                 .lock()
                 .await
@@ -558,14 +540,6 @@ async fn reconcile_once(
                     node,
                     join_session: Some(session),
                 },
-            )
-            .await?;
-            transition_join_operation(
-                &raft,
-                &store,
-                node_id,
-                crate::state::MembershipOperationPhase::Completed,
-                "join completed",
             )
             .await?;
         }
