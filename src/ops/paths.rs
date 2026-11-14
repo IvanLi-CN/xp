@@ -123,6 +123,10 @@ impl Paths {
         self.map_abs(Path::new("/usr/local/bin/xp-ops"))
     }
 
+    pub fn usr_local_bin_xp_proxy(&self) -> PathBuf {
+        self.map_abs(Path::new("/usr/local/bin/xp-proxy"))
+    }
+
     pub fn usr_local_bin_xray(&self) -> PathBuf {
         self.map_abs(Path::new("/usr/local/bin/xray"))
     }

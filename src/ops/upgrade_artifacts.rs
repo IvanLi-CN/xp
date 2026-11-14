@@ -151,19 +151,21 @@ pub(crate) fn managed_cloudflared_dest(paths: &Paths) -> PathBuf {
     }
 }
 
-fn managed_installation_binaries(paths: &Paths) -> [PathBuf; 4] {
+fn managed_installation_binaries(paths: &Paths) -> [PathBuf; 5] {
     [
         paths.usr_local_bin_xp(),
         paths.usr_local_bin_xp_ops(),
+        paths.usr_local_bin_xp_proxy(),
         paths.usr_local_bin_xray(),
         managed_cloudflared_dest(paths),
     ]
 }
 
-fn managed_artifact_binaries(paths: &Paths) -> [PathBuf; 5] {
+fn managed_artifact_binaries(paths: &Paths) -> [PathBuf; 6] {
     [
         paths.usr_local_bin_xp(),
         paths.usr_local_bin_xp_ops(),
+        paths.usr_local_bin_xp_proxy(),
         paths.usr_local_bin_xray(),
         paths.usr_local_bin_cloudflared(),
         paths.usr_bin_cloudflared(),
