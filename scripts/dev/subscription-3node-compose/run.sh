@@ -101,6 +101,32 @@ wait_https_ok_ca() {
   done
 }
 
+wait_join_converged() {
+  name="$1"
+  i=0
+  echo "waiting for ${name} to observe the committed cluster membership ..."
+  while :; do
+    info="$(compose exec -T tool curl -fsS --connect-timeout 1 --max-time 2 \
+      --cacert /vol/xp1/cluster/cluster_ca.pem \
+      "https://${name}:6443/api/cluster/info" 2>/dev/null || true)"
+    if [ -n "$info" ]; then
+      role="$(printf '%s' "$info" | json_get role 2>/dev/null || true)"
+      leader="$(printf '%s' "$info" | json_get leader_api_base_url 2>/dev/null || true)"
+      if [ "$role" = "leader" ] || { [ "$role" = "follower" ] && [ -n "$leader" ]; }; then
+        return 0
+      fi
+    fi
+    i=$((i + 1))
+    if [ "$i" -gt 600 ]; then
+      echo "timeout waiting for ${name} membership convergence" >&2
+      printf '%s\n' "$info" >&2
+      compose logs --no-color "${name}-app" || true
+      exit 1
+    fi
+    sleep 0.2
+  done
+}
+
 json_get() {
   need_python3
   key="$1"
@@ -283,12 +309,14 @@ up() {
   copy_https_cert_to_joiner xp1 xp2
   compose up -d xp2-app xp2
   wait_https_ok xp2 "/api/cluster/info"
+  wait_join_converged xp2
 
   t3="$(create_join_token_value)"
   join_node xp3 "$t3"
   copy_https_cert_to_joiner xp1 xp3
   compose up -d xp3-app xp3
   wait_https_ok xp3 "/api/cluster/info"
+  wait_join_converged xp3
 
   echo "cluster is up"
   urls
