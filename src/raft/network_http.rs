@@ -1,4 +1,5 @@
 use crate::{
+    control_plane_mesh::MeshRequestError,
     control_plane_mesh::{
         MeshAwareHttpClient, MeshPeerTarget, MeshRequest, build_mesh_http_client,
         build_unauthenticated_mesh_http_client, peer_target_from_node,
@@ -199,7 +200,8 @@ impl HttpNetwork {
         let resp = if let Some(mesh_auth) = &self.mesh_auth {
             let body = serde_json::to_vec(req).context("serialize raft rpc")?;
             let target = mesh_target_for_raft(&mesh_auth.store, self.target).await?;
-            self.client
+            match self
+                .client
                 .send_peer_request(
                     &target,
                     MeshRequest {
@@ -221,7 +223,19 @@ impl HttpNetwork {
                     &mesh_auth.cluster_ca_cert_pem,
                 )
                 .await
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?
+            {
+                Ok(response) => response,
+                Err(MeshRequestError::CircuitOpen { .. }) => self
+                    .client
+                    .direct()
+                    .post(url.clone())
+                    .timeout(option.hard_ttl())
+                    .json(req)
+                    .send()
+                    .await
+                    .context("Raft direct recovery request")?,
+                Err(error) => return Err(anyhow::anyhow!(error.to_string())),
+            }
         } else {
             self.client
                 .direct()
