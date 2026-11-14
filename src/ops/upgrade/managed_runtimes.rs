@@ -40,8 +40,19 @@ fn cloudflared_asset_name(platform: Platform) -> &'static str {
     }
 }
 
+fn xp_proxy_asset_name(platform: Platform) -> &'static str {
+    match platform {
+        Platform::LinuxX86_64 => "xp-proxy-linux-x86_64",
+        Platform::LinuxAarch64 => "xp-proxy-linux-aarch64",
+    }
+}
+
 pub(super) fn describe_dry_run(platform: Platform) {
-    for asset in [xray_asset_name(platform), cloudflared_asset_name(platform)] {
+    for asset in [
+        xray_asset_name(platform),
+        cloudflared_asset_name(platform),
+        xp_proxy_asset_name(platform),
+    ] {
         eprintln!("would install managed runtime asset when present: {asset}");
     }
 }
@@ -454,6 +465,10 @@ pub(super) async fn upgrade_managed_runtime_binaries(
     for (asset, dest) in [
         (xray_asset, paths.usr_local_bin_xray()),
         (cloudflared_asset, managed_cloudflared_dest(paths)),
+        (
+            xp_proxy_asset_name(platform),
+            paths.usr_local_bin_xp_proxy(),
+        ),
     ] {
         match install_release_binary(release, checksums, asset, &dest).await {
             Ok(backup) => installed.push(backup),
