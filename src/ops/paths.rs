@@ -35,6 +35,10 @@ impl Paths {
         self.map_abs(Path::new("/etc/xp/xp.env"))
     }
 
+    pub fn etc_xp_runtime_state(&self) -> PathBuf {
+        self.etc_xp_dir().join("runtime.json")
+    }
+
     pub fn etc_xray_dir(&self) -> PathBuf {
         self.map_abs(Path::new("/etc/xray"))
     }

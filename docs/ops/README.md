@@ -49,10 +49,11 @@ Current support boundaries that operators must know:
 
 ## Native VLESS XHTTP data plane boundary
 
-The independently released `xp-proxy` binary is currently an experimental protocol/data-plane
-asset, not a supported ingress runtime. Installing `/usr/local/bin/xp-proxy`, setting
-`XP_NATIVE_PROXY_ENABLED`, starting a process, or creating its control socket does not transfer
-an endpoint away from Xray and does not make a node a usable native ingress point.
+The released `xp-proxy` binary is part of the host-managed ingress runtime. Installing the binary
+or service asset does not change traffic ownership. The node starts in Xray runtime unless an
+operator explicitly uses `xp-ops runtime switch --to xp-proxy --yes`. That operation stops XP and
+both possible ingress services, verifies the old owner is stopped, starts exactly one selected
+runtime, and starts XP only after the selected service is ready.
 
 The production design is recorded in
 [the native proxy SPEC](../specs/native-vless-xhttp-proxy/SPEC.md) and
@@ -73,7 +74,7 @@ never bind the same port. A native process crash, missing socket, stale snapshot
 response or failed readiness check does not automatically switch the endpoint to Xray; the endpoint
 stays stopped/failed until an explicit, audited owner operation completes.
 
-### Host-managed target contract (design only)
+### Host-managed target contract
 
 The target host-managed contract is one independent `xp-proxy` service on both systemd and OpenRC.
 XP coordinates snapshots through the socket but does not spawn, supervise or kill the service.
@@ -83,12 +84,11 @@ Native -> Xray follows:
 `drain -> stop -> verify port release -> start Xray -> verify ready`.
 A failed handoff never leaves both owners running.
 
-Host upgrades must eventually include `xp-proxy` in the same checksummed transaction, readiness
-window, backup cleanup and rollback contract as XP/Xray/cloudflared. A restored proxy that cannot
-prove readiness leaves the endpoint stopped. The exact service identity, capability name, generation
-storage, drain deadline, fallback wire semantics, automatic rollback policy and Docker first-release
-scope remain owner-confirmation gates; this document does not authorize an operator to improvise
-them.
+Host upgrades include `xp-proxy` in the same checksummed transaction, readiness window, backup
+cleanup and rollback contract as XP/Xray/cloudflared. A restored proxy that cannot prove readiness
+leaves the endpoint stopped. Docker/Compose keeps the existing Xray path until it has equivalent
+service supervision, snapshot persistence, single-port owner handoff, readiness evidence and
+upgrade/rollback behavior.
 
 ### Container boundary
 
@@ -1421,10 +1421,11 @@ Current rollout semantics:
   runtime services are ready, before replacing `xp-ops` itself. On OpenRC, each managed restart
   is `stop -> stopped -> start -> started`; `stopping` and every unrecognized status are
   nonterminal. This prevents XP's runtime recovery loop from racing an OpenRC service transition.
-- A release may also contain the checksummed `xp-proxy` asset. The current upgrade path only
-  installs that binary as an inert asset; it does not start an `xp-proxy` service, transfer an
-  endpoint owner, or claim native readiness. Native activation remains unsupported until the
-  independent service and rollback contract in the native proxy SPEC is implemented and evidenced.
+- A release contains a checksummed `xp-proxy` asset and matching service assets. Installation and
+  upgrade preserve Xray runtime by default. Runtime selection is explicit and local:
+  `xp-ops runtime status` reads the persisted state and `xp-ops runtime switch --to xp-proxy --yes`
+  performs the stop, port-release, start, readiness and XP restart sequence. A failed switch stops
+  both ingress services and records a failed state; it never silently changes owner.
 - Deferring the `xp-ops` replacement prevents a self-update from ending the locked release phase before the service binaries and managed runtimes are updated.
 - A service restart is accepted only after systemd reports the unit active or OpenRC reports the
   service started on two successive checks. OpenRC stop is likewise accepted only after two exact

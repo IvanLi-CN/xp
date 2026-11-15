@@ -136,7 +136,7 @@ pub fn build_snapshot(
         }
     }
     Ok(ProxySnapshot {
-        protocol_version: 1,
+        protocol_version: CONTROL_PROTOCOL_VERSION,
         generation: 1,
         listeners,
         users: snapshot_users,
@@ -198,6 +198,10 @@ pub async fn publish_reconciled_snapshot(
     if !enabled {
         return;
     }
+    if !runtime_state_allows_proxy() {
+        tracing::debug!("xp-proxy snapshot publication skipped because node runtime is not active");
+        return;
+    }
     let socket = env::var_os("XP_NATIVE_PROXY_CONTROL_SOCKET")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/run/xp/xp-proxy.sock"));
@@ -222,6 +226,20 @@ pub async fn publish_reconciled_snapshot(
         }
         Err(error) => tracing::warn!(%error, "native proxy snapshot construction failed"),
     }
+}
+
+fn runtime_state_allows_proxy() -> bool {
+    let path = env::var_os("XP_RUNTIME_STATE_FILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/etc/xp/runtime.json"));
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    value.get("runtime").and_then(serde_json::Value::as_str) == Some("xp-proxy")
+        && value.get("state").and_then(serde_json::Value::as_str) == Some("active")
 }
 
 async fn send_request(
@@ -270,13 +288,13 @@ mod tests {
                 frame.extend_from_slice(&body);
                 let request: ControlRequest = decode_frame(&frame).unwrap();
                 assert_eq!(request.generation, 7);
-                assert_eq!(request.protocol_version, 1);
+                assert_eq!(request.protocol_version, CONTROL_PROTOCOL_VERSION);
                 assert!(matches!(
                     (expected, request.operation),
                     (0, ControlOperation::Prepare { .. }) | (1, ControlOperation::Activate)
                 ));
                 let response = ControlResponse {
-                    protocol_version: 1,
+                    protocol_version: CONTROL_PROTOCOL_VERSION,
                     request_id: request.request_id,
                     generation: 7,
                     state: if expected == 0 {
@@ -294,7 +312,7 @@ mod tests {
             }
         });
         let snapshot: ProxySnapshot = serde_json::from_value(serde_json::json!({
-            "protocol_version": 1,
+            "protocol_version": CONTROL_PROTOCOL_VERSION,
             "generation": 7,
             "listeners": [{
                 "bind": "127.0.0.1:0",
@@ -362,6 +380,7 @@ mod tests {
             "cluster-key",
         )
         .unwrap();
+        assert_eq!(snapshot.protocol_version, CONTROL_PROTOCOL_VERSION);
         assert_eq!(snapshot.listeners.len(), 1);
         assert_eq!(snapshot.listeners[0].bind, "0.0.0.0:443");
         assert_eq!(snapshot.listeners[0].path, "/xp-xhttp");

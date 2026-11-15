@@ -1,7 +1,7 @@
 use crate::ops::cli::{
     AdminTokenCommand, CloudflareCommand, CloudflareTokenCommand, Command, ContainerCommand,
-    DeployArgs, ExitError, IngressGuardCommand, InitArgs, InstallArgs, MihomoCommand, UpgradeArgs,
-    XpCommand, XpInstallArgs,
+    DeployArgs, ExitError, IngressGuardCommand, InitArgs, InstallArgs, MihomoCommand,
+    RuntimeCommand, UpgradeArgs, XpCommand, XpInstallArgs,
 };
 use crate::ops::paths::Paths;
 use crate::ops::util::is_test_root;
@@ -141,6 +141,16 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
             )
         }
         Command::Mihomo(MihomoCommand::Redact(_args)) => Ok(()),
+        Command::Runtime(RuntimeCommand::Status(_)) => Ok(()),
+        Command::Runtime(RuntimeCommand::Switch(args)) => {
+            if args.dry_run || is_test_root(paths.root()) {
+                return Ok(());
+            }
+            check_targets(
+                paths,
+                &[Target::dir(paths.etc_xp_dir(), "xp runtime configuration")],
+            )
+        }
     }
 }
 
