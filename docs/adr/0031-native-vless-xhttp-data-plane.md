@@ -2,7 +2,8 @@
 
 ## 状态
 
-高层架构已采纳；生产切换与 host-managed 生命周期细节在主人确认前不视为已授权实现。
+高层架构已采纳；节点级 Xray/`xp-proxy` 互斥运行时、host-managed 生命周期和发布门禁见
+[ADR 0035](./0035-xp-proxy-exclusive-node-runtime.md)，在实现和证据完成前不视为已上线。
 
 ## 背景
 

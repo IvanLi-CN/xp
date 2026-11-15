@@ -1,5 +1,9 @@
 # 主题历史
 
+- 2026-11-15：补充节点本地运行时边界：Xray 与 `xp-proxy` 互斥运行，运行时选择由本地 `xp-ops` 持久化和编排，
+  Raft 不保存运行时选择；既有节点升级保持当前 Xray runtime，`xp-proxy` service asset 必须纳入 host-managed
+  安装、升级、ready 和 rollback 合同。
+
 - 2026-11-14：完成独立数据面设计审查。锁定 XP 控制面与 `xp-proxy` 独立 service、显式
   endpoint owner、单端口唯一 owner、持久 generation、fail-closed 重启、systemd/OpenRC
   生命周期和 Xray/Mihomo 四路径证据门禁。记录 service identity、generation 来源、fallback

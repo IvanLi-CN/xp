@@ -16,6 +16,16 @@ XP 的控制面继续拥有 Raft、节点、endpoint、用户和成员关系的�
 两者通过受权限保护的本机 control socket 交换完整的 Proxy Snapshot；
 `xp-proxy` 不读取 Raft、SQLite 或 Web 状态。
 
+### Node-local runtime boundary
+
+Xray runtime 和 `xp-proxy` runtime 是节点内部的两种入口运行时，不是 Raft 中的集群模式。
+同一节点只能选择并运行其中一个：选择 Xray 时 `xp-proxy` 必须停止，选择 `xp-proxy` 时 Xray
+必须停止；两个运行时同时运行属于部署失败。节点本地的 `xp-ops` 负责持久化选择、执行切换、
+确认服务状态和回滚，XP 只通过 control socket 发布 snapshot，并向集群报告可验证的 capability、
+endpoint owner 和健康结果。
+
+既有节点升级默认保持当前 Xray runtime。安装 `xp-proxy` binary 或 service asset 不会自动改变流量归属，也不代表入口已经可用。
+
 本主题锁定以下首个生产协议范围：
 
 - TCP-only VLESS，`encryption: none`。
@@ -48,6 +58,7 @@ XP 的控制面继续拥有 Raft、节点、endpoint、用户和成员关系的�
 - `xp-proxy` 不直接参与 Raft、Web/API mutation、SQLite 或集群成员变更。
 - 不在同一 endpoint 端口同时运行 Xray 和 native listener，也不使用 `SO_REUSEPORT`
   掩盖 owner 冲突。
+- 不在同一节点同时运行 Xray 和 `xp-proxy` runtime；节点运行时选择属于本地 `xp-ops` 生命周期。
 - 不承诺零中断切换；单端口 handoff 必须有界、可观测并在失败时 fail closed。
 - 首个合同不包含 UDP/XUDP、其他 XHTTP mode、sing-mux、Native Reverse 或未验证的
   Xray/Mihomo 字段。
