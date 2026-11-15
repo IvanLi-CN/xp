@@ -11,6 +11,7 @@ use crate::ops::membership_lifecycle;
 use crate::ops::mihomo;
 use crate::ops::paths::Paths;
 use crate::ops::preflight;
+use crate::ops::runtime;
 use crate::ops::status;
 use crate::ops::tui;
 use crate::ops::upgrade;
@@ -71,6 +72,36 @@ pub enum Command {
 
     Status(StatusArgs),
     Tui(TuiArgs),
+    #[command(subcommand)]
+    Runtime(RuntimeCommand),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RuntimeCommand {
+    Switch(RuntimeSwitchArgs),
+    Status(RuntimeStatusArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RuntimeSwitchArgs {
+    #[arg(long, value_enum)]
+    pub to: RuntimeTargetArg,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RuntimeStatusArgs {
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeTargetArg {
+    Xray,
+    XpProxy,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -947,6 +978,10 @@ pub async fn run() -> i32 {
         },
         Some(Command::Mihomo(cmd)) => match cmd {
             MihomoCommand::Redact(args) => mihomo::cmd_mihomo_redact(paths, args).await,
+        },
+        Some(Command::Runtime(cmd)) => match cmd {
+            RuntimeCommand::Switch(args) => runtime::cmd_runtime_switch(paths, args),
+            RuntimeCommand::Status(args) => runtime::cmd_runtime_status(paths, args),
         },
         Some(Command::Status(args)) => status::cmd_status(paths, args).await,
         Some(Command::Tui(_args)) => tui::cmd_tui(paths).await,

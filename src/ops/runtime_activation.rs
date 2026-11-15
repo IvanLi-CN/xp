@@ -35,6 +35,14 @@ pub fn restart_xray_service(paths: &Paths, systemd_unit: &str, openrc_service: &
     restart_service(paths, systemd_unit, openrc_service)
 }
 
+pub fn start_xray_service(paths: &Paths) -> bool {
+    start_service(paths, "xray.service", "xray")
+}
+
+pub fn stop_xray_service(paths: &Paths) -> bool {
+    stop_service(paths, "xray.service", "xray")
+}
+
 pub fn restart_xp_service(paths: &Paths) -> bool {
     restart_service(paths, "xp.service", "xp")
 }
@@ -61,7 +69,7 @@ pub fn stop_xp_proxy_service(paths: &Paths) -> bool {
     stop_service(paths, "xp-proxy.service", "xp-proxy")
 }
 
-fn xp_proxy_service_installed(paths: &Paths) -> bool {
+pub fn xp_proxy_service_installed(paths: &Paths) -> bool {
     paths.systemd_unit_dir().join("xp-proxy.service").exists()
         || paths.openrc_initd_dir().join("xp-proxy").exists()
 }

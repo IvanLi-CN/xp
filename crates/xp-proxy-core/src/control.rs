@@ -8,7 +8,7 @@ use std::{
 
 use crate::metrics::TrafficSnapshot;
 
-pub const CONTROL_PROTOCOL_VERSION: u16 = 1;
+pub const CONTROL_PROTOCOL_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -138,6 +138,7 @@ pub enum ControlOperation {
     Activate,
     Drain,
     Stop,
+    Rollback { generation: u64 },
     Status,
 }
 
@@ -183,6 +184,7 @@ pub struct GenerationManager {
 #[derive(Debug, Default)]
 struct GenerationInner {
     active: Option<ProxySnapshot>,
+    previous: Option<ProxySnapshot>,
     prepared: Option<ProxySnapshot>,
     last_successful: Option<ProxySnapshot>,
     state: GenerationState,
@@ -235,6 +237,15 @@ impl GenerationManager {
         {
             return Err("generation must be newer than active generation".into());
         }
+        if let Some(prepared) = inner.prepared.as_ref() {
+            if prepared.generation != snapshot.generation {
+                return Err("another generation is already prepared".into());
+            }
+            if prepared != &snapshot {
+                return Err("prepared generation payload mismatch".into());
+            }
+            return Ok(());
+        }
         inner.state = GenerationState::Preparing;
         inner.prepared = Some(snapshot);
         inner.state = GenerationState::Ready;
@@ -254,7 +265,7 @@ impl GenerationManager {
         let generation = snapshot.generation;
         inner.prepared.take();
         inner.last_successful = Some(snapshot.clone());
-        inner.active = Some(snapshot);
+        inner.previous = inner.active.replace(snapshot);
         inner.state = GenerationState::Active;
         Ok(generation)
     }
@@ -307,6 +318,32 @@ impl GenerationManager {
         }
         generation
     }
+
+    pub fn rollback(&self, expected_generation: u64) -> Result<u64, String> {
+        let mut inner = self.inner.write().expect("generation lock poisoned");
+        let active = inner
+            .active
+            .as_ref()
+            .ok_or_else(|| "no active generation to rollback".to_string())?;
+        if active.generation != expected_generation {
+            return Err(format!(
+                "rollback generation mismatch: active={}, expected={expected_generation}",
+                active.generation
+            ));
+        }
+        let previous = inner
+            .previous
+            .take()
+            .ok_or_else(|| "no previous successful generation".to_string())?;
+        if let Some(path) = self.persistence_path.as_deref() {
+            persist_snapshot(path, &previous)?;
+        }
+        let generation = previous.generation;
+        inner.last_successful = Some(previous.clone());
+        inner.active = Some(previous);
+        inner.state = GenerationState::Active;
+        Ok(generation)
+    }
 }
 
 fn persist_snapshot(path: &Path, snapshot: &ProxySnapshot) -> Result<(), String> {
@@ -352,8 +389,11 @@ impl Default for GenerationManager {
 
 impl ProxySnapshot {
     pub fn validate(&self) -> Result<(), String> {
-        if self.protocol_version == 0 {
-            return Err("protocol_version must be non-zero".into());
+        if self.protocol_version != CONTROL_PROTOCOL_VERSION {
+            return Err(format!(
+                "unsupported snapshot protocol version: {}",
+                self.protocol_version
+            ));
         }
         if self.generation == 0 {
             return Err("generation must be non-zero".into());
@@ -412,7 +452,7 @@ mod tests {
     #[test]
     fn snapshot_validation_rejects_invalid_generation() {
         let snapshot = ProxySnapshot {
-            protocol_version: 1,
+            protocol_version: CONTROL_PROTOCOL_VERSION,
             generation: 0,
             listeners: vec![],
             users: vec![],
@@ -422,7 +462,7 @@ mod tests {
 
     fn snapshot(generation: u64) -> ProxySnapshot {
         ProxySnapshot {
-            protocol_version: 1,
+            protocol_version: CONTROL_PROTOCOL_VERSION,
             generation,
             listeners: vec![ListenerSnapshot {
                 bind: "127.0.0.1:443".into(),
@@ -449,6 +489,22 @@ mod tests {
         manager.activate().unwrap();
         assert!(manager.prepare(snapshot(1)).is_err());
         assert_eq!(manager.state(), (GenerationState::Active, Some(1)));
+    }
+
+    #[test]
+    fn rollback_restores_previous_generation_and_persists_it() {
+        let directory = std::env::temp_dir().join(format!("xp-proxy-{}", uuid::Uuid::new_v4()));
+        let path = directory.join("snapshot.json");
+        let manager = GenerationManager::new_with_persistence(&path).unwrap();
+        manager.prepare(snapshot(1)).unwrap();
+        manager.activate().unwrap();
+        manager.prepare(snapshot(2)).unwrap();
+        manager.activate().unwrap();
+        assert_eq!(manager.rollback(2).unwrap(), 1);
+        assert_eq!(manager.state(), (GenerationState::Active, Some(1)));
+        let restarted = GenerationManager::new_with_persistence(&path).unwrap();
+        assert_eq!(restarted.last_successful_snapshot().unwrap().generation, 1);
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

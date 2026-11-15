@@ -2,45 +2,39 @@
 
 ## 当前状态
 
-本文记录需求与设计锁定结果，不代表功能已实现或可部署。
-当前版本不广告 native production capability，不连接、部署或切换 us3，
-也不改变任何生产 endpoint owner。
+本文记录当前实现与剩余验收边界。运行时互斥、control protocol v2、持久 snapshot、
+listener 生命周期、systemd/OpenRC service asset 和本地切换命令已经进入实现；在
+Agent VM 的单 VM 集群、互操作、升级回滚和资源安全证据完成前，仍不广告生产 native
+capability，不连接、部署或切换 us3。
 
 需求合同见 [SPEC.md](./SPEC.md)；兼容性基线见 [COMPATIBILITY.md](./COMPATIBILITY.md)。
 
 ## 现有实现与差距
 
-- **进程生命周期：** `src/native_proxy_supervisor.rs` 由 XP 拉起 `xp-proxy` 子进程，
-  `run_server` 与 Xray 同时启动。实现前需改为 systemd/OpenRC 独立 service，
-  XP 只通过 control socket 协调。
-- **Snapshot 发布：** XP 在 Xray reconcile 成功后发送 `Prepare`/`Activate`，
-  但没有 owner 排他和 activate 结果门禁。实现前需增加显式 `ingress_owner`，
-  将 native endpoint 从 Xray desired config 排除，并使用协调 operation。
-- **Generation：** `NEXT_GENERATION` 是进程内 `AtomicU64`，XP 重启后从 1 开始。
-  实现前需由 XP 持久化按节点单调递增的 generation，并绑定 snapshot digest。
-- **状态机：** `GenerationManager` 只有内存 active/prepared，没有持久化、显式
-  rollback 或真实 listener drain。实现前需加入 durable state、幂等 request、
-  结构化错误、
-  rollback intent 和 listener handle 生命周期。
-- **Listener：** `xp-proxy` 绑定后只保存在 `ListenerRuntime`，`Drain`/`Stop` 不会
-  释放旧 listener，同 bind 还可能被跳过。实现前需记录 generation owner，完整
-  stop/drain，
-  并在部分 bind 失败时原子清理。
+- **进程生命周期：** `xp-ops` 负责独立服务的启动、停止和运行时切换，XP 不拥有
+  `xp-proxy` 子进程生命周期。XP 只通过 control socket 协调，且 Xray 与 xp-proxy
+  必须由节点级运行时状态互斥控制。
+- **Snapshot 发布：** XP 仅在环境开关和 `/etc/xp/runtime.json` 明确为
+  `xp-proxy/active` 时发送完整 snapshot；缺失、切换中或失败状态均 fail closed。
+  endpoint owner 仍由既有 `ingress_owner` 语义约束，旧 metadata 默认 Xray。
+- **Generation：** snapshot generation 已进入持久状态文件，并在 control protocol v2
+  中按 active generation 单调检查；同一 prepared payload 可幂等重放，冲突 payload 或
+  不同 generation 会被拒绝。
+- **状态机：** `GenerationManager` 已持久化最近成功 snapshot，支持 prepare、activate、
+  drain、stop、rollback 和结构化状态；重启只恢复诊断 snapshot，不自动恢复对外 listener。
+- **Listener：** `xp-proxy` 在 activate、stop 和 rollback 前等待旧 listener task 移除并
+  释放端口；部分 bind 失败会清理已启动 listener，禁止通过 `SO_REUSEPORT` 绕过冲突。
 - **Fallback：** 当前路径选择第一个 fallback，并以 raw TCP relay 为主；HTTP/H2
   语义和 header 清理没有形成 native 合同。实现前需在主人确认 scheme
   语义后实现 allowlist、
   authority、协议分流和 hop-by-hop 清理。
-- **重启恢复：** `xp-proxy` 没有生产级 last-successful snapshot persistence，XP
-  也不确认 active 状态。实现前需持久化校验/诊断信息，重启后等待 XP 重放
-  generation，
-  不得服务陈旧 snapshot。
-- **服务安装：** release 会安装 `xp-proxy` binary，但 init、service readiness、upgrade
-  activation 只覆盖 XP/Xray/cloudflared。实现前需为 systemd/OpenRC 增加独立 asset、
-  权限、
-  ready/stopped 两次观测、升级与回滚顺序。
-- **兼容性：** 已有协议单测和 Xray/Mihomo XHTTP fixture，但没有 native host handoff/
-  upgrade 证据。实现前需在 Agent VM 完成两种 init、四条协议路径、fault injection
-  和资源门禁。
+- **重启恢复：** `xp-proxy` 已持久化 last-successful snapshot 供诊断，但重启后保持 idle，
+  等待 XP 以新请求重放 generation，不服务陈旧 snapshot。
+- **服务安装：** release 已包含独立 `xp-proxy` service asset；`xp-ops init` 创建
+  `xp-proxy` identity、socket 目录和持久目录。XP 通过 `xp-proxy` group 访问 socket，
+  init 不自动启动该服务；显式 runtime switch 才启动目标入口。
+- **兼容性：** 已有协议单测和 Xray/Mihomo XHTTP fixture；native host handoff、两种 init、
+  四条协议路径、fault injection 和资源门禁仍待 Agent VM 绑定候选 SHA 验证。
 
 ## 已锁定的设计
 
@@ -225,20 +219,22 @@
 ## Acceptance matrix
 
 - **Usable ingress：** 需要 capability、process/socket、active generation、全部 bind、
-  self-test 和 owner proof。当前未满足，只是实验性 snapshot path。
+  self-test 和 owner proof；本 PR 已加入运行时状态门禁和 listener/generation 基础合同，
+  完整 capability 与真实流量证据仍是发布门禁。
 - **Xray/native owner：** 需要 desired config、native snapshot、端口采样和 operation
-  journal 一致。当前未实现，reconcile 仍可能同时配置 Xray/native。
-- **Control protocol：** 需要 versioned/idempotent request、status、unknown outcome 和
-  rollback。当前未满足，只有内存 v1 manager。
-- **Persistence：** 需要 XP durable generation 与 proxy last-successful snapshot recovery。
-  当前未满足，generation 会在进程中重置。
+  journal 一致；本 PR 已禁止非 `xp-proxy/active` 节点发布 snapshot，endpoint owner 与
+  Xray desired config 的完整 handoff 仍需集成证据确认。
+- **Control protocol：** 已升级为 versioned/idempotent request、status、listener release
+  和 rollback；unknown outcome 与跨服务 operation journal 仍由集成测试覆盖。
+- **Persistence：** XP 的 generation 与 proxy last-successful snapshot 已持久化；重启不
+  自动恢复 listener，必须由 XP 重放新 snapshot。
 - **Fallback：** 需要四种 scheme 的协议级 fixture、authority/header 安全和上游
   故障。
   当前未满足，主要是首个目标 raw relay。
-- **systemd：** 需要独立 service、ready、drain、upgrade、rollback。
-  当前没有 xp-proxy unit。
-- **OpenRC：** 需要两次连续 ready/stopped、supervision、upgrade、rollback。
-  当前没有 xp-proxy init script。
+- **systemd：** 已有独立 service、专用 identity、受限 socket 目录和显式 switch；ready、
+  drain、upgrade、rollback 仍需 Agent VM 生命周期证据。
+- **OpenRC：** 已有独立 init script、专用 identity 和 supervisor；两次连续 ready/stopped、
+  upgrade、rollback 仍需 Agent VM 生命周期证据。
 - **Xray/Mihomo：** 需要固定版本四条路径与资源 evidence。
   当前只有 Xray/XHTTP spike，native host lifecycle 仍未完成。
 - **Docker：** 按设计保持 capability 缺失，不得误报为支持。

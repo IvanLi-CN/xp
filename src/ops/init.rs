@@ -198,8 +198,6 @@ fn systemd_xp_unit(args: &InitArgs) -> String {
 Description=xp (Xray cluster manager)\n\
 Wants=network-online.target\n\
 After=network-online.target\n\
-Wants=xp-proxy.service\n\
-After=xp-proxy.service\n\
 \n\
 [Service]\n\
 Type=simple\n\
@@ -207,9 +205,8 @@ User=xp\n\
 Group=xp\n\
 WorkingDirectory={}\n\
 Environment=XP_DATA_DIR={}\n\
-Environment=XP_NATIVE_PROXY_ENABLED=true\n\
-Environment=XP_NATIVE_PROXY_CONTROL_SOCKET=/run/xp-proxy/xp-proxy.sock\n\
 EnvironmentFile=-/etc/xp/xp.env\n\
+SupplementaryGroups=xp-proxy\n\
 ExecStart=/usr/local/bin/xp run\n\
 Restart=always\n\
 RestartSec=2s\n\
@@ -600,7 +597,6 @@ fn enable_systemd_services(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
     }
     run_or_fail("systemctl", &["daemon-reload"])?;
     run_or_fail("systemctl", &["enable", "--now", "xray.service"])?;
-    run_or_fail("systemctl", &["enable", "--now", "xp-proxy.service"])?;
     run_or_fail("systemctl", &["enable", "--now", "xp.service"])?;
     Ok(())
 }
@@ -740,8 +736,6 @@ fn enable_openrc_services(mode: Mode) -> Result<(), ExitError> {
     run_or_fail("rc-update", &["add", "xray", "default"])?;
     run_or_fail("rc-update", &["add", "xp", "default"])?;
     run_or_fail("rc-service", &["xray", "start"])?;
-    run_or_fail("rc-update", &["add", "xp-proxy", "default"])?;
-    run_or_fail("rc-service", &["xp-proxy", "start"])?;
     run_or_fail("rc-service", &["xp", "start"])?;
     Ok(())
 }

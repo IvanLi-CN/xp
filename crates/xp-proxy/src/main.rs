@@ -77,22 +77,32 @@ impl ListenerRuntime {
             .remove(&bind)
     }
 
-    async fn stop_all(&self) {
+    async fn stop_all(&self) -> bool {
         let tokens = self
             .bound
             .lock()
             .expect("listener runtime lock poisoned")
-            .drain()
-            .map(|(_, token)| token)
+            .values()
+            .cloned()
             .collect::<Vec<_>>();
         for token in tokens {
             token.notify_waiters();
         }
-        // The accept loops observe the notification and drop their TcpListener. Yielding twice
-        // gives the kernel a deterministic opportunity to release every bound port before the
-        // next generation is activated.
-        tokio::task::yield_now().await;
-        tokio::task::yield_now().await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if self
+                .bound
+                .lock()
+                .expect("listener runtime lock poisoned")
+                .is_empty()
+            {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::task::yield_now().await;
+        }
     }
 }
 
@@ -542,7 +552,7 @@ async fn start_snapshot_listeners(
             Ok(tcp) => tcp,
             Err(error) => {
                 let _ = runtime.stop_token(bind);
-                runtime.stop_all().await;
+                let _ = runtime.stop_all().await;
                 return Err(error.into());
             }
         };
@@ -615,14 +625,20 @@ async fn handle_control(
         }
         let (_, active) = manager.state();
         let result = match request.operation {
-            ControlOperation::Prepare { snapshot } => manager
-                .prepare(snapshot)
-                .map(|_| manager.state().1.unwrap_or(request.generation)),
+            ControlOperation::Prepare { snapshot } => {
+                let generation = snapshot.generation;
+                manager
+                    .prepare(snapshot)
+                    .map(|_| generation)
+                    .map_err(anyhow::Error::msg)
+            }
             ControlOperation::Activate => {
                 let snapshot = manager
                     .prepared_snapshot()
                     .ok_or_else(|| anyhow::anyhow!("no prepared generation"))?;
-                listener_runtime.stop_all().await;
+                if !listener_runtime.stop_all().await {
+                    anyhow::bail!("active listeners did not release before activation");
+                }
                 start_snapshot_listeners(
                     snapshot,
                     manager.clone(),
@@ -630,16 +646,40 @@ async fn handle_control(
                     traffic.clone(),
                 )
                 .await?;
-                manager.activate()
+                match manager.activate() {
+                    Ok(generation) => Ok(generation),
+                    Err(error) => {
+                        let _ = listener_runtime.stop_all().await;
+                        Err(anyhow::Error::msg(error))
+                    }
+                }
             }
             ControlOperation::Drain => Ok(manager.drain().or(active).unwrap_or(request.generation)),
             ControlOperation::Stop => {
-                listener_runtime.stop_all().await;
+                if !listener_runtime.stop_all().await {
+                    anyhow::bail!("active listeners did not release before stop");
+                }
                 Ok(manager.stop().or(active).unwrap_or(request.generation))
+            }
+            ControlOperation::Rollback { generation } => {
+                if !listener_runtime.stop_all().await {
+                    anyhow::bail!("active listeners did not release before rollback");
+                }
+                let rolled_back = manager.rollback(generation).map_err(anyhow::Error::msg)?;
+                if let Some(snapshot) = manager.active_snapshot() {
+                    start_snapshot_listeners(
+                        snapshot,
+                        manager.clone(),
+                        listener_runtime.clone(),
+                        traffic.clone(),
+                    )
+                    .await?;
+                }
+                Ok(rolled_back)
             }
             ControlOperation::Status => Ok(active.unwrap_or(request.generation)),
         };
-        let error = result.as_ref().err().cloned();
+        let error = result.as_ref().err().map(ToString::to_string);
         let (state, generation) = manager.state();
         let response = ControlResponse {
             protocol_version: request.protocol_version,

@@ -24,6 +24,7 @@ mod mihomo;
 mod paths;
 mod platform;
 mod preflight;
+mod runtime;
 mod runtime_activation;
 #[cfg(test)]
 #[path = "init_runtime_defaults_tests.rs"]
