@@ -1,8 +1,8 @@
-[1m[92m    Finished[0m `release` profile [optimized] target(s) in 0.34s
-[1m[92m     Running[0m tests/mesh_transport_resource_e2e.rs (target/release/deps/mesh_transport_resource_e2e-2594c9c06444c5c1)
+[1m[92m    Finished[0m `release` profile [optimized] target(s) in 0.35s
+[1m[92m     Running[0m tests/mesh_transport_resource_e2e.rs (target/release/deps/mesh_transport_resource_e2e-64d720d6eb2c75bc)
 
 running 1 test
-source journal baseline PSS Some(PssSample { total_kib: 28264, anon_kib: 8968, file_kib: 19296 })
+source journal baseline PSS Some(PssSample { total_kib: 28400, anon_kib: 9488, file_kib: 18912 })
 source journal warm status pending=9870
 source journal warm status pending=9740
 source journal warm status pending=9610
@@ -14,7 +14,7 @@ source journal warm status pending=8960
 source journal warm status pending=8830
 source journal warm status pending=8700
 source journal warm status pending=8570
-source journal warm status pending=8505
+source journal warm status pending=8440
 source journal warm status pending=8375
 source journal warm status pending=8245
 source journal warm status pending=8115
@@ -30,10 +30,10 @@ source journal warm status pending=6945
 source journal warm status pending=6815
 source journal warm status pending=6685
 source journal warm status pending=6555
-source journal warm status pending=6425
-source journal warm status pending=6295
-source journal warm status pending=6165
-source journal warm status pending=6035
+source journal warm status pending=6490
+source journal warm status pending=6360
+source journal warm status pending=6230
+source journal warm status pending=6100
 source journal warm status pending=5970
 source journal warm status pending=5846
 source journal warm status pending=5711
@@ -58,14 +58,14 @@ source journal warm status pending=3438
 source journal warm status pending=3308
 source journal warm status pending=3178
 source journal warm status pending=3048
-source journal warm status pending=2918
 test xp_source_delivery_journal_memory_e2e has been running for over 60 seconds
+source journal warm status pending=2918
 source journal warm status pending=2788
 source journal warm status pending=2663
 source journal warm status pending=2529
 source journal warm status pending=2399
-source journal warm status pending=2269
-source journal warm status pending=2139
+source journal warm status pending=2334
+source journal warm status pending=2204
 source journal warm status pending=2074
 source journal warm status pending=1944
 source journal warm status pending=1814
@@ -304,19 +304,19 @@ source journal warm status pending=285
 source journal warm status pending=285
 source journal warm status pending=290
 source journal warm status pending=290
-source journal window generated=260 / 1270779 bytes, peak=260 / 1270779 bytes, ack=9970 / 155530105 bytes, apply=10162 / 156457129 bytes, source_ack=true / true, repository_apply=true / true
-source_journal_resource cpu_p95_percent=92.93 max_read_bytes=0 max_cycle_read_bytes=0 max_rss_delta=3358720 peak_pss_kib=32072 memory_limit_bytes=134217728 swap_limit_bytes=0 backlog_segments=10000 backlog_bytes=157038596 sample_window_seconds=300 generated_segments=260 generated_bytes=1270779 peak_generated_segments=260 peak_generated_bytes=1270779 acknowledged_segments=9970 acknowledged_bytes=155530105 applied_segments=10162 applied_bytes=156457129
-source_journal_resource_candidate_peak_pss_kib=32072
+source journal window generated=260 / 1274517 bytes, peak=260 / 1274517 bytes, ack=9970 / 155530101 bytes, apply=10162 / 156457087 bytes, source_ack=true / true, repository_apply=true / true
+source_journal_resource cpu_p95_percent=92.89 max_read_bytes=0 max_cycle_read_bytes=0 max_rss_delta=3158016 peak_pss_kib=31672 memory_limit_bytes=134217728 swap_limit_bytes=0 backlog_segments=10000 backlog_bytes=157038596 sample_window_seconds=300 generated_segments=260 generated_bytes=1274517 peak_generated_segments=260 peak_generated_bytes=1274517 acknowledged_segments=9970 acknowledged_bytes=155530101 applied_segments=10162 applied_bytes=156457087
+source_journal_resource_candidate_peak_pss_kib=31672
 test xp_source_delivery_journal_memory_e2e ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 305.36s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 305.35s
 
-[1m[92m    Finished[0m `release` profile [optimized] target(s) in 0.32s
-[1m[92m     Running[0m tests/mesh_transport_resource_e2e.rs (target/release/deps/mesh_transport_resource_e2e-2594c9c06444c5c1)
+[1m[92m    Finished[0m `release` profile [optimized] target(s) in 0.34s
+[1m[92m     Running[0m tests/mesh_transport_resource_e2e.rs (target/release/deps/mesh_transport_resource_e2e-64d720d6eb2c75bc)
 
 running 1 test
-repository_summary_resource_candidate_peak_pss_kib=30148
+repository_summary_resource_candidate_peak_pss_kib=30336
 test xp_repository_summary_memory_e2e ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 5.76s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 5.69s
 
