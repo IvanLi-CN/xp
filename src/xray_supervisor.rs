@@ -159,7 +159,15 @@ pub fn spawn_xray_supervisor(
     reconcile: ReconcileHandle,
 ) -> (XrayHealthHandle, tokio::task::JoinHandle<()>) {
     let opts = XraySupervisorOptions::from_config(&config);
-    let restarter = restarter_from_config(&config);
+    // The native proxy owns the public ingress while this capability is enabled. Xray may
+    // remain installed for compatibility and health reporting, but its supervisor must not
+    // restart the stopped legacy ingress and recreate a second public listener.
+    let native_proxy_enabled = std::env::var("XP_NATIVE_PROXY_ENABLED")
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on"));
+    let restarter = (!native_proxy_enabled)
+        .then(|| restarter_from_config(&config))
+        .flatten();
     spawn_xray_supervisor_with_options_and_restarter(
         config.xray_api_addr,
         opts,
