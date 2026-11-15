@@ -3,7 +3,7 @@
 name="xp"
 description="xp (Xray cluster manager)"
 
-command="/usr/local/libexec/xp-openrc-wrapper"
+command="/usr/local/bin/xp-openrc-wrapper"
 command_user="xp:xp"
 extra_groups="xp-proxy"
 supervisor=supervise-daemon
