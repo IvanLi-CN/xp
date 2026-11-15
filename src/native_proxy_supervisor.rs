@@ -71,6 +71,9 @@ pub fn build_snapshot(
 ) -> anyhow::Result<ProxySnapshot> {
     let mut listeners = Vec::new();
     let mut endpoint_ids = BTreeMap::new();
+    let native_runtime_enabled = env::var("XP_NATIVE_PROXY_ENABLED")
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on"));
     for endpoint in endpoints
         .iter()
         .filter(|endpoint| endpoint.node_id == local_node_id)
@@ -80,13 +83,16 @@ pub fn build_snapshot(
         }
         let meta: crate::protocol::VlessRealityVisionTcpEndpointMeta =
             serde_json::from_value(endpoint.meta.clone())?;
-        if !matches!(
-            crate::protocol::vless_ingress_owner(&endpoint.meta),
-            crate::protocol::VlessIngressOwner::Native
-        ) || !matches!(
-            meta.transport,
-            crate::protocol::VlessRealityTransport::Xhttp
-        ) {
+        if (!native_runtime_enabled
+            && !matches!(
+                crate::protocol::vless_ingress_owner(&endpoint.meta),
+                crate::protocol::VlessIngressOwner::Native
+            ))
+            || !matches!(
+                meta.transport,
+                crate::protocol::VlessRealityTransport::Xhttp
+            )
+        {
             continue;
         }
         let fallbacks = meta
