@@ -613,8 +613,6 @@ fn write_openrc_scripts(paths: &Paths, _args: &InitArgs, mode: Mode) -> Result<(
 
     ensure_dir(&initd).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     ensure_dir(&confd).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-    let libexec = paths.usr_local_libexec_dir();
-    ensure_dir(&libexec).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
 
     let xp_script = openrc_xp_script();
     let xp_proxy_script = openrc_xp_proxy_script();
@@ -627,7 +625,7 @@ fn write_openrc_scripts(paths: &Paths, _args: &InitArgs, mode: Mode) -> Result<(
     let xp_proxy_path = initd.join("xp-proxy");
     let xray_path = initd.join("xray");
     let upgrade_path = initd.join("xp-upgrade");
-    let xp_wrapper_path = libexec.join("xp-openrc-wrapper");
+    let xp_wrapper_path = paths.usr_local_bin_xp().with_file_name("xp-openrc-wrapper");
     write_string_if_changed(&xp_path, &xp_script)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&xp_proxy_path, &xp_proxy_script)
@@ -658,7 +656,7 @@ fn openrc_xp_script() -> String {
 name="xp"
 description="xp (Xray cluster manager)"
 
-command="/usr/local/libexec/xp-openrc-wrapper"
+command="/usr/local/bin/xp-openrc-wrapper"
 command_user="xp:xp"
 extra_groups="xp-proxy"
 supervisor=supervise-daemon
