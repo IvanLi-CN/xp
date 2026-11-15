@@ -460,6 +460,18 @@ mod tests {
         assert!(snapshot.validate().is_err());
     }
 
+    #[test]
+    fn status_control_request_roundtrips_over_wire_format() {
+        let request = ControlRequest {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: "status-test".into(),
+            generation: 1,
+            operation: ControlOperation::Status,
+        };
+        let decoded: ControlRequest = decode_frame(&encode_frame(&request).unwrap()).unwrap();
+        assert_eq!(decoded, request);
+    }
+
     fn snapshot(generation: u64) -> ProxySnapshot {
         ProxySnapshot {
             protocol_version: CONTROL_PROTOCOL_VERSION,

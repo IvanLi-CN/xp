@@ -153,7 +153,11 @@ async fn main() -> Result<()> {
                 let listener_runtime = listener_runtime.clone();
                 let traffic = traffic.clone();
                 tokio::spawn(async move {
-                    let _ = handle_control(stream, manager, listener_runtime, traffic).await;
+                    if let Err(error) =
+                        handle_control(stream, manager, listener_runtime, traffic).await
+                    {
+                        eprintln!("xp-proxy control request failed: {error}");
+                    }
                 });
             }
             _ = tokio::signal::ctrl_c() => break,
