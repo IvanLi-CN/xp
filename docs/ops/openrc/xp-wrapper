@@ -1,0 +1,5 @@
+#!/bin/sh
+set -a
+[ -f /etc/xp/xp.env ] && . /etc/xp/xp.env
+set +a
+exec /usr/local/bin/xp run --data-dir /var/lib/xp/data

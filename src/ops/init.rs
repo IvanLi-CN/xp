@@ -613,6 +613,8 @@ fn write_openrc_scripts(paths: &Paths, _args: &InitArgs, mode: Mode) -> Result<(
 
     ensure_dir(&initd).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     ensure_dir(&confd).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    let libexec = paths.usr_local_libexec_dir();
+    ensure_dir(&libexec).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
 
     let xp_script = openrc_xp_script();
     let xp_proxy_script = openrc_xp_proxy_script();
@@ -625,7 +627,7 @@ fn write_openrc_scripts(paths: &Paths, _args: &InitArgs, mode: Mode) -> Result<(
     let xp_proxy_path = initd.join("xp-proxy");
     let xray_path = initd.join("xray");
     let upgrade_path = initd.join("xp-upgrade");
-
+    let xp_wrapper_path = libexec.join("xp-openrc-wrapper");
     write_string_if_changed(&xp_path, &xp_script)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&xp_proxy_path, &xp_proxy_script)
@@ -634,11 +636,19 @@ fn write_openrc_scripts(paths: &Paths, _args: &InitArgs, mode: Mode) -> Result<(
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&upgrade_path, &upgrade_script)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    write_string_if_changed(
+        &xp_wrapper_path,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/docs/ops/openrc/xp-wrapper"
+        )),
+    )
+    .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     chmod(&xp_path, 0o755).ok();
     chmod(&xp_proxy_path, 0o755).ok();
     chmod(&xray_path, 0o755).ok();
     chmod(&upgrade_path, 0o755).ok();
-
+    chmod(&xp_wrapper_path, 0o755).ok();
     Ok(())
 }
 
@@ -648,8 +658,7 @@ fn openrc_xp_script() -> String {
 name="xp"
 description="xp (Xray cluster manager)"
 
-command="/bin/sh"
-command_args='-c "set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; exec /usr/local/bin/xp run --data-dir /var/lib/xp/data"'
+command="/usr/local/libexec/xp-openrc-wrapper"
 command_user="xp:xp"
 extra_groups="xp-proxy"
 supervisor=supervise-daemon
