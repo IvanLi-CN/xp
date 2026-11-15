@@ -136,7 +136,7 @@ pub fn build_snapshot(
         }
     }
     Ok(ProxySnapshot {
-        protocol_version: 1,
+        protocol_version: CONTROL_PROTOCOL_VERSION,
         generation: 1,
         listeners,
         users: snapshot_users,
@@ -380,6 +380,7 @@ mod tests {
             "cluster-key",
         )
         .unwrap();
+        assert_eq!(snapshot.protocol_version, CONTROL_PROTOCOL_VERSION);
         assert_eq!(snapshot.listeners.len(), 1);
         assert_eq!(snapshot.listeners[0].bind, "0.0.0.0:443");
         assert_eq!(snapshot.listeners[0].path, "/xp-xhttp");

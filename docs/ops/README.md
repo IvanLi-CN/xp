@@ -74,7 +74,7 @@ never bind the same port. A native process crash, missing socket, stale snapshot
 response or failed readiness check does not automatically switch the endpoint to Xray; the endpoint
 stays stopped/failed until an explicit, audited owner operation completes.
 
-### Host-managed target contract (design only)
+### Host-managed target contract
 
 The target host-managed contract is one independent `xp-proxy` service on both systemd and OpenRC.
 XP coordinates snapshots through the socket but does not spawn, supervise or kill the service.
@@ -84,12 +84,11 @@ Native -> Xray follows:
 `drain -> stop -> verify port release -> start Xray -> verify ready`.
 A failed handoff never leaves both owners running.
 
-Host upgrades must eventually include `xp-proxy` in the same checksummed transaction, readiness
-window, backup cleanup and rollback contract as XP/Xray/cloudflared. A restored proxy that cannot
-prove readiness leaves the endpoint stopped. The exact service identity, capability name, generation
-storage, drain deadline, fallback wire semantics, automatic rollback policy and Docker first-release
-scope remain owner-confirmation gates; this document does not authorize an operator to improvise
-them.
+Host upgrades include `xp-proxy` in the same checksummed transaction, readiness window, backup
+cleanup and rollback contract as XP/Xray/cloudflared. A restored proxy that cannot prove readiness
+leaves the endpoint stopped. Docker/Compose keeps the existing Xray path until it has equivalent
+service supervision, snapshot persistence, single-port owner handoff, readiness evidence and
+upgrade/rollback behavior.
 
 ### Container boundary
 

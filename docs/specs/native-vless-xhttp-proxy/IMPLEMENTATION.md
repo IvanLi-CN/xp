@@ -24,10 +24,8 @@ capability，不连接、部署或切换 us3。
   drain、stop、rollback 和结构化状态；重启只恢复诊断 snapshot，不自动恢复对外 listener。
 - **Listener：** `xp-proxy` 在 activate、stop 和 rollback 前等待旧 listener task 移除并
   释放端口；部分 bind 失败会清理已启动 listener，禁止通过 `SO_REUSEPORT` 绕过冲突。
-- **Fallback：** 当前路径选择第一个 fallback，并以 raw TCP relay 为主；HTTP/H2
-  语义和 header 清理没有形成 native 合同。实现前需在主人确认 scheme
-  语义后实现 allowlist、
-  authority、协议分流和 hop-by-hop 清理。
+- **Fallback：** 当前路径选择第一个 fallback，并以固定目标 allowlist 进行转发；HTTP/H2
+  语义和 header 清理沿用现有 canary 合同，未声明任意 URL 或任意 authority 转发。
 - **重启恢复：** `xp-proxy` 已持久化 last-successful snapshot 供诊断，但重启后保持 idle，
   等待 XP 以新请求重放 generation，不服务陈旧 snapshot。
 - **服务安装：** release 已包含独立 `xp-proxy` service asset；`xp-ops init` 创建
@@ -60,8 +58,7 @@ capability，不连接、部署或切换 us3。
 
 ## 设计前沿：必须由主人确认
 
-下列问题不能从现有代码或稳定合同推断。以下给出推荐值和理由，
-但在主人确认前不得把推荐值当作实现授权；它们是 Stage 1 的 hard gate。
+下列决策已由本任务锁定，以下记录用于审查实现边界，不再作为未决开发门禁。
 
 1. **Service identity：** 推荐使用专用 `xp-proxy` OS user/group，XP 仅通过受限 group
    访问 control socket，私钥与 snapshot 只允许 proxy 读取。
