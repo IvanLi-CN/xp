@@ -651,15 +651,19 @@ async fn reconcile_once_with_runtime(
         restart_handle.request_xray_restart();
     }
 
+    // Native ingress is an independent data plane. Once the runtime handoff has selected
+    // xp-proxy, publishing its snapshot must not depend on the legacy Xray reconcile succeeding
+    // (Xray is expected to be stopped during that handoff).
+    crate::native_proxy_supervisor::publish_reconciled_snapshot(
+        &local_node_id,
+        &native_snapshot_inputs.0,
+        &native_snapshot_inputs.1,
+        &native_snapshot_inputs.2,
+        cluster_ca_key_pem,
+    )
+    .await;
+
     if let Ok(outcome) = &outcome {
-        crate::native_proxy_supervisor::publish_reconciled_snapshot(
-            &local_node_id,
-            &native_snapshot_inputs.0,
-            &native_snapshot_inputs.1,
-            &native_snapshot_inputs.2,
-            cluster_ca_key_pem,
-        )
-        .await;
         // Only advance the hash cache when we are confident the inbound was rebuilt. This ensures
         // we keep retrying rebuilds when xray calls fail.
         last_applied_hash_by_endpoint_id
