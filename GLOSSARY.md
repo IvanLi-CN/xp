@@ -182,6 +182,12 @@ reports runtime state. In this topic the native data plane is `xp-proxy`; Xray r
 data-plane implementation.
 _Avoid_: Control plane, endpoint metadata
 
+**Xray Runtime / xp-proxy Runtime**:
+The node-local runtime selected by `xp-ops` to handle ingress traffic. A node may run exactly one
+of these runtimes at a time; the other runtime must be stopped. This is a node-local lifecycle fact,
+not a Raft cluster mode.
+_Avoid_: Cluster data-plane mode, transport mode
+
 **Proxy Snapshot**:
 A complete, versioned description of the listener, user, protocol, fallback and runtime settings
 that XP authoritatively publishes to the local data plane.

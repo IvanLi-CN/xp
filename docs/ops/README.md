@@ -49,10 +49,12 @@ Current support boundaries that operators must know:
 
 ## Native VLESS XHTTP data plane boundary
 
-The independently released `xp-proxy` binary is currently an experimental protocol/data-plane
-asset, not a supported ingress runtime. Installing `/usr/local/bin/xp-proxy`, setting
-`XP_NATIVE_PROXY_ENABLED`, starting a process, or creating its control socket does not transfer
-an endpoint away from Xray and does not make a node a usable native ingress point.
+The released `xp-proxy` binary is one component of the host-managed ingress runtime.
+Installing the binary, starting the service, or creating its control socket alone does not make an
+endpoint usable; XP must confirm
+the complete snapshot, generation, listener, owner and self-test contract.
+The node runs either the Xray runtime or the `xp-proxy` runtime.
+`xp-ops` owns the local choice and must stop the other runtime before starting the selected one.
 
 The production design is recorded in
 [the native proxy SPEC](../specs/native-vless-xhttp-proxy/SPEC.md) and
@@ -1421,10 +1423,11 @@ Current rollout semantics:
   runtime services are ready, before replacing `xp-ops` itself. On OpenRC, each managed restart
   is `stop -> stopped -> start -> started`; `stopping` and every unrecognized status are
   nonterminal. This prevents XP's runtime recovery loop from racing an OpenRC service transition.
-- A release may also contain the checksummed `xp-proxy` asset. The current upgrade path only
-  installs that binary as an inert asset; it does not start an `xp-proxy` service, transfer an
-  endpoint owner, or claim native readiness. Native activation remains unsupported until the
-  independent service and rollback contract in the native proxy SPEC is implemented and evidenced.
+- A release contains a checksummed `xp-proxy` asset. The upgrade path must install its matching
+  service asset and preserve the node's current runtime choice.
+  It must not silently transfer an endpoint owner.
+  Switching to `xp-proxy` requires the explicit local `xp-ops` runtime operation and the complete
+  readiness, snapshot, generation, listener and self-test evidence from the native proxy SPEC.
 - Deferring the `xp-ops` replacement prevents a self-update from ending the locked release phase before the service binaries and managed runtimes are updated.
 - A service restart is accepted only after systemd reports the unit active or OpenRC reports the
   service started on two successive checks. OpenRC stop is likewise accepted only after two exact

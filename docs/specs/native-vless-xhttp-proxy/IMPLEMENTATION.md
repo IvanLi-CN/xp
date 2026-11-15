@@ -34,10 +34,8 @@
   也不确认 active 状态。实现前需持久化校验/诊断信息，重启后等待 XP 重放
   generation，
   不得服务陈旧 snapshot。
-- **服务安装：** release 会安装 `xp-proxy` binary，但 init、service readiness、upgrade
-  activation 只覆盖 XP/Xray/cloudflared。实现前需为 systemd/OpenRC 增加独立 asset、
-  权限、
-  ready/stopped 两次观测、升级与回滚顺序。
+- **服务安装：** release 会提供 `xp-proxy` binary，但当前升级路径没有完成独立 service 的安装回填、权限、ready/stopped 两次观测、
+  节点本地运行时选择和升级与回滚顺序。实现前需将其纳入 host-managed 运行时事务，并保持既有节点的 Xray runtime，不自动切换流量。
 - **兼容性：** 已有协议单测和 Xray/Mihomo XHTTP fixture，但没有 native host handoff/
   upgrade 证据。实现前需在 Agent VM 完成两种 init、四条协议路径、fault injection
   和资源门禁。
@@ -108,12 +106,11 @@
 
 ## 推荐的切换状态机
 
-### Xray -> native
+### Xray runtime -> xp-proxy runtime
 
 1. XP 线性一致读取 endpoint owner、node capability、端口占用、当前 generation 和
    pending operation。
-2. 建立带 operation id 的切换记录，snapshot 只允许包含被选为 native 的 endpoint；
-   其余 endpoint 继续由 Xray 管理。
+2. 建立带 operation id 的本地切换记录；节点级切换不允许保留由 Xray 承载的并行 endpoint。
 3. 向 `xp-proxy` prepare 完整 candidate。prepare 只做 schema、crypto、fallback、资源和
    loopback self-test，不宣称公开 ingress。
 4. 更新 Xray desired config，删除同一 endpoint inbound；等待 Xray 报告 ready 且通过
@@ -123,7 +120,7 @@
 6. 只有第 5 步成功才提交 endpoint owner=native；否则按失败原因恢复 Xray。
    恢复失败则 endpoint 保持 stopped/failed，不启动两个 owner。
 
-### native -> Xray
+### xp-proxy runtime -> Xray runtime
 
 1. 记录显式 rollback/switch operation 和 expected native generation。
 2. 让 native 停止新 session，进入 bounded drain；到 deadline 后按已确认策略关闭
@@ -168,8 +165,10 @@
 
 ## 分阶段交付
 
-- **Stage 0：** 需求、术语、ADR、SPEC、ops 合同已锁定，待主人确认 8 项决策。
-  退出条件是主人明确确认或修订决策前沿，且无隐含假设。
+- **Stage 0：** 已确认节点本地运行时边界、Xray/`xp-proxy` 互斥、host-managed 首发范围、
+  显式 `xp-ops` 切换、既有节点保持 Xray 和失败时 fail closed。fallback 语义、drain SLA、
+  capability 命名等协议细节仍是实现前的设计审查项。
+  退出条件是这些剩余决策明确且无隐含假设。
 - **Stage 1：** control protocol v2、持久 generation、snapshot persistence、幂等、
   rollback 和 listener lifecycle。退出条件是 `VER-SNAPSHOT`、`VER-GENERATION`、
   `VER-CONTROL`、`VER-ROLLBACK` 通过。
