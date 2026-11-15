@@ -31,6 +31,7 @@ COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml .xp-source-marker ./
 COPY proto ./proto
 COPY crates ./crates
 COPY src ./src
+COPY docs/ops ./docs/ops
 COPY tests ./tests
 COPY test-fixtures ./test-fixtures
 COPY --from=web-builder /app/web/dist ./web/dist

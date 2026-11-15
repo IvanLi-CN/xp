@@ -1,6 +1,8 @@
 [Unit]
 Description=xp (Xray cluster manager)
 After=network.target
+Wants=xp-proxy.service
+After=xp-proxy.service
 # Suggested if you manage xray via systemd on the same host:
 # Wants=xray.service
 # After=xray.service
@@ -20,6 +22,9 @@ Group=xp
 # Explicit working directory and data dir (XP_DATA_DIR default is ./data).
 WorkingDirectory=/var/lib/xp
 Environment=XP_DATA_DIR=/var/lib/xp/data
+Environment=XP_NATIVE_PROXY_ENABLED=true
+Environment=XP_NATIVE_PROXY_CONTROL_SOCKET=/run/xp-proxy/xp-proxy.sock
+SupplementaryGroups=xp-proxy
 
 # Optional: additional env vars (XP_ADMIN_TOKEN, XP_XRAY_API_ADDR, quota knobs, etc.)
 EnvironmentFile=-/etc/xp/xp.env

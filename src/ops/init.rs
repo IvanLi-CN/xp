@@ -6,13 +6,10 @@ use serde_json::json;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-
 mod runtime_defaults;
 pub use runtime_defaults::backfill_low_memory_runtime_defaults;
-
 #[cfg(test)]
 mod openrc_upgrade_tests;
-
 pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
     let mode = if args.dry_run {
         Mode::DryRun
@@ -29,13 +26,10 @@ pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
             InitSystemArg::None => Some(InitSystem::None),
         },
     );
-
     if mode == Mode::DryRun {
         eprintln!("init system: {init_system:?}");
     }
-
     ensure_layout(&paths, distro, &args, mode)?;
-
     match init_system {
         InitSystem::Systemd => {
             write_systemd_units(&paths, &args, mode)?;
@@ -58,10 +52,8 @@ pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
         }
         InitSystem::None => {}
     }
-
     Ok(())
 }
-
 fn ensure_layout(
     paths: &Paths,
     distro: Distro,
@@ -75,7 +67,6 @@ fn ensure_layout(
     let etc_xp_dir = paths.etc_xp_dir();
     let etc_xp_ops_cf_dir = paths.etc_xp_ops_cloudflare_dir();
     let etc_cloudflared_dir = paths.etc_cloudflared_dir();
-
     let dirs = [
         xp_work_dir.as_path(),
         xp_data_dir.as_path(),
@@ -85,7 +76,6 @@ fn ensure_layout(
         etc_xp_ops_cf_dir.as_path(),
         etc_cloudflared_dir.as_path(),
     ];
-
     for d in dirs {
         if mode == Mode::DryRun {
             eprintln!("would create dir: {}", d.display());
@@ -93,21 +83,22 @@ fn ensure_layout(
         }
         ensure_dir(d).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     }
-
     if mode == Mode::Real {
         write_static_xray_config(paths)?;
     } else {
         eprintln!("would write: /etc/xray/config.json");
     }
-
     if mode == Mode::Real && !is_test_root(paths.root()) {
         ensure_user_group(distro, "xp", &args.xp_work_dir)?;
         ensure_user_group(distro, "xray", &args.xray_work_dir)?;
-
+        ensure_user_group(distro, "xp-proxy", Path::new("/var/lib/xp-proxy"))?;
         run_or_fail(
             "chown",
             &["-R", "xp:xp", args.xp_work_dir.to_string_lossy().as_ref()],
         )?;
+        ensure_dir(Path::new("/var/lib/xp-proxy"))
+            .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+        run_or_fail("chown", &["-R", "xp-proxy:xp-proxy", "/var/lib/xp-proxy"])?;
         run_or_fail(
             "chown",
             &["-R", "xp:xp", args.xp_data_dir.to_string_lossy().as_ref()],
@@ -121,13 +112,11 @@ fn ensure_layout(
             ],
         )?;
     } else if mode == Mode::DryRun {
-        eprintln!("would ensure users: xp, xray");
-        eprintln!("would chown: xp_work_dir/xp_data_dir to xp:xp; xray_work_dir to xray:xray");
+        eprintln!("would ensure users: xp, xray, xp-proxy");
+        eprintln!("would chown managed service directories");
     }
-
     Ok(())
 }
-
 pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
     let cfg = json!({
       "log": { "loglevel": "warning" },
@@ -169,7 +158,6 @@ pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
         { "tag": "block", "protocol": "blackhole", "settings": {} }
       ]
     });
-
     let content = serde_json::to_string_pretty(&cfg)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&paths.etc_xray_config(), &(content + "\n"))
@@ -177,42 +165,41 @@ pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
     chmod(&paths.etc_xray_config(), 0o644).ok();
     Ok(())
 }
-
 fn write_systemd_units(paths: &Paths, args: &InitArgs, mode: Mode) -> Result<(), ExitError> {
     let dir = paths.systemd_unit_dir();
     if mode == Mode::DryRun {
         eprintln!("would write systemd units under: {}", dir.display());
         return Ok(());
     }
-
     ensure_dir(&dir).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-
     let xp_unit = systemd_xp_unit(args);
+    let xp_proxy_unit = systemd_xp_proxy_unit();
     let guard_mode = crate::ops::ingress_guard::configured_mode(paths)?;
     let xray_unit =
         crate::ops::ingress_guard::render_systemd_xray_unit(&args.xray_work_dir, guard_mode);
     let upgrade_unit = systemd_xp_upgrade_unit(args);
-
     let xp_path = dir.join("xp.service");
+    let xp_proxy_path = dir.join("xp-proxy.service");
     let xray_path = dir.join("xray.service");
     let upgrade_path = dir.join("xp-upgrade.service");
-
     write_string_if_changed(&xp_path, &xp_unit)
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    write_string_if_changed(&xp_proxy_path, &xp_proxy_unit)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&xray_path, &xray_unit)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&upgrade_path, &upgrade_unit)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
-
     Ok(())
 }
-
 fn systemd_xp_unit(args: &InitArgs) -> String {
     format!(
         "[Unit]\n\
 Description=xp (Xray cluster manager)\n\
 Wants=network-online.target\n\
 After=network-online.target\n\
+Wants=xp-proxy.service\n\
+After=xp-proxy.service\n\
 \n\
 [Service]\n\
 Type=simple\n\
@@ -220,6 +207,8 @@ User=xp\n\
 Group=xp\n\
 WorkingDirectory={}\n\
 Environment=XP_DATA_DIR={}\n\
+Environment=XP_NATIVE_PROXY_ENABLED=true\n\
+Environment=XP_NATIVE_PROXY_CONTROL_SOCKET=/run/xp-proxy/xp-proxy.sock\n\
 EnvironmentFile=-/etc/xp/xp.env\n\
 ExecStart=/usr/local/bin/xp run\n\
 Restart=always\n\
@@ -231,7 +220,6 @@ WantedBy=multi-user.target\n",
         args.xp_data_dir.display()
     )
 }
-
 fn systemd_xp_upgrade_unit(args: &InitArgs) -> String {
     format!(
         "[Unit]\n\
@@ -246,6 +234,14 @@ EnvironmentFile=-/etc/xp/xp.env\n\
 ExecStart=/usr/local/bin/xp-ops _upgrade-runner\n",
         args.xp_data_dir.display()
     )
+}
+
+fn systemd_xp_proxy_unit() -> String {
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/ops/systemd/xp-proxy.service"
+    ))
+    .into()
 }
 
 fn write_systemd_xray_restart_policy(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
@@ -604,6 +600,7 @@ fn enable_systemd_services(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
     }
     run_or_fail("systemctl", &["daemon-reload"])?;
     run_or_fail("systemctl", &["enable", "--now", "xray.service"])?;
+    run_or_fail("systemctl", &["enable", "--now", "xp-proxy.service"])?;
     run_or_fail("systemctl", &["enable", "--now", "xp.service"])?;
     Ok(())
 }
@@ -622,22 +619,27 @@ fn write_openrc_scripts(paths: &Paths, _args: &InitArgs, mode: Mode) -> Result<(
     ensure_dir(&confd).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
 
     let xp_script = openrc_xp_script();
+    let xp_proxy_script = openrc_xp_proxy_script();
     let xray_script = crate::ops::ingress_guard::render_openrc_xray_script(
         crate::ops::ingress_guard::configured_mode(paths)?,
     );
     let upgrade_script = openrc_xp_upgrade_script();
 
     let xp_path = initd.join("xp");
+    let xp_proxy_path = initd.join("xp-proxy");
     let xray_path = initd.join("xray");
     let upgrade_path = initd.join("xp-upgrade");
 
     write_string_if_changed(&xp_path, &xp_script)
+        .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
+    write_string_if_changed(&xp_proxy_path, &xp_proxy_script)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&xray_path, &xray_script)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     write_string_if_changed(&upgrade_path, &upgrade_script)
         .map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
     chmod(&xp_path, 0o755).ok();
+    chmod(&xp_proxy_path, 0o755).ok();
     chmod(&xray_path, 0o755).ok();
     chmod(&upgrade_path, 0o755).ok();
 
@@ -653,6 +655,7 @@ description="xp (Xray cluster manager)"
 command="/bin/sh"
 command_args="-c 'set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; exec /usr/local/bin/xp run --data-dir /var/lib/xp/data'"
 command_user="xp:xp"
+extra_groups="xp-proxy"
 supervisor=supervise-daemon
 respawn_delay=2
 respawn_max=0
@@ -662,6 +665,14 @@ depend() {
 }
 "#
     .to_string()
+}
+
+fn openrc_xp_proxy_script() -> String {
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/ops/openrc/xp-proxy"
+    ))
+    .into()
 }
 
 #[cfg(test)]
@@ -729,6 +740,8 @@ fn enable_openrc_services(mode: Mode) -> Result<(), ExitError> {
     run_or_fail("rc-update", &["add", "xray", "default"])?;
     run_or_fail("rc-update", &["add", "xp", "default"])?;
     run_or_fail("rc-service", &["xray", "start"])?;
+    run_or_fail("rc-update", &["add", "xp-proxy", "default"])?;
+    run_or_fail("rc-service", &["xp-proxy", "start"])?;
     run_or_fail("rc-service", &["xp", "start"])?;
     Ok(())
 }

@@ -217,6 +217,23 @@ pub struct VlessRealityVisionTcpEndpointMeta {
     pub managed_default: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VlessIngressOwner {
+    Xray,
+    Native,
+}
+
+/// Missing owner metadata is deliberately treated as Xray for backwards compatibility.
+pub fn vless_ingress_owner(meta: &serde_json::Value) -> VlessIngressOwner {
+    match meta
+        .get("ingress_owner")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("native") => VlessIngressOwner::Native,
+        _ => VlessIngressOwner::Xray,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Ss2022EndpointMeta {
     pub method: String,

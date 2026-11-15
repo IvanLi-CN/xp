@@ -101,6 +101,32 @@ wait_https_ok_ca() {
   done
 }
 
+wait_join_converged() {
+  name="$1"
+  i=0
+  echo "waiting for ${name} to observe the committed cluster membership ..."
+  while :; do
+    info="$(compose exec -T tool curl -fsS --connect-timeout 1 --max-time 2 \
+      --cacert /vol/xp1/cluster/cluster_ca.pem \
+      "https://${name}:6443/api/cluster/info" 2>/dev/null || true)"
+    if [ -n "$info" ]; then
+      role="$(printf '%s' "$info" | json_get role 2>/dev/null || true)"
+      leader="$(printf '%s' "$info" | json_get leader_api_base_url 2>/dev/null || true)"
+      if [ "$role" = "leader" ] || { [ "$role" = "follower" ] && [ -n "$leader" ]; }; then
+        return 0
+      fi
+    fi
+    i=$((i + 1))
+    if [ "$i" -gt 600 ]; then
+      echo "timeout waiting for ${name} membership convergence" >&2
+      printf '%s\n' "$info" >&2
+      compose logs --no-color "${name}-app" || true
+      exit 1
+    fi
+    sleep 0.2
+  done
+}
+
 json_get() {
   need_python3
   key="$1"
@@ -283,12 +309,14 @@ up() {
   copy_https_cert_to_joiner xp1 xp2
   compose up -d xp2-app xp2
   wait_https_ok xp2 "/api/cluster/info"
+  wait_join_converged xp2
 
   t3="$(create_join_token_value)"
   join_node xp3 "$t3"
   copy_https_cert_to_joiner xp1 xp3
   compose up -d xp3-app xp3
   wait_https_ok xp3 "/api/cluster/info"
+  wait_join_converged xp3
 
   echo "cluster is up"
   urls
@@ -595,14 +623,30 @@ raise SystemExit("node meta sync failed: updated node not found")
   compose exec -T tool curl -fsS --cacert /vol/xp1/cluster/cluster_ca.pem \
     https://xp1-alt:6443/api/cluster/info >/dev/null
 
-  # Write from follower must still succeed (tests follower->leader forwarding).
+  # Write from follower must still succeed (tests follower->leader forwarding). Node metadata
+  # mutations intentionally require the local leader, so use a regular desired-state write here.
+  user_id="$(
+    compose exec -T xp1-app curl -fsS \
+      --cacert /data/cluster/cluster_ca.pem \
+      -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
+      https://xp1:6443/api/admin/users | python3 -c '
+import json
+import sys
+
+for user in json.load(sys.stdin).get("items", []):
+    if user.get("display_name") == "alice":
+        print(user["user_id"])
+        raise SystemExit(0)
+raise SystemExit("alice not found")
+'
+  )"
   compose exec -T tool curl -fsS \
     --cacert /vol/xp1/cluster/cluster_ca.pem \
     -H "Authorization: Bearer ${XP_APXDG_ADMIN_TOKEN}" \
     -H "Content-Type: application/json" \
     -X PATCH \
-    -d '{"quota_reset":{"policy":"unlimited"}}' \
-    "https://xp2:6443/api/admin/nodes/${node1_id}" >/dev/null
+    -d '{"display_name":"alice"}' \
+    "https://xp2:6443/api/admin/users/${user_id}" >/dev/null
 
   echo "meta sync ok (API edit blocked; xp-ops sync updates state+membership; forwarding works)"
 }

@@ -3,7 +3,8 @@ use super::*;
 use crate::ops::init::{backfill_low_memory_runtime_defaults, write_static_xray_config};
 use crate::ops::runtime_activation::{
     reload_systemd_units, restart_cloudflared_service, restart_xray_service,
-    service_commands_are_disabled, start_xp_service, stop_xp_service,
+    service_commands_are_disabled, start_xp_proxy_service, start_xp_service, stop_xp_proxy_service,
+    stop_xp_service,
 };
 use crate::ops::upgrade_artifacts::managed_cloudflared_dest;
 
@@ -114,6 +115,24 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
         )
         .expect_err("runtime failure helper must return an error"));
     }
+    if !stop_xp_proxy_service(paths) {
+        let err = retain_original_error(
+            ExitError::new(
+                7,
+                "service_error: stop xp-proxy before managed runtime activation failed",
+            ),
+            rollback_runtime_binaries(&backups),
+        );
+        return Err(finish_runtime_failure(
+            paths,
+            xp_backup,
+            data_dir,
+            err,
+            rollback_xp_on_failure,
+            true,
+        )
+        .expect_err("runtime failure helper must return an error"));
+    }
     if let Err(err) = reconcile_static_xray_config_and_restart(paths) {
         let runtime_rollback =
             rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults);
@@ -129,7 +148,7 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
         )
         .expect_err("runtime failure helper must return an error"));
     }
-    if !start_xp_service(paths) {
+    if !start_xp_proxy_service(paths) || !start_xp_service(paths) {
         let runtime_rollback = if stop_xp_service(paths) {
             rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults)
         } else {
@@ -206,7 +225,8 @@ fn rollback_runtime_binaries_and_services(
         &read_xray_openrc_service(paths),
     );
     let cloudflared_ok = restart_cloudflared_service(paths);
-    if xray_ok && cloudflared_ok {
+    let proxy_ok = start_xp_proxy_service(paths);
+    if xray_ok && cloudflared_ok && proxy_ok {
         Ok(())
     } else {
         Err(ExitError::new(

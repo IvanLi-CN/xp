@@ -1,6 +1,6 @@
 use super::resource_mesh_error::resource_mesh_error;
 use super::*;
-use crate::control_plane_mesh::MeshRequestError;
+use crate::control_plane_mesh::{MeshRequestError, PeerDirectPath};
 use crate::http::join_capability::require_reverse_assignment_on_voters;
 use sha2::{Digest, Sha256};
 #[path = "mesh/bootstrap.rs"]
@@ -1498,15 +1498,32 @@ pub(super) async fn send_mesh_internal_capability_read(
         updates_active_path: true,
     };
     let deadline = std::time::Instant::now() + budget;
-    let response = client
+    let response = match client
         .send_peer_request_allowing_legacy_not_found(
             &peer,
-            request,
+            request.clone(),
             ca_key_pem,
             &state.cluster_ca_pem,
         )
         .await
-        .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+    {
+        Ok(response) => response,
+        Err(crate::control_plane_mesh::MeshRequestError::CircuitOpen {
+            path: "Public", ..
+        }) => crate::control_plane_mesh::CapabilityProbeResponse::Verified(
+            client
+                .send_peer_direct_request(
+                    &peer,
+                    PeerDirectPath::ApiBaseUrl,
+                    request,
+                    ca_key_pem,
+                    &state.cluster_ca_pem,
+                )
+                .await
+                .map_err(|error| ApiError::gateway_timeout(error.to_string()))?,
+        ),
+        Err(error) => return Err(ApiError::gateway_timeout(error.to_string())),
+    };
     Ok(match response {
         crate::control_plane_mesh::CapabilityProbeResponse::Verified(response) => {
             MeshCapabilityProbeResponse::Verified { response, deadline }

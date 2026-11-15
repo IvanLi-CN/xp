@@ -1,20 +1,9 @@
-use std::{
-    collections::BTreeMap,
-    env,
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
-};
+use std::{collections::BTreeMap, env, fs, path::PathBuf, sync::Mutex};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
-    process::Command,
-    task::JoinHandle,
 };
-use tracing::{error, info};
 use uuid::Uuid;
 use xp_proxy_core::{
     CONTROL_PROTOCOL_VERSION, FallbackSnapshot, ListenerSnapshot, ProxySnapshot, RealitySnapshot,
@@ -22,45 +11,7 @@ use xp_proxy_core::{
     control::{ControlOperation, ControlRequest, ControlResponse, decode_frame, encode_frame},
 };
 
-use crate::config::Config;
-
-static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
-
-/// Starts the independent `xp-proxy` process only when the explicit capability is enabled.
-/// Snapshot publication is deliberately separate; this supervisor owns process lifecycle only.
-pub fn spawn_native_proxy_supervisor(config: Arc<Config>) -> Option<JoinHandle<()>> {
-    let enabled = env::var("XP_NATIVE_PROXY_ENABLED")
-        .ok()
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes"));
-    if !enabled {
-        return None;
-    }
-    let _ = config;
-    let binary = env::var("XP_NATIVE_PROXY_BIN").unwrap_or_else(|_| "xp-proxy".to_string());
-    let socket = env::var_os("XP_NATIVE_PROXY_CONTROL_SOCKET")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/run/xp/xp-proxy.sock"));
-    Some(tokio::spawn(async move {
-        if let Err(error) = run(binary, socket).await {
-            error!(%error, "native proxy supervisor stopped");
-        }
-    }))
-}
-
-async fn run(binary: String, socket: PathBuf) -> anyhow::Result<()> {
-    if let Some(parent) = socket.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    let mut child = Command::new(&binary)
-        .arg("--control-socket")
-        .arg(&socket)
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|error| anyhow::anyhow!("spawn {binary}: {error}"))?;
-    info!(binary = %binary, socket = %socket.display(), "native proxy process started");
-    let status = child.wait().await?;
-    anyhow::bail!("native proxy exited with {status}");
-}
+static GENERATION_LOCK: Mutex<()> = Mutex::new(());
 
 pub async fn publish_snapshot(
     socket: &std::path::Path,
@@ -130,6 +81,9 @@ pub fn build_snapshot(
         let meta: crate::protocol::VlessRealityVisionTcpEndpointMeta =
             serde_json::from_value(endpoint.meta.clone())?;
         if !matches!(
+            crate::protocol::vless_ingress_owner(&endpoint.meta),
+            crate::protocol::VlessIngressOwner::Native
+        ) || !matches!(
             meta.transport,
             crate::protocol::VlessRealityTransport::Xhttp
         ) {
@@ -183,10 +137,33 @@ pub fn build_snapshot(
     }
     Ok(ProxySnapshot {
         protocol_version: 1,
-        generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
+        generation: 1,
         listeners,
         users: snapshot_users,
     })
+}
+
+fn next_persistent_generation() -> anyhow::Result<u64> {
+    let _guard = GENERATION_LOCK
+        .lock()
+        .map_err(|_| anyhow::anyhow!("native proxy generation lock poisoned"))?;
+    let data_dir = env::var_os("XP_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/var/lib/xp/data"));
+    let directory = data_dir.join("native-proxy");
+    fs::create_dir_all(&directory)?;
+    let path = directory.join("generation");
+    let current = fs::read_to_string(&path)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    let next = current
+        .checked_add(1)
+        .ok_or_else(|| anyhow::anyhow!("native proxy generation exhausted"))?;
+    let temporary = directory.join("generation.tmp");
+    fs::write(&temporary, format!("{next}\n"))?;
+    fs::rename(&temporary, &path)?;
+    Ok(next)
 }
 
 fn xmux_snapshot(config: &crate::protocol::MihomoXmuxConfig) -> XmuxSnapshot {
@@ -231,7 +208,14 @@ pub async fn publish_reconciled_snapshot(
         memberships,
         cluster_ca_key_pem,
     ) {
-        Ok(snapshot) => {
+        Ok(mut snapshot) => {
+            match next_persistent_generation() {
+                Ok(generation) => snapshot.generation = generation,
+                Err(error) => {
+                    tracing::warn!(%error, "native proxy generation persistence failed");
+                    return;
+                }
+            }
             if let Err(error) = publish_snapshot(&socket, snapshot).await {
                 tracing::warn!(%error, "native proxy snapshot publication failed");
             }
@@ -263,17 +247,10 @@ mod tests {
     use super::*;
     use crate::domain::{Endpoint, EndpointKind, User};
     use crate::state::NodeUserEndpointMembership;
-    use clap::Parser;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
     use tokio::net::UnixListener;
     use xp_proxy_core::control::{GenerationState, ProxySnapshot};
-
-    #[test]
-    fn disabled_capability_does_not_spawn_a_process() {
-        let config = Arc::new(crate::config::Cli::try_parse_from(["xp"]).unwrap().config);
-        assert!(spawn_native_proxy_supervisor(config).is_none());
-    }
 
     #[tokio::test]
     async fn publishes_prepare_and_activate_over_control_socket() {
@@ -351,6 +328,7 @@ mod tests {
                 "short_ids": xp_test_fixtures::endpoint_short_ids(),
                 "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
                 "transport": "xhttp",
+                "ingress_owner": "native",
                 "canary_upstream": {"url": xp_test_fixtures::canary_http_loopback_url()},
                 "accepted_authorities": [xp_test_fixtures::endpoint_authority_alias()]
                 ,"mihomo_xmux": {

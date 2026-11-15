@@ -168,3 +168,56 @@ _Avoid_: Arbitrary backend, relay node
 A temporary Primary Backend choice made on the Login page before admin-token
 verification; it becomes durable only after authentication succeeds.
 _Avoid_: Login server switch, automatic failover
+
+## Native Data Plane
+
+**Control Plane**:
+The XP authority that stores and coordinates cluster, endpoint, user and membership state.
+It produces the complete desired snapshot for a node's data plane.
+_Avoid_: The process that accepts proxy traffic
+
+**Data Plane**:
+The runtime that accepts external proxy sessions, authenticates them, forwards traffic and
+reports runtime state. In this topic the native data plane is `xp-proxy`; Xray remains a separate
+data-plane implementation.
+_Avoid_: Control plane, endpoint metadata
+
+**Proxy Snapshot**:
+A complete, versioned description of the listener, user, protocol, fallback and runtime settings
+that XP authoritatively publishes to the local data plane.
+_Avoid_: Partial config patch, local proxy cache
+
+**Ingress Owner**:
+The explicit data-plane choice for an endpoint: `xray` or `native`. It is independent from the
+transport choice such as `xhttp`, and exactly one owner may hold an endpoint port at a time.
+_Avoid_: Installed binary, active process
+
+**Generation**:
+The durable XP ordering value attached to a Proxy Snapshot. It lets XP and `xp-proxy` distinguish
+the current snapshot, a stale snapshot and an explicitly authorized rollback.
+_Avoid_: Process start time, request id
+
+**Prepared Generation**:
+A candidate snapshot that passed validation but does not yet own a public listener or accept new
+external sessions.
+_Avoid_: Ready ingress, active generation
+
+**Active Generation**:
+The snapshot whose listeners currently own their endpoint ports and are authorized to accept new
+sessions.
+_Avoid_: Prepared generation, installed release
+
+**Drain**:
+The bounded lifecycle period during which a data plane stops accepting new sessions while existing
+sessions finish or are closed at the confirmed deadline.
+_Avoid_: Immediate stop, automatic failback
+
+**Usable Ingress Point**:
+An endpoint with explicit native owner, verified node capability, current active generation, all
+listeners bound, self-test passed, and proof that no other runtime owns the same port.
+_Avoid_: Binary present, service process alive
+
+**Compatibility Baseline**:
+The exact Xray/Mihomo versions and fixtures against which native protocol and deployment behavior
+are accepted. Current native design evidence is bound to Xray `26.3.27` and Mihomo `v1.19.29`.
+_Avoid_: Any recent client, version range without fixtures

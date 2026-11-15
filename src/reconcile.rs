@@ -2,7 +2,10 @@ use crate::{
     config::Config,
     credentials,
     domain::{Endpoint, EndpointKind, User},
-    protocol::{Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta},
+    protocol::{
+        Ss2022EndpointMeta, VlessIngressOwner, VlessRealityVisionTcpEndpointMeta,
+        vless_ingress_owner,
+    },
     reverse_mesh::ReverseLinkRuntime,
     reverse_mesh_runtime::ReverseXrayReconciler,
     state::{JsonSnapshotStore, NodeUserEndpointMembership, membership_key, membership_xray_email},
@@ -97,11 +100,9 @@ pub struct ReconcileHandle {
     mesh_gate_lock: Arc<RwLock<()>>,
     mesh_epoch_barrier: Arc<RwLock<()>>,
 }
-
 pub(crate) struct SnapshotInstallAdmission {
     snapshot_installing: Arc<AtomicBool>,
 }
-
 impl Drop for SnapshotInstallAdmission {
     fn drop(&mut self) {
         self.snapshot_installing.store(false, Ordering::Release);
@@ -158,21 +159,18 @@ impl ReconcileHandle {
         });
     }
 }
-
 #[derive(Debug, Clone)]
 struct BackoffConfig {
     base: Duration,
     cap: Duration,
     jitter_max_divisor: u32,
 }
-
 #[derive(Debug)]
 struct BackoffState<R> {
     cfg: BackoffConfig,
     attempt: u32,
     rng: R,
 }
-
 impl<R: RngCore> BackoffState<R> {
     fn new(cfg: BackoffConfig, rng: R) -> Self {
         Self {
@@ -187,7 +185,6 @@ impl<R: RngCore> BackoffState<R> {
     fn next_delay(&mut self) -> Duration {
         let base = base_delay_for_attempt(self.cfg.base, self.cfg.cap, self.attempt);
         self.attempt = self.attempt.saturating_add(1);
-
         let base_ms = base.as_millis().min(u128::from(u64::MAX)) as u64;
         let jitter_max_ms = if self.cfg.jitter_max_divisor == 0 {
             0
@@ -199,12 +196,10 @@ impl<R: RngCore> BackoffState<R> {
         } else {
             self.rng.next_u64() % (jitter_max_ms + 1)
         };
-
         let total_ms = base_ms.saturating_add(jitter_ms);
         std::cmp::min(self.cfg.cap, Duration::from_millis(total_ms))
     }
 }
-
 fn base_delay_for_attempt(base: Duration, cap: Duration, attempt: u32) -> Duration {
     let mut delay = base;
     for _ in 0..attempt {
@@ -218,7 +213,6 @@ fn base_delay_for_attempt(base: Duration, cap: Duration, attempt: u32) -> Durati
     }
     std::cmp::min(delay, cap)
 }
-
 #[derive(Debug)]
 struct ReconcilerOptions<R> {
     debounce: Duration,
@@ -226,7 +220,6 @@ struct ReconcilerOptions<R> {
     backoff: BackoffConfig,
     rng: R,
 }
-
 impl Default for ReconcilerOptions<StdRng> {
     fn default() -> Self {
         Self {
@@ -241,7 +234,6 @@ impl Default for ReconcilerOptions<StdRng> {
         }
     }
 }
-
 pub fn spawn_reconciler(
     config: Arc<Config>,
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -254,7 +246,6 @@ pub fn spawn_reconciler(
         ReconcilerOptions::default(),
     )
 }
-
 fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
     config: Arc<Config>,
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -282,7 +273,6 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         mesh_epoch_barrier: Arc::new(RwLock::new(())),
     };
     let restart_handle = handle.clone();
-
     tokio::spawn(reconciler_task(
         config,
         store,
@@ -291,10 +281,8 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         options,
         restart_handle,
     ));
-
     handle
 }
-
 async fn reconciler_task<R: RngCore>(
     config: Arc<Config>,
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -312,13 +300,11 @@ async fn reconciler_task<R: RngCore>(
     let mut backoff = BackoffState::new(options.backoff, options.rng);
     let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
     let mut reverse_reconciler = ReverseXrayReconciler::default();
-
     let mut periodic = tokio::time::interval_at(
         Instant::now() + options.periodic_full,
         options.periodic_full,
     );
     periodic.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
     loop {
         let now = Instant::now();
         let run_at = if pending.has_any() {
@@ -329,7 +315,6 @@ async fn reconciler_task<R: RngCore>(
             None
         };
         let reverse_link_deadline = restart_handle.reverse_links().next_deadline();
-
         tokio::select! {
             _ = periodic.tick() => {
                 pending.add(ReconcileRequest::Full);
@@ -367,7 +352,6 @@ async fn reconciler_task<R: RngCore>(
                     backoff_until = Some(Instant::now() + delay);
                     continue;
                 }
-
                 pending.clear();
                 backoff.reset();
                 backoff_until = None;
@@ -380,7 +364,6 @@ async fn reconciler_task<R: RngCore>(
         }
     }
 }
-
 #[derive(Debug)]
 struct Snapshot {
     nodes: Vec<crate::domain::Node>,
@@ -398,7 +381,6 @@ struct Snapshot {
     /// Keyed by `user_id`, value is the target epoch.
     users_needing_credential_refresh: BTreeMap<String, u32>,
 }
-
 #[derive(Debug, Default)]
 struct ReconcileOutcome {
     rebuilt_inbounds: BTreeSet<String>,
@@ -406,14 +388,16 @@ struct ReconcileOutcome {
     endpoint_users_applied: BTreeMap<String, BTreeSet<String>>,
     reverse_restart_required: bool,
 }
-
 fn endpoint_kind_key(kind: &EndpointKind) -> &'static str {
     match kind {
         EndpointKind::VlessRealityVisionTcp => "vless_reality_vision_tcp",
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => "ss2022_2022_blake3_aes_128_gcm",
     }
 }
-
+fn is_native_endpoint(endpoint: &Endpoint) -> bool {
+    endpoint.kind == EndpointKind::VlessRealityVisionTcp
+        && vless_ingress_owner(&endpoint.meta) == VlessIngressOwner::Native
+}
 fn desired_inbound_hash(endpoint: &Endpoint) -> Option<String> {
     let mut meta = match endpoint.kind {
         EndpointKind::VlessRealityVisionTcp => {
@@ -909,6 +893,9 @@ async fn reconcile_snapshot(
         {
             continue;
         }
+        if endpoint_by_tag.get(tag).is_some_and(is_native_endpoint) {
+            continue;
+        }
         let op = builder::build_remove_user_operation(email);
         let req = AlterInboundRequest {
             tag: tag.clone(),
@@ -928,6 +915,9 @@ async fn reconcile_snapshot(
         {
             continue;
         }
+        if endpoint_by_tag.get(tag).is_some_and(is_native_endpoint) {
+            continue;
+        }
         let req = RemoveInboundRequest { tag: tag.clone() };
         match client.remove_inbound(req).await {
             Ok(_) => {}
@@ -945,6 +935,9 @@ async fn reconcile_snapshot(
             continue;
         };
         if endpoint.node_id != local_node_id {
+            continue;
+        }
+        if is_native_endpoint(endpoint) {
             continue;
         }
 
@@ -1022,6 +1015,9 @@ async fn reconcile_snapshot(
         .values()
         .filter(|e| e.node_id == local_node_id)
     {
+        if is_native_endpoint(endpoint) {
+            continue;
+        }
         match builder::build_add_inbound_request(endpoint) {
             Ok(req) => match client.add_inbound(req).await {
                 Ok(_) => {}

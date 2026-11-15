@@ -47,6 +47,56 @@ Current support boundaries that operators must know:
   removing those env values does not reconfigure or delete an existing endpoint.
 - When a deployment environment needs manual intervention, document the exact branch and operator steps instead of implying the generic path will work.
 
+## Native VLESS XHTTP data plane boundary
+
+The independently released `xp-proxy` binary is currently an experimental protocol/data-plane
+asset, not a supported ingress runtime. Installing `/usr/local/bin/xp-proxy`, setting
+`XP_NATIVE_PROXY_ENABLED`, starting a process, or creating its control socket does not transfer
+an endpoint away from Xray and does not make a node a usable native ingress point.
+
+The production design is recorded in
+[the native proxy SPEC](../specs/native-vless-xhttp-proxy/SPEC.md) and
+[ADR 0031](../adr/0031-native-vless-xhttp-data-plane.md). Its release gate requires all of the
+following at once:
+
+- an explicit endpoint native owner marker and a verified node capability;
+- an independently managed `xp-proxy` service with protected control socket and ready status;
+- a durable XP generation, complete snapshot, active listener set and local protocol/fallback
+  self-test;
+- proof that Xray, the XP admin listener, Tunnel and every other registered owner have released
+  the same endpoint port;
+- fixed Xray `26.3.27` and Mihomo `v1.19.29` interoperability evidence plus Agent VM service,
+  upgrade, rollback, resource and security evidence.
+
+Until that gate is complete, all existing VLESS endpoints remain Xray-owned. Native and Xray must
+never bind the same port. A native process crash, missing socket, stale snapshot, unknown control
+response or failed readiness check does not automatically switch the endpoint to Xray; the endpoint
+stays stopped/failed until an explicit, audited owner operation completes.
+
+### Host-managed target contract (design only)
+
+The target host-managed contract is one independent `xp-proxy` service on both systemd and OpenRC.
+XP coordinates snapshots through the socket but does not spawn, supervise or kill the service.
+Xray -> native follows:
+`prepare -> remove Xray inbound -> verify port release -> activate native -> verify active`.
+Native -> Xray follows:
+`drain -> stop -> verify port release -> start Xray -> verify ready`.
+A failed handoff never leaves both owners running.
+
+Host upgrades must eventually include `xp-proxy` in the same checksummed transaction, readiness
+window, backup cleanup and rollback contract as XP/Xray/cloudflared. A restored proxy that cannot
+prove readiness leaves the endpoint stopped. The exact service identity, capability name, generation
+storage, drain deadline, fallback wire semantics, automatic rollback policy and Docker first-release
+scope remain owner-confirmation gates; this document does not authorize an operator to improvise
+them.
+
+### Container boundary
+
+Docker/Compose remains a first-class deployment shape for the existing Xray data plane. It must not
+advertise native capability until it has equivalent service supervision, snapshot persistence,
+single-port owner handoff, readiness evidence and upgrade/rollback behavior. This keeps native
+support from becoming a container-only shortcut or an untested host-managed exception.
+
 ## Web PWA and API compatibility
 
 The embedded Web/PWA keeps its page origin and app-shell cache unchanged, but an authenticated
@@ -1371,6 +1421,10 @@ Current rollout semantics:
   runtime services are ready, before replacing `xp-ops` itself. On OpenRC, each managed restart
   is `stop -> stopped -> start -> started`; `stopping` and every unrecognized status are
   nonterminal. This prevents XP's runtime recovery loop from racing an OpenRC service transition.
+- A release may also contain the checksummed `xp-proxy` asset. The current upgrade path only
+  installs that binary as an inert asset; it does not start an `xp-proxy` service, transfer an
+  endpoint owner, or claim native readiness. Native activation remains unsupported until the
+  independent service and rollback contract in the native proxy SPEC is implemented and evidenced.
 - Deferring the `xp-ops` replacement prevents a self-update from ending the locked release phase before the service binaries and managed runtimes are updated.
 - A service restart is accepted only after systemd reports the unit active or OpenRC reports the
   service started on two successive checks. OpenRC stop is likewise accepted only after two exact

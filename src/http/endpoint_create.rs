@@ -161,6 +161,9 @@ async fn admin_create_endpoint_local(
                 meta.transport = transport;
                 endpoint.meta =
                     serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
+                if let Some(object) = endpoint.meta.as_object_mut() {
+                    object.insert("ingress_owner".into(), serde_json::json!("xray"));
+                }
                 endpoint
             }
         }

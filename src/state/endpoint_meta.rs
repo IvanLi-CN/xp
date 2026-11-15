@@ -61,7 +61,9 @@ pub(super) fn build_endpoint_meta(
                 transport: input.transport,
                 managed_default: false,
             };
-            Ok(serde_json::to_value(meta)?)
+            let mut value = serde_json::to_value(meta)?;
+            value["ingress_owner"] = serde_json::json!("xray");
+            Ok(value)
         }
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
             let input: Ss2022EndpointMetaInput = serde_json::from_value(meta_input)?;

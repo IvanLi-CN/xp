@@ -234,12 +234,10 @@ impl ApiError {
     pub fn gateway_timeout(message: impl Into<String>) -> Self {
         Self::new("timeout", StatusCode::GATEWAY_TIMEOUT, message)
     }
-
     pub fn too_many_requests(message: impl Into<String>) -> Self {
         Self::new("auth_busy", StatusCode::TOO_MANY_REQUESTS, message)
     }
 }
-
 impl From<StoreError> for ApiError {
     fn from(value: StoreError) -> Self {
         match value {
@@ -287,9 +285,7 @@ impl From<StoreError> for ApiError {
         }
     }
 }
-
 pub struct ApiJson<T>(pub T);
-
 impl<S, T> FromRequest<S> for ApiJson<T>
 where
     axum::Json<T>: FromRequest<S>,
@@ -297,7 +293,6 @@ where
     S: Send + Sync,
 {
     type Rejection = ApiError;
-
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         let Json(value) = axum::Json::<T>::from_request(req, state)
             .await
@@ -305,12 +300,10 @@ where
         Ok(Self(value))
     }
 }
-
 #[derive(Serialize)]
 struct Items<T> {
     items: Vec<T>,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum EndpointProbeStatus {
@@ -319,7 +312,6 @@ enum EndpointProbeStatus {
     Degraded,
     Down,
 }
-
 #[derive(Debug, Clone, Serialize)]
 struct AdminEndpointProbeSlot {
     hour: String,
@@ -329,7 +321,6 @@ struct AdminEndpointProbeSlot {
     #[serde(skip_serializing_if = "Option::is_none")]
     latency_ms_p50: Option<u32>,
 }
-
 #[derive(Debug, Clone, Serialize)]
 struct AdminEndpointProbeSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -338,7 +329,6 @@ struct AdminEndpointProbeSummary {
     latest_latency_ms_p50: Option<u32>,
     slots: Vec<AdminEndpointProbeSlot>,
 }
-
 #[derive(Debug, Clone, Serialize)]
 struct AdminEndpointWithProbe {
     #[serde(flatten)]
@@ -6464,8 +6454,17 @@ async fn admin_patch_endpoint_local(
                 )?;
             }
 
+            let ingress_owner = endpoint.meta.get("ingress_owner").cloned();
             endpoint.meta =
                 serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
+            endpoint
+                .meta
+                .as_object_mut()
+                .expect("serialized VLESS metadata is an object")
+                .insert(
+                    "ingress_owner".into(),
+                    ingress_owner.unwrap_or_else(|| serde_json::json!("xray")),
+                );
             if mihomo_smux_was_omitted && !had_mihomo_smux {
                 endpoint
                     .meta
