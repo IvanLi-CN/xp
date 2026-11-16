@@ -624,7 +624,6 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             .then_some(managed_default_intent);
     let startup_raft_facade = raft_facade.clone();
     let membership_guard_raft_facade = raft_facade.clone();
-    let startup_node_id = cluster.node_id.clone();
     let (geo_db_update, _geo_db_update_task) =
         xp::ip_geo_db::spawn_geo_db_update_worker(config_arc.clone(), store.clone())?;
     let _quota = xp::quota::spawn_quota_worker(
@@ -682,6 +681,8 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         xp::join_coordinator::spawn_join_coordinator(raft_facade.clone(), store.clone());
 
     let startup_reconcile = reconcile.clone();
+    let startup_node_id = cluster.node_id.clone();
+    let startup_ca_key = cluster_ca_key_pem_required.clone();
     let app = xp::http::build_router_with_mesh_telemetry(
         config.clone(),
         store.clone(),
@@ -709,6 +710,29 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         "starting xp"
     );
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
+    let startup_native_snapshot = {
+        let store_guard = store.lock().await;
+        let users = store_guard
+            .list_users()
+            .into_iter()
+            .map(|user| (user.user_id.clone(), user))
+            .collect();
+        let memberships: Vec<xp::state::NodeUserEndpointMembership> = store_guard
+            .state()
+            .node_user_endpoint_memberships
+            .iter()
+            .cloned()
+            .collect();
+        (store_guard.list_endpoints(), users, memberships)
+    };
+    xp::native_proxy_supervisor::publish_reconciled_snapshot(
+        &startup_node_id,
+        &startup_native_snapshot.0,
+        &startup_native_snapshot.1,
+        &startup_native_snapshot.2,
+        &startup_ca_key,
+    )
+    .await;
     // Ensure the first reconcile runs after Raft/store startup. This is required for native
     // snapshot publication when Xray is intentionally stopped during a runtime handoff.
     startup_reconcile.request_full();
