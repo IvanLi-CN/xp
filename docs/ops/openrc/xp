@@ -4,8 +4,7 @@ name="xp"
 description="xp (Xray cluster manager)"
 
 command="/usr/local/bin/xp-openrc-wrapper"
-command_user="xp:xp"
-extra_groups="xp-proxy"
+command_user="xp:xp-proxy"
 supervisor=supervise-daemon
 respawn_delay=2
 respawn_max=0
