@@ -681,6 +681,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     let _join_coordinator_task =
         xp::join_coordinator::spawn_join_coordinator(raft_facade.clone(), store.clone());
 
+    let startup_reconcile = reconcile.clone();
     let app = xp::http::build_router_with_mesh_telemetry(
         config.clone(),
         store.clone(),
@@ -708,6 +709,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         "starting xp"
     );
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
+    // Ensure the first reconcile runs after Raft/store startup. This is required for native
+    // snapshot publication when Xray is intentionally stopped during a runtime handoff.
+    startup_reconcile.request_full();
     if let Some(startup_managed_default_intent) = pending_managed_default_reconcile {
         let data_dir = config.data_dir.clone();
         let raft_facade = startup_raft_facade;
