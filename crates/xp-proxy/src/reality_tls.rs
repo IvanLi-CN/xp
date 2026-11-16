@@ -168,12 +168,25 @@ pub async fn connect(
     stream.write_all(&hello).await?;
     stream.flush().await?;
     let mut wire = WireReader::new(stream, Vec::new());
-    let server_hello_record = wire
-        .read_record()
-        .await
-        .map_err(|error| anyhow!("read REALITY ServerHello: {error}"))?;
-    let server_hello = parse_server_hello(&server_hello_record)
-        .map_err(|error| anyhow!("parse REALITY ServerHello: {error}"))?;
+    let server_hello_record = loop {
+        let record = wire
+            .read_record()
+            .await
+            .map_err(|error| anyhow!("read REALITY ServerHello: {error}"))?;
+        // Xray's uTLS server may emit the TLS 1.3 compatibility ChangeCipherSpec
+        // record before ServerHello. It carries no handshake data and must be
+        // consumed before parsing the ServerHello transcript.
+        if record.first() == Some(&20) {
+            continue;
+        }
+        break record;
+    };
+    let server_hello = parse_server_hello(&server_hello_record).map_err(|error| {
+        anyhow!(
+            "parse REALITY ServerHello: {error}; record_prefix={:02x?}",
+            &server_hello_record[..server_hello_record.len().min(16)]
+        )
+    })?;
     let handshake_keys =
         derive_client_handshake_keys(client_private_key, &client_hello, &server_hello)?;
     let suite = match server_hello.cipher_suite {
