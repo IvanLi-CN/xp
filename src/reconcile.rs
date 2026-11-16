@@ -633,6 +633,17 @@ async fn reconcile_once_with_runtime(
         snapshot.users_by_id.clone(),
         snapshot.memberships.clone(),
     );
+    // Native ingress is independent of the legacy Xray data plane. Publish first so a stopped
+    // Xray cannot prevent xp-proxy from receiving the desired snapshot during a runtime handoff.
+    crate::native_proxy_supervisor::publish_reconciled_snapshot(
+        &local_node_id,
+        &native_snapshot_inputs.0,
+        &native_snapshot_inputs.1,
+        &native_snapshot_inputs.2,
+        cluster_ca_key_pem,
+    )
+    .await;
+
     let outcome = reconcile_snapshot(
         config.xray_api_addr,
         cluster_ca_key_pem,
@@ -650,18 +661,6 @@ async fn reconcile_once_with_runtime(
     if reverse_mesh_enabled && outcome.as_ref().is_ok_and(|o| o.reverse_restart_required) {
         restart_handle.request_xray_restart();
     }
-
-    // Native ingress is an independent data plane. Once the runtime handoff has selected
-    // xp-proxy, publishing its snapshot must not depend on the legacy Xray reconcile succeeding
-    // (Xray is expected to be stopped during that handoff).
-    crate::native_proxy_supervisor::publish_reconciled_snapshot(
-        &local_node_id,
-        &native_snapshot_inputs.0,
-        &native_snapshot_inputs.1,
-        &native_snapshot_inputs.2,
-        cluster_ca_key_pem,
-    )
-    .await;
 
     if let Ok(outcome) = &outcome {
         // Only advance the hash cache when we are confident the inbound was rebuilt. This ensures
