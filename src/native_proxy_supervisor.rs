@@ -251,8 +251,15 @@ fn runtime_state_allows_proxy() -> bool {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
         return false;
     };
+    runtime_state_allows_proxy_value(&value)
+}
+
+fn runtime_state_allows_proxy_value(value: &serde_json::Value) -> bool {
     value.get("runtime").and_then(serde_json::Value::as_str) == Some("xp-proxy")
-        && value.get("state").and_then(serde_json::Value::as_str) == Some("active")
+        && matches!(
+            value.get("state").and_then(serde_json::Value::as_str),
+            Some("active") | Some("switching")
+        )
 }
 
 async fn send_request(
@@ -407,5 +414,25 @@ mod tests {
         );
         assert_eq!(snapshot.users.len(), 1);
         assert!(uuid::Uuid::parse_str(&snapshot.users[0].uuid).is_ok());
+    }
+
+    #[test]
+    fn native_runtime_gate_allows_startup_switching_state() {
+        assert!(runtime_state_allows_proxy_value(&serde_json::json!({
+            "runtime": "xp-proxy",
+            "state": "switching"
+        })));
+        assert!(runtime_state_allows_proxy_value(&serde_json::json!({
+            "runtime": "xp-proxy",
+            "state": "active"
+        })));
+        assert!(!runtime_state_allows_proxy_value(&serde_json::json!({
+            "runtime": "xp-proxy",
+            "state": "failed"
+        })));
+        assert!(!runtime_state_allows_proxy_value(&serde_json::json!({
+            "runtime": "xray",
+            "state": "switching"
+        })));
     }
 }
