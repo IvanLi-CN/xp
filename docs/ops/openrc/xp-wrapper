@@ -2,4 +2,6 @@
 set -a
 [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env
 set +a
+export XP_NATIVE_PROXY_ENABLED
+export XP_NATIVE_PROXY_CONTROL_SOCKET
 exec /usr/local/bin/xp run --data-dir /var/lib/xp/data
