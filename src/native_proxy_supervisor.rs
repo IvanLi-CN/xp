@@ -201,11 +201,18 @@ pub async fn publish_reconciled_snapshot(
     let enabled = env::var("XP_NATIVE_PROXY_ENABLED")
         .ok()
         .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes"));
+    tracing::warn!(
+        target: "native_snapshot_debug",
+        "[DEBUG-native-snapshot] publication_enter enabled={enabled}"
+    );
     if !enabled {
         return;
     }
     if !runtime_state_allows_proxy() {
-        tracing::debug!("xp-proxy snapshot publication skipped because node runtime is not active");
+        tracing::warn!(
+            target: "native_snapshot_debug",
+            "[DEBUG-native-snapshot] runtime_gate=false"
+        );
         return;
     }
     let socket = env::var_os("XP_NATIVE_PROXY_CONTROL_SOCKET")
@@ -219,6 +226,12 @@ pub async fn publish_reconciled_snapshot(
         cluster_ca_key_pem,
     ) {
         Ok(mut snapshot) => {
+            tracing::warn!(
+                target: "native_snapshot_debug",
+                listeners = snapshot.listeners.len(),
+                users = snapshot.users.len(),
+                "[DEBUG-native-snapshot] snapshot_built"
+            );
             match next_persistent_generation() {
                 Ok(generation) => snapshot.generation = generation,
                 Err(error) => {
@@ -227,10 +240,27 @@ pub async fn publish_reconciled_snapshot(
                 }
             }
             if let Err(error) = publish_snapshot(&socket, snapshot).await {
-                tracing::warn!(%error, "native proxy snapshot publication failed");
+                tracing::warn!(
+                    target: "native_snapshot_debug",
+                    %error,
+                    socket = %socket.display(),
+                    "[DEBUG-native-snapshot] publication_failed"
+                );
+            } else {
+                tracing::warn!(
+                    target: "native_snapshot_debug",
+                    socket = %socket.display(),
+                    "[DEBUG-native-snapshot] publication_succeeded"
+                );
             }
         }
-        Err(error) => tracing::warn!(%error, "native proxy snapshot construction failed"),
+        Err(error) => {
+            tracing::warn!(
+                target: "native_snapshot_debug",
+                %error,
+                "[DEBUG-native-snapshot] construction_failed"
+            )
+        }
     }
 }
 
