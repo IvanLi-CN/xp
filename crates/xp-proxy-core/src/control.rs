@@ -302,6 +302,14 @@ impl GenerationManager {
             .clone()
     }
 
+    pub fn previous_snapshot(&self) -> Option<ProxySnapshot> {
+        self.inner
+            .read()
+            .expect("generation lock poisoned")
+            .previous
+            .clone()
+    }
+
     pub fn drain(&self) -> Option<u64> {
         let mut inner = self.inner.write().expect("generation lock poisoned");
         if inner.active.is_some() {
@@ -333,12 +341,14 @@ impl GenerationManager {
         }
         let previous = inner
             .previous
-            .take()
+            .as_ref()
+            .cloned()
             .ok_or_else(|| "no previous successful generation".to_string())?;
         if let Some(path) = self.persistence_path.as_deref() {
             persist_snapshot(path, &previous)?;
         }
         let generation = previous.generation;
+        inner.previous.take();
         inner.last_successful = Some(previous.clone());
         inner.active = Some(previous);
         inner.state = GenerationState::Active;

@@ -78,6 +78,51 @@ jobs:
       source_sha: ${{ needs.request.outputs.baseline }}
       tools_sha: ${{ github.sha }}
       role: main
+  address-family:
+    needs: [request, candidate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: '${{ needs.request.outputs.candidate }}'}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: "xp-proxy-perf-candidate-\
+            ${{ github.run_id }}-${{ github.run_attempt }}-binary"
+          path: candidate
+      - name: Prepare checksum-pinned Xray
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          mkdir fixture
+          gh release download v3.48.15 --repo "$GITHUB_REPOSITORY" \
+            --pattern xray-linux-x86_64 --dir fixture
+          python3 - <<'PYTHON'
+          import hashlib, json
+          from pathlib import Path
+          config=json.loads(Path('scripts/perf/xp-proxy/config.json').read_text())
+          assert hashlib.sha256(Path('fixture/xray-linux-x86_64').read_bytes()).hexdigest() \
+            == config['xray_sha256']
+          PYTHON
+          chmod +x candidate/xp-proxy fixture/xray-linux-x86_64
+      - name: Xray IPv4 and IPv6 bidirectional gate
+        run: |
+          python3 scripts/perf/xp-proxy/address_family.py --peer xray \
+            --xp "$PWD/candidate/xp-proxy" --xray "$PWD/fixture/xray-linux-x86_64" \
+            --output "$PWD/address-xray"
+      - name: Prepare Mihomo only after Xray passes
+        run: scripts/e2e/install-mihomo-v1.19.29.sh "$PWD/fixture/mihomo"
+      - name: Mihomo IPv4 and IPv6 gate
+        run: |
+          python3 scripts/perf/xp-proxy/address_family.py --peer mihomo \
+            --xp "$PWD/candidate/xp-proxy" --xray "$PWD/fixture/xray-linux-x86_64" \
+            --mihomo "$PWD/fixture/mihomo" --xray-evidence "$PWD/address-xray/result.json" \
+            --output "$PWD/address-mihomo"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: xp-proxy-address-family-${{ github.run_id }}-${{ github.run_attempt }}
+          path: address-*/**
+          retention-days: 90
   interop:
     needs: [request, candidate]
     runs-on: ubuntu-24.04

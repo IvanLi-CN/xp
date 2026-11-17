@@ -108,6 +108,20 @@ XP 是唯一的 endpoint/user 权威。XP 生成的 snapshot 必须完整描述�
 - **REQ-INGRESS-READY:** 对外 usable 的判定必须满足本文件的六项条件；任何一项未知或
   失败都报告 not-ready/failed，并保持端口唯一 owner。
 
+### TCP 地址族与 wildcard
+
+- **REQ-IP-WILDCARD:** XP 生成的 `0.0.0.0:PORT` 表示自动 wildcard；具备 IPv6 和 IPv4-mapped 能力的 Linux 使用显式
+  `IPV6_V6ONLY=false` 的单个双栈 socket，接收 IPv4 与 IPv6。不得依赖系统 `bindv6only` 默认值，也不得使用 `SO_REUSEPORT`。
+- **REQ-IP-EXPLICIT:** 非 wildcard 地址只绑定指定接口和地址族；显式 `[::]:PORT` 为 IPv6-only wildcard，不隐式扩大 IPv4 监听范围。
+- **REQ-IP-DEGRADE:** 自动 wildcard 仅在内核明确不支持或禁用 IPv6/双栈时退回 IPv4；端口冲突、权限和资源错误必须失败。显式 IPv6
+  地址绑定失败不得退回 IPv4。所有所需监听完成后才可激活 generation；候选失败恢复旧 generation 的监听，恢复失败报告停止。
+- **REQ-IP-CHAIN:** 入站连接、出站代理远端、本地出站 listener 和 VLESS 最终 TCP 目标均支持 IPv4/IPv6；保留系统解析与现有拨号策略，不新增
+  DNS 或 Happy Eyeballs。IPv4-mapped peer 按 IPv4 记录。
+- **REQ-IP-FALLBACK:** 已配置的 HTTP/HTTPS/H2/h2c 固定 fallback 支持合法的 bracketed IPv6 authority；保留精确
+  allowlist、端口、Host、SNI 和既有 header 合同，拒绝畸形 bracket、地址与端口，不增加任意转发。
+- **REQ-IP-COMPAT:** 保留 snapshot bind 表达和 control protocol v2，不增加开关，不改 endpoint
+  地址、订阅模式、生产网络、NAT、防火墙或 DNS。
+
 ### Snapshot and generation
 
 - **REQ-SNAPSHOT:** XP 发送完整、原子的、带 schema version 的 Proxy Snapshot。prepare、
@@ -291,6 +305,11 @@ Rust outbound -> Mihomo-compatible server
   豁免时测量继续、全量不影响自动门禁和旧结果不会解锁新候选。
 - **VER-PERF-RECORDS** covers: REQ-PERF-ANNOTATION, REQ-PERF-RETENTION. 验证人工 invalidate/restore、同名伪标
   记拒绝、指定工作流来源、run attempt 隔离、同 SHA 新 run、已作废数据排除、记录过期或读取失败不得自动恢复。
+
+- **VER-IP-SOCKET** covers: REQ-IP-WILDCARD, REQ-IP-EXPLICIT, REQ-IP-DEGRADE.
+  验证双栈、显式范围、`bindv6only=1`、禁用 IPv6、端口/权限错误、generation 回滚及 drain/restart。
+- **VER-IP-CHAIN** covers: REQ-IP-CHAIN, REQ-IP-FALLBACK, REQ-IP-COMPAT.
+  验证四种地址族组合、IPv6 远端、系统 DNS、固定 fallback、并发 SHA256、Xray→Mihomo 联测及协议版本不变。
 
 ## Acceptance Criteria
 
