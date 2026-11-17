@@ -19,8 +19,10 @@ use xp_proxy_core::{
     vless::{decode_request, is_authorized},
 };
 
+mod outbound;
 #[cfg(test)]
 mod outbound_tests;
+mod reality_stream;
 mod reality_tls;
 mod xhttp_h2;
 
@@ -43,7 +45,7 @@ struct Args {
     outbound_config: Option<std::path::PathBuf>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct OutboundConfig {
     listen: std::net::SocketAddr,
     remote: std::net::SocketAddr,
@@ -55,6 +57,8 @@ struct OutboundConfig {
     uuid: uuid::Uuid,
     destination_host: String,
     destination_port: u16,
+    #[serde(default)]
+    xmux: xp_proxy_core::XmuxSettings,
 }
 
 #[derive(Default)]
@@ -171,136 +175,17 @@ async fn main() -> Result<()> {
 
 async fn run_outbound(config: OutboundConfig) -> Result<()> {
     let listener = TcpListener::bind(config.listen).await?;
+    let pool = Arc::new(outbound::Pool::new(config)?);
     loop {
         let (local, _) = listener.accept().await?;
         local.set_nodelay(true)?;
-        let config = OutboundConfig {
-            listen: config.listen,
-            remote: config.remote,
-            server_name: config.server_name.clone(),
-            server_public_key: config.server_public_key.clone(),
-            short_id: config.short_id.clone(),
-            private_key: config.private_key.clone(),
-            path: config.path.clone(),
-            uuid: config.uuid,
-            destination_host: config.destination_host.clone(),
-            destination_port: config.destination_port,
-        };
+        let pool = pool.clone();
         tokio::spawn(async move {
-            if let Err(error) = outbound_connection(local, config).await {
+            if let Err(error) = pool.relay(local).await {
                 eprintln!("native outbound connection failed: {error}");
             }
         });
     }
-}
-
-async fn outbound_connection(local: TcpStream, config: OutboundConfig) -> Result<()> {
-    use base64::Engine;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use xp_proxy_core::reality::RealityClientHelloConfig;
-    use xp_proxy_core::vless::encode_tcp_request;
-
-    let public_key =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(config.server_public_key)?;
-    let private_key =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(config.private_key)?;
-    let mut public_key_bytes = [0u8; 32];
-    let mut private_key_bytes = [0u8; 32];
-    public_key_bytes.copy_from_slice(&public_key);
-    private_key_bytes.copy_from_slice(&private_key);
-    let short_id = hex::decode(config.short_id.trim_start_matches("0x"))?;
-    let remote = TcpStream::connect(config.remote).await?;
-    remote.set_nodelay(true)?;
-    let tls = reality_tls::connect(
-        remote,
-        RealityClientHelloConfig {
-            server_name: config.server_name.clone(),
-            server_public_key: public_key_bytes,
-            short_id,
-            unix_seconds: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as u32,
-            version: [1, 8, 0, 0],
-            alpn: vec!["h2".into()],
-        },
-        private_key_bytes,
-    )
-    .await?;
-    let (mut sender, connection) = h2::client::handshake(tls).await?;
-    // The dedicated transport must not outlive its one outbound request.
-    let mut connection_tasks = tokio::task::JoinSet::new();
-    connection_tasks.spawn(async move {
-        let _ = connection.await;
-    });
-    let path = if config.path.ends_with('/') {
-        config.path.clone()
-    } else {
-        format!("{}/", config.path)
-    };
-    let authority = format!(
-        "https://{}{}?x_padding={}",
-        config.server_name,
-        path,
-        "x".repeat(100)
-    );
-    let request = http::Request::builder()
-        .method("POST")
-        .uri(authority)
-        .header("content-type", "application/octet-stream")
-        .body(())?;
-    let (response, mut send) = sender.send_request(request, false)?;
-    let header = encode_tcp_request(
-        config.uuid,
-        (&config.destination_host, config.destination_port),
-        &[],
-    )?;
-    send.send_data(bytes::Bytes::from(header), false)?;
-    let (mut local_read, mut local_write) = local.into_split();
-    let uplink = async move {
-        let mut buffer = [0u8; 16 * 1024];
-        loop {
-            let size = local_read.read(&mut buffer).await?;
-            if size == 0 {
-                break;
-            }
-            send.send_data(bytes::Bytes::copy_from_slice(&buffer[..size]), false)?;
-        }
-        send.send_data(bytes::Bytes::new(), true)?;
-        Ok::<(), anyhow::Error>(())
-    };
-    let downlink = async move {
-        let mut response = response.await?;
-        if !response.status().is_success() {
-            anyhow::bail!("remote XHTTP request returned {}", response.status());
-        }
-        let mut response_header = Vec::with_capacity(2);
-        while response_header.len() < 2 {
-            let Some(chunk) = response.body_mut().data().await else {
-                anyhow::bail!("remote XHTTP response ended before VLESS response header");
-            };
-            let chunk = chunk?;
-            response
-                .body_mut()
-                .flow_control()
-                .release_capacity(chunk.len())?;
-            response_header.extend_from_slice(&chunk);
-        }
-        if response_header[..2] != [0, 0] {
-            anyhow::bail!("remote XHTTP response has an invalid VLESS header");
-        }
-        if response_header.len() > 2 {
-            local_write.write_all(&response_header[2..]).await?;
-        }
-        let mut response_body = response.into_body();
-        while let Some(chunk) = response_body.data().await {
-            let chunk = chunk?;
-            local_write.write_all(&chunk).await?;
-            response_body.flow_control().release_capacity(chunk.len())?;
-        }
-        local_write.shutdown().await?;
-        Ok::<(), anyhow::Error>(())
-    };
-    // An error cancels the other direction; ordinary upload EOF keeps reading.
-    tokio::try_join!(uplink, downlink)?;
-    Ok(())
 }
 
 async fn handle_connection(
@@ -784,8 +669,10 @@ mod tests {
                 uuid: user,
                 destination_host: origin.ip().to_string(),
                 destination_port: origin.port(),
+                xmux: xp_proxy_core::XmuxSettings::default(),
             };
-            let relay = tokio::spawn(outbound_connection(tcp, config));
+            let pool = Arc::new(outbound::Pool::new(config).unwrap());
+            let relay = tokio::spawn(async move { pool.relay(tcp).await });
             for i in 0..80 {
                 let data = [i as u8; 1024];
                 client.write_all(&data).await.unwrap();

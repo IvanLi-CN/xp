@@ -89,10 +89,12 @@ async fn session(
         uuid: uuid::Uuid::new_v4(),
         destination_host: "127.0.0.1".into(),
         destination_port: 80,
+        xmux: Default::default(),
     };
+    let pool = Arc::new(outbound::Pool::new(config).unwrap());
     (
         client,
-        tokio::spawn(outbound_connection(tcp, config)),
+        tokio::spawn(async move { pool.relay(tcp).await }),
         server,
     )
 }

@@ -41,6 +41,12 @@ on:
         required: true
         type: string
 
+      proxy_profile:
+        description: Optional proxy runtime benchmark (independent of CI build benchmark)
+        type: choice
+        options: [none, light, full]
+        default: none
+
 concurrency:
   group: >-
     ci-performance-${{ github.event.pull_request.number || format('manual-{0}',
@@ -51,9 +57,17 @@ permissions:
   actions: read
   contents: read
   packages: read
+  pull-requests: read
 
 jobs:
+  proxy-runtime:
+    if: github.event_name == 'workflow_dispatch' && inputs.proxy_profile != 'none'
+    uses: ./.github/workflows/xp-proxy-perf.yml
+    with:
+      profile: ${{ inputs.proxy_profile }}
+      candidate_sha: ${{ inputs.target_sha }}
   verify:
+    if: github.event_name != 'workflow_dispatch' || inputs.proxy_profile == 'none'
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -80,7 +94,7 @@ jobs:
 
   assert:
     needs: sample
-    if: ${{ always() && !cancelled() }}
+    if: ${{ always() && !cancelled() && needs.sample.result != 'skipped' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

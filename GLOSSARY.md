@@ -171,6 +171,22 @@ _Avoid_: Login server switch, automatic failover
 
 ## Native Data Plane
 
+**xp-proxy**:
+XP 的独立 Rust 代理数据面程序；在对比测试中以正式程序名区分于 Xray。
+_Avoid_: 将 native、native64 当作正式程序名称
+
+**Mainline Performance Baseline**:
+与候选程序同场测量的主干 xp-proxy 对照程序；其版本在一次测试期间保持固定。
+_Avoid_: 历史性能数值、最近发布版本
+
+**Performance Gate Waiver**:
+人工允许某个 PR 不受性能测试结论阻止合并的决定；不改变测试执行、真实结果或结果有效性。
+_Avoid_: 跳过性能测试、性能通过
+
+**Invalidated Performance Result**:
+被人明确作废、保留原始记录但不再参与有效结果汇总或复用的一次性能测试结果。
+_Avoid_: 测试失败、版本禁测、门禁豁免
+
 **Control Plane**:
 The XP authority that stores and coordinates cluster, endpoint, user and membership state.
 It produces the complete desired snapshot for a node's data plane.

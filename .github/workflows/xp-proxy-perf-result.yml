@@ -1,0 +1,72 @@
+name: xp-proxy-perf-result
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [invalidate, restore]
+        required: true
+      target_run_id:
+        description: Exact main xp-proxy-perf run ID
+        type: string
+        required: true
+      target_run_attempt:
+        description: Exact measured attempt
+        type: string
+        required: true
+      reason:
+        description: Human reason (no automatic judgement)
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: xp-proxy-perf-result-${{ inputs.target_run_id }}-${{ inputs.target_run_attempt }}
+  cancel-in-progress: false
+jobs:
+  receipt:
+    runs-on: ubuntu-24.04
+    outputs:
+      attempt: ${{ steps.receipt.outputs.receipt_attempt }}
+    steps:
+      - name: Require default branch before checking out trusted metadata code
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: '${{ github.workflow_sha }}'}
+      - name: Validate exact target and append or recover immutable human receipt
+        id: receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_RUN_ID: ${{ inputs.target_run_id }}
+          TARGET_RUN_ATTEMPT: ${{ inputs.target_run_attempt }}
+          MARK_ACTION: ${{ inputs.action }}
+          MARK_REASON: ${{ inputs.reason }}
+        run: python3 scripts/perf/xp-proxy/github.py prepare-mark
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: steps.receipt.outputs.receipt_attempt == github.run_attempt
+        with:
+          name: "xp-perf-disposition-${{ inputs.target_run_id }}-${{ inputs.target_run_attempt }}-\
+            ${{ github.run_id }}-${{ steps.receipt.outputs.receipt_attempt }}"
+          path: receipt.json
+          retention-days: 90
+          if-no-files-found: error
+  projection:
+    needs: receipt
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: '${{ github.workflow_sha }}'}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: "xp-perf-disposition-${{ inputs.target_run_id }}-${{ inputs.target_run_attempt }}-\
+            ${{ github.run_id }}-${{ needs.receipt.outputs.attempt }}"
+      - name: Project committed receipt to independent Check (original run unchanged)
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: python3 scripts/perf/xp-proxy/github.py project-mark
