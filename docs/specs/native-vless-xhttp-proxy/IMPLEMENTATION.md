@@ -15,7 +15,9 @@ capability，不连接、部署或切换 us3。
 [PERFORMANCE-DESIGN.md](./PERFORMANCE-DESIGN.md)。当前实现候选已增加独立构建、测量、门禁与人工标记工作流，
 以及默认并发、首包解析、流许可释放、出站连接池、H2 流控和 TLS 分片读取修复。TLS record 后端使用缓存密钥的 ring AES-GCM，
 两种套件均与独立 AES-GCM 实现进行字节、序号和认证失败对照；不改变 record 格式或 release 优化级别。
-确定性回归及 GitHub-hosted 互操作/性能矩阵正在验证。
+确定性回归已覆盖默认 64 并发、大首包、流许可、连接池和取消分片。
+GitHub-hosted 同场矩阵已暴露并保留 main 的既有并发/流控失败；候选与 Xray 的完整矩阵正在按最终 SHA 收敛。
+原始测量不得因主干缺陷被自动改为成功；人工 `perf:waive` 只改变 PR 门禁。
 
 当前尚无本候选的 GitHub-hosted 轻量/全量验收结论，也未完成正式审查；不得视为性能达标或 merge-ready。
 人工作废工作流须合并到默认分支后才有真实入口，pre-merge 负例不能代替 post-merge 实测。

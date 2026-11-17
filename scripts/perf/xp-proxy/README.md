@@ -38,6 +38,7 @@ CPU/PSS 只报告，不设新增数值门槛。主干自身有缺陷时仍保留
 
 `xp-proxy-perf-gate` 读取当前 PR 的 `perf:waive`，只改变合并门禁。
 加标/去标只重评门禁，不重新构建；实际测量继续，main 不继承标签。
+管理员启用合并约束时，只将 `xp-proxy-perf-gate` 加入性能 required checks；既有其他检查保持原策略。
 不要把 `measurement` 再设为必要检查，否则会抵消人工豁免。工作流不修改仓库分支规则。
 
 默认分支的 `xp-proxy-perf-result` 接受准确 run ID、attempt、`invalidate`/`restore` 和人工理由。
@@ -57,4 +58,6 @@ actionlint .github/workflows/xp-proxy-perf*.yml
 ```
 
 真实跨实现回归使用相同上游二进制。`interop` job 先完成 Xray 双向 1/8/64 并发、三类负载，
-成功后才安装和运行 Mihomo。它与性能判定独立，不以互操作成功替代吞吐及延迟门槛。
+成功后才安装和运行 Mihomo。Mihomo 的监听端口早于转发 `Running` 状态开放；测试使用仅限
+loopback 的 controller 对同一配置执行一次串行 reload，返回 204 后才开始正式请求，不循环重试
+业务请求探测就绪。它与性能判定独立，不以互操作成功替代吞吐及延迟门槛。

@@ -5,6 +5,7 @@ import argparse
 import json
 from pathlib import Path
 import subprocess
+import urllib.request
 from benchmark import Processes, configs, port, ready, PUBLIC, SHORT, UUID
 
 
@@ -41,11 +42,13 @@ def main():
         diagnostic["inbounds"][0]["streamSettings"]["realitySettings"]["show"] = True
         server.write_text(json.dumps(diagnostic))
         if args.mihomo:
+            controller = port()
             # Same pinned fields as tests/fixtures/mihomo-smux-v1.19.29.yaml.
             mihomo = dict(
                 mode="rule",
                 **{"log-level": "warning", "ipv6": False, "dns": {"enable": False}},
             )
+            mihomo["external-controller"] = f"127.0.0.1:{controller}"
             mihomo["tunnels"] = [
                 dict(
                     network=["tcp"],
@@ -121,6 +124,21 @@ def main():
                         else [args.xray, "run", "-config", client]
                     )
                     peer = group.start("client", command)
+                    if args.mihomo:
+                        ready(controller, peer)
+                        # The listener is published while tunnel.Status is still
+                        # Suspend/Inner. ApplyConfig holds executor's mutex until
+                        # OnRunning; a single serialized reload returning 204 is
+                        # a real initialization barrier, not a payload retry loop.
+                        request = urllib.request.Request(
+                            f"http://127.0.0.1:{controller}/configs",
+                            data=json.dumps({"path": str(config.resolve())}).encode(),
+                            headers={"Content-Type": "application/json"},
+                            method="PUT",
+                        )
+                        with urllib.request.urlopen(request, timeout=10) as response:
+                            if response.status != 204:
+                                raise RuntimeError("Mihomo initialization barrier failed")
                     ready(local, peer)
                 else:
                     peer = group.start("server", [args.xray, "run", "-config", server])

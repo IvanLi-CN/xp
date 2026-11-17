@@ -2,7 +2,7 @@
 """GitHub metadata adapter. All hosted operations use the bound gh backend."""
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import hashlib
 import io
 import json
@@ -59,6 +59,23 @@ def seal(value):
             separators=(",", ":"),
         ).encode()
     ).hexdigest()
+
+
+def projection_output(value):
+    status = "已作废（invalidated）" if value["action"] == "invalidate" else "有效（已恢复）"
+    expires = datetime.fromisoformat(value["created_at"].replace("Z", "+00:00")) + timedelta(days=90)
+    return dict(
+        title=f"{status} — run {value['target_identity'][1]} attempt {value['target_identity'][2]}",
+        summary=(
+            f"XP 人工结果标记；原始测量保持 `{value['measurement']}`。\n\n"
+            f"操作人：`{value['actor']}`\n\n理由：{value['reason']}\n\n"
+            f"工作流：`{value['workflow_path']}`，revision `{value['workflow_sha']}`\n\n"
+            f"操作时间：`{value['created_at']}`；审计有效期上限：`{expires.isoformat()}`。"
+            "实际有效期受 artifact 可用期限制；到期或审计缺失的结果不得复用。\n\n"
+            f"Receipt SHA256：`{value['digest']}`\n\n"
+            f"[原始测量]({value['target_url']}) · [审计操作]({value['operation_url']})"
+        ),
+    )
 
 
 def receipts(repo, repo_id, workflow_id, branch, target):
@@ -254,8 +271,8 @@ def main():
                 previous_digest=max(chain, key=lambda r: r["sequence"])["digest"]
                 if chain
                 else None,
-                operation_url=own["html_url"],
-                target_url=target["html_url"],
+                operation_url=f"{own['html_url']}/attempts/{os.environ['GITHUB_RUN_ATTEMPT']}",
+                target_url=f"{target['html_url']}/attempts/{attempt}",
                 retention_days=90,
             )
             if not value["reason"].strip():
@@ -305,10 +322,7 @@ def main():
             status="completed",
             conclusion="neutral",
             details_url=value["operation_url"],
-            output=dict(
-                title=f"{'invalidated' if value['action'] == 'invalidate' else 'valid (restored)'} — run {value['target_identity'][1]} attempt {value['target_identity'][2]}",
-                summary=f"XP human disposition; original measurement: {value['measurement']}\n\nActor: {value['actor']}\n\nReason: {value['reason']}\n\nReceipt SHA256: {value['digest']}\n\n[Original run]({value['target_url']}) · [Auditable operation]({value['operation_url']})",
-            ),
+            output=projection_output(value),
         )
         if matching:
             payload.pop("head_sha")
