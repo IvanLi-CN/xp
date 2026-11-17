@@ -58,7 +58,7 @@ jobs:
         with: {ref: '${{ needs.request.outputs.candidate }}'}
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with: {toolchain: 1.96.0, components: 'rustfmt, clippy'}
-      - run: cargo test --locked -p xp-proxy -p xp-proxy-core
+      - run: cargo test --locked -p xp-proxy -p xp-proxy-core --all-targets
       - run: >-
           cargo clippy --locked -p xp-proxy -p xp-proxy-core
           --all-targets --all-features -- -D warnings
@@ -188,6 +188,7 @@ jobs:
         run: python3 scripts/perf/xp-proxy/timing.py after-upload
   gate:
     name: xp-proxy-perf-gate
+    timeout-minutes: 17
     if: always() && github.event_name == 'pull_request'
     needs: [request, candidate, baseline, measurement]
     runs-on: ubuntu-24.04

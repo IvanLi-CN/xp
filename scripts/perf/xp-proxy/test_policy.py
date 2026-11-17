@@ -155,6 +155,7 @@ class PolicyTests(unittest.TestCase):
                 workload=workload,
                 sweep=sweep,
                 samples=100,
+                confirmed_bytes=1024 * 1024,
                 mbps=100,
                 p50_ms=1,
                 p95_ms=2,

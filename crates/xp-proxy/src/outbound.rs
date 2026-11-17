@@ -83,8 +83,7 @@ impl Pool {
         !transport.dead.load(Ordering::SeqCst)
             && (settings.h_max_request_times == 0
                 || requests < settings.h_max_request_times as usize)
-            && (settings.c_max_reuse_times == 0
-                || requests < settings.c_max_reuse_times as usize + 1)
+            && (settings.c_max_reuse_times == 0 || requests < settings.c_max_reuse_times as usize)
             && (settings.h_max_reusable_secs == 0
                 || transport.created.elapsed().as_secs() < settings.h_max_reusable_secs as u64)
     }

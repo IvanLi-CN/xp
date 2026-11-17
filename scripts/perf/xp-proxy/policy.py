@@ -13,7 +13,14 @@ def related(path):
                 ".cargo/",
             )
         )
-        or path in {"Cargo.toml", "Cargo.lock", "rust-toolchain", "rust-toolchain.toml"}
+        or path
+        in {
+            "Cargo.toml",
+            "Cargo.lock",
+            "rust-toolchain",
+            "rust-toolchain.toml",
+            ".github/workflows/ci-performance.yml",
+        }
         or path.startswith(".github/workflows/xp-proxy-perf")
         or path.startswith(".github/scripts/xp-proxy-perf")
     )
@@ -31,7 +38,7 @@ def gate(*, applicable, waived, measurement, current_sha, measured_sha):
         return "pending", "waiting for current candidate measurement"
     if measurement == "success":
         return "success", "current automatic light measurement passed"
-    if measurement in {"failure", "error", "cancelled", "timed_out"}:
+    if measurement in {"failure", "error", "cancelled", "timed_out", "skipped"}:
         return "failure", f"measurement {measurement}; no human merge exception"
     return "pending", "waiting for automatic light measurement"
 

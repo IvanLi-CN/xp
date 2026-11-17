@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import resource as usage
 import subprocess
 import threading
 import time
@@ -262,6 +263,7 @@ def compare(rows):
             if any(
                 r.get("errors")
                 or r["samples"] == 0
+                or (workload != "latency" and r.get("confirmed_bytes", 0) < 1024 * 1024)
                 or (workload == "latency" and r["samples"] < 100)
                 or not r["resources_released"]
                 for r in values
@@ -324,24 +326,57 @@ def main():
     origin_port, remote, local, fallback = (port() for _ in range(4))
 
     def load(address, concurrency, workload):
-        return json.loads(
-            subprocess.check_output(
-                [
-                    str(harness),
-                    "--mode",
-                    "load",
-                    "--addr",
-                    address,
-                    "--concurrency",
-                    str(concurrency),
-                    "--workload",
-                    workload,
-                    "--duration-ms",
-                    str(CONFIG["slot_ms"]),
-                ],
-                timeout=4,
-            )
+        process = subprocess.Popen(
+            [
+                str(harness),
+                "--mode",
+                "load",
+                "--addr",
+                address,
+                "--concurrency",
+                str(concurrency),
+                "--workload",
+                workload,
+                "--duration-ms",
+                str(CONFIG["slot_ms"]),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={**os.environ, "TOKIO_WORKER_THREADS": "2"},
         )
+        samples = []
+        stopped = threading.Event()
+
+        def sample():
+            while not stopped.wait(0.05):
+                samples.append(
+                    dict(
+                        t=time.monotonic() - start,
+                        generator=resource(process.pid),
+                        origin=resource(origin.pid),
+                    )
+                )
+
+        observer = threading.Thread(target=sample)
+        before = usage.getrusage(usage.RUSAGE_CHILDREN)
+        observer.start()
+        try:
+            stdout, stderr = process.communicate(timeout=4)
+            if process.returncode:
+                raise RuntimeError(stderr.decode())
+            result = json.loads(stdout)
+            after = usage.getrusage(usage.RUSAGE_CHILDREN)
+            result["generator_cpu_seconds"] = (
+                after.ru_utime + after.ru_stime - before.ru_utime - before.ru_stime
+            )
+            result["generator_telemetry"] = samples
+            return result
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            stopped.set()
+            observer.join()
 
     try:
         origin = processes.start(
@@ -349,47 +384,25 @@ def main():
             [harness, "--mode", "origin", "--addr", f"127.0.0.1:{origin_port}"],
         )
         ready(origin_port, origin)
-        subprocess.run(
-            [
-                "openssl",
-                "req",
-                "-x509",
-                "-newkey",
-                "ec",
-                "-pkeyopt",
-                "ec_paramgen_curve:P-256",
-                "-nodes",
-                "-keyout",
-                str(args.output / "key.pem"),
-                "-out",
-                str(args.output / "cert.pem"),
-                "-days",
-                "1",
-                "-subj",
-                "/CN=test.local",
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
         camouflage = processes.start(
             "fallback",
-            [
-                "openssl",
-                "s_server",
-                "-quiet",
-                "-www",
-                "-alpn",
-                "h2",
-                "-accept",
-                str(fallback),
-                "-cert",
-                args.output / "cert.pem",
-                "-key",
-                args.output / "key.pem",
-            ],
+            [harness, "--mode", "tls-origin", "--addr", f"127.0.0.1:{fallback}"],
         )
         ready(fallback, camouflage)
+        report["crypto_capacity"] = json.loads(
+            subprocess.check_output(
+                [
+                    str(harness),
+                    "--mode",
+                    "crypto",
+                    "--addr",
+                    "127.0.0.1:0",
+                    "--duration-ms",
+                    "1000",
+                ],
+                timeout=3,
+            )
+        )
         server, client, snapshot, outbound = configs(
             args.output, origin_port, remote, local, fallback
         )

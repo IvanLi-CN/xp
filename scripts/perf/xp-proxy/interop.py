@@ -26,45 +26,9 @@ def main():
             [args.harness, "--mode", "origin", "--addr", f"127.0.0.1:{origin_port}"],
         )
         ready(origin_port, origin)
-        subprocess.run(
-            [
-                "openssl",
-                "req",
-                "-x509",
-                "-newkey",
-                "ec",
-                "-pkeyopt",
-                "ec_paramgen_curve:P-256",
-                "-nodes",
-                "-keyout",
-                str(args.output / "key.pem"),
-                "-out",
-                str(args.output / "cert.pem"),
-                "-days",
-                "1",
-                "-subj",
-                "/CN=test.local",
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
         camouflage = processes.start(
             "fallback",
-            [
-                "openssl",
-                "s_server",
-                "-quiet",
-                "-www",
-                "-alpn",
-                "h2",
-                "-accept",
-                str(fallback),
-                "-cert",
-                args.output / "cert.pem",
-                "-key",
-                args.output / "key.pem",
-            ],
+            [args.harness, "--mode", "tls-origin", "--addr", f"127.0.0.1:{fallback}"],
         )
         ready(fallback, camouflage)
         server, client, snapshot, outbound = configs(
@@ -172,11 +136,15 @@ def main():
                                     "--concurrency",
                                     str(concurrency),
                                     "--duration-ms",
-                                    "900",
+                                    "10000",
+                                    "--requests-per-client",
+                                    "1",
+                                    "--bulk-frame-bytes",
+                                    "1048576",
                                     "--workload",
                                     workload,
                                 ],
-                                timeout=4,
+                                timeout=12,
                             )
                         )
                         results.append(
