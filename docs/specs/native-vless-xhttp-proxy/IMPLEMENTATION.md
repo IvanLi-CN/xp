@@ -16,6 +16,13 @@ capability，不连接、部署或切换 us3。
 以及默认并发、首包解析、流许可释放、出站连接池、H2 流控和 TLS 分片读取修复。TLS record 后端使用缓存密钥的 ring AES-GCM，
 两种套件均与独立 AES-GCM 实现进行字节、序号和认证失败对照；不改变 record 格式或 release 优化级别。
 确定性回归已覆盖默认 64 并发、大首包、流许可、连接池和取消分片。
+TLS 应用数据通过有界的 `AsyncRead/AsyncWrite` record stream 直接交给 H2，移除后台桥接任务和 plaintext duplex。
+
+旧桥接在接收积压时阻塞反向发送；确定性回归在直接 I/O 修复后通过。读写分别保留分片和待发密文偏移，取消后不重复确认 plaintext 或重加密。
+
+待发密文以单条 record 为界。关闭先发出已确认数据和 `close_notify`，写半关闭后仍允许读取响应。认证失败、超大或截断 record 均拒绝。
+
+默认 Tokio worker 数和运行内存配置不变。本地功能回归不替代当前 SHA 的性能验收。
 GitHub-hosted 同场矩阵已暴露并保留 main 的既有并发/流控失败；候选与 Xray 的完整矩阵正在按最终 SHA 收敛。
 新增多目标/多客户端隔离 fixture，本地功能诊断已覆盖 8 目标、16/64 流和慢/失败目标混合；
 Linux 验证实际底层连接数及当前 SHA 的 Actions 证据；CPU/PSS 摘要使用每个负载区间的

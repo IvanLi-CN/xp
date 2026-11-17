@@ -1,3 +1,4 @@
+use crate::reality_stream::TlsStream;
 use anyhow::{Result, anyhow};
 use bytes::BytesMut;
 use hmac::{Hmac, Mac};
@@ -8,7 +9,7 @@ use rustls::{
     pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer},
 };
 use sha2::{Digest, Sha256, Sha384, Sha512};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::{Duration, timeout};
 
@@ -71,7 +72,7 @@ pub async fn accept(
     stream: TcpStream,
     authenticated: &AuthenticatedClientHello,
     server_name: &str,
-) -> Result<DuplexStream> {
+) -> Result<TlsStream> {
     let client_hello = parse_client_hello(&hello).map_err(|error| anyhow!(error))?;
     let cipher_suite = choose_cipher_suite(&client_hello.cipher_suites)?;
     let suite = match cipher_suite {
@@ -150,9 +151,7 @@ pub async fn accept(
     )?;
     let application_keys =
         derive_application_traffic_keys(suite, &handshake_keys.secret, &flight_transcript);
-    let (local, peer) = tokio::io::duplex(64 * 1024);
-    tokio::spawn(run_record_bridge(wire, peer, application_keys));
-    Ok(local)
+    Ok(application_stream(wire, application_keys))
 }
 
 /// Establishes the client side of the native REALITY TLS flight and returns a
@@ -162,7 +161,7 @@ pub async fn connect(
     mut stream: TcpStream,
     config: RealityClientHelloConfig,
     client_private_key: [u8; 32],
-) -> Result<DuplexStream> {
+) -> Result<TlsStream> {
     let mut random = [0u8; 32];
     let mut random_tail = [0u8; 16];
     OsRng.fill_bytes(&mut random);
@@ -223,9 +222,12 @@ pub async fn connect(
     let application_keys =
         derive_application_traffic_keys(suite, &handshake_keys.secret, &transcript);
     transcript.extend_from_slice(&finished_message);
-    let (local, peer) = tokio::io::duplex(64 * 1024);
-    tokio::spawn(run_client_record_bridge(wire, peer, application_keys));
-    Ok(local)
+    Ok(TlsStream::new(
+        wire.stream,
+        wire.pending,
+        application_keys.server,
+        application_keys.client,
+    ))
 }
 
 async fn read_server_finished(
@@ -266,34 +268,6 @@ async fn read_server_finished(
             }
             transcript.extend_from_slice(message);
             cursor = end;
-        }
-    }
-}
-
-async fn run_client_record_bridge(
-    mut wire: WireReader,
-    local: DuplexStream,
-    application_keys: xp_proxy_core::tls13::Tls13TrafficKeys,
-) {
-    let (mut local_read, mut local_write) = tokio::io::split(local);
-    let mut network_reader = Tls13RecordReader::new(application_keys.server);
-    let mut network_writer = Tls13RecordWriter::new(application_keys.client);
-    let mut buffer = [0u8; 16 * 1024];
-    loop {
-        tokio::select! {
-            record = wire.read_record() => {
-                let Ok(record) = record else { break };
-                let Ok((content_type, data)) = network_reader.open(&record) else { break };
-                if content_type == 21 { break; }
-                if content_type == 23 && local_write.write_all(&data).await.is_err() { break; }
-            }
-            read = local_read.read(&mut buffer) => {
-                let Ok(size) = read else { break };
-                if size == 0 { break; }
-                let Ok(record) = network_writer.seal(23, &buffer[..size]) else { break };
-                if wire.stream.write_all(&record).await.is_err() { break; }
-                if wire.stream.flush().await.is_err() { break; }
-            }
         }
     }
 }
@@ -424,36 +398,18 @@ async fn read_client_finished(
     }
 }
 
-async fn run_record_bridge(
-    mut wire: WireReader,
-    local: DuplexStream,
+fn application_stream(
+    wire: WireReader,
     application_keys: xp_proxy_core::tls13::Tls13TrafficKeys,
-) {
-    let (mut local_read, mut local_write) = tokio::io::split(local);
-    let mut network_reader = Tls13RecordReader::new(application_keys.client);
-    let mut network_writer = Tls13RecordWriter::new(application_keys.server);
-    let mut buffer = [0u8; 16 * 1024];
-    loop {
-        tokio::select! {
-            record = wire.read_record() => {
-                let Ok(record) = record else { break };
-                let Ok((content_type, data)) = network_reader.open(&record) else {
-                    eprintln!("REALITY application record authentication failed");
-                    break;
-                };
-                if content_type == 21 { break; }
-                if content_type == 23 && local_write.write_all(&data).await.is_err() { break; }
-            }
-            read = local_read.read(&mut buffer) => {
-                let Ok(size) = read else { break };
-                if size == 0 { break; }
-                let Ok(record) = network_writer.seal(23, &buffer[..size]) else { break };
-                if wire.stream.write_all(&record).await.is_err() { break; }
-                if wire.stream.flush().await.is_err() { break; }
-            }
-        }
-    }
+) -> TlsStream {
+    TlsStream::new(
+        wire.stream,
+        wire.pending,
+        application_keys.client,
+        application_keys.server,
+    )
 }
+
 fn replace_certificate_signature(
     certificate: &mut [u8],
     auth_key: [u8; 32],
@@ -564,6 +520,42 @@ mod tests {
         assert_ne!(patched, original);
         let (_, parsed) = x509_parser::parse_x509_certificate(&patched).unwrap();
         assert_eq!(parsed.signature_value.data.len(), 64);
+    }
+
+    #[tokio::test]
+    async fn unread_application_data_does_not_block_reverse_tls_writes() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+        let keys = derive_application_traffic_keys(
+            Tls13CipherSuite::Aes128GcmSha256,
+            &[7; 32],
+            b"full duplex regression",
+        );
+        let mut writer = Tls13RecordWriter::new(keys.client.clone());
+        let pending = (0..8)
+            .flat_map(|_| writer.seal(23, &[42; 16384]).unwrap())
+            .collect();
+        let mut local = application_stream(WireReader::new(server, pending), keys.clone());
+        // The old bridge filled its 64 KiB duplex before yielding on this
+        // single-thread runtime. Leave incoming data unread while replying.
+        let mut byte = [0];
+        local.read_exact(&mut byte).await.unwrap();
+        assert_eq!(byte, [42]);
+        local.write_all(b"reverse reply").await.unwrap();
+        local.flush().await.unwrap();
+        let mut peer = WireReader::new(client, Vec::new());
+        let record = timeout(Duration::from_millis(200), peer.read_record())
+            .await
+            .expect("unread application backlog must not block reverse TLS output")
+            .unwrap();
+        let mut reader = Tls13RecordReader::new(keys.server);
+        assert_eq!(
+            reader.open(&record).unwrap(),
+            (23, b"reverse reply".to_vec())
+        );
     }
 
     #[tokio::test]

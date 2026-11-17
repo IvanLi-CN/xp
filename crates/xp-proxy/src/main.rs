@@ -20,6 +20,7 @@ use xp_proxy_core::{
 };
 
 mod outbound;
+mod reality_stream;
 mod reality_tls;
 mod xhttp_h2;
 
