@@ -41,6 +41,11 @@ on:
         required: true
         type: string
 
+      diagnostic_source_sha:
+        description: Temporary exact source SHA for transport diagnosis
+        type: string
+        required: false
+
       proxy_profile:
         description: Optional proxy runtime benchmark (independent of CI build benchmark)
         type: choice
@@ -159,7 +164,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: {path: tools}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: 093b6fc3b00d5cc7ee6630962fb9c92e7c30b027, path: source}
+        with:
+          ref: ${{ inputs.diagnostic_source_sha || '093b6fc3b00d5cc7ee6630962fb9c92e7c30b027' }}
+          path: source
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with: {toolchain: 1.96.0, targets: x86_64-unknown-linux-musl}
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
@@ -192,6 +199,7 @@ jobs:
         env:
           CARGO_INCREMENTAL: '0'
           CARGO_BUILD_JOBS: '4'
+          SOURCE_SHA: ${{ inputs.diagnostic_source_sha }}
           PROBE_TOOLS: ${{ github.workspace }}/tools
           PROBE_HARNESS: ${{ github.workspace }}/fixture/perf_harness
           PROBE_XRAY: ${{ github.workspace }}/fixture/xray-linux-x86_64
@@ -201,6 +209,20 @@ jobs:
             --target x86_64-unknown-linux-musl -p xp-proxy
           cp source/target/x86_64-unknown-linux-musl/release/xp-proxy fixture/original
           python3 tools/scripts/perf/xp-proxy/diagnose-latency.py "$PWD/fixture/original" original
+          git -C source rev-parse HEAD > evidence/source-sha.txt
+          sha256sum fixture/original > evidence/binary-sha256.txt
+          if [[ -n "$SOURCE_SHA" ]]; then
+            test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+            cargo test --manifest-path source/Cargo.toml --locked \
+              --target x86_64-unknown-linux-musl -p xp-proxy -p xp-proxy-core --all-targets
+            python3 tools/scripts/perf/xp-proxy/interop.py --xp "$PWD/fixture/original" \
+              --harness "$PROBE_HARNESS" --xray "$PROBE_XRAY" --output "$PWD/evidence/interop-xray"
+            tools/scripts/e2e/install-mihomo-v1.19.29.sh "$PWD/fixture/mihomo"
+            python3 tools/scripts/perf/xp-proxy/interop.py --xp "$PWD/fixture/original" \
+              --harness "$PROBE_HARNESS" --xray "$PROBE_XRAY" \
+              --mihomo "$PWD/fixture/mihomo" --output "$PWD/evidence/interop-mihomo"
+            exit 0
+          fi
           python3 tools/scripts/perf/xp-proxy/diagnose-nodelay-patch.py
           git -C source diff > evidence/nodelay.patch
           cargo build --manifest-path source/Cargo.toml --locked --release \
