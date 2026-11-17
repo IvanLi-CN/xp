@@ -74,6 +74,18 @@ never bind the same port. A native process crash, missing socket, stale snapshot
 response or failed readiness check does not automatically switch the endpoint to Xray; the endpoint
 stays stopped/failed until an explicit, audited owner operation completes.
 
+### Native TCP 地址族
+
+XP snapshot 的 `0.0.0.0:PORT` 为自动 wildcard，在支持 IPv6 的 Linux 上接收 IPv4 和 IPv6。
+
+运行时显式设置 `IPV6_V6ONLY=false`，不依赖节点的 `bindv6only` 默认值。内核不支持或禁用 IPv6 时自动使用 IPv4；端口冲突、权限和资源失败不会触发降级。
+
+具体 IPv4/IPv6 地址保持接口范围；显式 `[::]:PORT` 为 IPv6-only wildcard。
+
+验收应分别发起 IPv4/IPv6 请求，并检查服务端实际 peer/local 地址与端口 owner；客户端填写 IPv4 字面量并不能证明服务端收到 IPv4。
+
+此能力不改变节点 DNS、NAT、防火墙、端口或订阅地址，也不替代显式 runtime switch。容器 native capability 仍受下述部署边界约束。
+
 ### Host-managed target contract
 
 The target host-managed contract is one independent `xp-proxy` service on both systemd and OpenRC.

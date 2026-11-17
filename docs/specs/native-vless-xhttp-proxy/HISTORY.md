@@ -21,3 +21,9 @@
 - 2026-11-05：确定 native proxy 为第二个独立 Rust 项目。首个生产范围固定为 TCP VLESS、
   REALITY、XHTTP `stream-one`、六项 XMUX 设置和 allowlist HTTP(S) fallback；UDP/XUDP 与
   其他 XHTTP mode 延后到显式 capability 和兼容性证据之后。
+
+## IPv6 TCP 支持
+
+将 XP 的 IPv4 wildcard 解释为自动双栈 wildcard，补齐原始 VLESS IPv6 目标拨号和固定 fallback 的 IPv6 authority 验证。
+
+保留独立进程、control protocol v2、显式 runtime switch 和唯一端口 owner 合同；本任务不执行生产发布或节点网络变更。

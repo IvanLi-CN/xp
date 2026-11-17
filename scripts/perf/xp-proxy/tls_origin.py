@@ -14,7 +14,7 @@ import ssl
 import subprocess
 
 
-async def serve(port, directory):
+async def serve(port, directory, host="127.0.0.1"):
     key, cert = directory / "fixture.key", directory / "fixture.pem"
     subprocess.run(
         [
@@ -44,7 +44,7 @@ async def serve(port, directory):
         # REALITY's first post-handshake-length cache lookup may sleep five
         # seconds. Its mirrored connection intentionally never finishes TLS
         # with this target; do not kill the accepted proxy during initialization.
-        accept, "127.0.0.1", port, ssl=context, ssl_handshake_timeout=15,
+        accept, host, port, ssl=context, ssl_handshake_timeout=15,
     )
     async with server:
         await server.serve_forever()
@@ -54,5 +54,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--directory", type=Path, required=True)
+    parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
-    asyncio.run(serve(args.port, args.directory))
+    asyncio.run(serve(args.port, args.directory, args.host))

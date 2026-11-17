@@ -22,12 +22,44 @@ impl FallbackTarget {
         {
             return Err("fallback authority must be a host and optional port".into());
         }
-        let host = authority
-            .strip_prefix('[')
-            .and_then(|value| value.split_once(']').map(|(host, _)| host))
-            .unwrap_or_else(|| authority.split(':').next().unwrap_or_default());
-        if host.is_empty() || host.chars().any(|ch| ch.is_ascii_whitespace()) {
+        let (host, port) = if let Some(bracketed) = authority.strip_prefix('[') {
+            let (host, suffix) = bracketed
+                .split_once(']')
+                .ok_or("fallback IPv6 authority requires closing bracket")?;
+            host.parse::<std::net::Ipv6Addr>()
+                .map_err(|_| "fallback authority has an invalid IPv6 address")?;
+            let port = if suffix.is_empty() {
+                None
+            } else {
+                Some(
+                    suffix
+                        .strip_prefix(':')
+                        .ok_or("invalid IPv6 authority suffix")?,
+                )
+            };
+            (host, port)
+        } else {
+            if authority.contains(['[', ']']) || authority.matches(':').count() > 1 {
+                return Err("fallback IPv6 authority must be bracketed".into());
+            }
+            match authority.split_once(':') {
+                Some((host, port)) => (host, Some(port)),
+                None => (authority, None),
+            }
+        };
+        if host.is_empty()
+            || host
+                .chars()
+                .any(|ch| ch.is_ascii_whitespace() || ch.is_control())
+        {
             return Err("fallback authority has an invalid host".into());
+        }
+        if let Some(port) = port
+            && (port.is_empty()
+                || !port.bytes().all(|byte| byte.is_ascii_digit())
+                || port.parse::<u16>().is_err())
+        {
+            return Err("fallback authority has an invalid port".into());
         }
         Ok(Self {
             scheme: scheme.to_owned(),
@@ -72,6 +104,31 @@ mod tests {
         let allowed = BTreeSet::from(["origin.example:80".to_owned()]);
         assert!(target.is_allowed(&allowed));
         assert!(!target.is_allowed(&BTreeSet::from(["other.example:80".to_owned()])));
+    }
+
+    #[test]
+    fn validates_ipv6_brackets_address_port_and_exact_allowlist() {
+        for scheme in ["http", "https", "h2", "h2c"] {
+            let target = FallbackTarget::parse(&format!("{scheme}://[::1]:8443")).unwrap();
+            assert!(target.is_allowed(&BTreeSet::from(["[::1]:8443".into()])));
+            assert!(!target.is_allowed(&BTreeSet::from(["[::1]:443".into()])));
+        }
+        for authority in [
+            "::1:443",
+            "[::1",
+            "[::1]garbage",
+            "[nope]:80",
+            "[::1]:65536",
+            "[::1]:",
+            "[::1]:-1",
+            "[::1]:80:90",
+            "[::1] :80",
+        ] {
+            assert!(
+                FallbackTarget::parse(&format!("https://{authority}")).is_err(),
+                "{authority}"
+            );
+        }
     }
 
     #[test]

@@ -322,3 +322,21 @@ TLS 分片读取仅在完整 record 到齐后消费缓冲，取消不会丢失�
 
 本清单只是实现边界，不授权在本轮直接实施或部署；
 所有阶段都必须先满足主人确认，实现还必须满足 SPEC acceptance criteria。
+
+## IPv6 TCP 链路
+
+`crates/xp-proxy/src/listen.rs` 集中创建 wildcard socket，供 snapshot 与独立 outbound 入口共用。
+
+逻辑 snapshot 仍使用 `0.0.0.0:PORT`。
+
+通过 `socket2` 明确设置双栈选项；内核能力缺失允许自动 IPv4 降级，端口、权限和资源错误不降级。
+
+显式 IPv6 监听为 IPv6-only。
+
+VLESS 原始 TCP 转发使用 `(host, port)` 拨号，避免裸 IPv6 的字符串拼接歧义；XHTTP 路径保留相同的 tuple 拨号。
+
+fallback 只补齐 IPv6 authority 语法验证，不修复空 fallback snapshot 或扩大现有 fallback 语义。
+
+IPv6 验收需要当前候选的四种入站/目标地址族组合、真实 Xray 双向与 Mihomo 客户端传输，以及隔离 Linux 的禁用 IPv6、端口冲突和服务生命周期证据。
+
+单元测试或配置解析成功不能替代这些证据，未完成的场景不得标为通过。

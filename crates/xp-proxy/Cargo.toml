@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1"
+libc = "0.2"
+socket2 = "0.6"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 http-body-util = "0.1"
@@ -41,6 +43,5 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 xp-proxy-core = { path = "../xp-proxy-core" }
 
 [dev-dependencies]
-socket2 = "0.6"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 x509-parser = "0.18"

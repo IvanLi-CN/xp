@@ -4,9 +4,11 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(test)]
+use tokio::net::TcpListener;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream, UnixListener, UnixStream},
+    net::{TcpStream, UnixListener, UnixStream},
     sync::Notify,
     time::{Duration, timeout},
 };
@@ -19,6 +21,9 @@ use xp_proxy_core::{
     vless::{decode_request, is_authorized},
 };
 
+#[cfg(test)]
+mod ipv6_tests;
+mod listen;
 mod outbound;
 #[cfg(test)]
 mod outbound_tests;
@@ -64,6 +69,7 @@ struct OutboundConfig {
 #[derive(Default)]
 struct ListenerRuntime {
     bound: Mutex<HashMap<std::net::SocketAddr, Arc<Notify>>>,
+    transition: tokio::sync::Mutex<()>,
 }
 
 impl ListenerRuntime {
@@ -92,7 +98,8 @@ impl ListenerRuntime {
             .cloned()
             .collect::<Vec<_>>();
         for token in tokens {
-            token.notify_waiters();
+            // Retain a permit if a newly spawned accept task has not polled yet.
+            token.notify_one();
         }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
@@ -174,7 +181,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run_outbound(config: OutboundConfig) -> Result<()> {
-    let listener = TcpListener::bind(config.listen).await?;
+    let listener = listen::bind(config.listen)?;
     let pool = Arc::new(outbound::Pool::new(config)?);
     loop {
         let (local, _) = listener.accept().await?;
@@ -390,8 +397,8 @@ async fn handle_vless(
     if !is_authorized(&request, &allowed) {
         anyhow::bail!("unauthorized VLESS user");
     }
-    let destination = format!("{}:{}", request.destination.0, request.destination.1);
-    let mut outbound = TcpStream::connect(destination).await?;
+    let mut outbound =
+        TcpStream::connect((request.destination.0.as_str(), request.destination.1)).await?;
     inbound.write_all(&[0, 0]).await?;
     if consumed < header.len() {
         let payload = &header[consumed..];
@@ -445,19 +452,17 @@ async fn start_snapshot_listeners(
     runtime: Arc<ListenerRuntime>,
     traffic: Arc<TrafficCounter>,
 ) -> Result<()> {
+    // Complete every bind before exposing any part of the new generation.
+    let mut staged = Vec::new();
     for listener in snapshot.listeners {
         let bind = listener.bind.parse::<std::net::SocketAddr>()?;
+        let tcp = listen::bind(bind)?;
+        staged.push((bind, tcp));
+    }
+    for (bind, tcp) in staged {
         if !runtime.register(bind) {
-            continue;
+            anyhow::bail!("listener already registered: {bind}");
         }
-        let tcp = match TcpListener::bind(bind).await {
-            Ok(tcp) => tcp,
-            Err(error) => {
-                let _ = runtime.stop_token(bind);
-                let _ = runtime.stop_all().await;
-                return Err(error.into());
-            }
-        };
         let stop = runtime
             .bound
             .lock()
@@ -480,6 +485,13 @@ async fn start_snapshot_listeners(
                 let Some(active) = manager.active_snapshot() else {
                     continue;
                 };
+                if matches!(
+                    manager.state().0,
+                    xp_proxy_core::control::GenerationState::Draining
+                        | xp_proxy_core::control::GenerationState::Stopped
+                ) {
+                    continue;
+                }
                 let Some(listener) = active
                     .listeners
                     .iter()
@@ -496,10 +508,65 @@ async fn start_snapshot_listeners(
                     }
                 });
             }
+            // Publish release only after the socket is closed, not just after
+            // the accept loop exits. Activation may immediately rebind it.
+            drop(tcp);
             let _ = runtime.stop_token(bind);
         });
     }
     Ok(())
+}
+
+async fn activate_prepared(
+    manager: &GenerationManager,
+    runtime: &Arc<ListenerRuntime>,
+    traffic: &Arc<TrafficCounter>,
+) -> Result<u64> {
+    let snapshot = manager
+        .prepared_snapshot()
+        .ok_or_else(|| anyhow::anyhow!("no prepared generation"))?;
+    replace_listeners(snapshot, manager, runtime, traffic, || manager.activate()).await
+}
+
+async fn replace_listeners(
+    snapshot: ProxySnapshot,
+    manager: &GenerationManager,
+    runtime: &Arc<ListenerRuntime>,
+    traffic: &Arc<TrafficCounter>,
+    commit: impl FnOnce() -> Result<u64, String>,
+) -> Result<u64> {
+    let previous = manager.active_snapshot();
+    if !runtime.stop_all().await {
+        manager.stop();
+        anyhow::bail!("active listeners did not release before activation");
+    }
+    let result = async {
+        start_snapshot_listeners(snapshot, manager.clone(), runtime.clone(), traffic.clone())
+            .await?;
+        commit().map_err(anyhow::Error::msg)
+    }
+    .await;
+    if result.is_err() {
+        if !runtime.stop_all().await {
+            manager.stop();
+            anyhow::bail!("failed candidate listeners did not release");
+        }
+        if let Some(previous) = previous
+            && let Err(error) = start_snapshot_listeners(
+                previous,
+                manager.clone(),
+                runtime.clone(),
+                traffic.clone(),
+            )
+            .await
+        {
+            manager.stop();
+            anyhow::bail!(
+                "candidate activation failed; previous listener recovery failed: {error}"
+            );
+        }
+    }
+    result
 }
 
 async fn handle_control(
@@ -525,6 +592,7 @@ async fn handle_control(
         if request.protocol_version != CONTROL_PROTOCOL_VERSION {
             anyhow::bail!("unsupported control protocol version");
         }
+        let _transition = listener_runtime.transition.lock().await;
         let (_, active) = manager.state();
         let result = match request.operation {
             ControlOperation::Prepare { snapshot } => {
@@ -535,26 +603,7 @@ async fn handle_control(
                     .map_err(anyhow::Error::msg)
             }
             ControlOperation::Activate => {
-                let snapshot = manager
-                    .prepared_snapshot()
-                    .ok_or_else(|| anyhow::anyhow!("no prepared generation"))?;
-                if !listener_runtime.stop_all().await {
-                    anyhow::bail!("active listeners did not release before activation");
-                }
-                start_snapshot_listeners(
-                    snapshot,
-                    manager.clone(),
-                    listener_runtime.clone(),
-                    traffic.clone(),
-                )
-                .await?;
-                match manager.activate() {
-                    Ok(generation) => Ok(generation),
-                    Err(error) => {
-                        let _ = listener_runtime.stop_all().await;
-                        Err(anyhow::Error::msg(error))
-                    }
-                }
+                activate_prepared(&manager, &listener_runtime, &traffic).await
             }
             ControlOperation::Drain => Ok(manager.drain().or(active).unwrap_or(request.generation)),
             ControlOperation::Stop => {
@@ -564,20 +613,16 @@ async fn handle_control(
                 Ok(manager.stop().or(active).unwrap_or(request.generation))
             }
             ControlOperation::Rollback { generation } => {
-                if !listener_runtime.stop_all().await {
-                    anyhow::bail!("active listeners did not release before rollback");
+                if active != Some(generation) {
+                    Err(anyhow::anyhow!("rollback generation mismatch"))
+                } else if let Some(snapshot) = manager.previous_snapshot() {
+                    replace_listeners(snapshot, &manager, &listener_runtime, &traffic, || {
+                        manager.rollback(generation)
+                    })
+                    .await
+                } else {
+                    Err(anyhow::anyhow!("no previous successful generation"))
                 }
-                let rolled_back = manager.rollback(generation).map_err(anyhow::Error::msg)?;
-                if let Some(snapshot) = manager.active_snapshot() {
-                    start_snapshot_listeners(
-                        snapshot,
-                        manager.clone(),
-                        listener_runtime.clone(),
-                        traffic.clone(),
-                    )
-                    .await?;
-                }
-                Ok(rolled_back)
             }
             ControlOperation::Status => Ok(active.unwrap_or(request.generation)),
         };
