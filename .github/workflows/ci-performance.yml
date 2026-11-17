@@ -207,6 +207,12 @@ jobs:
             --target x86_64-unknown-linux-musl -p xp-proxy
           cp source/target/x86_64-unknown-linux-musl/release/xp-proxy fixture/nodelay
           python3 tools/scripts/perf/xp-proxy/diagnose-latency.py "$PWD/fixture/nodelay" nodelay
+          python3 tools/scripts/perf/xp-proxy/diagnose-lifecycle-patch.py
+          git -C source diff > evidence/scoped-tasks.patch
+          cargo build --manifest-path source/Cargo.toml --locked --release \
+            --target x86_64-unknown-linux-musl -p xp-proxy
+          cp source/target/x86_64-unknown-linux-musl/release/xp-proxy fixture/scoped
+          python3 tools/scripts/perf/xp-proxy/diagnose-latency.py "$PWD/fixture/scoped" scoped
           python3 tools/scripts/perf/xp-proxy/diagnose-latency.py \
             "$PWD/fixture/original" original-repeat
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
