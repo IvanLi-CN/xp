@@ -4,6 +4,67 @@ use sha2::{Digest, Sha256};
 use std::net::{IpAddr, SocketAddr};
 use xp_proxy_core::control::{ListenerSnapshot, RealitySnapshot, UserSnapshot, XmuxSnapshot};
 
+#[tokio::test]
+async fn slow_control_reader_does_not_block_another_connections_stop() {
+    let (blocked, mut slow) = UnixStream::pair().unwrap();
+    socket2::SockRef::from(&blocked)
+        .set_send_buffer_size(1024)
+        .unwrap();
+    blocked.writable().await.unwrap();
+    let padding = [0; 4096];
+    let mut filled = 0;
+    loop {
+        match blocked.try_write(&padding) {
+            Ok(size) => filled += size,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            result => panic!("failed to fill control response buffer: {result:?}"),
+        }
+    }
+    assert!(filled > 0);
+    let manager = GenerationManager::default();
+    let runtime = Arc::new(ListenerRuntime::default());
+    let traffic = Arc::new(TrafficCounter::default());
+    let stalled = tokio::spawn(handle_control(
+        blocked,
+        manager.clone(),
+        runtime.clone(),
+        traffic.clone(),
+    ));
+    let request = |operation| ControlRequest {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: "control-backpressure".into(),
+        generation: 1,
+        operation,
+    };
+    slow.write_all(&encode_frame(&request(ControlOperation::Status)).unwrap())
+        .await
+        .unwrap();
+    // The current-thread runtime polls the first handler until its full response
+    // buffer blocks. Keep the peer alive without reading any response bytes.
+    tokio::task::yield_now().await;
+    assert!(!stalled.is_finished());
+    let (server, mut client) = UnixStream::pair().unwrap();
+    let independent = tokio::spawn(handle_control(server, manager, runtime, traffic));
+    timeout(Duration::from_secs(1), async {
+        client
+            .write_all(&encode_frame(&request(ControlOperation::Stop)).unwrap())
+            .await
+            .unwrap();
+        let mut header = [0; 4];
+        client.read_exact(&mut header).await.unwrap();
+        let mut body = vec![0; u32::from_be_bytes(header) as usize];
+        client.read_exact(&mut body).await.unwrap();
+        let response: ControlResponse = serde_json::from_slice(&body).unwrap();
+        assert!(response.error.is_none());
+        assert_eq!(response.request_id, "control-backpressure");
+    })
+    .await
+    .expect("a non-reading control client must not block independent Stop");
+    assert!(!stalled.is_finished());
+    stalled.abort();
+    independent.abort();
+}
+
 fn listener_snapshot(bind: SocketAddr) -> ListenerSnapshot {
     ListenerSnapshot {
         bind: bind.to_string(),

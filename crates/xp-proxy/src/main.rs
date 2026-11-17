@@ -592,7 +592,7 @@ async fn handle_control(
         if request.protocol_version != CONTROL_PROTOCOL_VERSION {
             anyhow::bail!("unsupported control protocol version");
         }
-        let _transition = listener_runtime.transition.lock().await;
+        let transition = listener_runtime.transition.lock().await;
         let (_, active) = manager.state();
         let result = match request.operation {
             ControlOperation::Prepare { snapshot } => {
@@ -636,6 +636,9 @@ async fn handle_control(
             error,
             metrics: Some(traffic.snapshot()),
         };
+        // The response snapshot is serialized with the operation, but a slow
+        // reader must not hold the shared state-transition lock during I/O.
+        drop(transition);
         stream.write_all(&encode_frame(&response)?).await?;
     }
 }
