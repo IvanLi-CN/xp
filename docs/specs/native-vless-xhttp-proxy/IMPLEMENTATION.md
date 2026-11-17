@@ -11,6 +11,10 @@ capability，不连接、部署或切换 us3。
 
 ## 协议正确性修复
 
+响应消费者关闭时，downlink 即使等待静默目标也会终止，取消配对 uplink 并释放许可。
+
+真实 H2 回归覆盖上传 END_STREAM 后的 RST_STREAM，确认 active stream 回到零；正常半关闭继续接收响应。
+
 一个 H2 transport 的并发 stream 不再消耗物理连接配额；stream 许可通过作用域释放，连接失败和取消也归还许可。VLESS 首包先解析实际头部，再限制未完成头部长度。
 
 出站消费每个 H2 body chunk 后归还接收窗口，包含与 VLESS 响应头合并的 payload。真实 native 连接回归覆盖 80 次小响应和后续 128 KiB 响应，跨越默认窗口。
