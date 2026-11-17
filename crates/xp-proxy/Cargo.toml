@@ -41,5 +41,6 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 xp-proxy-core = { path = "../xp-proxy-core" }
 
 [dev-dependencies]
+socket2 = "0.6"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 x509-parser = "0.18"
