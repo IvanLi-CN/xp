@@ -41,7 +41,10 @@ async def serve(port, directory):
                 pass
 
     server = await asyncio.start_server(
-        accept, "127.0.0.1", port, ssl=context, ssl_handshake_timeout=3,
+        # REALITY's first post-handshake-length cache lookup may sleep five
+        # seconds. Its mirrored connection intentionally never finishes TLS
+        # with this target; do not kill the accepted proxy during initialization.
+        accept, "127.0.0.1", port, ssl=context, ssl_handshake_timeout=15,
     )
     async with server:
         await server.serve_forever()

@@ -263,6 +263,7 @@ def compare(rows):
         for name, values in grouped.items():
             if any(
                 r.get("errors")
+                or r.get("warmup_errors")
                 or r["samples"] == 0
                 or (workload != "latency" and r.get("confirmed_bytes", 0) < 1024 * 1024)
                 or (workload == "latency" and r["samples"] < 100)
@@ -465,7 +466,10 @@ def main():
                                 else [binary, "--outbound-config", outbound],
                             )
                             ready(local, subject)
-                        # Warm the H2 transport and observe its legitimate idle sockets.
+                        # Warm one actual transaction before sampling. The pinned
+                        # REALITY server may wait five seconds for its target's
+                        # post-handshake-length cache on a cold process.
+                        warmup_start = time.monotonic()
                         warmup = json.loads(
                             subprocess.check_output(
                                 [
@@ -479,11 +483,14 @@ def main():
                                     "--workload",
                                     "latency",
                                     "--duration-ms",
-                                    "300",
+                                    "10000",
+                                    "--requests-per-client",
+                                    "1",
                                 ],
-                                timeout=3,
+                                timeout=12,
                             )
                         )
+                        warmup_seconds = time.monotonic() - warmup_start
                         time.sleep(0.02)
                         idle = resource(subject.pid)
                         for concurrency, workload in itertools.product(
@@ -538,6 +545,7 @@ def main():
                                 and after["fd"] <= idle["fd"]
                             )
                             result["warmup_errors"] = warmup["errors"]
+                            result["warmup_seconds"] = warmup_seconds
                             rows.append(
                                 dict(
                                     program=name,

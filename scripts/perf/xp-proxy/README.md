@@ -19,6 +19,9 @@
 连接数秒，不能将这段策略等待误作传输超时。独立功能联测仍使用 graceful EOF 验证完整收尾。
 TLS 伪装源站使用 Python/OpenSSL 并发握手；锁定 REALITY 会镜像单条握手 record 长度，不能使用
 合并握手 record 的 rustls 源站，也不能使用串行接受连接的 `openssl s_server`。
+锁定 REALITY 的冷启动可能等待目标站 post-handshake 长度缓存初始化五秒；目标源站采用
+15 秒握手期限，正式采样前以单次完整事务做最多 10 秒的有界预热，并记录预热耗时和失败。
+这段准备计入消费墙钟，不改变正式两秒槽；预热失败保留为非通过。
 生产 H2 使用有界的 256 KiB stream / 1 MiB connection 接收窗口；窗口信用不等于预分配内存，
 仍逐 chunk 释放容量，实际 PSS 保留在报告中。
 `crypto_capacity` 单独记录实际 TLS record 后端的 16 KiB 加密/解密容量，辅助定位瓶颈。
