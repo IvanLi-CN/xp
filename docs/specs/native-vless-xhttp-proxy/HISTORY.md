@@ -1,5 +1,10 @@
 # 主题历史
 
+- 2026-11-17：收敛 xp-proxy 性能修复与 Actions 需求：轻量三分钟、全量六分钟设计预算，复用独立上游构建产物，候选/main/Xray 同场对照；PR label 仅豁免合
+  并门禁，测量与 main push 测试持续执行。
+
+人工按 run/attempt 作废或恢复结果，独立 Check 展示并验证指定操作工作流来源，证据按九十天留存设计。本轮仅修改需求文档，不表示性能修复、工作流或验收已完成。
+
 - 2026-11-14：完成独立数据面设计审查。锁定 XP 控制面与 `xp-proxy` 独立 service、显式
   endpoint owner、单端口唯一 owner、持久 generation、fail-closed 重启、systemd/OpenRC
   生命周期和 Xray/Mihomo 四路径证据门禁。记录 service identity、generation 来源、fallback

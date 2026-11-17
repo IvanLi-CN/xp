@@ -96,12 +96,12 @@ async fn open_stream(
             .into_data()
             .map_err(|_| anyhow!("XHTTP request contained a non-data frame"))?;
         buffered.extend_from_slice(&data);
-        if buffered.len() > 8192 {
-            return Err(anyhow!("VLESS request header exceeds 8192 bytes"));
-        }
         match decode_request(&buffered) {
             Ok(decoded) => break decoded,
-            Err(VlessRequestError::Truncated) => continue,
+            Err(VlessRequestError::Truncated) if buffered.len() <= 8192 => continue,
+            Err(VlessRequestError::Truncated) => {
+                return Err(anyhow!("VLESS request header exceeds 8192 bytes"));
+            }
             Err(error) => return Err(anyhow!(error)),
         }
     };
@@ -117,18 +117,21 @@ async fn open_stream(
         .map_err(|_| anyhow!("XMUX session lock poisoned"))?
         .try_open_stream()
         .map_err(|error| anyhow!(error))?;
-    let destination = format!("{}:{}", vless.destination.0, vless.destination.1);
-    let mut outbound = TcpStream::connect(destination).await?;
+    let permit = SessionPermit { session, permit };
+    let mut outbound =
+        TcpStream::connect((vless.destination.0.as_str(), vless.destination.1)).await?;
+    outbound.set_nodelay(true)?;
     let extra = &buffered[consumed..];
     if !extra.is_empty() {
         outbound.write_all(extra).await?;
+        traffic.add_uplink(extra.len() as u64);
     }
     let (sender, receiver) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(16);
     sender
         .send(Ok(Frame::data(Bytes::from_static(&[0, 0]))))
         .await
         .map_err(|_| anyhow!("HTTP/2 response stream closed"))?;
-    tokio::spawn(relay_body(body, outbound, sender, traffic, session, permit));
+    tokio::spawn(relay_body(body, outbound, sender, traffic, permit));
     let stream = tokio_stream::wrappers::ReceiverStream::new(receiver);
     let body = StreamBody::new(stream).boxed();
     Ok(Response::builder()
@@ -139,13 +142,26 @@ async fn open_stream(
         .body(body)?)
 }
 
+// Own the stream admission across connect errors, cancellation and relay failure.
+struct SessionPermit {
+    session: Arc<Mutex<StreamOneSession>>,
+    permit: StreamPermit,
+}
+
+impl Drop for SessionPermit {
+    fn drop(&mut self) {
+        if let Ok(mut session) = self.session.lock() {
+            session.close_stream(self.permit);
+        }
+    }
+}
+
 async fn relay_body(
     mut body: Incoming,
     outbound: TcpStream,
     sender: mpsc::Sender<Result<Frame<Bytes>, Infallible>>,
     traffic: Arc<TrafficCounter>,
-    session: Arc<Mutex<StreamOneSession>>,
-    permit: StreamPermit,
+    _permit: SessionPermit,
 ) {
     let (mut read_in, mut write_out) = outbound.into_split();
     let sender_for_downlink = sender;
@@ -177,10 +193,9 @@ async fn relay_body(
         write_out.shutdown().await?;
         Ok::<(), anyhow::Error>(())
     };
-    let _ = tokio::join!(downlink, uplink);
-    if let Ok(mut session) = session.lock() {
-        let _ = session.close_stream(permit);
-    }
+    // A clean upload EOF is a TCP half-close: continue receiving the response.
+    // Either direction failing cancels its peer and drops the admission guard.
+    let _ = tokio::try_join!(downlink, uplink);
 }
 
 fn simple_response(status: StatusCode, message: &str) -> Response<ResponseBody> {
@@ -203,7 +218,7 @@ mod tests {
         let echo_addr = echo_listener.local_addr().unwrap();
         tokio::spawn(async move {
             let (mut stream, _) = echo_listener.accept().await.unwrap();
-            let mut buffer = [0u8; 4096];
+            let mut buffer = [0u8; 32768];
             loop {
                 let read = stream.read(&mut buffer).await.unwrap();
                 if read == 0 {
@@ -245,9 +260,9 @@ mod tests {
         let (response, mut body) = sender.send_request(request, false).unwrap();
         let header =
             encode_tcp_request(user, (&echo_addr.ip().to_string(), echo_addr.port()), &[]).unwrap();
-        let payload = b"h2-xhttp-payload";
+        let payload = vec![42u8; 16384];
         let mut request_body = header;
-        request_body.extend_from_slice(payload);
+        request_body.extend_from_slice(&payload);
         body.send_data(Bytes::from(request_body), true).unwrap();
 
         let mut response = response.await.unwrap();
@@ -260,6 +275,6 @@ mod tests {
             received.extend_from_slice(&chunk.unwrap());
         }
         assert_eq!(&received[..2], &[0, 0]);
-        assert_eq!(&received[2..], payload);
+        assert_eq!(&received[2..], payload.as_slice());
     }
 }

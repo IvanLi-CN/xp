@@ -1,0 +1,74 @@
+name: xp-proxy-perf-build
+on:
+  workflow_call:
+    inputs:
+      source_sha: {type: string, required: true}
+      tools_sha: {type: string, required: true}
+      role: {type: string, required: true}
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: '${{ inputs.source_sha }}', path: source}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: '${{ inputs.tools_sha }}', path: tools}
+      - name: Verify exact sources
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TOOLS_SHA: ${{ inputs.tools_sha }}
+        run: |
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C tools rev-parse HEAD)" = "$TOOLS_SHA"
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
+        with: {toolchain: 1.96.0, targets: x86_64-unknown-linux-musl}
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            source/target
+          key: "xp-proxy-perf-musl-1.96-${{ inputs.role }}-\
+            ${{ hashFiles('source/Cargo.lock') }}-${{ inputs.source_sha }}"
+          restore-keys: "xp-proxy-perf-musl-1.96-${{ inputs.role }}-\
+            ${{ hashFiles('source/Cargo.lock') }}-"
+      - name: Build only performance inputs
+        env: {CARGO_INCREMENTAL: '0', CARGO_BUILD_JOBS: '4'}
+        run: |
+          cargo build --manifest-path source/Cargo.toml --locked --release \
+            --target x86_64-unknown-linux-musl -p xp-proxy
+          mkdir bundle
+          cp source/target/x86_64-unknown-linux-musl/release/xp-proxy bundle/
+      - name: Build candidate harness upstream
+        if: inputs.role == 'candidate'
+        env: {CARGO_INCREMENTAL: '0', CARGO_BUILD_JOBS: '4'}
+        run: |
+          cargo build --manifest-path source/Cargo.toml --locked --release \
+            --target x86_64-unknown-linux-musl -p xp-proxy --example perf_harness
+          cp source/target/x86_64-unknown-linux-musl/release/examples/perf_harness bundle/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: binary
+        with:
+          name: "xp-proxy-perf-${{ inputs.role }}-\
+            ${{ github.run_id }}-${{ github.run_attempt }}-binary"
+          path: bundle/*
+          retention-days: 90
+          if-no-files-found: error
+      - name: Seal manifest after immutable binary upload
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BINARY_ARTIFACT_ID: ${{ steps.binary.outputs.artifact-id }}
+          BINARY_ARTIFACT_NAME: "xp-proxy-perf-${{ inputs.role }}-\
+            ${{ github.run_id }}-${{ github.run_attempt }}-binary"
+        run: python3 tools/scripts/perf/xp-proxy/github.py manifest
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: "xp-proxy-perf-${{ inputs.role }}-\
+            ${{ github.run_id }}-${{ github.run_attempt }}-manifest"
+          path: manifest/manifest.json
+          retention-days: 90
+          if-no-files-found: error

@@ -206,6 +206,42 @@ XP 是唯一的 endpoint/user 权威。XP 生成的 snapshot 必须完整描述�
 - **REQ-FUTURE-CAPABILITY:** UDP/XUDP、其他 XHTTP mode、额外 Xray 字段、Native Reverse 或
   任何新 fallback 行为，必须先增加独立 capability、fixture、互操作证据和本主题版本更新。
 
+## Performance requirements
+
+详细性能合同见 [contracts/performance.md](./contracts/performance.md)。性能测试与协议互操作、服务生命周期及生产部署验收是不同证据，不能互相替代。
+
+- **REQ-PERF-COMPARE:** 候选 xp-proxy 必须与测试启动时锁定的 main xp-proxy 和 Xray `26.3.27` 在同一 GitHub-hosted
+  Linux runner 上串行交替测试，固定可比配置并记录准确版本；不得以历史性能数值替代同场测量。
+- **REQ-PERF-COVERAGE:** 自动轻量覆盖入站、小请求延迟、上传/下载和并发 1/8；手动全量增加出站及并发 16/64。
+
+两档必须检查内容完整性、真实错误率、有效吞吐、延迟、CPU、内存和资源释放，不得以提高连接上限替代默认配置的并发正确性。
+
+- **REQ-PERF-THRESHOLD:** 有效测量中，候选对应场景的吞吐不得低于 main 与锁定 Xray 各自的 90%，小请求 p50/p95 相对两个对照各自不得增加超过 5 ms；
+  合法负载零异常失败、内容校验通过、连接结束后资源释放。
+
+测量不足必须明确非通过，不自动识别特殊缺陷或放宽门槛。
+
+- **REQ-PERF-BUDGET:** 轻量按三分钟、全量按六分钟墙钟设计，性能执行不编译程序；下载、准备、测试和证据上传计入预算，排队与上游构建不计入。
+
+轻量五分钟、全量十分钟安全超时；超过设计预算告警，不直接作为性能数值失败。
+
+- **REQ-PERF-ARTIFACT:** 上游提供独立 xp-proxy 优化构建产物及 SHA、target、构建配置、toolchain 和二进制校验和；消费端必须精确验证来源与候选
+  /main 身份，不用其他成功产物补位。
+- **REQ-PERF-TRIGGER:** 相关协议代码、共享依赖、锁文件、工具链、构建和性能测试变更必须自动运行轻量测试；main 的相关变更同样自动测试。
+
+无关变更明确报告不适用，必需检查不得永久等待。
+
+- **REQ-PERF-GATE:** 测量结论、PR 合并门禁和人工有效性标记必须分离。
+
+`perf:waive` 只豁免本 PR 的性能合并门禁，不停止测试，不改变原始结果，不影响 main 后续测试或其他 CI。门禁只依据自动轻量及豁免状态，手动全量独立报告。
+
+- **REQ-PERF-ANNOTATION:** 作废与恢复由人经指定工作流明确选择准确 run/attempt 并填写理由，保留完整审计链和原始结果；标记精确影响该次结果，不禁测整个 SHA，不
+  由机器推断。
+
+独立 Check 展示须与指定工作流实际生成的操作记录核对，不只凭名称、App 或自报链接认定来源。
+
+- **REQ-PERF-RETENTION:** 测试结果、标记及审计证据统一按 90 天设计并遵守仓库实际留存上限；过期、缺失或审计不完整的结果不得复用，已作废结果不得因标记消失自动恢复为有效。
+
 ## Compatibility and Acceptance
 
 生产候选必须同时提供以下四条路径的证据：
@@ -241,6 +277,15 @@ Rust outbound -> Mihomo-compatible server
 - **VER-RESOURCE** covers: REQ-RESOURCE, REQ-OBSERVABILITY. H2/连接/FD/内存/日志有界，状态分类可解释且不把 unknown 当 zero/ready。
 - **VER-FUTURE** covers: REQ-FUTURE-CAPABILITY. 未授权协议字段或 mode 被拒绝，新增 capability 未经 fixture 不能启用。
 
+- **VER-PERF-COMPARE** covers: REQ-PERF-COMPARE, REQ-PERF-ARTIFACT. 核对同场三程序测量、固定 main SHA、构建
+  manifest、错误 SHA/target/校验和及缺失产物的负例。
+- **VER-PERF-MEASURE** covers: REQ-PERF-COVERAGE, REQ-PERF-THRESHOLD, REQ-PERF-BUDGET. 覆盖双档矩阵、默认并发正确
+  性、完整性、双重门槛、资源回收、墙钟明细、预算告警及安全超时，保留无效测量的非通过状态。
+- **VER-PERF-AUTOMATION** covers: REQ-PERF-TRIGGER, REQ-PERF-GATE. 验证相关/无关路径、main push、PR 新提交、加标/去标、
+  豁免时测量继续、全量不影响自动门禁和旧结果不会解锁新候选。
+- **VER-PERF-RECORDS** covers: REQ-PERF-ANNOTATION, REQ-PERF-RETENTION. 验证人工 invalidate/restore、同名伪标
+  记拒绝、指定工作流来源、run attempt 隔离、同 SHA 新 run、已作废数据排除、记录过期或读取失败不得自动恢复。
+
 ## Acceptance Criteria
 
 - **AC-1 Usable ingress:** 只有本文件“Usable ingress point”六项条件全部成立时，系统才报告
@@ -262,6 +307,8 @@ Rust outbound -> Mihomo-compatible server
   保留为未完成而非降级成通过。
 
 ## References
+
+- [xp-proxy 性能测试与结果治理合同](./contracts/performance.md)。
 
 - `crates/xp-proxy-core/src/control.rs`：当前控制协议和 generation 状态机实现。
 - `crates/xp-proxy/src/main.rs`：当前 listener、fallback 和 control socket 实现。

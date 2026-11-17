@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "target": "x86_64-unknown-linux-musl",
+  "profile": "release",
+  "toolchain": "1.96.0",
+  "xray_version": "26.3.27",
+  "xray_release": "v3.48.15",
+  "xray_asset": "xray-linux-x86_64",
+  "xray_sha256": "ba15b5b3658d3b89008d601e730859d06a5db3691320f0130fd91a37bc63412d",
+  "slot_ms": 2000,
+  "sweeps": 2,
+  "light": [
+    1,
+    8
+  ],
+  "full": [
+    1,
+    8,
+    16,
+    64
+  ],
+  "throughput_ratio": 0.9,
+  "latency_delta_ms": 5,
+  "retention_days": 90
+}
