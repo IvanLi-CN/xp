@@ -26,7 +26,6 @@ pub struct StreamOneSession {
     path: String,
     settings: XmuxSettings,
     next_connection_id: u64,
-    active_connections: u16,
     active_streams: u16,
     connection_reuses: u32,
     request_count: u32,
@@ -46,7 +45,6 @@ impl StreamOneSession {
             path,
             settings,
             next_connection_id: 1,
-            active_connections: 0,
             active_streams: 0,
             connection_reuses: 0,
             request_count: 0,
@@ -67,19 +65,21 @@ impl StreamOneSession {
         {
             return Err("XMUX max_concurrency reached".into());
         }
-        if self.active_connections >= self.settings.max_connections {
-            return Err("XMUX max_connections reached".into());
+        // This session belongs to one accepted H2 transport. max_connections limits
+        // the outbound transport pool, never the number of streams on this transport.
+        self.reuse_decision()
+            .map_err(|decision| format!("XMUX transport exhausted: {:?}", decision.reason))?;
+        if self.active_streams == u16::MAX {
+            return Err("XMUX stream capacity reached".into());
         }
         let connection_id = self.next_connection_id;
         self.next_connection_id = self.next_connection_id.saturating_add(1);
-        self.active_connections += 1;
         self.active_streams += 1;
         self.request_count = self.request_count.saturating_add(1);
         Ok(StreamPermit { connection_id })
     }
 
     pub fn close_stream(&mut self, _permit: StreamPermit) -> ReuseDecision {
-        self.active_connections = self.active_connections.saturating_sub(1);
         self.active_streams = self.active_streams.saturating_sub(1);
         self.connection_reuses = self.connection_reuses.saturating_add(1);
         match self.reuse_decision() {
@@ -149,6 +149,23 @@ mod tests {
         assert!(session.try_open_stream().is_err());
         assert_eq!(session.active_streams(), 1);
         assert_eq!(session.close_stream(permit).reason, ReuseReason::Allowed);
+    }
+
+    #[test]
+    fn one_h2_connection_accepts_64_simultaneous_streams() {
+        let mut session = StreamOneSession::new("/xp-xhttp", XmuxSettings::default()).unwrap();
+        let permits: Vec<_> = (0..64)
+            .map(|_| {
+                session
+                    .try_open_stream()
+                    .expect("one H2 transport can multiplex streams")
+            })
+            .collect();
+        assert_eq!(session.active_streams(), 64);
+        for permit in permits {
+            session.close_stream(permit);
+        }
+        assert_eq!(session.active_streams(), 0);
     }
 
     #[test]
