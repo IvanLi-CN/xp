@@ -67,10 +67,7 @@ jobs:
       profile: ${{ inputs.proxy_profile }}
       candidate_sha: ${{ inputs.target_sha }}
   verify:
-    if: >-
-      github.event_name != 'workflow_dispatch' ||
-      (inputs.proxy_profile == 'none' &&
-      inputs.target_sha != 'efe21eac143d616e53e1a54a0a7545cdc4729b32')
+    if: github.event_name != 'workflow_dispatch' || inputs.proxy_profile == 'none'
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -151,87 +148,3 @@ jobs:
           name: "ci-performance-${{ github.run_id }}"
           path: ci-performance.json
           if-no-files-found: ignore
-
-  baseline-correctness-diagnostic:
-    if: >-
-      github.event_name == 'workflow_dispatch' && inputs.proxy_profile == 'none' &&
-      inputs.target_sha == 'efe21eac143d616e53e1a54a0a7545cdc4729b32'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    env:
-      CARGO_HTTP_MULTIPLEXING: 'false'
-      CARGO_BUILD_JOBS: '4'
-      CARGO_INCREMENTAL: '0'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: 'efe21eac143d616e53e1a54a0a7545cdc4729b32', path: source}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: '2bc923e2aacafd7bbfb5660d53009022d91e38a6', path: tools}
-      - name: Bind exact source and tooling
-        run: |
-          test "$(git -C source rev-parse HEAD)" = 'efe21eac143d616e53e1a54a0a7545cdc4729b32'
-          test "$(git -C tools rev-parse HEAD)" = '2bc923e2aacafd7bbfb5660d53009022d91e38a6'
-          mkdir evidence
-          git -C source rev-parse HEAD > evidence/source-sha.txt
-          git -C tools rev-parse HEAD > evidence/tools-sha.txt
-      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
-        with: {toolchain: 1.96.0, targets: x86_64-unknown-linux-musl}
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            source/target
-          key: "baseline-correctness-${{ inputs.target_sha }}"
-          restore-keys: "xp-proxy-perf-musl-1.96-main-\
-            ${{ hashFiles('source/Cargo.lock') }}-"
-      - name: Test actual Linux musl source and build binary
-        run: |
-          set -o pipefail
-          cargo test --manifest-path source/Cargo.toml --locked --release \
-            --target x86_64-unknown-linux-musl -p xp-proxy -p xp-proxy-core \
-            --all-targets 2>&1 | tee evidence/unit-tests.log
-          cargo build --manifest-path source/Cargo.toml --locked --release \
-            --target x86_64-unknown-linux-musl -p xp-proxy
-          sha256sum source/target/x86_64-unknown-linux-musl/release/xp-proxy \
-            > evidence/binary-sha256.txt
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: xp-proxy-perf-candidate-44045615599-1-binary
-          run-id: 44045615599
-          github-token: ${{ github.token }}
-          path: tool-binary
-      - name: Verify pinned test fixture and Xray
-        env: {GH_TOKEN: '${{ github.token }}'}
-        run: |
-          printf '%s  %s\n' \
-            b5ac5650fb8ae16371562eef8227625f35b3bf6b4b4c9cd103da0f7a362e8d1a \
-            tool-binary/perf_harness | sha256sum -c -
-          gh release download v3.48.15 --repo "$GITHUB_REPOSITORY" \
-            --pattern xray-linux-x86_64 --dir fixtures
-          printf '%s  %s\n' \
-            ba15b5b3658d3b89008d601e730859d06a5db3691320f0130fd91a37bc63412d \
-            fixtures/xray-linux-x86_64 | sha256sum -c -
-          chmod +x fixtures/xray-linux-x86_64 tool-binary/perf_harness
-          fixtures/xray-linux-x86_64 version > evidence/xray-version.txt
-      - name: Xray gate before Mihomo
-        run: |
-          python3 tools/scripts/perf/xp-proxy/interop.py \
-            --xp "$PWD/source/target/x86_64-unknown-linux-musl/release/xp-proxy" \
-            --harness "$PWD/tool-binary/perf_harness" \
-            --xray "$PWD/fixtures/xray-linux-x86_64" --output "$PWD/evidence/xray"
-      - name: Mihomo gate after Xray
-        run: |
-          sh tools/scripts/e2e/install-mihomo-v1.19.29.sh "$PWD/fixtures/mihomo"
-          python3 tools/scripts/perf/xp-proxy/interop.py \
-            --xp "$PWD/source/target/x86_64-unknown-linux-musl/release/xp-proxy" \
-            --harness "$PWD/tool-binary/perf_harness" \
-            --xray "$PWD/fixtures/xray-linux-x86_64" \
-            --mihomo "$PWD/fixtures/mihomo" --output "$PWD/evidence/mihomo"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: baseline-correctness-${{ inputs.target_sha }}
-          path: evidence
-          retention-days: 90
