@@ -28,6 +28,8 @@ def stats(pid):
     if value is None:
         return None
     value['threads'] = {}
+    stat = Path(f'/proc/{pid}/stat').read_text().split()
+    value['user_ticks'], value['system_ticks'] = int(stat[13]), int(stat[14])
     for task in Path(f'/proc/{pid}/task').glob('*'):
         try:
             fields = (task / 'schedstat').read_text().split()
@@ -44,7 +46,7 @@ def pin(process, core):
         except ProcessLookupError:
             pass
 
-for mode, repeats in [('shared', 4), ('pinned', 4), ('contended', 2)]:
+for mode, repeats in [('history', 4), ('history-one-worker', 4)]:
     for repeat in range(repeats):
         for name in (('candidate', 'Xray') if repeat % 2 == 0 else ('Xray', 'candidate')):
             directory = OUT / f'{mode}-{repeat}-{name}'
@@ -63,6 +65,8 @@ for mode, repeats in [('shared', 4), ('pinned', 4), ('contended', 2)]:
                 command = ([XP, '--control-socket', directory / 'control.sock',
                             '--state-file', directory / 'state.json', '--snapshot', snapshot]
                            if name == 'candidate' else [XRAY, 'run', '-config', server])
+                if name == 'candidate' and mode == 'history-one-worker':
+                    command = ['env', 'TOKIO_WORKER_THREADS=1', *command]
                 subject = group.start('subject', command)
                 ready(remote, subject)
                 peer = group.start('peer', [XRAY, 'run', '-config', client])
@@ -71,13 +75,19 @@ for mode, repeats in [('shared', 4), ('pinned', 4), ('contended', 2)]:
                     '--addr', f'127.0.0.1:{local}', '--requests-per-client', '1',
                     '--duration-ms', '10000'], timeout=12))
                 assert not warmup['errors']
-                if mode != 'shared':
+                if mode in ('pinned', 'contended'):
                     for proc, core in [(subject, CORES[0]), (peer, CORES[1]),
                                        (origin, CORES[2]), (camouflage, CORES[3])]:
                         pin(proc, core)
                 if mode == 'contended':
                     burner = group.start('burner', ['python3', '-c', 'while True: pass'])
                     pin(burner, CORES[0])
+                for c, w in [(1, 'latency'), (1, 'upload'), (1, 'download'), (8, 'latency')]:
+                    priming = json.loads(subprocess.check_output([str(HARNESS), '--mode', 'load',
+                        '--addr', f'127.0.0.1:{local}', '--concurrency', str(c),
+                        '--workload', w, '--duration-ms', '2000'], timeout=5))
+                    assert not priming['errors']
+                    time.sleep(.02)
                 telemetry = []
                 done = threading.Event()
                 def sample():
@@ -87,7 +97,7 @@ for mode, repeats in [('shared', 4), ('pinned', 4), ('contended', 2)]:
                                 ('peer', peer), ('origin', origin), ('generator', load)]}))
                 cmd = [str(HARNESS), '--mode', 'load', '--addr', f'127.0.0.1:{local}',
                        '--concurrency', '8', '--workload', 'upload', '--duration-ms', '2000']
-                if mode != 'shared':
+                if mode in ('pinned', 'contended'):
                     cmd = ['taskset', '-c', str(CORES[3]), *cmd]
                 load = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                         env={**os.environ, 'TOKIO_WORKER_THREADS': '2'})
