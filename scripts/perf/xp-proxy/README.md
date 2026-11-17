@@ -14,6 +14,10 @@
 业务数据及 SHA256 ACK。延迟负载为 1 KiB，上传/下载使用持续 64 KiB 帧，每场景至少确认 1 MiB 实际数据。
 独立互操作测试另对每个客户端验证单次 1 MiB 大帧，避免用短槽截止替代功能完整性检查。
 槽内 1.8 秒发新事务、最多 0.2 秒收尾；超时单列且不能计入确认吞吐。每场景每 sweep 的延迟样本须达到 100。
+完成应用会话时先发送关闭帧并 half-close 写端，再读取 EOF，避免双方等待对方关闭。
+TLS 伪装源站使用 Python/OpenSSL 并发握手；锁定 REALITY 会镜像单条握手 record 长度，不能使用
+合并握手 record 的 rustls 源站，也不能使用串行接受连接的 `openssl s_server`。
+`crypto_capacity` 单独记录实际 TLS record 后端的 16 KiB 加密/解密容量，辅助定位瓶颈。
 客户端、代理、源站是独立进程，但共享 runner CPU；报告不能宣称独占物理资源或长期稳定性。
 
 `measurement.json` 保存全部原始矩阵、直连对照、50 ms CPU/PSS/FD 采样及逐场景回收检查。

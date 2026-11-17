@@ -6000,6 +6000,7 @@ dependencies = [
  "hex",
  "hkdf",
  "hmac",
+ "ring",
  "serde",
  "serde_json",
  "sha2",

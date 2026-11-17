@@ -73,44 +73,6 @@ async fn origin(mut tcp: TcpStream) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    if args.mode == "tls-origin" {
-        use http_body_util::Full;
-        use hyper::{Response, service::service_fn};
-        use hyper_util::rt::{TokioExecutor, TokioIo};
-        use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
-        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519)?;
-        let cert = rcgen::CertificateParams::new(vec!["test.local".into()])?.self_signed(&key)?;
-        let mut config = rustls::ServerConfig::builder_with_provider(Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_protocol_versions(&[&rustls::version::TLS13])?
-        .with_no_client_auth()
-        .with_single_cert(
-            vec![cert.der().clone()],
-            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der())),
-        )?;
-        config.alpn_protocols = vec![b"h2".to_vec()];
-        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
-        let listener = TcpListener::bind(&args.addr).await?;
-        println!("{}", json!({"ready": listener.local_addr()?.to_string()}));
-        loop {
-            let (tcp, _) = listener.accept().await?;
-            tcp.set_nodelay(true)?;
-            let acceptor = acceptor.clone();
-            tokio::spawn(async move {
-                if let Ok(tls) = acceptor.accept(tcp).await {
-                    let service = service_fn(|_| async {
-                        Ok::<_, std::convert::Infallible>(Response::new(Full::new(
-                            bytes::Bytes::from_static(b"camouflage fixture"),
-                        )))
-                    });
-                    let _ = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
-                        .serve_connection(TokioIo::new(tls), service)
-                        .await;
-                }
-            });
-        }
-    }
     if args.mode == "crypto" {
         use xp_proxy_core::tls13::{Tls13CipherSuite, Tls13TrafficKey};
         let key = Tls13TrafficKey::from_secret(Tls13CipherSuite::Aes128GcmSha256, &[7u8; 32]);
@@ -220,11 +182,11 @@ async fn main() -> Result<()> {
                 let mut close = [0u8; 17];
                 close[0] = 3;
                 tcp.write_all(&close).await?;
+                tcp.shutdown().await?;
                 let mut tail = [0u8; 1];
                 if tcp.read(&mut tail).await? != 0 {
                     bail!("unexpected data after completed session");
                 }
-                tcp.shutdown().await?;
                 Ok::<_, anyhow::Error>(())
             };
             match tokio::time::timeout_at(deadline, work).await {

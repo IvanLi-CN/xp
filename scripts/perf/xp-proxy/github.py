@@ -114,7 +114,7 @@ def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     if args.command == "classify":
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-        candidate = os.environ["CANDIDATE_SHA"]
+        candidate = api(f"repos/{repo}/commits/{os.environ['CANDIDATE_SHA']}")["sha"]
         baseline = api(f"repos/{repo}/commits/main")["sha"]
         if "pull_request" in event:
             paths = [

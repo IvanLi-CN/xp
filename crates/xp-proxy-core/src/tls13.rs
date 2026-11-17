@@ -1,6 +1,6 @@
-use aes_gcm::{Aes128Gcm, Aes256Gcm, KeyInit, Nonce, aead::AeadInPlace};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
+use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey};
 use sha2::{Digest, Sha256, Sha384};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,12 +41,27 @@ pub enum Tls13RecordError {
     InvalidFinished,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct Tls13TrafficKey {
     suite: Tls13CipherSuite,
     key: Vec<u8>,
     iv: [u8; 12],
+    cipher: LessSafeKey,
 }
+
+impl std::fmt::Debug for Tls13TrafficKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tls13TrafficKey")
+            .field("suite", &self.suite)
+            .finish_non_exhaustive()
+    }
+}
+impl PartialEq for Tls13TrafficKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.suite == other.suite && self.key == other.key && self.iv == other.iv
+    }
+}
+impl Eq for Tls13TrafficKey {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tls13TrafficKeys {
@@ -228,7 +243,18 @@ impl Tls13TrafficKey {
         let iv_bytes = hkdf_expand_label(suite, secret, b"iv", &[], 12);
         let mut iv = [0u8; 12];
         iv.copy_from_slice(&iv_bytes);
-        Self { suite, key, iv }
+        let algorithm = match suite {
+            Tls13CipherSuite::Aes128GcmSha256 => &aead::AES_128_GCM,
+            Tls13CipherSuite::Aes256GcmSha384 => &aead::AES_256_GCM,
+        };
+        let cipher =
+            LessSafeKey::new(UnboundKey::new(algorithm, &key).expect("derived AES key length"));
+        Self {
+            suite,
+            key,
+            iv,
+            cipher,
+        }
     }
 
     pub fn seal(
@@ -244,24 +270,14 @@ impl Tls13TrafficKey {
         let length =
             u16::try_from(inner.len() + 16).map_err(|_| Tls13RecordError::InvalidHeader)?;
         let header = [23, 3, 3, (length >> 8) as u8, length as u8];
-        let ciphertext = match self.suite {
-            Tls13CipherSuite::Aes128GcmSha256 => {
-                let cipher =
-                    Aes128Gcm::new_from_slice(&self.key).expect("AES-128 key length is fixed");
-                cipher
-                    .encrypt_in_place(Nonce::from_slice(&nonce), &header, &mut inner)
-                    .map_err(|_| Tls13RecordError::AuthenticationFailed)?;
-                inner
-            }
-            Tls13CipherSuite::Aes256GcmSha384 => {
-                let cipher =
-                    Aes256Gcm::new_from_slice(&self.key).expect("AES-256 key length is fixed");
-                cipher
-                    .encrypt_in_place(Nonce::from_slice(&nonce), &header, &mut inner)
-                    .map_err(|_| Tls13RecordError::AuthenticationFailed)?;
-                inner
-            }
-        };
+        self.cipher
+            .seal_in_place_append_tag(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(&header),
+                &mut inner,
+            )
+            .map_err(|_| Tls13RecordError::AuthenticationFailed)?;
+        let ciphertext = inner;
         let mut record = Vec::with_capacity(5 + ciphertext.len());
         record.extend_from_slice(&header);
         record.extend_from_slice(&ciphertext);
@@ -282,16 +298,16 @@ impl Tls13TrafficKey {
         let nonce = self.nonce(sequence)?;
         let header = &record[..5];
         let mut plaintext = record[5..5 + length].to_vec();
-        match self.suite {
-            Tls13CipherSuite::Aes128GcmSha256 => Aes128Gcm::new_from_slice(&self.key)
-                .expect("AES-128 key length is fixed")
-                .decrypt_in_place(Nonce::from_slice(&nonce), header, &mut plaintext)
-                .map_err(|_| Tls13RecordError::AuthenticationFailed)?,
-            Tls13CipherSuite::Aes256GcmSha384 => Aes256Gcm::new_from_slice(&self.key)
-                .expect("AES-256 key length is fixed")
-                .decrypt_in_place(Nonce::from_slice(&nonce), header, &mut plaintext)
-                .map_err(|_| Tls13RecordError::AuthenticationFailed)?,
-        }
+        let opened = self
+            .cipher
+            .open_in_place(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(header),
+                &mut plaintext,
+            )
+            .map_err(|_| Tls13RecordError::AuthenticationFailed)?;
+        let length = opened.len();
+        plaintext.truncate(length);
         let Some(content_type_index) = plaintext.iter().rposition(|byte| *byte != 0) else {
             return Err(Tls13RecordError::MissingContentType);
         };
@@ -369,6 +385,45 @@ pub fn derive_secret(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_record_backend_matches_independent_aes_gcm_wire() {
+        use aes_gcm::{Aes128Gcm, Aes256Gcm, KeyInit, aead::AeadInPlace};
+        for suite in [
+            Tls13CipherSuite::Aes128GcmSha256,
+            Tls13CipherSuite::Aes256GcmSha384,
+        ] {
+            let key = Tls13TrafficKey::from_secret(suite, &[7u8; 48]);
+            for sequence in [0, 1, u32::MAX as u64, u64::MAX - 1] {
+                for length in [0, 1, 15, 16, 16384] {
+                    let payload = vec![42; length];
+                    let actual = key.seal(23, &payload, sequence).unwrap();
+                    let nonce = key.nonce(sequence).unwrap();
+                    let mut expected = payload.clone();
+                    expected.push(23);
+                    let nonce = aes_gcm::Nonce::from_slice(&nonce);
+                    match suite {
+                        Tls13CipherSuite::Aes128GcmSha256 => Aes128Gcm::new_from_slice(&key.key)
+                            .unwrap()
+                            .encrypt_in_place(nonce, &actual[..5], &mut expected)
+                            .unwrap(),
+                        Tls13CipherSuite::Aes256GcmSha384 => Aes256Gcm::new_from_slice(&key.key)
+                            .unwrap()
+                            .encrypt_in_place(nonce, &actual[..5], &mut expected)
+                            .unwrap(),
+                    }
+                    assert_eq!(actual[5..], expected);
+                    assert_eq!(key.open(&actual, sequence).unwrap(), (23, payload));
+                    let mut corrupt = actual;
+                    *corrupt.last_mut().unwrap() ^= 1;
+                    assert_eq!(
+                        key.open(&corrupt, sequence),
+                        Err(Tls13RecordError::AuthenticationFailed)
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn tls13_aes128_record_roundtrips_and_binds_sequence() {

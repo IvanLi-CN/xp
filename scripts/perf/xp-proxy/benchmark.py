@@ -31,7 +31,8 @@ XMUX = dict(
 
 
 def digest(path):
-    return hashlib.file_digest(open(path, "rb"), "sha256").hexdigest()
+    with open(path, "rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def verify(directory, sha, role):
@@ -386,7 +387,7 @@ def main():
         ready(origin_port, origin)
         camouflage = processes.start(
             "fallback",
-            [harness, "--mode", "tls-origin", "--addr", f"127.0.0.1:{fallback}"],
+            ["python3", ROOT / "tls_origin.py", "--port", fallback, "--directory", args.output],
         )
         ready(fallback, camouflage)
         report["crypto_capacity"] = json.loads(

@@ -292,6 +292,20 @@ mod tests {
         .await;
     }
 
+    #[tokio::test]
+    async fn connection_reuse_one_allows_exactly_one_request_per_transport() {
+        pooled_transfer(
+            3,
+            1024,
+            xp_proxy_core::XmuxSettings {
+                c_max_reuse_times: 1,
+                ..Default::default()
+            },
+            3,
+        )
+        .await;
+    }
+
     async fn pooled_transfer(
         concurrency: usize,
         payload_size: usize,

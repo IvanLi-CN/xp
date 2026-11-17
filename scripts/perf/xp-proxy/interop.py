@@ -28,7 +28,7 @@ def main():
         ready(origin_port, origin)
         camouflage = processes.start(
             "fallback",
-            [args.harness, "--mode", "tls-origin", "--addr", f"127.0.0.1:{fallback}"],
+            ["python3", Path(__file__).with_name("tls_origin.py"), "--port", fallback, "--directory", args.output],
         )
         ready(fallback, camouflage)
         server, client, snapshot, outbound = configs(

@@ -13,7 +13,9 @@ capability，不连接、部署或切换 us3。
 
 性能合同见 [contracts/performance.md](./contracts/performance.md)，设计预算见
 [PERFORMANCE-DESIGN.md](./PERFORMANCE-DESIGN.md)。当前实现候选已增加独立构建、测量、门禁与人工标记工作流，
-以及默认并发、首包解析、流许可释放、出站连接池、H2 流控和 TLS 分片读取修复。确定性回归正在验证。
+以及默认并发、首包解析、流许可释放、出站连接池、H2 流控和 TLS 分片读取修复。TLS record 后端使用缓存密钥的 ring AES-GCM，
+两种套件均与独立 AES-GCM 实现进行字节、序号和认证失败对照；不改变 record 格式或 release 优化级别。
+确定性回归及 GitHub-hosted 互操作/性能矩阵正在验证。
 
 当前尚无本候选的 GitHub-hosted 轻量/全量验收结论，也未完成正式审查；不得视为性能达标或 merge-ready。
 人工作废工作流须合并到默认分支后才有真实入口，pre-merge 负例不能代替 post-merge 实测。

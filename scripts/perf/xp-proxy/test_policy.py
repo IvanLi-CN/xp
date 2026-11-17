@@ -1,13 +1,43 @@
 import copy
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import json
+import tempfile
 import unittest
 from policy import related, gate, validate_receipt, disposition
-from benchmark import compare
+from benchmark import compare, verify, digest, CONFIG, ROOT
 from github import seal
 
 
 class PolicyTests(unittest.TestCase):
+    def test_consumer_rejects_stale_or_incomplete_binary_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            for name in ("xp-proxy", "perf_harness"):
+                (directory / name).write_bytes(b"fixture binary")
+            valid = dict(
+                schema_version=1, sha="a" * 40, target=CONFIG["target"],
+                profile=CONFIG["profile"], toolchain=CONFIG["toolchain"],
+                config_digest=digest(ROOT / "config.json"),
+                checksums={name: digest(directory / name) for name in ("xp-proxy", "perf_harness")},
+            )
+            manifest = directory / "manifest.json"
+            manifest.write_text(json.dumps(valid))
+            verify(directory, "a" * 40, "candidate")
+            for key in ("sha", "target", "profile", "toolchain", "config_digest"):
+                invalid = {**valid, key: "wrong"}
+                manifest.write_text(json.dumps(invalid))
+                with self.assertRaises(ValueError, msg=key):
+                    verify(directory, "a" * 40, "candidate")
+            invalid = {**valid, "checksums": {"xp-proxy": valid["checksums"]["xp-proxy"]}}
+            manifest.write_text(json.dumps(invalid))
+            with self.assertRaises(ValueError):
+                verify(directory, "a" * 40, "candidate")
+            manifest.write_text(json.dumps(valid))
+            (directory / "xp-proxy").write_bytes(b"corrupt")
+            with self.assertRaises(ValueError):
+                verify(directory, "a" * 40, "candidate")
+
     def test_related_inputs_and_not_applicable(self):
         for path in (
             "crates/xp-proxy/src/main.rs",
