@@ -41,15 +41,10 @@ on:
         required: true
         type: string
 
-      diagnostic_source_sha:
-        description: Temporary exact source SHA for transport diagnosis
-        type: string
-        required: false
-
       proxy_profile:
         description: Optional proxy runtime benchmark (independent of CI build benchmark)
         type: choice
-        options: [none, light, full, diagnose]
+        options: [none, light, full]
         default: none
 
 concurrency:
@@ -66,9 +61,7 @@ permissions:
 
 jobs:
   proxy-runtime:
-    if: >-
-      github.event_name == 'workflow_dispatch' && inputs.proxy_profile != 'none'
-      && inputs.proxy_profile != 'diagnose'
+    if: github.event_name == 'workflow_dispatch' && inputs.proxy_profile != 'none'
     uses: ./.github/workflows/xp-proxy-perf.yml
     with:
       profile: ${{ inputs.proxy_profile }}
@@ -155,88 +148,3 @@ jobs:
           name: "ci-performance-${{ github.run_id }}"
           path: ci-performance.json
           if-no-files-found: ignore
-
-  diagnose-main-transport:
-    if: github.event_name == 'workflow_dispatch' && inputs.proxy_profile == 'diagnose'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {path: tools}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ inputs.diagnostic_source_sha || '093b6fc3b00d5cc7ee6630962fb9c92e7c30b027' }}
-          path: source
-      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
-        with: {toolchain: 1.96.0, targets: x86_64-unknown-linux-musl}
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            source/target
-          key: transport-diagnose-093b6fc3
-          restore-keys: xp-proxy-perf-musl-1.96-main-
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          artifact-ids: '14318757764'
-          merge-multiple: true
-          run-id: 44063124801
-          github-token: ${{ github.token }}
-          path: fixture
-      - name: Prepare immutable fixtures
-        env: {GH_TOKEN: '${{ github.token }}'}
-        run: |
-          gh release download v3.48.15 --repo "$GITHUB_REPOSITORY" \
-            --pattern xray-linux-x86_64 --dir fixture
-          expected=b5ac5650fb8ae16371562eef8227625f35b3bf6b4b4c9cd103da0f7a362e8d1a
-          printf '%s  %s\n' "$expected" fixture/perf_harness | sha256sum -c
-          expected=ba15b5b3658d3b89008d601e730859d06a5db3691320f0130fd91a37bc63412d
-          printf '%s  %s\n' "$expected" fixture/xray-linux-x86_64 | sha256sum -c
-          chmod +x fixture/*
-      - name: Baseline and single-variable TCP_NODELAY comparison
-        env:
-          CARGO_INCREMENTAL: '0'
-          CARGO_BUILD_JOBS: '4'
-          SOURCE_SHA: ${{ inputs.diagnostic_source_sha }}
-          PROBE_TOOLS: ${{ github.workspace }}/tools
-          PROBE_HARNESS: ${{ github.workspace }}/fixture/perf_harness
-          PROBE_XRAY: ${{ github.workspace }}/fixture/xray-linux-x86_64
-          PROBE_OUTPUT: ${{ github.workspace }}/evidence
-        run: |
-          cargo build --manifest-path source/Cargo.toml --locked --release \
-            --target x86_64-unknown-linux-musl -p xp-proxy
-          cp source/target/x86_64-unknown-linux-musl/release/xp-proxy fixture/original
-          python3 tools/scripts/perf/xp-proxy/diagnose-latency.py "$PWD/fixture/original" original
-          git -C source rev-parse HEAD > evidence/source-sha.txt
-          sha256sum fixture/original > evidence/binary-sha256.txt
-          if [[ -n "$SOURCE_SHA" ]]; then
-            test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
-            cargo test --manifest-path source/Cargo.toml --locked \
-              --target x86_64-unknown-linux-musl -p xp-proxy -p xp-proxy-core --all-targets
-            python3 tools/scripts/perf/xp-proxy/interop.py --xp "$PWD/fixture/original" \
-              --harness "$PROBE_HARNESS" --xray "$PROBE_XRAY" --output "$PWD/evidence/interop-xray"
-            tools/scripts/e2e/install-mihomo-v1.19.29.sh "$PWD/fixture/mihomo"
-            python3 tools/scripts/perf/xp-proxy/interop.py --xp "$PWD/fixture/original" \
-              --harness "$PROBE_HARNESS" --xray "$PROBE_XRAY" \
-              --mihomo "$PWD/fixture/mihomo" --output "$PWD/evidence/interop-mihomo"
-            exit 0
-          fi
-          python3 tools/scripts/perf/xp-proxy/diagnose-nodelay-patch.py
-          git -C source diff > evidence/nodelay.patch
-          cargo build --manifest-path source/Cargo.toml --locked --release \
-            --target x86_64-unknown-linux-musl -p xp-proxy
-          cp source/target/x86_64-unknown-linux-musl/release/xp-proxy fixture/nodelay
-          python3 tools/scripts/perf/xp-proxy/diagnose-latency.py "$PWD/fixture/nodelay" nodelay
-          python3 tools/scripts/perf/xp-proxy/diagnose-lifecycle-patch.py
-          git -C source diff > evidence/scoped-tasks.patch
-          cargo build --manifest-path source/Cargo.toml --locked --release \
-            --target x86_64-unknown-linux-musl -p xp-proxy
-          cp source/target/x86_64-unknown-linux-musl/release/xp-proxy fixture/scoped
-          python3 tools/scripts/perf/xp-proxy/diagnose-latency.py "$PWD/fixture/scoped" scoped
-          python3 tools/scripts/perf/xp-proxy/diagnose-latency.py \
-            "$PWD/fixture/original" original-repeat
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with: {name: main-transport-diagnosis, path: evidence, retention-days: 7}
