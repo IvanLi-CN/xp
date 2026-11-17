@@ -67,10 +67,7 @@ jobs:
       profile: ${{ inputs.proxy_profile }}
       candidate_sha: ${{ inputs.target_sha }}
   verify:
-    if: >-
-      github.event_name != 'workflow_dispatch' ||
-      (inputs.proxy_profile == 'none' &&
-      inputs.target_sha != '3ad68b697ad6fe7af11d14bb21e1a9639bdd8405')
+    if: github.event_name != 'workflow_dispatch' || inputs.proxy_profile == 'none'
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -151,33 +148,3 @@ jobs:
           name: "ci-performance-${{ github.run_id }}"
           path: ci-performance.json
           if-no-files-found: ignore
-
-  temporary-c8-diagnosis:
-    if: >-
-      github.event_name == 'workflow_dispatch' && inputs.proxy_profile == 'none' &&
-      inputs.target_sha == '3ad68b697ad6fe7af11d14bb21e1a9639bdd8405'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: xp-proxy-perf-candidate-44030368568-1-binary
-          run-id: 44030368568
-          github-token: ${{ github.token }}
-          path: candidate
-      - name: Prepare checksum-bound Xray
-        env: {GH_TOKEN: '${{ github.token }}'}
-        run: |
-          mkdir fixture
-          gh release download v3.48.15 --repo "$GITHUB_REPOSITORY" \
-            --pattern xray-linux-x86_64 --dir fixture
-          chmod +x candidate/* fixture/*
-      - name: Temporary differential, no gate substitution
-        run: python3 scripts/perf/xp-proxy/temporary_c8_diagnose.py
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: temporary-c8-diagnosis-${{ github.run_id }}
-          path: c8-diagnostic/**
-          retention-days: 90
