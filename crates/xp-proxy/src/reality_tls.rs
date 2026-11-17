@@ -39,7 +39,7 @@ impl WireReader {
         }
     }
 
-    async fn read_exact_vec(&mut self, length: usize) -> Result<Vec<u8>> {
+    async fn ensure_pending(&mut self, length: usize) -> Result<()> {
         while self.pending.len() < length {
             let mut chunk = [0u8; 16 * 1024];
             let read = self.stream.read(&mut chunk).await?;
@@ -48,16 +48,20 @@ impl WireReader {
             }
             self.pending.extend_from_slice(&chunk[..read]);
         }
+        Ok(())
+    }
+
+    async fn read_exact_vec(&mut self, length: usize) -> Result<Vec<u8>> {
+        self.ensure_pending(length).await?;
         Ok(self.pending.split_to(length).to_vec())
     }
 
     async fn read_record(&mut self) -> Result<Vec<u8>> {
-        let header = self.read_exact_vec(5).await?;
-        let length = u16::from_be_bytes([header[3], header[4]]) as usize;
-        let body = self.read_exact_vec(length).await?;
-        let mut record = header;
-        record.extend_from_slice(&body);
-        Ok(record)
+        // select! may cancel this future while a fragmented body is pending.
+        // Commit consumption only once the entire record is buffered.
+        self.ensure_pending(5).await?;
+        let length = u16::from_be_bytes([self.pending[3], self.pending[4]]) as usize;
+        self.read_exact_vec(5 + length).await
     }
 }
 
@@ -560,6 +564,31 @@ mod tests {
         assert_ne!(patched, original);
         let (_, parsed) = x509_parser::parse_x509_certificate(&patched).unwrap();
         assert_eq!(parsed.signature_value.data.len(), 64);
+    }
+
+    #[tokio::test]
+    async fn fragmented_record_survives_cancelled_read() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+        let mut wire = WireReader::new(server, Vec::new());
+        let record = [23, 3, 3, 0, 4, 7, 8, 9, 10];
+        client.write_all(&record[..5]).await.unwrap();
+        assert!(
+            timeout(Duration::from_millis(20), wire.read_record())
+                .await
+                .is_err()
+        );
+        client.write_all(&record[5..]).await.unwrap();
+        assert_eq!(
+            timeout(Duration::from_millis(100), wire.read_record())
+                .await
+                .expect("cancelled read must retain its TLS record header")
+                .unwrap(),
+            record
+        );
     }
 
     #[tokio::test]
