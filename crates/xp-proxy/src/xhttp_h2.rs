@@ -171,7 +171,12 @@ async fn relay_body(
     let downlink = async move {
         let mut buffer = [0u8; 16 * 1024];
         loop {
-            let size = read_in.read(&mut buffer).await?;
+            let size = tokio::select! {
+                _ = sender_for_downlink.closed() => {
+                    return Err(anyhow!("HTTP/2 response stream closed"));
+                }
+                read = read_in.read(&mut buffer) => read?,
+            };
             if size == 0 {
                 break Ok::<(), anyhow::Error>(());
             }
@@ -278,5 +283,99 @@ mod tests {
         }
         assert_eq!(&received[..2], &[0, 0]);
         assert_eq!(&received[2..], payload.as_slice());
+    }
+
+    #[tokio::test]
+    async fn response_cancel_after_upload_eof_releases_silent_target_permit() {
+        use tokio::sync::oneshot;
+        use tokio::time::{Duration, timeout};
+
+        let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_addr = target.local_addr().unwrap();
+        let (half_closed_tx, half_closed_rx) = oneshot::channel();
+        let (_hold_target_tx, hold_target_rx) = oneshot::channel::<()>();
+        let target_task = tokio::spawn(async move {
+            let (mut stream, _) = target.accept().await.unwrap();
+            let mut received = Vec::new();
+            stream.read_to_end(&mut received).await.unwrap();
+            half_closed_tx.send(()).unwrap();
+            // Keep the target silent and connected after the upload half-close.
+            let _ = hold_target_rx.await;
+            drop(stream);
+        });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let user = uuid::Uuid::new_v4();
+        let session = Arc::new(Mutex::new(
+            StreamOneSession::new(
+                "/xp-xhttp",
+                XmuxSettings {
+                    max_concurrency: 1,
+                    ..XmuxSettings::default()
+                },
+            )
+            .unwrap(),
+        ));
+        let server_session = session.clone();
+        let server_task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let service = service_fn(move |request| {
+                handle_request(
+                    request,
+                    vec![UserSnapshot {
+                        uuid: user.to_string(),
+                    }],
+                    "/xp-xhttp".into(),
+                    server_session.clone(),
+                    Arc::new(TrafficCounter::default()),
+                )
+            });
+            let _ = http2::Builder::new(TokioExecutor::new())
+                .serve_connection(TokioIo::new(stream), service)
+                .await;
+        });
+        let client = TcpStream::connect(addr).await.unwrap();
+        let (mut client, connection) = h2::client::handshake(client).await.unwrap();
+        let client_task = tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri("http://xhttp.test/xp-xhttp")
+            .body(())
+            .unwrap();
+        let (response, mut upload) = client.send_request(request, false).unwrap();
+        let header = encode_tcp_request(
+            user,
+            (&target_addr.ip().to_string(), target_addr.port()),
+            &[],
+        )
+        .unwrap();
+        upload.send_data(Bytes::from(header), true).unwrap();
+        let response = timeout(Duration::from_secs(1), response)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        timeout(Duration::from_secs(1), half_closed_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(session.lock().unwrap().active_streams(), 1);
+        upload.send_reset(h2::Reason::CANCEL);
+        drop(response);
+        let released = timeout(Duration::from_millis(200), async {
+            while session.lock().unwrap().active_streams() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        client_task.abort();
+        server_task.abort();
+        target_task.abort();
+        assert!(
+            released.is_ok(),
+            "cancelled response retained the silent target's permit"
+        );
     }
 }

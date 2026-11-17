@@ -7,6 +7,8 @@
 
 人工按 run/attempt 作废或恢复结果，独立 Check 展示并验证指定操作工作流来源，证据按九十天留存设计。本轮仅修改需求文档，不表示性能修复、工作流或验收已完成。
 
+- 2026-11-17：将并发准入、响应窗口归还、首包解析和取消分片修复提取为最小正确性依赖，建立可用主干基线；补齐上传结束后取消静默响应的许可释放回归。性能优化和验收工作流保留在独立 PR。
+
 - 2026-11-14：完成独立数据面设计审查。锁定 XP 控制面与 `xp-proxy` 独立 service、显式
   endpoint owner、单端口唯一 owner、持久 generation、fail-closed 重启、systemd/OpenRC
   生命周期和 Xray/Mihomo 四路径证据门禁。记录 service identity、generation 来源、fallback

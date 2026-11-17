@@ -599,6 +599,97 @@ mod tests {
     use x25519_dalek::{PublicKey, StaticSecret};
     use xp_proxy_core::reality::{RealityClientHelloConfig, build_client_hello};
 
+    #[tokio::test]
+    async fn outbound_returns_receive_window_for_repeated_and_large_responses() {
+        use base64::Engine;
+        use xp_proxy_core::control::{
+            ListenerSnapshot, RealitySnapshot, UserSnapshot, XmuxSnapshot,
+        };
+        timeout(Duration::from_secs(5), async {
+            let echo = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let origin = echo.local_addr().unwrap();
+            let echo_task = tokio::spawn(async move {
+                let (mut tcp, _) = echo.accept().await.unwrap();
+                tcp.set_nodelay(true).unwrap();
+                for _ in 0..80 {
+                    let mut data = [0; 1024];
+                    tcp.read_exact(&mut data).await.unwrap();
+                    tcp.write_all(&data).await.unwrap();
+                }
+                tcp.write_all(&vec![77; 128 * 1024]).await.unwrap();
+            });
+            let remote = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = remote.local_addr().unwrap();
+            let private = [9; 32];
+            let public = PublicKey::from(&StaticSecret::from(private));
+            let encode =
+                |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+            let user = uuid::Uuid::new_v4();
+            let snapshot = ListenerSnapshot {
+                bind: address.to_string(),
+                path: "/xp-xhttp".into(),
+                xmux: XmuxSnapshot::default(),
+                fallbacks: vec![],
+                reality: RealitySnapshot {
+                    dest: "127.0.0.1:1".into(),
+                    server_names: vec!["example.test".into()],
+                    short_ids: vec!["aaaaaaaaaaaaaaaa".into()],
+                    private_key: encode(&private),
+                },
+            };
+            let server = tokio::spawn(async move {
+                let (tcp, _) = remote.accept().await.unwrap();
+                handle_connection(
+                    tcp,
+                    vec![UserSnapshot {
+                        uuid: user.to_string(),
+                    }],
+                    snapshot,
+                    Arc::new(TrafficCounter::default()),
+                )
+                .await
+                .unwrap();
+            });
+            let local = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let mut client = TcpStream::connect(local.local_addr().unwrap())
+                .await
+                .unwrap();
+            client.set_nodelay(true).unwrap();
+            let (tcp, _) = local.accept().await.unwrap();
+            let config = OutboundConfig {
+                listen: local.local_addr().unwrap(),
+                remote: address,
+                server_name: "example.test".into(),
+                server_public_key: encode(public.as_bytes()),
+                short_id: "aaaaaaaaaaaaaaaa".into(),
+                private_key: encode(&[7; 32]),
+                path: "/xp-xhttp".into(),
+                uuid: user,
+                destination_host: origin.ip().to_string(),
+                destination_port: origin.port(),
+                xmux: xp_proxy_core::XmuxSettings::default(),
+            };
+            let pool = Arc::new(outbound::Pool::new(config).unwrap());
+            let relay = tokio::spawn(async move { pool.relay(tcp).await });
+            for i in 0..80 {
+                let data = [i as u8; 1024];
+                client.write_all(&data).await.unwrap();
+                let mut received = [0; 1024];
+                client.read_exact(&mut received).await.unwrap();
+                assert_eq!(received, data);
+            }
+            let mut bulk = vec![0; 128 * 1024];
+            client.read_exact(&mut bulk).await.unwrap();
+            assert_eq!(bulk, vec![77; 128 * 1024]);
+            client.shutdown().await.unwrap();
+            relay.await.unwrap().unwrap();
+            echo_task.await.unwrap();
+            server.abort();
+        })
+        .await
+        .expect("outbound must release receive window beyond 65535 bytes");
+    }
+
     #[test]
     fn split_client_hello_preserves_buffered_tail() {
         let server_private = [9u8; 32];
