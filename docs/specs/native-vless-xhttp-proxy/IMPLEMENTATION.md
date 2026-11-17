@@ -11,6 +11,12 @@ capability，不连接、部署或切换 us3。
 
 ## 协议正确性修复
 
+入站传输、出站本地入口和远端 REALITY socket 启用 `TCP_NODELAY`，避免交互小包因 Nagle/延迟 ACK 停顿。
+
+专用出站请求共同管理上传、下载和 H2 driver。上传错误取消静默下载并释放传输；正常上传 EOF 保留下载，直到响应结束。
+
+真实 REALITY + H2 回归区分本地 RST 与正常半关闭：前者在 150ms 内终止请求，后者仍接收远端后续响应。
+
 响应消费者关闭时，downlink 即使等待静默目标也会终止，取消配对 uplink 并释放许可。
 
 真实 H2 回归覆盖上传 END_STREAM 后的 RST_STREAM，确认 active stream 回到零；正常半关闭继续接收响应。

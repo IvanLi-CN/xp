@@ -19,6 +19,8 @@ use xp_proxy_core::{
     vless::{decode_request, is_authorized},
 };
 
+#[cfg(test)]
+mod outbound_tests;
 mod reality_tls;
 mod xhttp_h2;
 
@@ -171,6 +173,7 @@ async fn run_outbound(config: OutboundConfig) -> Result<()> {
     let listener = TcpListener::bind(config.listen).await?;
     loop {
         let (local, _) = listener.accept().await?;
+        local.set_nodelay(true)?;
         let config = OutboundConfig {
             listen: config.listen,
             remote: config.remote,
@@ -206,8 +209,10 @@ async fn outbound_connection(local: TcpStream, config: OutboundConfig) -> Result
     public_key_bytes.copy_from_slice(&public_key);
     private_key_bytes.copy_from_slice(&private_key);
     let short_id = hex::decode(config.short_id.trim_start_matches("0x"))?;
+    let remote = TcpStream::connect(config.remote).await?;
+    remote.set_nodelay(true)?;
     let tls = reality_tls::connect(
-        TcpStream::connect(config.remote).await?,
+        remote,
         RealityClientHelloConfig {
             server_name: config.server_name.clone(),
             server_public_key: public_key_bytes,
@@ -220,7 +225,9 @@ async fn outbound_connection(local: TcpStream, config: OutboundConfig) -> Result
     )
     .await?;
     let (mut sender, connection) = h2::client::handshake(tls).await?;
-    tokio::spawn(async move {
+    // The dedicated transport must not outlive its one outbound request.
+    let mut connection_tasks = tokio::task::JoinSet::new();
+    connection_tasks.spawn(async move {
         let _ = connection.await;
     });
     let path = if config.path.ends_with('/') {
@@ -259,33 +266,30 @@ async fn outbound_connection(local: TcpStream, config: OutboundConfig) -> Result
         send.send_data(bytes::Bytes::new(), true)?;
         Ok::<(), anyhow::Error>(())
     };
-    tokio::spawn(async move {
-        let _ = uplink.await;
-    });
-    let mut response = response.await?;
-    if !response.status().is_success() {
-        anyhow::bail!("remote XHTTP request returned {}", response.status());
-    }
-    let mut response_header = Vec::with_capacity(2);
-    while response_header.len() < 2 {
-        let Some(chunk) = response.body_mut().data().await else {
-            anyhow::bail!("remote XHTTP response ended before VLESS response header");
-        };
-        let chunk = chunk?;
-        response
-            .body_mut()
-            .flow_control()
-            .release_capacity(chunk.len())?;
-        response_header.extend_from_slice(&chunk);
-    }
-    if response_header[..2] != [0, 0] {
-        anyhow::bail!("remote XHTTP response has an invalid VLESS header");
-    }
-    if response_header.len() > 2 {
-        local_write.write_all(&response_header[2..]).await?;
-    }
-    let mut response_body = response.into_body();
     let downlink = async move {
+        let mut response = response.await?;
+        if !response.status().is_success() {
+            anyhow::bail!("remote XHTTP request returned {}", response.status());
+        }
+        let mut response_header = Vec::with_capacity(2);
+        while response_header.len() < 2 {
+            let Some(chunk) = response.body_mut().data().await else {
+                anyhow::bail!("remote XHTTP response ended before VLESS response header");
+            };
+            let chunk = chunk?;
+            response
+                .body_mut()
+                .flow_control()
+                .release_capacity(chunk.len())?;
+            response_header.extend_from_slice(&chunk);
+        }
+        if response_header[..2] != [0, 0] {
+            anyhow::bail!("remote XHTTP response has an invalid VLESS header");
+        }
+        if response_header.len() > 2 {
+            local_write.write_all(&response_header[2..]).await?;
+        }
+        let mut response_body = response.into_body();
         while let Some(chunk) = response_body.data().await {
             let chunk = chunk?;
             local_write.write_all(&chunk).await?;
@@ -294,7 +298,8 @@ async fn outbound_connection(local: TcpStream, config: OutboundConfig) -> Result
         local_write.shutdown().await?;
         Ok::<(), anyhow::Error>(())
     };
-    downlink.await?;
+    // An error cancels the other direction; ordinary upload EOF keeps reading.
+    tokio::try_join!(uplink, downlink)?;
     Ok(())
 }
 
@@ -304,6 +309,7 @@ async fn handle_connection(
     listener: xp_proxy_core::control::ListenerSnapshot,
     traffic: Arc<TrafficCounter>,
 ) -> Result<()> {
+    stream.set_nodelay(true)?;
     let (size, probe) = peek_probe(&stream).await?;
     if size == 4 && &probe == b"PRI " {
         return xhttp_h2::serve(stream, users, listener.path, listener.xmux.into(), traffic).await;
