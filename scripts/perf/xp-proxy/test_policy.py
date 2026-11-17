@@ -48,6 +48,7 @@ class PolicyTests(unittest.TestCase):
             "rust-toolchain.toml",
             "scripts/perf/xp-proxy/config.json",
             ".github/workflows/xp-proxy-perf-build.yml",
+            "scripts/e2e/install-mihomo-v1.19.29.sh",
         ):
             self.assertTrue(related(path), path)
         for path in ("web/src/App.tsx", "docs/ops/README.md", "src/raft.rs"):

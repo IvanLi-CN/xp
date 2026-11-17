@@ -16,6 +16,7 @@ capability，不连接、部署或切换 us3。
 以及默认并发、首包解析、流许可释放、出站连接池、H2 流控和 TLS 分片读取修复。TLS record 后端使用缓存密钥的 ring AES-GCM，
 两种套件均与独立 AES-GCM 实现进行字节、序号和认证失败对照；不改变 record 格式或 release 优化级别。
 确定性回归已覆盖默认 64 并发、大首包、流许可、连接池和取消分片。
+连接池在检查容量前注册通知，避免双租约释放时合并唤醒；回归要求两个等待者同时取得空位。触发路径测试覆盖实际 Mihomo 安装 fixture。
 TLS 应用数据通过有界的 `AsyncRead/AsyncWrite` record stream 直接交给 H2，移除后台桥接任务和 plaintext duplex。
 
 旧桥接在接收积压时阻塞反向发送；确定性回归在直接 I/O 修复后通过。读写分别保留分片和待发密文偏移，取消后不重复确认 plaintext 或重加密。

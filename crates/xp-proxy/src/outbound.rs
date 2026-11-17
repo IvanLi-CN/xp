@@ -49,6 +49,8 @@ pub struct Pool {
     short_id: Vec<u8>,
     transports: Mutex<Vec<Arc<Transport>>>,
     notify: Arc<Notify>,
+    #[cfg(test)]
+    wait_hook: std::sync::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 impl Pool {
     pub fn new(config: OutboundConfig) -> Result<Self> {
@@ -75,6 +77,8 @@ impl Pool {
             short_id,
             transports: Mutex::new(Vec::new()),
             notify: Arc::new(Notify::new()),
+            #[cfg(test)]
+            wait_hook: std::sync::Mutex::new(None),
         })
     }
     fn reusable(&self, transport: &Transport) -> bool {
@@ -90,6 +94,9 @@ impl Pool {
     async fn lease(&self) -> Result<Lease> {
         loop {
             let notified = self.notify.notified();
+            tokio::pin!(notified);
+            // Register before checking capacity: releases can precede our first poll.
+            notified.as_mut().enable();
             let mut transports = self.transports.lock().await;
             transports.retain(|t| self.reusable(t) || t.active.load(Ordering::SeqCst) != 0);
             let limit = self.config.xmux.max_concurrency as usize;
@@ -114,6 +121,13 @@ impl Pool {
                 });
             }
             drop(transports);
+            #[cfg(test)]
+            {
+                let hook = self.wait_hook.lock().unwrap().clone();
+                if let Some(hook) = hook {
+                    hook();
+                }
+            }
             notified.await;
         }
     }
@@ -271,6 +285,83 @@ mod tests {
         TrafficCounter,
         control::{ListenerSnapshot, RealitySnapshot, UserSnapshot, XmuxSnapshot},
     };
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn released_slots_wake_all_waiters_before_their_first_notification_poll() {
+        let encode = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        let pool = Arc::new(
+            Pool::new(OutboundConfig {
+                listen: "127.0.0.1:1".parse().unwrap(),
+                remote: "127.0.0.1:1".parse().unwrap(),
+                server_name: "example.test".into(),
+                server_public_key: encode(&[9; 32]),
+                private_key: encode(&[7; 32]),
+                short_id: "aaaaaaaaaaaaaaaa".into(),
+                path: "/xp-xhttp".into(),
+                uuid: uuid::Uuid::new_v4(),
+                destination_host: "127.0.0.1".into(),
+                destination_port: 1,
+                xmux: xp_proxy_core::XmuxSettings {
+                    max_concurrency: 2,
+                    ..Default::default()
+                },
+            })
+            .unwrap(),
+        );
+        // Admission needs a live sender, but no request or remote protocol traffic.
+        let (client, _peer) = tokio::io::duplex(4096);
+        let (sender, connection) = h2::client::Builder::new().handshake(client).await.unwrap();
+        let driver = tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        let transport = Arc::new(Transport {
+            sender,
+            active: AtomicUsize::new(2),
+            requests: AtomicUsize::new(2),
+            created: Instant::now(),
+            dead: Arc::new(AtomicBool::new(false)),
+            driver: driver.abort_handle(),
+        });
+        pool.transports.lock().await.push(transport.clone());
+        let occupied = [0, 1].map(|_| Lease {
+            transport: transport.clone(),
+            notify: pool.notify.clone(),
+        });
+        let checked = Arc::new(std::sync::Barrier::new(3));
+        let resume = Arc::new(std::sync::Barrier::new(3));
+        *pool.wait_hook.lock().unwrap() = Some(Arc::new({
+            let checked = checked.clone();
+            let resume = resume.clone();
+            let calls = AtomicUsize::new(0);
+            move || {
+                if calls.fetch_add(1, Ordering::SeqCst) < 2 {
+                    checked.wait();
+                    resume.wait();
+                }
+            }
+        }));
+        let mut waiters = tokio::task::JoinSet::new();
+        for _ in 0..2 {
+            let pool = pool.clone();
+            waiters.spawn(async move { pool.lease().await.unwrap() });
+        }
+        checked.wait();
+        drop(occupied);
+        resume.wait();
+        let first = timeout(Duration::from_secs(1), waiters.join_next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let second = timeout(Duration::from_secs(1), waiters.join_next())
+            .await
+            .expect("both free slots must be leased while the first replacement remains active")
+            .unwrap()
+            .unwrap();
+        assert_eq!(transport.active.load(Ordering::SeqCst), 2);
+        drop((first, second));
+        assert_eq!(transport.active.load(Ordering::SeqCst), 0);
+    }
 
     #[tokio::test]
     async fn pooled_reality_h2_preserves_large_payloads_and_releases_streams() {
