@@ -75,3 +75,29 @@ Compatibility Baseline 之外还必须有 Agent VM evidence：
 标记为可用。
 Xray/Mihomo 的单元测试、现有 XHTTP spike 或“xp-proxy 进程已启动”都不能单独
 解锁 production capability。
+
+## IPv6 TCP 验证入口
+
+`address_family.py` 是协议正确性 fixture，不用于测量性能。两侧代理和目标站分别使用明确地址族。
+
+```sh
+python3 scripts/perf/xp-proxy/address_family.py --peer xray \
+  --xp /path/to/xp-proxy --xray /path/to/xray --output /tmp/address-xray
+python3 scripts/perf/xp-proxy/address_family.py --peer mihomo \
+  --xp /path/to/xp-proxy --xray /path/to/xray --mihomo /path/to/mihomo \
+  --xray-evidence /tmp/address-xray/result.json --output /tmp/address-mihomo
+```
+
+Mihomo 入口要求同一代理二进制已有成功的 Xray receipt；版本和发布资产校验和沿用锁定基线。
+
+每个方向验证四种地址组合、1/8 并发、复用与新连接，以及上传/下载 SHA256；保留实时服务端 socket 和目标的 peer/local 证据。
+
+Linux 故障使用 `scripts/testbox/native-ip-faults.py`，只在临时 mount/network namespace 内设置 sysctl 和 hosts。
+
+服务生命周期使用 `scripts/testbox/native-ip-services.py`，要求隔离环境中已通过官方 `xp-ops init/bootstrap` 安装服务。
+
+该 fixture 手工重放测试 snapshot，验证 systemd/OpenRC 的双栈流量、重启 idle 和 Xray/native 同端口 handoff。
+
+`scripts/testbox/native-ip-container.py` 仅验证候选二进制在官方镜像中的双栈流量和重启，不解锁容器 native capability 或替代容器部署合同。
+
+以上 fixture 均不得在生产节点运行。候选 SHA、构建产物哈希和原始结果应保留在对应 Actions artifact 或任务验收证据中。

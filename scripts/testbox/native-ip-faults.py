@@ -44,10 +44,10 @@ def raw(stream, host, number, user=UUID):
         except OSError:
             address = bytes([len(host)]) + host.encode()
             kind = 2
-    stream.sendall(b"\x00" + uuid.UUID(user).bytes + b"\x00\x01" + number.to_bytes(2, "big") + bytes([kind]) + address)
-    assert receive(stream, 2) == b"\x00\x00"
     data = bytes(range(256)) * 512
-    stream.sendall(len(data).to_bytes(4, "big") + data)
+    # Xray may defer the VLESS response header until application data arrives.
+    stream.sendall(b"\x00" + uuid.UUID(user).bytes + b"\x00\x01" + number.to_bytes(2, "big") + bytes([kind]) + address + len(data).to_bytes(4, "big") + data)
+    assert receive(stream, 2) == b"\x00\x00"
     reply = receive(stream, 32 + len(data))
     assert reply[:32] == hashlib.sha256(data).digest()
     assert reply[32:] == bytes(byte ^ 0xa5 for byte in data)
