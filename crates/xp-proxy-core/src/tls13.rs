@@ -264,23 +264,25 @@ impl Tls13TrafficKey {
         sequence: u64,
     ) -> Result<Vec<u8>, Tls13RecordError> {
         let nonce = self.nonce(sequence)?;
-        let mut inner = Vec::with_capacity(plaintext.len() + 1);
-        inner.extend_from_slice(plaintext);
-        inner.push(content_type);
-        let length =
-            u16::try_from(inner.len() + 16).map_err(|_| Tls13RecordError::InvalidHeader)?;
+        let length = plaintext
+            .len()
+            .checked_add(17)
+            .and_then(|length| u16::try_from(length).ok())
+            .ok_or(Tls13RecordError::InvalidHeader)?;
         let header = [23, 3, 3, (length >> 8) as u8, length as u8];
-        self.cipher
-            .seal_in_place_append_tag(
+        let mut record = Vec::with_capacity(5 + length as usize);
+        record.extend_from_slice(&header);
+        record.extend_from_slice(plaintext);
+        record.push(content_type);
+        let tag = self
+            .cipher
+            .seal_in_place_separate_tag(
                 Nonce::assume_unique_for_key(nonce),
                 Aad::from(&header),
-                &mut inner,
+                &mut record[5..],
             )
             .map_err(|_| Tls13RecordError::AuthenticationFailed)?;
-        let ciphertext = inner;
-        let mut record = Vec::with_capacity(5 + ciphertext.len());
-        record.extend_from_slice(&header);
-        record.extend_from_slice(&ciphertext);
+        record.extend_from_slice(tag.as_ref());
         Ok(record)
     }
 
@@ -315,7 +317,8 @@ impl Tls13TrafficKey {
         if content_type == 0 {
             return Err(Tls13RecordError::MissingContentType);
         }
-        Ok((content_type, plaintext[..content_type_index].to_vec()))
+        plaintext.truncate(content_type_index);
+        Ok((content_type, plaintext))
     }
 
     fn nonce(&self, sequence: u64) -> Result<[u8; 12], Tls13RecordError> {
