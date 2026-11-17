@@ -158,3 +158,17 @@ PR 和 main 上影响 xp-proxy 的变更自动运行轻量测试。
 - [Checks API](https://docs.github.com/en/rest/checks/runs)
 - [Actions 权限](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)
 - [Checks、runs、artifacts 和日志的保留策略](https://docs.github.com/en/organizations/managing-organization-settings/configuring-the-retention-period-for-github-actions-artifacts-and-logs-in-your-organization)
+
+## 多目标与连接拓扑验证
+
+互操作阶段增加固定的 8 个独立目标端口，每个目标返回唯一身份和每条流独立 payload 的摘要与回显。混合使用 IPv4 地址和 localhost 域名，检查 VLESS
+目标解析、目标选择及跨流数据隔离。Xray 客户端始终显式设置 `maxConnections=1`。
+
+分别验证一个客户端的 16 条流、四个独立客户端的 64
+条流，以及四客户端下的快目标、事件阻塞慢目标、拒绝连接和重置连接混合。必须在慢目标尚未释放时完成快目标业务，故障目标必须实际失败，其他流仍完整成功；慢目标释放后也必须完整返回。Linux
+从实际 TCP socket 状态核对客户端到代理的底层连接数分别为 1 和 4，不能仅凭配置推断 MUX 拓扑。先对锁定 Xray 服务端验证相同
+fixture，再验证候选服务端；之后才开始 Mihomo 阶段。
+
+这些是功能隔离场景，不宣称公网多站点吞吐或全局吞吐公平性。现有 180/360 秒性能消费 job 预算不变，拓扑互操作单独计时。手动全量另运行 Xray 诊断
+job，按两轮反向顺序分别控制 16/64 并发、被测/对端 Go 内存上限、连接池大小和采样时长；保存 GC 日志与两端 CPU/PSS。诊断变体不替代正式 48
+MiB、单连接配置，不产生自动豁免，也不修改性能判定。

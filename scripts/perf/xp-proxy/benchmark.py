@@ -12,6 +12,7 @@ import resource as usage
 import subprocess
 import threading
 import time
+from resource_summary import summarize
 
 ROOT = Path(__file__).resolve().parent
 CONFIG = json.loads((ROOT / "config.json").read_text())
@@ -97,7 +98,7 @@ class Processes:
     def __init__(self, directory):
         self.directory, self.processes = directory, []
 
-    def start(self, name, command):
+    def start(self, name, command, env=None):
         log = open(self.directory / f"{name}.log", "ab", buffering=0)
         process = subprocess.Popen(
             [str(x) for x in command],
@@ -108,6 +109,7 @@ class Processes:
                 "GOMEMLIMIT": "48MiB",
                 "GOGC": "100",
                 "TOKIO_WORKER_THREADS": "2",
+                **(env or {}),
             },
         )
         log.close()
@@ -511,6 +513,7 @@ def main():
                                         )
                                     )
 
+                            telemetry_start = len(telemetry)
                             monitor = threading.Thread(target=observe)
                             monitor.start()
                             try:
@@ -544,6 +547,7 @@ def main():
                                 and idle is not None
                                 and after["fd"] <= idle["fd"]
                             )
+                            result["resources"] = summarize(telemetry[telemetry_start:])
                             result["warmup_errors"] = warmup["errors"]
                             result["warmup_seconds"] = warmup_seconds
                             rows.append(
@@ -577,9 +581,10 @@ def main():
         report["execute_seconds"] = time.monotonic() - start
         (args.output / "measurement.json").write_text(json.dumps(report, indent=2))
         summary = f"## xp-proxy performance ({args.profile})\n\nMeasurement: **{report['measurement']}**\n\nCandidate: `{args.candidate_sha}`; main: `{args.baseline_sha}`.\n\n"
-        summary += "|Program|Direction|Concurrency|Load|Sweep|Samples|Mbps|p50 ms|p95 ms|Errors|\n|---|---|---:|---|---:|---:|---:|---:|---:|---:|\n"
+        summary += "|Program|Direction|Concurrency|Load|Sweep|Samples|Mbps|p50 ms|p95 ms|Errors|CPU %|Peak PSS MiB|\n|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|\n"
         for row in rows:
-            summary += f"|{row['program'].replace('candidate', 'xp-proxy (candidate)').replace('main', 'xp-proxy (main)')}|{row['direction']}|{row['concurrency']}|{row['workload']}|{row['sweep']}|{row['samples']}|{row['mbps']:.2f}|{row['p50_ms']}|{row['p95_ms']}|{len(row['errors'])}|\n"
+            summary += f"|{row['program'].replace('candidate', 'xp-proxy (candidate)').replace('main', 'xp-proxy (main)')}|{row['direction']}|{row['concurrency']}|{row['workload']}|{row['sweep']}|{row['samples']}|{row['mbps']:.2f}|{row['p50_ms']}|{row['p95_ms']}|{len(row['errors'])}|{row['resources']['cpu_percent']}|{row['resources']['peak_pss_mib']}|\n"
+        summary += "\nCPU: sampled process interval, 100% = one logical core. PSS: sampled load peak.\n"
         summary += "\n" + "\n".join(
             f"- {failure}" for failure in report.get("failures", [])
         )

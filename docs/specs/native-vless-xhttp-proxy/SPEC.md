@@ -216,6 +216,11 @@ XP 是唯一的 endpoint/user 权威。XP 生成的 snapshot 必须完整描述�
 
 两档必须检查内容完整性、真实错误率、有效吞吐、延迟、CPU、内存和资源释放，不得以提高连接上限替代默认配置的并发正确性。
 
+- **REQ-PERF-TOPOLOGY:** 互操作必须覆盖 8 个独立目标、单客户端 16 条流、四客户端 64 条流，
+  混合 IP/域名和快慢/拒绝/重置目标；校验目标身份、payload 隔离及 Linux 实际 1/4 条底层连接。
+  慢目标由事件屏障保持阻塞，其他目标必须在释放前完成；失败目标不得破坏正常流。
+  相同 fixture 先通过锁定 Xray 服务端，再验证候选，不以该功能短测宣称公网吞吐或长期公平性。
+
 - **REQ-PERF-THRESHOLD:** 有效测量中，候选对应场景的吞吐不得低于 main 与锁定 Xray 各自的 90%，小请求 p50/p95 相对两个对照各自不得增加超过 5 ms；
   合法负载零异常失败、内容校验通过、连接结束后资源释放。
 
@@ -279,7 +284,8 @@ Rust outbound -> Mihomo-compatible server
 
 - **VER-PERF-COMPARE** covers: REQ-PERF-COMPARE, REQ-PERF-ARTIFACT. 核对同场三程序测量、固定 main SHA、构建
   manifest、错误 SHA/target/校验和及缺失产物的负例。
-- **VER-PERF-MEASURE** covers: REQ-PERF-COVERAGE, REQ-PERF-THRESHOLD, REQ-PERF-BUDGET. 覆盖双档矩阵、默认并发正确
+- **VER-PERF-MEASURE** covers: REQ-PERF-TOPOLOGY, REQ-PERF-COVERAGE,
+  REQ-PERF-THRESHOLD, REQ-PERF-BUDGET. 覆盖双档矩阵、默认并发正确
   性、完整性、双重门槛、资源回收、墙钟明细、预算告警及安全超时，保留无效测量的非通过状态。
 - **VER-PERF-AUTOMATION** covers: REQ-PERF-TRIGGER, REQ-PERF-GATE. 验证相关/无关路径、main push、PR 新提交、加标/去标、
   豁免时测量继续、全量不影响自动门禁和旧结果不会解锁新候选。
