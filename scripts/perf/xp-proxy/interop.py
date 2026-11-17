@@ -34,6 +34,12 @@ def main():
         server, client, snapshot, outbound = configs(
             args.output, origin_port, remote, local, fallback
         )
+        # Disposable fixture identities only. Retain the exact mirrored record
+        # boundaries when diagnosing a stalled native -> Xray handshake.
+        diagnostic = json.loads(server.read_text())
+        diagnostic["log"]["loglevel"] = "debug"
+        diagnostic["inbounds"][0]["streamSettings"]["realitySettings"]["show"] = True
+        server.write_text(json.dumps(diagnostic))
         if args.mihomo:
             # Same pinned fields as tests/fixtures/mihomo-smux-v1.19.29.yaml.
             mihomo = dict(

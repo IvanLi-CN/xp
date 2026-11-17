@@ -42,6 +42,7 @@ async fn origin(mut tcp: TcpStream) -> Result<()> {
             Err(e) => return Err(e.into()),
         }
         if header[0] == 3 {
+            tcp.write_all(&header).await?;
             return Ok(());
         }
         let len = u64::from_be_bytes(header[9..17].try_into()?) as usize;
@@ -182,6 +183,19 @@ async fn main() -> Result<()> {
                 let mut close = [0u8; 17];
                 close[0] = 3;
                 tcp.write_all(&close).await?;
+                let mut close_ack = [0u8; 17];
+                tcp.read_exact(&mut close_ack).await?;
+                if close_ack != close {
+                    bail!("session close ACK mismatch");
+                }
+                if request_limit == 0 {
+                    // All application transactions and the terminal ACK completed.
+                    // End the sampling socket explicitly: Xray's normal TCP EOF
+                    // policy can intentionally retain a half-close for seconds.
+                    // This is planned cancellation, never an unfinished transfer.
+                    socket2::SockRef::from(&tcp).set_linger(Some(Duration::ZERO))?;
+                    return Ok(());
+                }
                 tcp.shutdown().await?;
                 let mut tail = [0u8; 1];
                 if tcp.read(&mut tail).await? != 0 {
@@ -210,6 +224,11 @@ async fn main() -> Result<()> {
             .get(((samples.len().saturating_sub(1)) as f64 * p).ceil() as usize)
             .copied()
     };
+    let termination = if request_limit == 0 {
+        "planned_cancel_after_terminal_ack"
+    } else {
+        "graceful_eof"
+    };
     println!(
         "{}",
         json!({
@@ -221,7 +240,8 @@ async fn main() -> Result<()> {
             "p95_ms": percentile(0.95),
             "errors": errors,
             "incomplete": errors.iter()
-                .filter(|s| s.as_str()=="incomplete_at_slot_deadline").count()
+                .filter(|s| s.as_str()=="incomplete_at_slot_deadline").count(),
+            "termination": termination,
         })
     );
     Ok(())
@@ -249,6 +269,9 @@ mod tests {
         assert_eq!(&ack[8..], Sha256::digest([42u8; 1024]).as_slice());
         header[0] = 3;
         client.write_all(&header).await.unwrap();
+        let mut closed = [0u8; 17];
+        client.read_exact(&mut closed).await.unwrap();
+        assert_eq!(closed, header);
         assert_eq!(client.read(&mut [0u8; 1]).await.unwrap(), 0);
         task.await.unwrap().unwrap();
     }

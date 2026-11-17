@@ -133,7 +133,11 @@ impl Pool {
             self.private_key,
         )
         .await?;
-        let (sender, mut connection) = h2::client::handshake(tls).await?;
+        let (sender, mut connection) = h2::client::Builder::new()
+            .initial_window_size(256 * 1024)
+            .initial_connection_window_size(1024 * 1024)
+            .handshake(tls)
+            .await?;
         let dead = Arc::new(AtomicBool::new(false));
         let driver_dead = dead.clone();
         let notify = self.notify.clone();

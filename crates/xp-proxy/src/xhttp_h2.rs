@@ -46,6 +46,8 @@ where
         )
     });
     http2::Builder::new(TokioExecutor::new())
+        .initial_stream_window_size(256 * 1024)
+        .initial_connection_window_size(1024 * 1024)
         .serve_connection(io, service)
         .await
         .map_err(|error| anyhow!("HTTP/2 connection failed: {error}"))?;

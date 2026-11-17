@@ -14,9 +14,13 @@
 业务数据及 SHA256 ACK。延迟负载为 1 KiB，上传/下载使用持续 64 KiB 帧，每场景至少确认 1 MiB 实际数据。
 独立互操作测试另对每个客户端验证单次 1 MiB 大帧，避免用短槽截止替代功能完整性检查。
 槽内 1.8 秒发新事务、最多 0.2 秒收尾；超时单列且不能计入确认吞吐。每场景每 sweep 的延迟样本须达到 100。
-完成应用会话时先发送关闭帧并 half-close 写端，再读取 EOF，避免双方等待对方关闭。
+持续采样结束时，源站确认最后一笔事务及终止帧后，客户端主动取消采样 socket，并明确记录
+`planned_cancel_after_terminal_ack`；未确认事务仍算失败。Xray 的正常 TCP half-close 策略会保留
+连接数秒，不能将这段策略等待误作传输超时。独立功能联测仍使用 graceful EOF 验证完整收尾。
 TLS 伪装源站使用 Python/OpenSSL 并发握手；锁定 REALITY 会镜像单条握手 record 长度，不能使用
 合并握手 record 的 rustls 源站，也不能使用串行接受连接的 `openssl s_server`。
+生产 H2 使用有界的 256 KiB stream / 1 MiB connection 接收窗口；窗口信用不等于预分配内存，
+仍逐 chunk 释放容量，实际 PSS 保留在报告中。
 `crypto_capacity` 单独记录实际 TLS record 后端的 16 KiB 加密/解密容量，辅助定位瓶颈。
 客户端、代理、源站是独立进程，但共享 runner CPU；报告不能宣称独占物理资源或长期稳定性。
 
