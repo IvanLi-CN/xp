@@ -64,6 +64,3 @@ loopback 的 controller 对同一配置执行一次串行 reload，返回 204 �
 
 多目标功能验证由 `topology.py` 执行：8 个目标、独立 payload、域名/IP、单/四客户端，Linux 核对实际 1/4 条
 transport，事件屏障证明慢目标不阻塞其他目标，拒绝/重置目标不破坏正常流。该脚本先验证 Xray 服务端，再验证 xp-proxy，位于 Mihomo 阶段之前。
-
-手动全量的 `scaling-diagnostic` job 运行 `scaling.py`，两轮反向顺序比较 16/64 并发、单独提高被测端或对端的 Go 内存上限、4
-条连接及较长采样槽。原始 GC 日志和资源采样独立存档；这些诊断配置不进入正式性能结果或改变门槛。

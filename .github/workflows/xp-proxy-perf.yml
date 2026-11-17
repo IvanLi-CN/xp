@@ -128,42 +128,6 @@ jobs:
             interop-*/*.log
             topology/**
           retention-days: 90
-  scaling-diagnostic:
-    if: inputs.profile == 'full'
-    needs: [request, candidate]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: "xp-proxy-perf-candidate-\
-            ${{ github.run_id }}-${{ github.run_attempt }}-binary"
-          path: candidate
-      - name: Prepare pinned Xray
-        env: {GH_TOKEN: '${{ github.token }}'}
-        run: |
-          mkdir fixture
-          gh release download v3.48.15 --repo "$GITHUB_REPOSITORY" \
-            --pattern xray-linux-x86_64 --dir fixture
-          python3 - <<'PYTHON'
-          import hashlib, json
-          from pathlib import Path
-          config=json.loads(Path('scripts/perf/xp-proxy/config.json').read_text())
-          assert hashlib.sha256(Path('fixture/xray-linux-x86_64').read_bytes()).hexdigest() \
-            == config['xray_sha256']
-          PYTHON
-          chmod +x candidate/* fixture/*
-      - name: Diagnose Xray scaling without changing formal comparison
-        run: |
-          python3 scripts/perf/xp-proxy/scaling.py --harness "$PWD/candidate/perf_harness" \
-            --xray "$PWD/fixture/xray-linux-x86_64" --output "$PWD/scaling"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: xp-proxy-scaling-${{ github.run_id }}-${{ github.run_attempt }}
-          path: scaling/**
-          retention-days: 90
   measurement:
     needs: [request, candidate, baseline]
     runs-on: ubuntu-24.04

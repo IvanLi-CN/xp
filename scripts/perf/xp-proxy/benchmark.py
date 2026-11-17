@@ -98,7 +98,7 @@ class Processes:
     def __init__(self, directory):
         self.directory, self.processes = directory, []
 
-    def start(self, name, command, env=None):
+    def start(self, name, command):
         log = open(self.directory / f"{name}.log", "ab", buffering=0)
         process = subprocess.Popen(
             [str(x) for x in command],
@@ -109,7 +109,6 @@ class Processes:
                 "GOMEMLIMIT": "48MiB",
                 "GOGC": "100",
                 "TOKIO_WORKER_THREADS": "2",
-                **(env or {}),
             },
         )
         log.close()
