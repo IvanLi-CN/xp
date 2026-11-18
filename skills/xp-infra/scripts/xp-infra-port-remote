@@ -91,7 +91,7 @@ case "$docker_path" in
   *) exit 1 ;;
 esac
 if [ "$docker_path" = absent ]; then
-  docker_socket="$(bounded_preflight_command sudo -n sh -c 'if [ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]; then printf %s present; else printf %s absent; fi' sh "$ingress_runtime" 2>/dev/null)" || exit 1
+  docker_socket="$(bounded_preflight_command sudo -n sh -c 'if [ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]; then printf %s present; else printf %s absent; fi' 2>/dev/null)" || exit 1
   [ "$docker_socket" = absent ] || exit 1
 fi
 docker_preflight() (
@@ -128,7 +128,7 @@ if [ "$container_count" -eq 1 ]; then
   case "$1" in *[!0-9a-f]*) exit 1 ;; esac
   case "$2" in ''|*[!0-9TZ:.-]*) exit 1 ;; esac
   container="$1"
-  data_dir="$(docker_preflight exec "$container" sh -c 'if [ -n "${XP_DATA_DIR:-}" ]; then printf %s "$XP_DATA_DIR"; else printf %s /var/lib/xp/data; fi' sh "$ingress_runtime" 2>/dev/null)" || exit 1
+  data_dir="$(docker_preflight exec "$container" sh -c 'if [ -n "${XP_DATA_DIR:-}" ]; then printf %s "$XP_DATA_DIR"; else printf %s /var/lib/xp/data; fi' 2>/dev/null)" || exit 1
   ingress_api_addr="$(docker_preflight exec "$container" sh -c 'printf %s "${XP_XRAY_API_ADDR:-127.0.0.1:10085}"' 2>/dev/null)" || exit 1
   case "$data_dir" in /*) ;; *) exit 1 ;; esac
   state_path="$data_dir/managed-default-endpoints.json"
@@ -464,7 +464,7 @@ fi
 docker_path_after="$(bounded_preflight_command sudo -n sh -c 'docker_path="$(command -v docker 2>/dev/null || true)"; for candidate in "$docker_path" /usr/bin/docker /usr/local/bin/docker; do if [ -n "$candidate" ] && [ -x "$candidate" ]; then printf %s "$candidate"; exit 0; fi; done; printf %s absent' 2>/dev/null)" || exit 1
 [ "$docker_path_after" = "$docker_path" ] || exit 1
 if [ "$docker_path" = absent ]; then
-  docker_socket_after="$(bounded_preflight_command sudo -n sh -c 'if [ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]; then printf %s present; else printf %s absent; fi' sh "$ingress_runtime" 2>/dev/null)" || exit 1
+  docker_socket_after="$(bounded_preflight_command sudo -n sh -c 'if [ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]; then printf %s present; else printf %s absent; fi' 2>/dev/null)" || exit 1
   [ "$docker_socket_after" = "$docker_socket" ] || exit 1
 else
   docker_inventory_after="$(docker_preflight ps --format '{{.Names}} {{.Image}}' 2>/dev/null)" || exit 1

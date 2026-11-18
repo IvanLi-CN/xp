@@ -114,8 +114,13 @@ esac`,
     },
   };
 }
-async function run(mode: string, container = false, allow = false) {
+async function run(mode: string, container = false, allow = false, runtime = "xray") {
   const f = fixture(mode);
+  if (runtime === "xp-proxy" && container) {
+    writeFileSync(join(f.dir, "proc/99/cmdline"), "xp-proxy\0run\0");
+    rmSync(join(f.dir, "proc/99/exe"));
+    symlinkSync("/usr/bin/xp-proxy", join(f.dir, "proc/99/exe"));
+  }
   // Relocate only the private config path; execute the retained probe unchanged.
   const source = readFileSync(
     join(import.meta.dir, "../scripts/xp-infra-audit-vless-remote"),
@@ -125,7 +130,7 @@ async function run(mode: string, container = false, allow = false) {
     ? ["container", "a".repeat(64), "2026-01-01T00:00:00Z", "", "", "99:12345"]
     : ["host", "", "", "123", "456", ""];
   const child = Bun.spawn(
-    ["sh", "-s", "--", "fixture-ep.example.test", "4443", String(allow), ...args],
+    ["sh", "-s", "--", "fixture-ep.example.test", "4443", String(allow), ...args, runtime],
     { env: f.env, stdin: new Blob([source]), stdout: "pipe", stderr: "pipe" },
   );
   const [out, err, code] = await Promise.all([
@@ -264,6 +269,17 @@ esac
       }
     }
   }, 20000);
+  test("xp-proxy host and container require both HTTP versions and stable identity", async () => {
+    for (const container of [false, true]) {
+      const result = await run("host", container, false, "xp-proxy");
+      expect({ code: result.code, out: result.out }).toEqual({
+        code: 0,
+        out: "vless_ingress=true\n",
+      });
+    }
+    expect((await run("pid-drift", false, false, "xp-proxy")).code).not.toBe(0);
+    expect((await run("token-drift", true, false, "xp-proxy")).code).not.toBe(0);
+  });
   test("host identity is revalidated around successful loopback request", async () => {
     const result = await run("host");
     expect(result.code).toBe(0);

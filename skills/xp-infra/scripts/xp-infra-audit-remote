@@ -642,7 +642,7 @@ ingress_public_ports() {
       return 0
     fi
   fi
-  printf '%s\n' "$raw_ports" | awk -v owner="$ingress_runtime" -v pid="${host_ingress_pid:-${container_ingress_token%%:*}}" '
+  selected_ports="$(printf '%s\n' "$raw_ports" | awk -v owner="$ingress_runtime" -v pid="${host_ingress_pid:-${container_ingress_token%%:*}}" '
     index($0, "\"" owner "\"") {
       if (!index($0, "pid=" pid ",")) exit 1
       address = $4
@@ -651,7 +651,8 @@ ingress_public_ports() {
       sub(/^.*:/, "", port)
       if (port ~ /^[1-9][0-9]*$/ && port + 0 <= 65535 && !seen[port]++) print port
     }
-  ' | paste -sd, -
+  ')" || return 1
+  printf '%s\n' "$selected_ports" | paste -sd, -
 }
 
 read_runtime_status() {
@@ -798,7 +799,8 @@ managed_default_state_snapshot="$snapshot_value"
 emit_value managed_default_state_json "$managed_default_state_snapshot"
 echo "sync_node_meta=$(sync_node_meta && printf true || printf false)"
 if [ "$require_ingress_public_listener" = true ]; then
-  emit_value ingress_public_ports "$(ingress_public_ports)"
+  public_ports="$(ingress_public_ports)" || exit 1
+  emit_value ingress_public_ports "$public_ports"
 else
   emit_value ingress_public_ports ""
 fi
