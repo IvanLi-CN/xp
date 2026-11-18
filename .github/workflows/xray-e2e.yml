@@ -90,7 +90,8 @@ jobs:
           sha256sum "$fixture/xp" "$fixture/xp-ops" "$fixture/xp-proxy"
           sudo env XP_DISPOSABLE_CI_HOST=1 \
             python3 scripts/testbox/native-reality-host.py systemd "$fixture"
-          docker run --rm \
+          # Inspect listener ownership for the unprivileged OpenRC services.
+          docker run --rm --cap-add SYS_PTRACE \
             --env XP_DISPOSABLE_CI_HOST=1 \
             --volume "$fixture:/fixture:ro" \
             --volume "$PWD/scripts/testbox/native-reality-host.py:/probe.py:ro" \
