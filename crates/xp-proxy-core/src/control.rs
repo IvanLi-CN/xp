@@ -530,6 +530,24 @@ mod tests {
     }
 
     #[test]
+    fn managed_reality_target_requires_matching_nonconflicting_loopback() {
+        for (dest, target, valid) in [
+            ("127.0.0.1:39043", "127.0.0.1:39043", true),
+            ("[::1]:39043", "[::1]:39043", true),
+            ("0.0.0.0:39043", "0.0.0.0:39043", false),
+            ("192.0.2.1:39043", "192.0.2.1:39043", false),
+            ("127.0.0.1:443", "127.0.0.1:443", false),
+            ("127.0.0.1:0", "127.0.0.1:0", false),
+            ("127.0.0.1:39043", "127.0.0.1:39044", false),
+        ] {
+            let mut snapshot = snapshot(1);
+            snapshot.listeners[0].reality.dest = dest.into();
+            snapshot.listeners[0].reality_tls_target = Some(target.parse().unwrap());
+            assert_eq!(snapshot.validate().is_ok(), valid, "{dest} -> {target}");
+        }
+    }
+
+    #[test]
     fn failed_prepare_preserves_active_generation() {
         let manager = GenerationManager::new();
         manager.prepare(snapshot(1)).unwrap();

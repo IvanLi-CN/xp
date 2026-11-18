@@ -391,7 +391,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let socket = dir.path().join("proxy.sock");
         let listener = UnixListener::bind(&socket).unwrap();
-        let snapshot = managed_snapshot(Some("127.0.0.1:39043"), true).unwrap();
+        let snapshot = managed_snapshot(true, true).unwrap();
         let task = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let size = stream.read_u32().await.unwrap();
@@ -420,43 +420,29 @@ mod tests {
 
     #[test]
     fn managed_tls_target_does_not_depend_on_canary_upstream() {
-        for bind in ["127.0.0.1:39043", "[::1]:39043"] {
-            let snapshot = managed_snapshot(Some(bind), true).unwrap();
-            assert_eq!(
-                snapshot.listeners[0].reality_tls_target,
-                Some(bind.parse().unwrap())
-            );
-            assert!(snapshot.listeners[0].fallbacks.is_empty());
-            assert!(
-                managed_snapshot(Some(bind), false).unwrap().listeners[0]
-                    .reality_tls_target
-                    .is_none()
-            );
-        }
+        let snapshot = managed_snapshot(true, true).unwrap();
+        assert_eq!(
+            snapshot.listeners[0].reality_tls_target,
+            Some(snapshot.listeners[0].reality.dest.parse().unwrap())
+        );
+        assert!(snapshot.listeners[0].fallbacks.is_empty());
         assert!(
-            managed_snapshot(None, true).unwrap().listeners[0]
+            managed_snapshot(true, false).unwrap().listeners[0]
                 .reality_tls_target
                 .is_none()
         );
-        for bind in [
-            "0.0.0.0:39043",
-            "192.0.2.1:39043",
-            "127.0.0.1:443",
-            "127.0.0.1:0",
-        ] {
-            assert!(managed_snapshot(Some(bind), true).is_err(), "{bind}");
-        }
-        let mut snapshot = managed_snapshot(Some("127.0.0.1:39043"), true).unwrap();
-        snapshot.listeners[0].reality.dest = "127.0.0.1:39044".into();
-        assert!(snapshot.validate().is_err());
+        assert!(
+            managed_snapshot(false, true).unwrap().listeners[0]
+                .reality_tls_target
+                .is_none()
+        );
     }
 
     fn managed_snapshot(
-        bind: Option<&str>,
+        canary_enabled: bool,
         managed_default: bool,
     ) -> anyhow::Result<ProxySnapshot> {
-        let mut reality = xp_test_fixtures::endpoint_reality().clone();
-        reality["dest"] = serde_json::json!(bind.unwrap_or("127.0.0.1:39043"));
+        let reality = xp_test_fixtures::endpoint_reality();
         let endpoint = Endpoint {
             endpoint_id: xp_test_fixtures::primary_endpoint_id().into(),
             node_id: xp_test_fixtures::primary_node_id().into(),
@@ -479,7 +465,7 @@ mod tests {
             &BTreeMap::new(),
             &[],
             "cluster-key",
-            bind.map(|bind| bind.parse().unwrap()),
+            canary_enabled.then(|| reality["dest"].as_str().unwrap().parse().unwrap()),
         )
     }
 
