@@ -99,6 +99,7 @@ pub fn build_snapshot(
 ) -> anyhow::Result<ProxySnapshot> {
     let mut listeners = Vec::new();
     let mut endpoint_ids = BTreeMap::new();
+    let mut managed_tls_fallback_ready = true;
     let native_runtime_enabled = native_proxy_enabled();
     for endpoint in endpoints
         .iter()
@@ -117,22 +118,25 @@ pub fn build_snapshot(
         {
             continue;
         }
-        let reality_tls_target = canary_bind.filter(|target| {
-            if !meta.managed_default {
-                return false;
-            }
-            let matches = target.ip().is_loopback()
-                && target.port() != 0
-                && target.port() != endpoint.port
-                && meta.reality.dest.parse::<std::net::SocketAddr>() == Ok(*target);
-            if !matches {
-                tracing::warn!(
-                    endpoint = %endpoint.endpoint_id,
-                    "managed REALITY TLS fallback target does not match the local canary"
+        let reality_tls_target = if meta.managed_default {
+            if let Some(target) = canary_bind
+                && (!target.ip().is_loopback()
+                    || target.port() == 0
+                    || target.port() == endpoint.port
+                    || meta.reality.dest.parse::<std::net::SocketAddr>() != Ok(target))
+            {
+                anyhow::bail!(
+                    "managed TLS fallback target does not match the local canary: {}",
+                    endpoint.endpoint_id,
                 );
             }
-            matches
-        });
+            canary_bind
+        } else {
+            None
+        };
+        if meta.managed_default && reality_tls_target.is_none() {
+            managed_tls_fallback_ready = false;
+        }
         let fallbacks = meta
             .canary_upstream
             .iter()
@@ -185,6 +189,7 @@ pub fn build_snapshot(
         generation: 1,
         listeners,
         users: snapshot_users,
+        managed_tls_fallback_ready: Some(managed_tls_fallback_ready),
     };
     snapshot
         .validate_reality_tls_targets()
@@ -387,6 +392,7 @@ mod tests {
                     error: None,
                     metrics: None,
                     reality_tls_fallback_v1: false,
+                    managed_tls_fallback_ready: None,
                 };
                 stream
                     .write_all(&encode_frame(&response).unwrap())
@@ -455,6 +461,19 @@ mod tests {
             Some(snapshot.listeners[0].reality.dest.parse().unwrap())
         );
         assert!(snapshot.listeners[0].fallbacks.is_empty());
+        assert_eq!(snapshot.managed_tls_fallback_ready, Some(true));
+        assert_eq!(
+            managed_snapshot(None, true)
+                .unwrap()
+                .managed_tls_fallback_ready,
+            Some(false)
+        );
+        assert_eq!(
+            managed_snapshot(None, false)
+                .unwrap()
+                .managed_tls_fallback_ready,
+            Some(true)
+        );
         assert!(
             managed_snapshot(Some(true), false).unwrap().listeners[0]
                 .reality_tls_target
@@ -465,11 +484,20 @@ mod tests {
                 .reality_tls_target
                 .is_none()
         );
-        let mismatched = managed_snapshot(Some(false), true).unwrap();
-        assert!(mismatched.listeners[0].reality_tls_target.is_none());
-        assert_eq!(
-            mismatched.listeners[0].reality.dest,
-            snapshot.listeners[0].reality.dest
+    }
+
+    #[test]
+    fn managed_tls_target_mismatch_rejects_the_snapshot() {
+        let error = managed_snapshot(Some(false), true).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("does not match the local canary")
+        );
+        assert!(
+            managed_snapshot(Some(false), false).unwrap().listeners[0]
+                .reality_tls_target
+                .is_none()
         );
     }
 

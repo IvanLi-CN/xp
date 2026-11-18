@@ -33,6 +33,8 @@ pub struct ProxySnapshot {
     pub generation: u64,
     pub listeners: Vec<ListenerSnapshot>,
     pub users: Vec<UserSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_tls_fallback_ready: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -155,6 +157,8 @@ pub struct ControlResponse {
     pub metrics: Option<TrafficSnapshot>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reality_tls_fallback_v1: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_tls_fallback_ready: Option<bool>,
 }
 
 pub fn encode_frame<T: Serialize>(value: &T) -> Result<Vec<u8>, serde_json::Error> {
@@ -300,6 +304,15 @@ impl GenerationManager {
             .expect("generation lock poisoned")
             .active
             .clone()
+    }
+
+    pub fn active_managed_tls_fallback_ready(&self) -> Option<bool> {
+        self.inner
+            .read()
+            .expect("generation lock poisoned")
+            .active
+            .as_ref()
+            .and_then(|snapshot| snapshot.managed_tls_fallback_ready)
     }
 
     pub fn prepared_snapshot(&self) -> Option<ProxySnapshot> {
@@ -502,6 +515,7 @@ mod tests {
             generation: 0,
             listeners: vec![],
             users: vec![],
+            managed_tls_fallback_ready: None,
         };
         assert!(snapshot.validate().is_err());
     }
@@ -518,10 +532,30 @@ mod tests {
         assert_eq!(decoded, request);
     }
 
+    #[test]
+    fn fallback_readiness_changes_only_when_generation_is_activated() {
+        let manager = GenerationManager::new();
+        let mut current = snapshot(1);
+        current.managed_tls_fallback_ready = Some(true);
+        manager.prepare(current).unwrap();
+        assert_eq!(manager.active_managed_tls_fallback_ready(), None);
+        manager.activate().unwrap();
+
+        let mut replacement = snapshot(2);
+        replacement.managed_tls_fallback_ready = Some(false);
+        manager.prepare(replacement).unwrap();
+        assert_eq!(manager.active_managed_tls_fallback_ready(), Some(true));
+        manager.activate().unwrap();
+        assert_eq!(manager.active_managed_tls_fallback_ready(), Some(false));
+        manager.rollback(2).unwrap();
+        assert_eq!(manager.active_managed_tls_fallback_ready(), Some(true));
+    }
+
     fn snapshot(generation: u64) -> ProxySnapshot {
         ProxySnapshot {
             protocol_version: CONTROL_PROTOCOL_VERSION,
             generation,
+            managed_tls_fallback_ready: None,
             listeners: vec![ListenerSnapshot {
                 bind: "127.0.0.1:443".into(),
                 path: "/xp-xhttp".into(),

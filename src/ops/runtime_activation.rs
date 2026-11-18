@@ -81,10 +81,23 @@ pub fn start_xp_proxy_service(paths: &Paths) -> bool {
 }
 
 pub(super) fn wait_for_xp_proxy_snapshot(paths: &Paths) -> bool {
+    service_commands_are_disabled(paths) || wait_for_proxy_status(paths, active_snapshot_ready)
+}
+
+pub(super) fn wait_for_restored_xp_proxy_snapshot(paths: &Paths) -> bool {
+    // A previous release may not report managed fallback readiness.
     service_commands_are_disabled(paths)
         || wait_for_proxy_status(paths, |response| {
-            response.state == GenerationState::Active && response.generation > 0
+            snapshot_is_active(response) && response.managed_tls_fallback_ready != Some(false)
         })
+}
+
+fn snapshot_is_active(response: &ControlResponse) -> bool {
+    response.state == GenerationState::Active && response.generation > 0
+}
+
+fn active_snapshot_ready(response: &ControlResponse) -> bool {
+    snapshot_is_active(response) && response.managed_tls_fallback_ready == Some(true)
 }
 
 fn wait_for_proxy_status(paths: &Paths, ready: impl Fn(&ControlResponse) -> bool) -> bool {
@@ -327,6 +340,27 @@ fn command_runs(program: &str, args: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activation_requires_fallback_readiness_from_the_active_generation() {
+        let mut response = ControlResponse {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: "test".into(),
+            generation: 7,
+            state: GenerationState::Active,
+            error: None,
+            metrics: None,
+            reality_tls_fallback_v1: true,
+            managed_tls_fallback_ready: Some(false),
+        };
+        assert!(!active_snapshot_ready(&response));
+        response.managed_tls_fallback_ready = None;
+        assert!(!active_snapshot_ready(&response));
+        response.managed_tls_fallback_ready = Some(true);
+        assert!(active_snapshot_ready(&response));
+        response.state = GenerationState::Ready;
+        assert!(!active_snapshot_ready(&response));
+    }
 
     #[test]
     fn parses_openrc_stopping_as_a_distinct_nonterminal_state() {

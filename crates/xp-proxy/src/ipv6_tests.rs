@@ -216,6 +216,7 @@ async fn failed_dual_stack_generation_preserves_previous_listener_and_port_owner
         let snapshot = ProxySnapshot {
             protocol_version: CONTROL_PROTOCOL_VERSION,
             generation: 1,
+            managed_tls_fallback_ready: None,
             users: vec![UserSnapshot {
                 uuid: uuid::Uuid::new_v4().to_string(),
             }],

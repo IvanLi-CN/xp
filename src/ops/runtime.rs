@@ -249,7 +249,7 @@ fn switch_runtime(paths: &Paths, target: RuntimeTarget) -> Result<(), ExitError>
     if target == RuntimeTarget::XpProxy && !wait_for_xp_proxy_snapshot(paths) {
         return Err(ExitError::new(
             7,
-            "service_error: XP did not activate an xp-proxy snapshot after runtime switch",
+            "service_error: xp-proxy snapshot or managed HTTPS fallback not ready after switch",
         ));
     }
     Ok(())

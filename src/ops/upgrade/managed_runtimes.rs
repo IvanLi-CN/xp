@@ -6,7 +6,8 @@ use crate::ops::runtime::{RuntimeTarget, expects_native_snapshot, upgrade_runtim
 use crate::ops::runtime_activation::{
     reload_systemd_units, restart_cloudflared_service, service_commands_are_disabled,
     start_xp_proxy_service, start_xp_service, stop_xp_proxy_service, stop_xp_service,
-    stop_xray_service_named, wait_for_xp_proxy_snapshot, xp_proxy_service_installed,
+    stop_xray_service_named, wait_for_restored_xp_proxy_snapshot, wait_for_xp_proxy_snapshot,
+    xp_proxy_service_installed,
 };
 use crate::ops::upgrade_artifacts::managed_cloudflared_dest;
 
@@ -169,7 +170,7 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
     } else if !start_xp_service(paths) {
         Some("service_error: start xp after managed runtime activation failed")
     } else if target == RuntimeTarget::XpProxy && !wait_for_xp_proxy_snapshot(paths) {
-        Some("service_error: XP did not activate an xp-proxy snapshot after upgrade")
+        Some("service_error: xp-proxy snapshot or managed HTTPS fallback not ready")
     } else {
         None
     };
@@ -232,7 +233,7 @@ fn finish_runtime_failure(
     } else {
         Err(error)
     };
-    if restart_xp && expects_native_snapshot(paths) && !wait_for_xp_proxy_snapshot(paths) {
+    if restart_xp && expects_native_snapshot(paths) && !wait_for_restored_xp_proxy_snapshot(paths) {
         let _ = stop_xp_service(paths);
         let _ = stop_xp_proxy_service(paths);
         return Err(retain_original_error(
@@ -700,7 +701,7 @@ pub(super) async fn rollback_complete_phase_binaries(
             "rollback_failed: start xp after restored runtime activation failed",
         ));
     }
-    if target == RuntimeTarget::XpProxy && !wait_for_xp_proxy_snapshot(paths) {
+    if target == RuntimeTarget::XpProxy && !wait_for_restored_xp_proxy_snapshot(paths) {
         let _ = stop_xp_service(paths);
         let _ = stop_xp_proxy_service(paths);
         return Err(ExitError::new(

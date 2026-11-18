@@ -661,6 +661,11 @@ async fn handle_control(
             error,
             metrics: Some(traffic.snapshot()),
             reality_tls_fallback_v1: is_status,
+            managed_tls_fallback_ready: if is_status {
+                manager.active_managed_tls_fallback_ready()
+            } else {
+                None
+            },
         };
         // The response snapshot is serialized with the operation, but a slow
         // reader must not hold the shared state-transition lock during I/O.
