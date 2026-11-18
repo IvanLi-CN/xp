@@ -2,6 +2,10 @@
 
 ## 当前状态
 
+宿主入口选择以节点 runtime 为准；显式切换到 `xp-proxy` 后不要求修改历史端点 owner。
+GitHub Actions 已覆盖实际 XP 生成的 HTTPS fallback 与 Xray 对照，以及 systemd/OpenRC 上
+两种运行时的重启、升级和故障回滚；对应提交与运行记录见 HISTORY。
+
 本文记录当前实现与剩余验收边界。运行时互斥、control protocol v2、持久 snapshot、
 listener 生命周期、systemd/OpenRC service asset 和本地切换命令已经进入实现；在
 Agent VM 的单 VM 集群、互操作、升级回滚和资源安全证据完成前，仍不广告生产 native

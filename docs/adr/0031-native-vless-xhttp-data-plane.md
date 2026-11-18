@@ -16,8 +16,8 @@ XP 的进程生命周期，不能提供清晰的服务 ready、端口 owner 和�
 - XP 继续拥有 Raft、endpoint/user 权威状态，并生成完整、版本化的 Proxy Snapshot。
 - `xp-proxy` 作为独立 OS process/service 拥有 listener、VLESS/REALITY/XHTTP、固定
   fallback、连接生命周期和运行时指标；它不读取 XP Raft、SQLite 或 Web 状态。
-- endpoint 的 `transport=xhttp` 不自动选择 native。每个 endpoint 必须有显式 ingress
-  owner；旧 metadata 缺失 owner 时保持 Xray。
+- endpoint 的 `transport=xhttp` 不自动选择 native。宿主节点通过显式 runtime 操作选择单一入口模式；选择 `xp-proxy` 后统一接管本机支持的
+  XHTTP 端点，不需要迁移历史 endpoint owner。未选择 native 时，旧 metadata 缺失 owner 保持 Xray。
 - 一个端口只能有一个 owner。Xray -> native 与 native -> Xray 都必须先停止并确认旧
   owner 释放端口，再启动新 owner；不使用 `SO_REUSEPORT`、bind race 或隐式自动 failback。
 - native capability 只有在独立 service、control socket、协议版本、loopback self-test、
@@ -33,9 +33,10 @@ XP 的进程生命周期，不能提供清晰的服务 ready、端口 owner 和�
 
 ## 切换与回滚边界
 
-切换是由 XP 协调的有界 operation：prepare candidate、释放旧 owner、activate 新 owner、
-验证 active generation/self-test、最后提交 owner。任何中间失败都进入 failed 或
-rollback_required；无法恢复目标 owner 时 endpoint 保持 stopped，不启动两个数据面争抢端口。
+宿主切换由 `xp-ops` 按节点执行：验证候选配置，停止 XP 与旧运行时并释放端口，
+再启动选定运行时和 XP。native 必须取得 active generation、自测与 listener readiness 后才提交节点 active；
+不提交逐端点 owner 迁移。任何中间失败都进入 failed 或 rollback_required；
+无法恢复目标 owner 时保持 stopped，不启动两个运行时争抢端口。
 proxy 崩溃或 control socket 消失只允许服务管理器重启同一 proxy；跨到 Xray 的 rollback
 必须是明确的 owner operation。
 
