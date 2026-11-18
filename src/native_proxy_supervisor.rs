@@ -99,9 +99,7 @@ pub fn build_snapshot(
 ) -> anyhow::Result<ProxySnapshot> {
     let mut listeners = Vec::new();
     let mut endpoint_ids = BTreeMap::new();
-    let native_runtime_enabled = env::var("XP_NATIVE_PROXY_ENABLED")
-        .ok()
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on"));
+    let native_runtime_enabled = native_proxy_enabled();
     for endpoint in endpoints
         .iter()
         .filter(|endpoint| endpoint.node_id == local_node_id)
@@ -111,11 +109,7 @@ pub fn build_snapshot(
         }
         let meta: crate::protocol::VlessRealityVisionTcpEndpointMeta =
             serde_json::from_value(endpoint.meta.clone())?;
-        if (!native_runtime_enabled
-            && !matches!(
-                crate::protocol::vless_ingress_owner(&endpoint.meta),
-                crate::protocol::VlessIngressOwner::Native
-            ))
+        if !is_native_endpoint(endpoint, native_runtime_enabled)
             || !matches!(
                 meta.transport,
                 crate::protocol::VlessRealityTransport::Xhttp
@@ -248,12 +242,6 @@ pub async fn publish_reconciled_snapshot(
     cluster_ca_key_pem: &str,
     canary_bind: Option<std::net::SocketAddr>,
 ) {
-    let enabled = env::var("XP_NATIVE_PROXY_ENABLED")
-        .ok()
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes"));
-    if !enabled {
-        return;
-    }
     if !runtime_state_allows_proxy() {
         return;
     }
@@ -292,7 +280,30 @@ pub async fn publish_reconciled_snapshot(
     }
 }
 
-fn runtime_state_allows_proxy() -> bool {
+pub(crate) fn is_native_endpoint(endpoint: &crate::domain::Endpoint, selected: bool) -> bool {
+    use crate::{
+        domain::EndpointKind,
+        protocol::{VlessIngressOwner, vless_ingress_owner},
+    };
+    endpoint.kind == EndpointKind::VlessRealityVisionTcp
+        && (vless_ingress_owner(&endpoint.meta) == VlessIngressOwner::Native
+            || (selected
+                && endpoint
+                    .meta
+                    .get("transport")
+                    .and_then(|value| value.as_str())
+                    == Some("xhttp")))
+}
+
+fn native_proxy_enabled() -> bool {
+    env::var("XP_NATIVE_PROXY_ENABLED")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes"))
+}
+
+pub(crate) fn runtime_state_allows_proxy() -> bool {
+    if !native_proxy_enabled() {
+        return false;
+    }
     let path = env::var_os("XP_RUNTIME_STATE_FILE")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/etc/xp/runtime.json"));

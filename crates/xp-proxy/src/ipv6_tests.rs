@@ -244,6 +244,15 @@ async fn failed_dual_stack_generation_preserves_previous_listener_and_port_owner
         for host in ["127.0.0.1", "::1"] {
             TcpStream::connect((host, port)).await.unwrap();
         }
+        let mut next = snapshot;
+        next.generation = 3;
+        manager.prepare(next).unwrap();
+        assert_eq!(
+            activate_prepared(&manager, &runtime, &traffic)
+                .await
+                .unwrap(),
+            3
+        );
         assert!(runtime.stop_all().await);
         listen::bind(SocketAddr::from(([0, 0, 0, 0], port))).unwrap();
     })

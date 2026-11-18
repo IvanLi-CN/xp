@@ -2,10 +2,8 @@ use crate::{
     config::Config,
     credentials,
     domain::{Endpoint, EndpointKind, User},
-    protocol::{
-        Ss2022EndpointMeta, VlessIngressOwner, VlessRealityVisionTcpEndpointMeta,
-        vless_ingress_owner,
-    },
+    native_proxy_supervisor::is_native_endpoint,
+    protocol::{Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta},
     reverse_mesh::ReverseLinkRuntime,
     reverse_mesh_runtime::ReverseXrayReconciler,
     state::{JsonSnapshotStore, NodeUserEndpointMembership, membership_key, membership_xray_email},
@@ -399,10 +397,6 @@ fn endpoint_kind_key(kind: &EndpointKind) -> &'static str {
         EndpointKind::VlessRealityVisionTcp => "vless_reality_vision_tcp",
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => "ss2022_2022_blake3_aes_128_gcm",
     }
-}
-fn is_native_endpoint(endpoint: &Endpoint) -> bool {
-    endpoint.kind == EndpointKind::VlessRealityVisionTcp
-        && vless_ingress_owner(&endpoint.meta) == VlessIngressOwner::Native
 }
 fn desired_inbound_hash(endpoint: &Endpoint) -> Option<String> {
     let mut meta = match endpoint.kind {
@@ -891,6 +885,10 @@ async fn reconcile_snapshot(
         .keys()
         .map(|user_id| (user_id.clone(), true))
         .collect();
+
+    let native_runtime_selected = crate::native_proxy_supervisor::runtime_state_allows_proxy();
+    let is_native_endpoint =
+        |endpoint: &Endpoint| is_native_endpoint(endpoint, native_runtime_selected);
 
     // 1) Explicit requests first.
     for (tag, email) in pending.remove_users.iter() {

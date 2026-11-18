@@ -544,7 +544,12 @@ async fn activate_prepared(
     let snapshot = manager
         .prepared_snapshot()
         .ok_or_else(|| anyhow::anyhow!("no prepared generation"))?;
-    replace_listeners(snapshot, manager, runtime, traffic, || manager.activate()).await
+    let result =
+        replace_listeners(snapshot, manager, runtime, traffic, || manager.activate()).await;
+    if result.is_err() {
+        manager.discard_failed_prepare();
+    }
+    result
 }
 
 async fn replace_listeners(

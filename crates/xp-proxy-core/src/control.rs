@@ -282,6 +282,18 @@ impl GenerationManager {
         )
     }
 
+    pub fn discard_failed_prepare(&self) {
+        let mut inner = self.inner.write().expect("generation lock poisoned");
+        inner.prepared = None;
+        if inner.state == GenerationState::Ready {
+            inner.state = if inner.active.is_some() {
+                GenerationState::Active
+            } else {
+                GenerationState::Failed
+            };
+        }
+    }
+
     pub fn active_snapshot(&self) -> Option<ProxySnapshot> {
         self.inner
             .read()
