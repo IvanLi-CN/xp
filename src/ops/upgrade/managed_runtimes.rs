@@ -512,7 +512,7 @@ async fn reconcile_managed_runtime_defaults(
         let _ = fs::remove_file(&config_path);
         return Err(ExitError::new(
             7,
-            "service_error: xray restart failed or its API did not become ready",
+            "service_error: xray did not become ready",
         ));
     }
 
