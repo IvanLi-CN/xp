@@ -18,6 +18,7 @@ impl ReconcileHandle {
             mesh_state_applied: Arc::new(AtomicBool::new(true)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
             snapshot_installing: Arc::new(AtomicBool::new(false)),
+            managed_canary_bind: Arc::default(),
             mesh_gate_lock: Arc::new(RwLock::new(())),
             mesh_epoch_barrier: Arc::new(RwLock::new(())),
         }
@@ -41,6 +42,7 @@ impl ReconcileHandle {
             mesh_state_applied: Arc::new(AtomicBool::new(true)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
             snapshot_installing: Arc::new(AtomicBool::new(false)),
+            managed_canary_bind: Arc::default(),
             mesh_gate_lock: Arc::new(RwLock::new(())),
             mesh_epoch_barrier: Arc::new(RwLock::new(())),
         }

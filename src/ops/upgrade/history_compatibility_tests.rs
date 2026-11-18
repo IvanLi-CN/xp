@@ -73,8 +73,8 @@ fn prefix_history_compatibility_fails_closed_on_unreadable_ledger() {
     }
 }
 
-#[test]
-fn prefix_history_compatibility_checks_actual_backup_before_any_complete_rollback() {
+#[tokio::test]
+async fn prefix_history_compatibility_checks_actual_backup_before_any_complete_rollback() {
     let root = tempfile::tempdir().unwrap();
     let paths = Paths::new(root.path().to_path_buf());
     let data = root.path().join("data");
@@ -91,6 +91,7 @@ fn prefix_history_compatibility_checks_actual_backup_before_any_complete_rollbac
     }];
     let error =
         super::super::managed_runtimes::rollback_complete_phase_binaries(&paths, &data, &backups)
+            .await
             .unwrap_err();
     assert!(error.message.contains(ROLLBACK_BLOCKED));
     assert_eq!(fs::read(&destination).unwrap(), original);

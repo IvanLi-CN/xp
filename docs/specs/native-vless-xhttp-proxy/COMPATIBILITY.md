@@ -101,3 +101,17 @@ Linux 故障使用 `scripts/testbox/native-ip-faults.py`，只在临时 mount/ne
 `scripts/testbox/native-ip-container.py` 仅验证候选二进制在官方镜像中的双栈流量和重启，不解锁容器 native capability 或替代容器部署合同。
 
 以上 fixture 均不得在生产节点运行。候选 SHA、构建产物哈希和原始结果应保留在对应 Actions artifact 或任务验收证据中。
+
+## 托管 REALITY TLS fallback
+
+使用 XP 生成的托管端点快照，让 Xray 26.3.27 与 xp-proxy 使用同一个 HTTPS canary。
+`canary_upstream` 留空。普通 HTTPS 在 HTTP/1.1 和 HTTP/2 下均须返回 canary 的证书；
+`/generate_204` 须返回 204，签名 Mesh 须通过，未授权请求须拒绝。
+记录 canary 不可达、错误 SNI 和畸形 TLS 的表现。无需复制 Xray 认证前拨号行为。
+新旧 control v2 组合须覆盖能力缺失时拒绝发布及旧快照可读。
+
+在隔离环境中运行以下探针，使用同一候选构建的两个 Rust 程序及锁定的 Xray 资产。探针生成临时证书和集群身份，并使用 XP 自己发布的快照。
+
+```sh
+python3 scripts/testbox/native-reality-canary.py /path/to/xp /path/to/xp-proxy /path/to/xray
+```

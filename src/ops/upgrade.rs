@@ -20,6 +20,7 @@ mod managed_runtimes;
 mod reexec;
 mod transaction_lock;
 mod xray_cleanup;
+mod xray_readiness;
 use failure::{
     cleanup_after_upgrade_failure, clear_upgrade_diagnostics, preflight_upgrade,
     record_early_upgrade_failure, restore_after_failed_install,
@@ -262,7 +263,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         && let Some(resume) = resume.as_ref()
         && resume.service_phase_complete
     {
-        return finish_reexeced_upgrade(&paths, &args.data_dir, resume);
+        return finish_reexeced_upgrade(&paths, &args.data_dir, resume).await;
     }
 
     if mode == Mode::Real
@@ -397,6 +398,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         ));
     }
     let phase_result = async {
+        super::runtime::upgrade_runtime_target(&paths)?;
         upgrade_xp(
             &paths,
             &release,
@@ -461,7 +463,9 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
                     &paths,
                     &lock_data_dir,
                     &service_backups,
-                ) {
+                )
+                .await
+                {
                     Ok(()) => error,
                     Err(rollback) => ExitError::new(
                         rollback.code,

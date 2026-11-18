@@ -16,8 +16,11 @@ fn desired_inbound_hash_changes_for_vless_transport() {
         }),
     };
     let vision_hash = desired_inbound_hash(&endpoint).unwrap();
+    assert!(!is_native_endpoint(&endpoint, true));
     endpoint.meta["transport"] = serde_json::json!("xhttp");
     assert_ne!(desired_inbound_hash(&endpoint).unwrap(), vision_hash);
+    assert!(!is_native_endpoint(&endpoint, false));
+    assert!(is_native_endpoint(&endpoint, true));
 }
 
 #[test]

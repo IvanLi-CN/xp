@@ -1,8 +1,15 @@
 use crate::ops::paths::Paths;
 use crate::ops::util::is_test_root;
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
+use xp_proxy_core::control::{
+    CONTROL_PROTOCOL_VERSION, ControlOperation, ControlRequest, ControlResponse, GenerationState,
+    encode_frame,
+};
 
 const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(45);
 const SERVICE_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -40,7 +47,15 @@ pub fn start_xray_service(paths: &Paths) -> bool {
 }
 
 pub fn stop_xray_service(paths: &Paths) -> bool {
-    stop_service(paths, "xray.service", "xray")
+    stop_xray_service_named(paths, "xray.service", "xray")
+}
+
+pub(super) fn stop_xray_service_named(
+    paths: &Paths,
+    systemd_unit: &str,
+    openrc_service: &str,
+) -> bool {
+    stop_service(paths, systemd_unit, openrc_service)
 }
 
 pub fn restart_xp_service(paths: &Paths) -> bool {
@@ -56,10 +71,75 @@ pub fn stop_xp_service(paths: &Paths) -> bool {
 }
 
 pub fn start_xp_proxy_service(paths: &Paths) -> bool {
-    if !xp_proxy_service_installed(paths) {
+    if !xp_proxy_service_installed(paths) || service_commands_are_disabled(paths) {
         return true;
     }
-    start_service(paths, "xp-proxy.service", "xp-proxy")
+    if !start_service(paths, "xp-proxy.service", "xp-proxy") {
+        return false;
+    }
+    wait_for_proxy_status(paths, |_| true)
+}
+
+pub(super) fn wait_for_xp_proxy_snapshot(paths: &Paths) -> bool {
+    service_commands_are_disabled(paths) || wait_for_proxy_status(paths, active_snapshot_ready)
+}
+
+pub(super) fn wait_for_restored_xp_proxy_snapshot(paths: &Paths) -> bool {
+    // A previous release may not report managed fallback readiness.
+    service_commands_are_disabled(paths)
+        || wait_for_proxy_status(paths, |response| {
+            snapshot_is_active(response) && response.managed_tls_fallback_ready != Some(false)
+        })
+}
+
+fn snapshot_is_active(response: &ControlResponse) -> bool {
+    response.state == GenerationState::Active && response.generation > 0
+}
+
+fn active_snapshot_ready(response: &ControlResponse) -> bool {
+    snapshot_is_active(response) && response.managed_tls_fallback_ready == Some(true)
+}
+
+fn wait_for_proxy_status(paths: &Paths, ready: impl Fn(&ControlResponse) -> bool) -> bool {
+    let socket = paths.map_abs(Path::new("/run/xp-proxy/xp-proxy.sock"));
+    let deadline = Instant::now() + service_ready_timeout();
+    while Instant::now() < deadline {
+        if proxy_status(&socket).is_some_and(|response| ready(&response)) {
+            return true;
+        }
+        thread::sleep(SERVICE_READY_POLL_INTERVAL);
+    }
+    false
+}
+
+fn proxy_status(socket: &Path) -> Option<ControlResponse> {
+    fn probe(socket: &Path) -> anyhow::Result<Option<ControlResponse>> {
+        let mut stream = UnixStream::connect(socket)?;
+        let timeout = Some(SERVICE_READY_POLL_INTERVAL);
+        stream.set_read_timeout(timeout)?;
+        stream.set_write_timeout(timeout)?;
+        let request = ControlRequest {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: "xp-ops-readiness".into(),
+            generation: 0,
+            operation: ControlOperation::Status,
+        };
+        stream.write_all(&encode_frame(&request)?)?;
+        let mut header = [0; 4];
+        stream.read_exact(&mut header)?;
+        let len = u32::from_be_bytes(header) as usize;
+        if len > 4096 {
+            return Ok(None);
+        }
+        let mut body = vec![0; len];
+        stream.read_exact(&mut body)?;
+        let response: ControlResponse = serde_json::from_slice(&body)?;
+        Ok((response.protocol_version == request.protocol_version
+            && response.request_id == request.request_id
+            && response.error.is_none())
+        .then_some(response))
+    }
+    probe(socket).ok().flatten()
 }
 
 pub fn stop_xp_proxy_service(paths: &Paths) -> bool {
@@ -223,7 +303,7 @@ fn parse_openrc_service_state(output: &str) -> Option<OpenrcServiceState> {
     })
 }
 
-fn service_ready_timeout() -> Duration {
+pub(super) fn service_ready_timeout() -> Duration {
     if cfg!(debug_assertions)
         && let Ok(timeout_ms) = std::env::var("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS")
         && let Ok(timeout_ms) = timeout_ms.parse::<u64>()
@@ -260,6 +340,27 @@ fn command_runs(program: &str, args: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activation_requires_fallback_readiness_from_the_active_generation() {
+        let mut response = ControlResponse {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: "test".into(),
+            generation: 7,
+            state: GenerationState::Active,
+            error: None,
+            metrics: None,
+            reality_tls_fallback_v1: true,
+            managed_tls_fallback_ready: Some(false),
+        };
+        assert!(!active_snapshot_ready(&response));
+        response.managed_tls_fallback_ready = None;
+        assert!(!active_snapshot_ready(&response));
+        response.managed_tls_fallback_ready = Some(true);
+        assert!(active_snapshot_ready(&response));
+        response.state = GenerationState::Ready;
+        assert!(!active_snapshot_ready(&response));
+    }
 
     #[test]
     fn parses_openrc_stopping_as_a_distinct_nonterminal_state() {

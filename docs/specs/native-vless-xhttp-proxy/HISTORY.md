@@ -1,5 +1,13 @@
 # 主题历史
 
+- 对齐宿主单节点单模式合同：显式节点 runtime 切换接管本机受支持的 XHTTP 端点，不要求逐端点 owner 迁移。
+  HTTPS fallback 修复与服务验收见 [PR #493][fallback-pr]。候选 `ca844c86` 的 [GitHub Actions][fallback-ci] 在
+  systemd/OpenRC 下完成 Xray、xp-proxy 重启、升级及坏运行时回滚，恢复二进制和 HTTPS/H2
+  204；探针验证每次操作完成后的监听独占，不能作为全转换窗口持续采样的证明。
+
+[fallback-pr]: https://github.com/IvanLi-CN/xp/pull/493
+[fallback-ci]: https://github.com/IvanLi-CN/xp/actions/runs/44379309936/job/135066885602
+
 - 2026-11-17：修复出站连接池在容量检查与通知首次轮询之间的丢失唤醒，加入双等待者确定性交错回归；自动适用性补齐实际使用的 Mihomo 安装 fixture。
 
 - 2026-11-17：复测实际主干后补齐 NODELAY 和专用出站任务归属。Linux 单变量对照确认小包停顿；本地重置回归先失败再通过，保留半关闭响应。

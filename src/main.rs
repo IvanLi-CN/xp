@@ -664,7 +664,11 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             store.clone(),
             raft_facade.clone(),
         )?;
+    let managed_canary_bind = vless_https_canary_task
+        .is_some()
+        .then_some(config.vless_canary_bind);
     let _vless_https_canary_task = vless_https_canary_task;
+    reconcile.initialize_managed_canary(managed_canary_bind);
     let membership_guard_cleanup = xp::raft_membership_guard::MembershipRemovalCleanup {
         local_raft_node_id: raft_id,
         local_node_id: cluster.node_id.clone(),
@@ -731,6 +735,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         &startup_native_snapshot.1,
         &startup_native_snapshot.2,
         &startup_ca_key,
+        managed_canary_bind,
     )
     .await;
     // Ensure the first reconcile runs after Raft/store startup. This is required for native

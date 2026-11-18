@@ -2,7 +2,7 @@ use crate::ops::cli::{ExitError, RuntimeStatusArgs, RuntimeSwitchArgs, RuntimeTa
 use crate::ops::paths::Paths;
 use crate::ops::runtime_activation::{
     start_xp_proxy_service, start_xp_service, start_xray_service, stop_xp_proxy_service,
-    stop_xp_service, stop_xray_service, xp_proxy_service_installed,
+    stop_xp_service, stop_xray_service, wait_for_xp_proxy_snapshot, xp_proxy_service_installed,
 };
 use crate::ops::util::write_string_if_changed;
 use serde::{Deserialize, Serialize};
@@ -51,6 +51,23 @@ fn load_state(paths: &Paths) -> Result<RuntimeState, ExitError> {
             format!("runtime_state_read_failed: {error}"),
         )),
     }
+}
+
+pub(super) fn expects_native_snapshot(paths: &Paths) -> bool {
+    load_state(paths).is_ok_and(|state| {
+        state.runtime == RuntimeTarget::XpProxy && state.state != RuntimeStateKind::Failed
+    })
+}
+
+pub(super) fn upgrade_runtime_target(paths: &Paths) -> Result<RuntimeTarget, ExitError> {
+    let state = load_state(paths)?;
+    if state.state != RuntimeStateKind::Active {
+        return Err(ExitError::new(
+            7,
+            "service_error: ingress runtime must be active before upgrade",
+        ));
+    }
+    Ok(state.runtime)
 }
 
 fn save_state(paths: &Paths, state: &RuntimeState) -> Result<(), ExitError> {
@@ -227,6 +244,12 @@ fn switch_runtime(paths: &Paths, target: RuntimeTarget) -> Result<(), ExitError>
         return Err(ExitError::new(
             7,
             "service_error: start xp after runtime switch failed",
+        ));
+    }
+    if target == RuntimeTarget::XpProxy && !wait_for_xp_proxy_snapshot(paths) {
+        return Err(ExitError::new(
+            7,
+            "service_error: xp-proxy snapshot or managed HTTPS fallback not ready after switch",
         ));
     }
     Ok(())

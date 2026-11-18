@@ -185,8 +185,8 @@ esac\n",
             .failure()
             .code(7)
             .stderr(predicates::str::contains(
-                "xray restart failed; restored previous config; rolled back xp",
+                "xray did not become ready; restored previous config; rolled back xp",
             ));
-        assert_eq!(fs::read_to_string(&xray_restart_count).unwrap().trim(), "3");
+        assert_eq!(fs::read_to_string(&xray_restart_count).unwrap().trim(), "2");
     }
 }

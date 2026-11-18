@@ -19,6 +19,33 @@ pub async fn publish_snapshot(
 ) -> anyhow::Result<()> {
     let generation = snapshot.generation;
     let mut stream = UnixStream::connect(socket).await?;
+    if snapshot
+        .listeners
+        .iter()
+        .any(|listener| listener.reality_tls_target.is_some())
+    {
+        let request_id = Uuid::new_v4().to_string();
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            send_request(
+                &mut stream,
+                ControlRequest {
+                    protocol_version: CONTROL_PROTOCOL_VERSION,
+                    request_id: request_id.clone(),
+                    generation,
+                    operation: ControlOperation::Status,
+                },
+            ),
+        )
+        .await??;
+        if response.protocol_version != CONTROL_PROTOCOL_VERSION
+            || response.request_id != request_id
+            || response.error.is_some()
+            || !response.reality_tls_fallback_v1
+        {
+            anyhow::bail!("native proxy does not support managed REALITY TLS fallback");
+        }
+    }
     let request = ControlRequest {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: Uuid::new_v4().to_string(),
@@ -68,12 +95,12 @@ pub fn build_snapshot(
     users: &BTreeMap<String, crate::domain::User>,
     memberships: &[crate::state::NodeUserEndpointMembership],
     cluster_ca_key_pem: &str,
+    canary_bind: Option<std::net::SocketAddr>,
 ) -> anyhow::Result<ProxySnapshot> {
     let mut listeners = Vec::new();
     let mut endpoint_ids = BTreeMap::new();
-    let native_runtime_enabled = env::var("XP_NATIVE_PROXY_ENABLED")
-        .ok()
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on"));
+    let mut managed_tls_fallback_ready = true;
+    let native_runtime_enabled = native_proxy_enabled();
     for endpoint in endpoints
         .iter()
         .filter(|endpoint| endpoint.node_id == local_node_id)
@@ -83,17 +110,32 @@ pub fn build_snapshot(
         }
         let meta: crate::protocol::VlessRealityVisionTcpEndpointMeta =
             serde_json::from_value(endpoint.meta.clone())?;
-        if (!native_runtime_enabled
-            && !matches!(
-                crate::protocol::vless_ingress_owner(&endpoint.meta),
-                crate::protocol::VlessIngressOwner::Native
-            ))
+        if !is_native_endpoint(endpoint, native_runtime_enabled)
             || !matches!(
                 meta.transport,
                 crate::protocol::VlessRealityTransport::Xhttp
             )
         {
             continue;
+        }
+        let reality_tls_target = if meta.managed_default {
+            if let Some(target) = canary_bind
+                && (!target.ip().is_loopback()
+                    || target.port() == 0
+                    || target.port() == endpoint.port
+                    || meta.reality.dest.parse::<std::net::SocketAddr>() != Ok(target))
+            {
+                anyhow::bail!(
+                    "managed TLS fallback target does not match the local canary: {}",
+                    endpoint.endpoint_id,
+                );
+            }
+            canary_bind
+        } else {
+            None
+        };
+        if meta.managed_default && reality_tls_target.is_none() {
+            managed_tls_fallback_ready = false;
         }
         let fallbacks = meta
             .canary_upstream
@@ -111,6 +153,7 @@ pub fn build_snapshot(
         listeners.push(ListenerSnapshot {
             bind: format!("0.0.0.0:{}", endpoint.port),
             path: crate::protocol::VLESS_XHTTP_PATH.to_string(),
+            reality_tls_target,
             reality: RealitySnapshot {
                 dest: meta.reality.dest,
                 server_names: meta.reality.server_names,
@@ -141,12 +184,17 @@ pub fn build_snapshot(
             snapshot_users.push(UserSnapshot { uuid });
         }
     }
-    Ok(ProxySnapshot {
+    let snapshot = ProxySnapshot {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         generation: 1,
         listeners,
         users: snapshot_users,
-    })
+        managed_tls_fallback_ready: Some(managed_tls_fallback_ready),
+    };
+    snapshot
+        .validate_reality_tls_targets()
+        .map_err(anyhow::Error::msg)?;
+    Ok(snapshot)
 }
 
 fn next_persistent_generation() -> anyhow::Result<u64> {
@@ -197,13 +245,8 @@ pub async fn publish_reconciled_snapshot(
     users: &BTreeMap<String, crate::domain::User>,
     memberships: &[crate::state::NodeUserEndpointMembership],
     cluster_ca_key_pem: &str,
+    canary_bind: Option<std::net::SocketAddr>,
 ) {
-    let enabled = env::var("XP_NATIVE_PROXY_ENABLED")
-        .ok()
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes"));
-    if !enabled {
-        return;
-    }
     if !runtime_state_allows_proxy() {
         return;
     }
@@ -216,6 +259,7 @@ pub async fn publish_reconciled_snapshot(
         users,
         memberships,
         cluster_ca_key_pem,
+        canary_bind,
     ) {
         Ok(mut snapshot) => {
             match next_persistent_generation() {
@@ -241,7 +285,30 @@ pub async fn publish_reconciled_snapshot(
     }
 }
 
-fn runtime_state_allows_proxy() -> bool {
+pub(crate) fn is_native_endpoint(endpoint: &crate::domain::Endpoint, selected: bool) -> bool {
+    use crate::{
+        domain::EndpointKind,
+        protocol::{VlessIngressOwner, vless_ingress_owner},
+    };
+    endpoint.kind == EndpointKind::VlessRealityVisionTcp
+        && (vless_ingress_owner(&endpoint.meta) == VlessIngressOwner::Native
+            || (selected
+                && endpoint
+                    .meta
+                    .get("transport")
+                    .and_then(|value| value.as_str())
+                    == Some("xhttp")))
+}
+
+fn native_proxy_enabled() -> bool {
+    env::var("XP_NATIVE_PROXY_ENABLED")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes"))
+}
+
+pub(crate) fn runtime_state_allows_proxy() -> bool {
+    if !native_proxy_enabled() {
+        return false;
+    }
     let path = env::var_os("XP_RUNTIME_STATE_FILE")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/etc/xp/runtime.json"));
@@ -324,6 +391,8 @@ mod tests {
                     },
                     error: None,
                     metrics: None,
+                    reality_tls_fallback_v1: false,
+                    managed_tls_fallback_ready: None,
                 };
                 stream
                     .write_all(&encode_frame(&response).unwrap())
@@ -350,6 +419,124 @@ mod tests {
         .unwrap();
         publish_snapshot(&socket, snapshot).await.unwrap();
         task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_proxy_never_receives_the_new_snapshot() {
+        let dir = tempdir().unwrap();
+        let socket = dir.path().join("proxy.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let snapshot = managed_snapshot(Some(true), true).unwrap();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let size = stream.read_u32().await.unwrap();
+            let mut frame = size.to_be_bytes().to_vec();
+            frame.resize(frame.len() + size as usize, 0);
+            stream.read_exact(&mut frame[4..]).await.unwrap();
+            let request: ControlRequest = decode_frame(&frame).unwrap();
+            assert!(matches!(request.operation, ControlOperation::Status));
+            let response = serde_json::json!({
+                "protocol_version": CONTROL_PROTOCOL_VERSION,
+                "request_id": request.request_id,
+                "generation": 12,
+                "state": "active",
+                "error": null,
+            });
+            stream
+                .write_all(&encode_frame(&response).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(stream.read(&mut [0]).await.unwrap(), 0);
+        });
+        let err = publish_snapshot(&socket, snapshot).await.unwrap_err();
+        assert!(err.to_string().contains("does not support"));
+        task.await.unwrap();
+    }
+
+    #[test]
+    fn managed_tls_target_does_not_depend_on_canary_upstream() {
+        let snapshot = managed_snapshot(Some(true), true).unwrap();
+        assert_eq!(
+            snapshot.listeners[0].reality_tls_target,
+            Some(snapshot.listeners[0].reality.dest.parse().unwrap())
+        );
+        assert!(snapshot.listeners[0].fallbacks.is_empty());
+        assert_eq!(snapshot.managed_tls_fallback_ready, Some(true));
+        assert_eq!(
+            managed_snapshot(None, true)
+                .unwrap()
+                .managed_tls_fallback_ready,
+            Some(false)
+        );
+        assert_eq!(
+            managed_snapshot(None, false)
+                .unwrap()
+                .managed_tls_fallback_ready,
+            Some(true)
+        );
+        assert!(
+            managed_snapshot(Some(true), false).unwrap().listeners[0]
+                .reality_tls_target
+                .is_none()
+        );
+        assert!(
+            managed_snapshot(None, true).unwrap().listeners[0]
+                .reality_tls_target
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn managed_tls_target_mismatch_rejects_the_snapshot() {
+        let error = managed_snapshot(Some(false), true).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("does not match the local canary")
+        );
+        assert!(
+            managed_snapshot(Some(false), false).unwrap().listeners[0]
+                .reality_tls_target
+                .is_none()
+        );
+    }
+
+    fn managed_snapshot(
+        canary_matches_dest: Option<bool>,
+        managed_default: bool,
+    ) -> anyhow::Result<ProxySnapshot> {
+        let reality = xp_test_fixtures::endpoint_reality();
+        let endpoint = Endpoint {
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().into(),
+            node_id: xp_test_fixtures::primary_node_id().into(),
+            tag: xp_test_fixtures::primary_endpoint_tag().into(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::json!({
+                "reality": reality,
+                "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+                "short_ids": xp_test_fixtures::endpoint_short_ids(),
+                "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
+                "transport": "xhttp",
+                "ingress_owner": "native",
+                "managed_default": managed_default
+            }),
+        };
+        build_snapshot(
+            &endpoint.node_id,
+            std::slice::from_ref(&endpoint),
+            &BTreeMap::new(),
+            &[],
+            "cluster-key",
+            canary_matches_dest.map(|matches_dest| {
+                let mut address: std::net::SocketAddr =
+                    reality["dest"].as_str().unwrap().parse().unwrap();
+                if !matches_dest {
+                    address.set_port(address.port() ^ 1);
+                }
+                address
+            }),
+        )
     }
 
     #[test]
@@ -398,6 +585,7 @@ mod tests {
             &users,
             &memberships,
             "cluster-key",
+            None,
         )
         .unwrap();
         assert_eq!(snapshot.protocol_version, CONTROL_PROTOCOL_VERSION);

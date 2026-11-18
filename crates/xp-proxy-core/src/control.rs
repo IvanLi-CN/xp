@@ -33,6 +33,8 @@ pub struct ProxySnapshot {
     pub generation: u64,
     pub listeners: Vec<ListenerSnapshot>,
     pub users: Vec<UserSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_tls_fallback_ready: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +42,8 @@ pub struct ListenerSnapshot {
     pub bind: String,
     pub path: String,
     pub reality: RealitySnapshot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reality_tls_target: Option<std::net::SocketAddr>,
     #[serde(default)]
     pub xmux: XmuxSnapshot,
     #[serde(default)]
@@ -151,6 +155,10 @@ pub struct ControlResponse {
     pub error: Option<String>,
     #[serde(default)]
     pub metrics: Option<TrafficSnapshot>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reality_tls_fallback_v1: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_tls_fallback_ready: Option<bool>,
 }
 
 pub fn encode_frame<T: Serialize>(value: &T) -> Result<Vec<u8>, serde_json::Error> {
@@ -278,12 +286,33 @@ impl GenerationManager {
         )
     }
 
+    pub fn discard_failed_prepare(&self) {
+        let mut inner = self.inner.write().expect("generation lock poisoned");
+        inner.prepared = None;
+        if inner.state == GenerationState::Ready {
+            inner.state = if inner.active.is_some() {
+                GenerationState::Active
+            } else {
+                GenerationState::Failed
+            };
+        }
+    }
+
     pub fn active_snapshot(&self) -> Option<ProxySnapshot> {
         self.inner
             .read()
             .expect("generation lock poisoned")
             .active
             .clone()
+    }
+
+    pub fn active_managed_tls_fallback_ready(&self) -> Option<bool> {
+        self.inner
+            .read()
+            .expect("generation lock poisoned")
+            .active
+            .as_ref()
+            .and_then(|snapshot| snapshot.managed_tls_fallback_ready)
     }
 
     pub fn prepared_snapshot(&self) -> Option<ProxySnapshot> {
@@ -398,6 +427,25 @@ impl Default for GenerationManager {
 }
 
 impl ProxySnapshot {
+    pub fn validate_reality_tls_targets(&self) -> Result<(), String> {
+        for listener in &self.listeners {
+            if let Some(target) = listener.reality_tls_target
+                && (!target.ip().is_loopback()
+                    || target.port() == 0
+                    || listener.reality.dest.parse::<std::net::SocketAddr>().ok() != Some(target)
+                    || self.listeners.iter().any(|ingress| {
+                        ingress
+                            .bind
+                            .parse::<std::net::SocketAddr>()
+                            .is_ok_and(|bind| bind.port() == target.port())
+                    }))
+            {
+                return Err("invalid managed REALITY TLS target".into());
+            }
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.protocol_version != CONTROL_PROTOCOL_VERSION {
             return Err(format!(
@@ -408,6 +456,7 @@ impl ProxySnapshot {
         if self.generation == 0 {
             return Err("generation must be non-zero".into());
         }
+        self.validate_reality_tls_targets()?;
         for listener in &self.listeners {
             if listener.bind.parse::<std::net::SocketAddr>().is_err() {
                 return Err(format!("invalid listener bind: {}", listener.bind));
@@ -466,6 +515,7 @@ mod tests {
             generation: 0,
             listeners: vec![],
             users: vec![],
+            managed_tls_fallback_ready: None,
         };
         assert!(snapshot.validate().is_err());
     }
@@ -482,10 +532,30 @@ mod tests {
         assert_eq!(decoded, request);
     }
 
+    #[test]
+    fn fallback_readiness_changes_only_when_generation_is_activated() {
+        let manager = GenerationManager::new();
+        let mut current = snapshot(1);
+        current.managed_tls_fallback_ready = Some(true);
+        manager.prepare(current).unwrap();
+        assert_eq!(manager.active_managed_tls_fallback_ready(), None);
+        manager.activate().unwrap();
+
+        let mut replacement = snapshot(2);
+        replacement.managed_tls_fallback_ready = Some(false);
+        manager.prepare(replacement).unwrap();
+        assert_eq!(manager.active_managed_tls_fallback_ready(), Some(true));
+        manager.activate().unwrap();
+        assert_eq!(manager.active_managed_tls_fallback_ready(), Some(false));
+        manager.rollback(2).unwrap();
+        assert_eq!(manager.active_managed_tls_fallback_ready(), Some(true));
+    }
+
     fn snapshot(generation: u64) -> ProxySnapshot {
         ProxySnapshot {
             protocol_version: CONTROL_PROTOCOL_VERSION,
             generation,
+            managed_tls_fallback_ready: None,
             listeners: vec![ListenerSnapshot {
                 bind: "127.0.0.1:443".into(),
                 path: "/xp-xhttp".into(),
@@ -497,10 +567,29 @@ mod tests {
                 },
                 xmux: XmuxSnapshot::default(),
                 fallbacks: Vec::new(),
+                reality_tls_target: None,
             }],
             users: vec![UserSnapshot {
                 uuid: uuid::Uuid::nil().to_string(),
             }],
+        }
+    }
+
+    #[test]
+    fn managed_reality_target_requires_matching_nonconflicting_loopback() {
+        for (dest, target, valid) in [
+            ("127.0.0.1:39043", "127.0.0.1:39043", true),
+            ("[::1]:39043", "[::1]:39043", true),
+            ("0.0.0.0:39043", "0.0.0.0:39043", false),
+            ("192.0.2.1:39043", "192.0.2.1:39043", false),
+            ("127.0.0.1:443", "127.0.0.1:443", false),
+            ("127.0.0.1:0", "127.0.0.1:0", false),
+            ("127.0.0.1:39043", "127.0.0.1:39044", false),
+        ] {
+            let mut snapshot = snapshot(1);
+            snapshot.listeners[0].reality.dest = dest.into();
+            snapshot.listeners[0].reality_tls_target = Some(target.parse().unwrap());
+            assert_eq!(snapshot.validate().is_ok(), valid, "{dest} -> {target}");
         }
     }
 

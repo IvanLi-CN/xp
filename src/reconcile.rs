@@ -2,10 +2,8 @@ use crate::{
     config::Config,
     credentials,
     domain::{Endpoint, EndpointKind, User},
-    protocol::{
-        Ss2022EndpointMeta, VlessIngressOwner, VlessRealityVisionTcpEndpointMeta,
-        vless_ingress_owner,
-    },
+    native_proxy_supervisor::is_native_endpoint,
+    protocol::{Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta},
     reverse_mesh::ReverseLinkRuntime,
     reverse_mesh_runtime::ReverseXrayReconciler,
     state::{JsonSnapshotStore, NodeUserEndpointMembership, membership_key, membership_xray_email},
@@ -97,6 +95,7 @@ pub struct ReconcileHandle {
     mesh_state_applied: Arc<AtomicBool>,
     mesh_gate_authoritative: Arc<AtomicBool>,
     snapshot_installing: Arc<AtomicBool>,
+    managed_canary_bind: Arc<std::sync::OnceLock<Option<std::net::SocketAddr>>>,
     mesh_gate_lock: Arc<RwLock<()>>,
     mesh_epoch_barrier: Arc<RwLock<()>>,
 }
@@ -109,6 +108,10 @@ impl Drop for SnapshotInstallAdmission {
     }
 }
 impl ReconcileHandle {
+    pub fn initialize_managed_canary(&self, bind: Option<std::net::SocketAddr>) {
+        let _ = self.managed_canary_bind.set(bind);
+    }
+
     pub fn request(&self, req: ReconcileRequest) {
         if let Some(tx) = &self.tx {
             let _ = tx.send(req);
@@ -269,6 +272,7 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         mesh_state_applied: Arc::new(AtomicBool::new(false)),
         mesh_gate_authoritative: Arc::new(AtomicBool::new(false)),
         snapshot_installing: Arc::new(AtomicBool::new(false)),
+        managed_canary_bind: Arc::default(),
         mesh_gate_lock: Arc::new(RwLock::new(())),
         mesh_epoch_barrier: Arc::new(RwLock::new(())),
     };
@@ -393,10 +397,6 @@ fn endpoint_kind_key(kind: &EndpointKind) -> &'static str {
         EndpointKind::VlessRealityVisionTcp => "vless_reality_vision_tcp",
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => "ss2022_2022_blake3_aes_128_gcm",
     }
-}
-fn is_native_endpoint(endpoint: &Endpoint) -> bool {
-    endpoint.kind == EndpointKind::VlessRealityVisionTcp
-        && vless_ingress_owner(&endpoint.meta) == VlessIngressOwner::Native
 }
 fn desired_inbound_hash(endpoint: &Endpoint) -> Option<String> {
     let mut meta = match endpoint.kind {
@@ -628,21 +628,19 @@ async fn reconcile_once_with_runtime(
     let reverse_mesh_enabled = config.reverse_mesh_enabled
         && cluster_mesh_enabled
         && crate::reverse_mesh::NATIVE_REVERSE_ENABLED;
-    let native_snapshot_inputs = (
-        snapshot.endpoints.clone(),
-        snapshot.users_by_id.clone(),
-        snapshot.memberships.clone(),
-    );
     // Native ingress is independent of the legacy Xray data plane. Publish first so a stopped
     // Xray cannot prevent xp-proxy from receiving the desired snapshot during a runtime handoff.
-    crate::native_proxy_supervisor::publish_reconciled_snapshot(
-        &local_node_id,
-        &native_snapshot_inputs.0,
-        &native_snapshot_inputs.1,
-        &native_snapshot_inputs.2,
-        cluster_ca_key_pem,
-    )
-    .await;
+    if let Some(canary_bind) = restart_handle.managed_canary_bind.get() {
+        crate::native_proxy_supervisor::publish_reconciled_snapshot(
+            &local_node_id,
+            &snapshot.endpoints,
+            &snapshot.users_by_id,
+            &snapshot.memberships,
+            cluster_ca_key_pem,
+            *canary_bind,
+        )
+        .await;
+    }
 
     let outcome = reconcile_snapshot(
         config.xray_api_addr,
@@ -887,6 +885,10 @@ async fn reconcile_snapshot(
         .keys()
         .map(|user_id| (user_id.clone(), true))
         .collect();
+
+    let native_runtime_selected = crate::native_proxy_supervisor::runtime_state_allows_proxy();
+    let is_native_endpoint =
+        |endpoint: &Endpoint| is_native_endpoint(endpoint, native_runtime_selected);
 
     // 1) Explicit requests first.
     for (tag, email) in pending.remove_users.iter() {

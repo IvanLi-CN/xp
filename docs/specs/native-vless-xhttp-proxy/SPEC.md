@@ -39,7 +39,7 @@ XP 的控制面继续拥有 Raft、节点、endpoint、用户和成员关系的�
 ### Goals
 
 - 将 XP 控制面与 `xp-proxy` 数据面隔离为两个独立 OS 进程和发布边界。
-- 用显式 capability 和显式 endpoint ingress owner 控制 native/Xray 选择。
+- 用显式 capability 和节点级 runtime 选择控制 native/Xray 归属。
 - 定义完整的 snapshot、generation、prepare、activate、drain、rollback、restart 和
   status 合同。
 - 在单端口切换时保持唯一 listener owner，失败时 fail closed，禁止双重绑定和
@@ -67,18 +67,15 @@ XP 是唯一的 endpoint/user 权威。XP 生成的 snapshot 必须完整描述�
 
 ### Data-plane ownership
 
-每个 VLESS XHTTP endpoint 必须明确记录 ingress owner：`xray` 或 `native`。历史 metadata
-缺少该字段时继续视为 `xray`，避免仅因升级而改变既有流量归属；`transport: xhttp` 只
-描述协议，不得隐式表示 native。
-只有 owner 为 `native` 且本节点通过 capability 和运行时就绪检查时，XP 才能把该 endpoint
-放入 native snapshot，并从 Xray desired config 中排除同一端口。
+宿主节点只运行一种入口模式，由节点级 runtime 状态显式选择 `xray` 或 `xp-proxy`。显式选择 `xp-proxy` 后，本机受支持的 VLESS XHTTP 端点统一进入
+native snapshot，并从 Xray desired config 中排除同一端口；不要求逐端点修改或迁移历史 `ingress_owner`。节点未选择 native 时，历史
+metadata 缺少该字段仍保持 Xray；`transport: xhttp` 本身不启用 native。native 服务仍须通过 capability 和运行时就绪检查。
 
 ### Usable ingress point
 
 一个 native endpoint 只有同时满足下列条件才算 usable ingress point：
 
-1. endpoint 的 ingress owner 是显式的 `native`，不是二进制存在、环境变量存在或
-   `transport: xhttp` 的推断结果。
+1. 节点通过显式 runtime 切换选择 `xp-proxy`，且该端点属于受支持的 XHTTP 入口；不能仅凭二进制存在或 `transport: xhttp` 判断可用。
 2. 本节点已广告专用 native capability，且 capability 的本地服务、control socket、协议
    版本和自测均通过。
 3. XP 已为当前 snapshot 取得有效的持久 generation，`xp-proxy` 已接受同一 generation，
@@ -103,8 +100,8 @@ XP 是唯一的 endpoint/user 权威。XP 生成的 snapshot 必须完整描述�
 - **REQ-CAPABILITY:** native capability 必须是独立、可验证、按节点声明的 capability。只有
   独立服务已安装、control socket 权限正确、协议版本兼容、loopback self-test 通过且当前
   运行时可被服务管理器确认 ready 后才可广告。安装资产不能自动启用 capability。
-- **REQ-OWNER:** endpoint 必须有显式 owner marker，取值为 `xray` 或 `native`。旧 metadata
-  缺失 marker 时按 `xray` 解释；owner mutation 需要条件快照，不能被旧 Web/API 请求静默覆盖。
+- **REQ-OWNER:** 节点级显式 runtime 状态决定受支持入口的实际 owner；Xray config 与 native snapshot 必须使用同一选择。历史
+  endpoint marker 不得阻止已授权的节点切换，也不得由普通 Web/API 更新静默改变节点 runtime。
 - **REQ-INGRESS-READY:** 对外 usable 的判定必须满足本文件的六项条件；任何一项未知或
   失败都报告 not-ready/failed，并保持端口唯一 owner。
 
@@ -162,13 +159,11 @@ XP 是唯一的 endpoint/user 权威。XP 生成的 snapshot 必须完整描述�
 - **REQ-SINGLE-OWNER:** 一个 endpoint port 在任一时刻只能有一个 owner。XP 在 Xray desired
   config 和 native snapshot 中必须使用同一份 owner 事实；发现冲突时拒绝 mutation/reconcile，
   不得依靠启动顺序或 bind race 解决。
-- **REQ-SWITCH-TO-NATIVE:** Xray -> native 必须按以下顺序完成：验证 endpoint owner、capability、
-  port 和旧 generation；prepare native candidate；让 Xray 删除该 endpoint 并确认端口释放；
-  activate native；确认 active generation 和握手 self-test；最后提交 owner 已切换。任一步失败，
-  native 不得接受新连接。
-- **REQ-SWITCH-TO-XRAY:** native -> Xray 必须先停止新 native session，进入 drain 并等待有界
-  deadline；确认 native listener 释放端口后再写入/启动 Xray inbound，并确认 Xray ready；成功后
-  才提交 owner 为 xray。
+- **REQ-SWITCH-TO-NATIVE:** Xray -> native 是节点级操作：验证 capability、配置、端口和旧 generation；停止 XP
+  及旧运行时并确认释放入口，再启动候选服务，由 XP 发布和激活 snapshot。只有 active generation、listener 和 self-test 均就绪才提交节点
+  runtime 为 active；任一步失败不得报告切换成功，不提交逐端点 owner mutation。
+- **REQ-SWITCH-TO-XRAY:** native -> Xray 是节点级操作：停止 XP 及 native 运行时，确认 listener 释放后再启动 Xray；确认 Xray
+  的实际 API 和入口就绪后恢复 XP 并提交节点 runtime 为 active。
 - **REQ-ROLLBACK-ORDER:** 切换或升级失败时，回滚遵守“先停止当前 owner、确认端口释放、再恢复
   目标 owner、最后确认 ready”的顺序。恢复目标不能 ready 时，endpoint 保持 stopped/failed，
   不得同时启动另一 owner 争抢同一端口。
@@ -177,6 +172,23 @@ XP 是唯一的 endpoint/user 权威。XP 生成的 snapshot 必须完整描述�
   rollback 必须由 XP 的显式协调操作完成。
 
 ### Protocol and fallback contract
+
+托管默认 XHTTP 端点启用 HTTPS canary 时，XP 发布可选的 `reality_tls_target`。
+目标必须是与 `reality.dest` 一致的本机 canary loopback 地址和非零端口，
+且不得指回任何接入端口。合法但未通过 REALITY 认证的 TLS ClientHello 和后续数据
+透传给该目标，由 canary 终止 TLS 并处理 HTTP 路由。SNI 和 Host 不参与目标选择。
+拨号失败关闭连接；有认证的代理流量与明文流量保留原路径。
+
+`canary_upstream` 是 canary 收到 HTTP 请求后的可选上游，不决定 TLS 路由是否存在。
+XP 必须在同一 control v2 连接的 `Status` 响应中确认 `reality_tls_fallback_v1`，
+才发送含该目标的 `Prepare` 请求。旧 snapshot 仍可读取。
+若托管回落目标无效或与本机 canary 不符，XP 记录冲突并拒绝发布新快照。旧代次继续生效。
+
+XP 在快照中写入 `managed_tls_fallback_ready`，状态响应只报告已激活代次的值。
+
+没有托管端点时回落视为就绪。任一托管 XHTTP 端点缺少有效目标时，回落未就绪。
+
+切换或升级须确认快照已激活且回落已就绪。回滚仅允许旧版本省略字段，明确未就绪仍失败。
 
 - **REQ-VLESS:** 入站和出站只承诺 TCP stream 与 `encryption: none` VLESS；用户认证失败、
   framing 错误或非法 destination 必须 fail closed。

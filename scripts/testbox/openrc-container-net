@@ -1,0 +1,14 @@
+#!/sbin/openrc-run
+
+# Docker has already configured networking for this test container.
+depend() {
+    provide net
+}
+
+start() {
+    return 0
+}
+
+stop() {
+    return 0
+}
