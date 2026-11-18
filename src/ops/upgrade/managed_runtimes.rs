@@ -1,12 +1,12 @@
 use super::failure::rollback_xp_after_runtime_failure;
+use super::xray_readiness::restart_upgrade_xray;
 use super::*;
 use crate::ops::init::{backfill_low_memory_runtime_defaults, write_static_xray_config};
 use crate::ops::runtime::{RuntimeTarget, expects_native_snapshot, upgrade_runtime_target};
 use crate::ops::runtime_activation::{
-    reload_systemd_units, restart_cloudflared_service, restart_xray_service,
-    service_commands_are_disabled, start_xp_proxy_service, start_xp_service, stop_xp_proxy_service,
-    stop_xp_service, stop_xray_service_named, wait_for_xp_proxy_snapshot,
-    xp_proxy_service_installed,
+    reload_systemd_units, restart_cloudflared_service, service_commands_are_disabled,
+    start_xp_proxy_service, start_xp_service, stop_xp_proxy_service, stop_xp_service,
+    stop_xray_service_named, wait_for_xp_proxy_snapshot, xp_proxy_service_installed,
 };
 use crate::ops::upgrade_artifacts::managed_cloudflared_dest;
 
@@ -148,9 +148,10 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
             "unable to stop xray before activating xp-proxy",
         ));
     }
-    if let Err(err) = reconcile_managed_runtime_defaults(paths, target) {
+    if let Err(err) = reconcile_managed_runtime_defaults(paths, target).await {
         let runtime_rollback =
-            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults, target);
+            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults, target)
+                .await;
         let restart_xp = runtime_rollback.is_ok();
         let err = retain_original_error(err, runtime_rollback);
         return Err(finish_runtime_failure(
@@ -178,7 +179,8 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
                 retain_original_error(ExitError::new(7, activation_error), Err(error))
             })?;
         let runtime_rollback =
-            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults, target);
+            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults, target)
+                .await;
         let restart_xp = runtime_rollback.is_ok();
         let err = retain_original_error(ExitError::new(7, activation_error), runtime_rollback);
         return Err(finish_runtime_failure(
@@ -257,7 +259,7 @@ fn retain_original_error(original: ExitError, rollback: Result<(), ExitError>) -
     }
 }
 
-fn rollback_runtime_binaries_and_services(
+async fn rollback_runtime_binaries_and_services(
     paths: &Paths,
     backups: &[RuntimeBinaryBackup],
     runtime_defaults: &RuntimeDefaultsBackup,
@@ -276,7 +278,7 @@ fn rollback_runtime_binaries_and_services(
             "rollback_failed: restored runtime defaults but systemd daemon-reload failed",
         ));
     }
-    if restart_selected_runtime(paths, target) {
+    if restart_selected_runtime(paths, target).await {
         Ok(())
     } else {
         Err(ExitError::new(
@@ -426,14 +428,10 @@ fn stop_upgrade_xray(paths: &Paths) -> bool {
     )
 }
 
-fn restart_selected_runtime(paths: &Paths, target: RuntimeTarget) -> bool {
+async fn restart_selected_runtime(paths: &Paths, target: RuntimeTarget) -> bool {
     match target {
         RuntimeTarget::Xray => {
-            restart_xray_service(
-                paths,
-                &read_xray_systemd_unit(paths),
-                &read_xray_openrc_service(paths),
-            ) && restart_cloudflared_service(paths)
+            restart_upgrade_xray(paths).await && restart_cloudflared_service(paths)
         }
         RuntimeTarget::XpProxy => {
             stop_upgrade_xray(paths)
@@ -443,7 +441,7 @@ fn restart_selected_runtime(paths: &Paths, target: RuntimeTarget) -> bool {
     }
 }
 
-fn reconcile_managed_runtime_defaults(
+async fn reconcile_managed_runtime_defaults(
     paths: &Paths,
     target: RuntimeTarget,
 ) -> Result<(), ExitError> {
@@ -489,11 +487,7 @@ fn reconcile_managed_runtime_defaults(
         return Err(err);
     }
 
-    if restart_xray_service(
-        paths,
-        &read_xray_systemd_unit(paths),
-        &read_xray_openrc_service(paths),
-    ) {
+    if restart_upgrade_xray(paths).await {
         if !restart_cloudflared_service(paths) {
             if had_old {
                 fs::copy(&backup, &config_path).map_err(|e| {
@@ -502,26 +496,11 @@ fn reconcile_managed_runtime_defaults(
             } else {
                 let _ = fs::remove_file(&config_path);
             }
-            let rollback_restarted = restart_xray_service(
-                paths,
-                &read_xray_systemd_unit(paths),
-                &read_xray_openrc_service(paths),
-            );
             let _ = fs::remove_file(&backup);
-            return if rollback_restarted {
-                Err(ExitError::new(
-                    7,
-                    "service_error: cloudflared restart failed; restored previous xray config",
-                ))
-            } else {
-                Err(ExitError::new(
-                    8,
-                    concat!(
-                        "rollback_failed: cloudflared restart failed; restored previous xray ",
-                        "config; xray rollback restart failed",
-                    ),
-                ))
-            };
+            return Err(ExitError::new(
+                7,
+                "service_error: cloudflared restart failed; restored previous xray config",
+            ));
         }
         if had_old {
             let _ = fs::remove_file(&backup);
@@ -531,25 +510,19 @@ fn reconcile_managed_runtime_defaults(
 
     if !had_old {
         let _ = fs::remove_file(&config_path);
-        return Err(ExitError::new(7, "service_error: xray restart failed"));
+        return Err(ExitError::new(
+            7,
+            "service_error: xray restart failed or its API did not become ready",
+        ));
     }
 
     fs::copy(&backup, &config_path)
         .map_err(|e| ExitError::new(8, format!("rollback_failed: restore xray config: {e}")))?;
-    let rollback_restarted = restart_xray_service(
-        paths,
-        &read_xray_systemd_unit(paths),
-        &read_xray_openrc_service(paths),
-    );
     let _ = fs::remove_file(&backup);
 
     Err(ExitError::new(
         7,
-        if rollback_restarted {
-            "service_error: xray restart failed; restored previous config"
-        } else {
-            "service_error: xray restart failed; restored previous config; rollback restart failed"
-        },
+        "service_error: xray did not become ready; restored previous config",
     ))
 }
 
@@ -687,7 +660,7 @@ pub(super) fn rollback_runtime_binaries(backups: &[RuntimeBinaryBackup]) -> Resu
     Ok(())
 }
 
-pub(super) fn rollback_complete_phase_binaries(
+pub(super) async fn rollback_complete_phase_binaries(
     paths: &Paths,
     data_dir: &Path,
     backups: &[RuntimeBinaryBackup],
@@ -715,7 +688,7 @@ pub(super) fn rollback_complete_phase_binaries(
         ));
     }
     rollback_runtime_binaries(backups)?;
-    if !restart_selected_runtime(paths, target) {
+    if !restart_selected_runtime(paths, target).await {
         return Err(ExitError::new(
             8,
             "rollback_failed: restored service binaries but service restart failed",
@@ -762,8 +735,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn runtime_rollback_restores_both_binaries() {
+    #[tokio::test]
+    async fn runtime_rollback_restores_both_binaries() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
         let bin = tmp.path().join("usr/local/bin");
@@ -792,6 +765,7 @@ mod tests {
             &RuntimeDefaultsBackup { files: Vec::new() },
             RuntimeTarget::Xray,
         )
+        .await
         .unwrap();
 
         assert_eq!(fs::read(xray).unwrap(), b"old-xray");
@@ -813,8 +787,8 @@ mod tests {
         assert!(result.message.contains("runtime rollback failed"));
     }
 
-    #[test]
-    fn runtime_defaults_rollback_restores_pre_upgrade_files() {
+    #[tokio::test]
+    async fn runtime_defaults_rollback_restores_pre_upgrade_files() {
         use crate::ops::init::backfill_low_memory_runtime_defaults;
 
         let tmp = tempfile::tempdir().unwrap();
@@ -881,6 +855,7 @@ mod tests {
         );
 
         rollback_runtime_binaries_and_services(&paths, &[], &snapshot, RuntimeTarget::Xray)
+            .await
             .unwrap();
 
         assert_eq!(

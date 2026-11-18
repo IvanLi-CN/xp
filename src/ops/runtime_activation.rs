@@ -290,7 +290,7 @@ fn parse_openrc_service_state(output: &str) -> Option<OpenrcServiceState> {
     })
 }
 
-fn service_ready_timeout() -> Duration {
+pub(super) fn service_ready_timeout() -> Duration {
     if cfg!(debug_assertions)
         && let Ok(timeout_ms) = std::env::var("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS")
         && let Ok(timeout_ms) = timeout_ms.parse::<u64>()

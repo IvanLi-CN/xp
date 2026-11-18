@@ -63,15 +63,15 @@ pub(super) fn resume_with_upgraded_xp_ops(
     ))
 }
 
-pub(super) fn finish_reexeced_upgrade(
+pub(super) async fn finish_reexeced_upgrade(
     paths: &Paths,
     data_dir: &Path,
     resume: &ResumeContext,
 ) -> Result<(), ExitError> {
-    finish_reexeced_upgrade_with_cleanup(paths, data_dir, resume, remove_transaction_backups)
+    finish_reexeced_upgrade_with_cleanup(paths, data_dir, resume, remove_transaction_backups).await
 }
 
-fn finish_reexeced_upgrade_with_cleanup<F>(
+async fn finish_reexeced_upgrade_with_cleanup<F>(
     paths: &Paths,
     data_dir: &Path,
     resume: &ResumeContext,
@@ -88,7 +88,8 @@ where
             data_dir,
             resume,
             ExitError::new(7, format!("service_error: prepare upgrade status: {error}")),
-        );
+        )
+        .await;
     }
     if let Err(error) = cleanup_managed_artifacts_excluding(
         paths,
@@ -103,7 +104,8 @@ where
                 7,
                 format!("service_error: cleanup upgrade artifacts: {error}"),
             ),
-        );
+        )
+        .await;
     }
     if let Err(error) =
         super::failure::persist_committed_cleanup_guard(data_dir, &resume.release.tag)
@@ -116,7 +118,8 @@ where
                 7,
                 format!("service_error: persist backup cleanup guard: {error}"),
             ),
-        );
+        )
+        .await;
     }
     // Activation is complete. Unlink is irreversible across multiple files; never roll
     // installed binaries back through backups that may already have been removed.
@@ -150,7 +153,7 @@ where
     Ok(())
 }
 
-fn recover_after_complete_phase_failure(
+async fn recover_after_complete_phase_failure(
     paths: &Paths,
     data_dir: &Path,
     resume: &ResumeContext,
@@ -160,7 +163,9 @@ fn recover_after_complete_phase_failure(
         paths,
         &paths.map_abs(data_dir),
         &resume.service_backups,
-    ) {
+    )
+    .await
+    {
         Ok(()) => error,
         Err(rollback) => ExitError::new(
             rollback.code,
@@ -364,8 +369,8 @@ mod tests {
         assert_eq!(std::fs::read(&target).unwrap(), b"unrelated");
     }
 
-    #[test]
-    fn committed_cleanup_failure_never_rolls_back_ready_binaries() {
+    #[tokio::test]
+    async fn committed_cleanup_failure_never_rolls_back_ready_binaries() {
         const CHILD: &str = "XP_OPS_COMMITTED_CLEANUP_TEST_CHILD";
         if std::env::var_os(CHILD).is_none() {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
@@ -418,6 +423,7 @@ mod tests {
                 std::fs::remove_file(&ops_backup)?;
                 Err(std::io::Error::other("injected later unlink failure"))
             })
+            .await
             .unwrap_err();
         assert!(
             error
@@ -444,6 +450,7 @@ mod tests {
             super::finish_reexeced_upgrade_with_cleanup(&paths, tmp.path(), &resume, |_| {
                 panic!("must not unlink backups before the cleanup guard is durable")
             })
+            .await
             .unwrap_err();
         assert!(error.message.contains("persist backup cleanup guard"));
         assert_eq!(std::fs::read(&xp).unwrap(), b"xp-old");
