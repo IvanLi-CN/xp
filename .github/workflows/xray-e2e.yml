@@ -74,12 +74,32 @@ jobs:
           fixture="$(mktemp -d)"
           trap 'rm -rf "$fixture"' EXIT
           gh release download v3.48.15 --repo "$GITHUB_REPOSITORY" \
-            --pattern xray-linux-x86_64 --dir "$fixture"
+            --pattern xray-linux-x86_64 --pattern cloudflared-linux-x86_64 \
+            --pattern checksums.txt --dir "$fixture"
           checksum="$(jq -er '.xray_sha256' scripts/perf/xp-proxy/config.json)"
           printf '%s  %s\n' "$checksum" "$fixture/xray-linux-x86_64" | sha256sum --check
-          chmod +x "$fixture/xray-linux-x86_64"
-          cargo build --locked -p xp -p xp-proxy --bin xp --bin xp-proxy
+          (cd "$fixture" && sha256sum --check --ignore-missing checksums.txt)
+          chmod +x "$fixture/"*-linux-x86_64
+          cargo build --locked -p xp -p xp-proxy --bin xp --bin xp-ops --bin xp-proxy
+          for bin in xp xp-ops xp-proxy; do
+            install -m 0755 "${CARGO_TARGET_DIR:-target}/debug/$bin" "$fixture/$bin"
+          done
           python3 scripts/testbox/native-reality-canary.py \
-            "${CARGO_TARGET_DIR:-target}/debug/xp" \
-            "${CARGO_TARGET_DIR:-target}/debug/xp-proxy" \
+            "$fixture/xp" "$fixture/xp-proxy" \
             "$fixture/xray-linux-x86_64"
+          sha256sum "$fixture/xp" "$fixture/xp-ops" "$fixture/xp-proxy"
+          sudo env XP_DISPOSABLE_CI_HOST=1 \
+            python3 scripts/testbox/native-reality-host.py systemd "$fixture"
+          docker run --rm \
+            --env XP_DISPOSABLE_CI_HOST=1 \
+            --volume "$fixture:/fixture:ro" \
+            --volume "$PWD/scripts/testbox/native-reality-host.py:/probe.py:ro" \
+            ubuntu:24.04 bash -euc '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends \
+                openrc bash curl iproute2 openssl python3
+              mkdir -p /run/openrc
+              touch /run/openrc/softlevel
+              python3 /probe.py openrc /fixture
+            '
