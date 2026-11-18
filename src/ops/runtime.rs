@@ -59,6 +59,17 @@ pub(super) fn expects_native_snapshot(paths: &Paths) -> bool {
     })
 }
 
+pub(super) fn upgrade_runtime_target(paths: &Paths) -> Result<RuntimeTarget, ExitError> {
+    let state = load_state(paths)?;
+    if state.state != RuntimeStateKind::Active {
+        return Err(ExitError::new(
+            7,
+            "service_error: ingress runtime must be active before upgrade",
+        ));
+    }
+    Ok(state.runtime)
+}
+
 fn save_state(paths: &Paths, state: &RuntimeState) -> Result<(), ExitError> {
     let content = serde_json::to_string_pretty(state)
         .map_err(|error| ExitError::new(5, format!("runtime_state_encode_failed: {error}")))?;

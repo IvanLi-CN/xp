@@ -1,11 +1,12 @@
 use super::failure::rollback_xp_after_runtime_failure;
 use super::*;
 use crate::ops::init::{backfill_low_memory_runtime_defaults, write_static_xray_config};
-use crate::ops::runtime::expects_native_snapshot;
+use crate::ops::runtime::{RuntimeTarget, expects_native_snapshot, upgrade_runtime_target};
 use crate::ops::runtime_activation::{
     reload_systemd_units, restart_cloudflared_service, restart_xray_service,
     service_commands_are_disabled, start_xp_proxy_service, start_xp_service, stop_xp_proxy_service,
-    stop_xp_service, wait_for_xp_proxy_snapshot,
+    stop_xp_service, stop_xray_service_named, wait_for_xp_proxy_snapshot,
+    xp_proxy_service_installed,
 };
 use crate::ops::upgrade_artifacts::managed_cloudflared_dest;
 
@@ -68,6 +69,12 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
     data_dir: &Path,
     rollback_xp_on_failure: bool,
 ) -> Result<Vec<RuntimeBinaryBackup>, ExitError> {
+    let target = upgrade_runtime_target(paths).map_err(|error| {
+        unrestored_transaction_backup_error(format!(
+            "cannot confirm ingress runtime: {}",
+            error.message
+        ))
+    })?;
     let backups = match upgrade_managed_runtime_binaries(paths, release, checksums, platform).await
     {
         Ok(backups) => backups,
@@ -136,9 +143,14 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
         )
         .expect_err("runtime failure helper must return an error"));
     }
-    if let Err(err) = reconcile_static_xray_config_and_restart(paths) {
+    if target == RuntimeTarget::XpProxy && !stop_upgrade_xray(paths) {
+        return Err(unrestored_transaction_backup_error(
+            "unable to stop xray before activating xp-proxy",
+        ));
+    }
+    if let Err(err) = reconcile_managed_runtime_defaults(paths, target) {
         let runtime_rollback =
-            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults);
+            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults, target);
         let restart_xp = runtime_rollback.is_ok();
         let err = retain_original_error(err, runtime_rollback);
         return Err(finish_runtime_failure(
@@ -151,23 +163,22 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
         )
         .expect_err("runtime failure helper must return an error"));
     }
-    let activation_error = if !start_xp_proxy_service(paths) {
+    let activation_error = if target == RuntimeTarget::XpProxy && !start_selected_proxy(paths) {
         Some("service_error: xp-proxy control socket did not become ready")
     } else if !start_xp_service(paths) {
         Some("service_error: start xp after managed runtime activation failed")
-    } else if expects_native_snapshot(paths) && !wait_for_xp_proxy_snapshot(paths) {
+    } else if target == RuntimeTarget::XpProxy && !wait_for_xp_proxy_snapshot(paths) {
         Some("service_error: XP did not activate an xp-proxy snapshot after upgrade")
     } else {
         None
     };
     if let Some(activation_error) = activation_error {
-        let runtime_rollback = if stop_xp_service(paths) {
-            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults)
-        } else {
-            Err(unrestored_transaction_backup_error(
-                "stop xp before runtime rollback failed",
-            ))
-        };
+        confirm_xp_stopped_for_rollback(|| stop_xp_service(paths), || stop_xp_proxy_service(paths))
+            .map_err(|error| {
+                retain_original_error(ExitError::new(7, activation_error), Err(error))
+            })?;
+        let runtime_rollback =
+            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults, target);
         let restart_xp = runtime_rollback.is_ok();
         let err = retain_original_error(ExitError::new(7, activation_error), runtime_rollback);
         return Err(finish_runtime_failure(
@@ -181,6 +192,21 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
         .expect_err("runtime failure helper must return an error"));
     }
     Ok(backups)
+}
+
+fn confirm_xp_stopped_for_rollback(
+    stop_xp: impl FnOnce() -> bool,
+    stop_proxy: impl FnOnce() -> bool,
+) -> Result<(), ExitError> {
+    if stop_xp() {
+        return Ok(());
+    }
+    let detail = if stop_proxy() {
+        "stop xp before runtime rollback failed; xp-proxy stopped"
+    } else {
+        "stop xp before runtime rollback failed; xp-proxy stop could not be confirmed"
+    };
+    Err(unrestored_transaction_backup_error(detail))
 }
 
 fn finish_runtime_failure(
@@ -235,6 +261,7 @@ fn rollback_runtime_binaries_and_services(
     paths: &Paths,
     backups: &[RuntimeBinaryBackup],
     runtime_defaults: &RuntimeDefaultsBackup,
+    target: RuntimeTarget,
 ) -> Result<(), ExitError> {
     if !stop_xp_proxy_service(paths) {
         return Err(unrestored_transaction_backup_error(
@@ -249,14 +276,7 @@ fn rollback_runtime_binaries_and_services(
             "rollback_failed: restored runtime defaults but systemd daemon-reload failed",
         ));
     }
-    let xray_ok = restart_xray_service(
-        paths,
-        &read_xray_systemd_unit(paths),
-        &read_xray_openrc_service(paths),
-    );
-    let cloudflared_ok = restart_cloudflared_service(paths);
-    let proxy_ok = start_xp_proxy_service(paths);
-    if xray_ok && cloudflared_ok && proxy_ok {
+    if restart_selected_runtime(paths, target) {
         Ok(())
     } else {
         Err(ExitError::new(
@@ -394,13 +414,55 @@ fn restore_runtime_defaults(snapshot: &RuntimeDefaultsBackup) -> Result<(), Exit
     Ok(())
 }
 
-fn reconcile_static_xray_config_and_restart(paths: &Paths) -> Result<(), ExitError> {
+fn start_selected_proxy(paths: &Paths) -> bool {
+    xp_proxy_service_installed(paths) && start_xp_proxy_service(paths)
+}
+
+fn stop_upgrade_xray(paths: &Paths) -> bool {
+    stop_xray_service_named(
+        paths,
+        &read_xray_systemd_unit(paths),
+        &read_xray_openrc_service(paths),
+    )
+}
+
+fn restart_selected_runtime(paths: &Paths, target: RuntimeTarget) -> bool {
+    match target {
+        RuntimeTarget::Xray => {
+            restart_xray_service(
+                paths,
+                &read_xray_systemd_unit(paths),
+                &read_xray_openrc_service(paths),
+            ) && restart_cloudflared_service(paths)
+        }
+        RuntimeTarget::XpProxy => {
+            stop_upgrade_xray(paths)
+                && restart_cloudflared_service(paths)
+                && start_selected_proxy(paths)
+        }
+    }
+}
+
+fn reconcile_managed_runtime_defaults(
+    paths: &Paths,
+    target: RuntimeTarget,
+) -> Result<(), ExitError> {
     backfill_low_memory_runtime_defaults(paths)?;
     if !reload_systemd_units(paths) {
         return Err(ExitError::new(
             7,
             "service_error: systemd daemon-reload failed",
         ));
+    }
+    if target == RuntimeTarget::XpProxy {
+        return if restart_cloudflared_service(paths) {
+            Ok(())
+        } else {
+            Err(ExitError::new(
+                7,
+                "service_error: cloudflared restart failed",
+            ))
+        };
     }
     let config_path = paths.etc_xray_config();
     let backup = backup_path(&config_path);
@@ -630,6 +692,12 @@ pub(super) fn rollback_complete_phase_binaries(
     data_dir: &Path,
     backups: &[RuntimeBinaryBackup],
 ) -> Result<(), ExitError> {
+    let target = upgrade_runtime_target(paths).map_err(|error| {
+        unrestored_transaction_backup_error(format!(
+            "cannot confirm ingress runtime: {}",
+            error.message
+        ))
+    })?;
     if let Some(backup) = backups
         .iter()
         .find(|item| item.dest == paths.usr_local_bin_xp())
@@ -637,32 +705,35 @@ pub(super) fn rollback_complete_phase_binaries(
     {
         super::history_compatibility::ensure_rollback(data_dir, backup)?;
     }
+    if service_commands_are_disabled(paths) {
+        return rollback_runtime_binaries(backups);
+    }
+    confirm_xp_stopped_for_rollback(|| stop_xp_service(paths), || stop_xp_proxy_service(paths))?;
+    if !stop_xp_proxy_service(paths) {
+        return Err(unrestored_transaction_backup_error(
+            "unable to stop xp-proxy before restoring service binaries",
+        ));
+    }
     rollback_runtime_binaries(backups)?;
-    if !service_commands_are_disabled(paths) {
-        if !stop_xp_service(paths) {
-            return Err(ExitError::new(
-                8,
-                "rollback_failed: stop xp before restored runtime activation failed",
-            ));
-        }
-        let xray_ok = restart_xray_service(
-            paths,
-            &read_xray_systemd_unit(paths),
-            &read_xray_openrc_service(paths),
-        );
-        let cloudflared_ok = restart_cloudflared_service(paths);
-        if !(xray_ok && cloudflared_ok) {
-            return Err(ExitError::new(
-                8,
-                "rollback_failed: restored service binaries but service restart failed",
-            ));
-        }
-        if !start_xp_service(paths) {
-            return Err(ExitError::new(
-                8,
-                "rollback_failed: start xp after restored runtime activation failed",
-            ));
-        }
+    if !restart_selected_runtime(paths, target) {
+        return Err(ExitError::new(
+            8,
+            "rollback_failed: restored service binaries but service restart failed",
+        ));
+    }
+    if !start_xp_service(paths) {
+        return Err(ExitError::new(
+            8,
+            "rollback_failed: start xp after restored runtime activation failed",
+        ));
+    }
+    if target == RuntimeTarget::XpProxy && !wait_for_xp_proxy_snapshot(paths) {
+        let _ = stop_xp_service(paths);
+        let _ = stop_xp_proxy_service(paths);
+        return Err(ExitError::new(
+            8,
+            "rollback_failed: restored xp-proxy snapshot did not become active",
+        ));
     }
     Ok(())
 }
@@ -670,6 +741,26 @@ pub(super) fn rollback_complete_phase_binaries(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xp_stop_failure_isolates_proxy_and_preserves_upgrade_backups() {
+        for proxy_stopped in [true, false] {
+            let tmp = tempfile::tempdir().unwrap();
+            let paths = Paths::new(tmp.path().to_path_buf());
+            let backup = paths.usr_local_bin_xp().with_extension("bak.123");
+            fs::create_dir_all(backup.parent().unwrap()).unwrap();
+            fs::write(&backup, b"previous binary").unwrap();
+            let error = confirm_xp_stopped_for_rollback(|| false, || proxy_stopped).unwrap_err();
+            let result = cleanup_after_upgrade_failure(&paths, &[], error);
+            assert_eq!(result.code, 8);
+            assert!(result.message.contains(if proxy_stopped {
+                "xp-proxy stopped"
+            } else {
+                "xp-proxy stop could not be confirmed"
+            }));
+            assert_eq!(fs::read(&backup).unwrap(), b"previous binary");
+        }
+    }
 
     #[test]
     fn runtime_rollback_restores_both_binaries() {
@@ -699,6 +790,7 @@ mod tests {
                 },
             ],
             &RuntimeDefaultsBackup { files: Vec::new() },
+            RuntimeTarget::Xray,
         )
         .unwrap();
 
@@ -788,7 +880,8 @@ mod tests {
                 .contains("--token-file")
         );
 
-        rollback_runtime_binaries_and_services(&paths, &[], &snapshot).unwrap();
+        rollback_runtime_binaries_and_services(&paths, &[], &snapshot, RuntimeTarget::Xray)
+            .unwrap();
 
         assert_eq!(
             fs::read_to_string(&cloudflared_drop_in).unwrap(),

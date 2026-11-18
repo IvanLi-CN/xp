@@ -397,6 +397,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         ));
     }
     let phase_result = async {
+        super::runtime::upgrade_runtime_target(&paths)?;
         upgrade_xp(
             &paths,
             &release,

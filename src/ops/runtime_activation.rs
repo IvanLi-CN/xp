@@ -47,7 +47,15 @@ pub fn start_xray_service(paths: &Paths) -> bool {
 }
 
 pub fn stop_xray_service(paths: &Paths) -> bool {
-    stop_service(paths, "xray.service", "xray")
+    stop_xray_service_named(paths, "xray.service", "xray")
+}
+
+pub(super) fn stop_xray_service_named(
+    paths: &Paths,
+    systemd_unit: &str,
+    openrc_service: &str,
+) -> bool {
+    stop_service(paths, systemd_unit, openrc_service)
 }
 
 pub fn restart_xp_service(paths: &Paths) -> bool {
