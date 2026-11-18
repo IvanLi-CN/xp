@@ -187,6 +187,7 @@ XP 是唯一的 endpoint/user 权威。XP 生成的 snapshot 必须完整描述�
 `canary_upstream` 是 canary 收到 HTTP 请求后的可选上游，不决定 TLS 路由是否存在。
 XP 必须在同一 control v2 连接的 `Status` 响应中确认 `reality_tls_fallback_v1`，
 才发送含该目标的 `Prepare` 请求。旧 snapshot 仍可读取。
+若某个端点的 `reality.dest` 与本机已就绪的 canary 地址不符，XP 记录该端点并省略其 TLS 回落目标；其他端点和用户权限继续随快照更新。
 
 - **REQ-VLESS:** 入站和出站只承诺 TCP stream 与 `encryption: none` VLESS；用户认证失败、
   framing 错误或非法 destination 必须 fail closed。

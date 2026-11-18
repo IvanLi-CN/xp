@@ -1,10 +1,11 @@
 use super::failure::rollback_xp_after_runtime_failure;
 use super::*;
 use crate::ops::init::{backfill_low_memory_runtime_defaults, write_static_xray_config};
+use crate::ops::runtime::expects_native_snapshot;
 use crate::ops::runtime_activation::{
     reload_systemd_units, restart_cloudflared_service, restart_xray_service,
     service_commands_are_disabled, start_xp_proxy_service, start_xp_service, stop_xp_proxy_service,
-    stop_xp_service,
+    stop_xp_service, wait_for_xp_proxy_snapshot,
 };
 use crate::ops::upgrade_artifacts::managed_cloudflared_dest;
 
@@ -116,12 +117,14 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
         .expect_err("runtime failure helper must return an error"));
     }
     if !stop_xp_proxy_service(paths) {
+        let runtime_rollback = rollback_runtime_binaries(&backups);
+        let restart_xp = runtime_rollback.is_ok();
         let err = retain_original_error(
             ExitError::new(
                 7,
                 "service_error: stop xp-proxy before managed runtime activation failed",
             ),
-            rollback_runtime_binaries(&backups),
+            runtime_rollback,
         );
         return Err(finish_runtime_failure(
             paths,
@@ -129,7 +132,7 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
             data_dir,
             err,
             rollback_xp_on_failure,
-            true,
+            restart_xp,
         )
         .expect_err("runtime failure helper must return an error"));
     }
@@ -148,23 +151,25 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
         )
         .expect_err("runtime failure helper must return an error"));
     }
-    if !start_xp_proxy_service(paths) || !start_xp_service(paths) {
+    let activation_error = if !start_xp_proxy_service(paths) {
+        Some("service_error: xp-proxy control socket did not become ready")
+    } else if !start_xp_service(paths) {
+        Some("service_error: start xp after managed runtime activation failed")
+    } else if expects_native_snapshot(paths) && !wait_for_xp_proxy_snapshot(paths) {
+        Some("service_error: XP did not activate an xp-proxy snapshot after upgrade")
+    } else {
+        None
+    };
+    if let Some(activation_error) = activation_error {
         let runtime_rollback = if stop_xp_service(paths) {
             rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults)
         } else {
-            Err(ExitError::new(
-                8,
-                "rollback_failed: stop xp before runtime rollback failed",
+            Err(unrestored_transaction_backup_error(
+                "stop xp before runtime rollback failed",
             ))
         };
         let restart_xp = runtime_rollback.is_ok();
-        let err = retain_original_error(
-            ExitError::new(
-                7,
-                "service_error: start xp after managed runtime activation failed",
-            ),
-            runtime_rollback,
-        );
+        let err = retain_original_error(ExitError::new(7, activation_error), runtime_rollback);
         return Err(finish_runtime_failure(
             paths,
             xp_backup,
@@ -186,7 +191,7 @@ fn finish_runtime_failure(
     rollback_xp_on_failure: bool,
     restart_xp: bool,
 ) -> Result<(), ExitError> {
-    if rollback_xp_on_failure {
+    let outcome = if rollback_xp_on_failure {
         rollback_xp_after_runtime_failure(paths, data_dir, xp_backup, error, restart_xp)
     } else if restart_xp && !start_xp_service(paths) {
         Err(retain_original_error(
@@ -198,7 +203,19 @@ fn finish_runtime_failure(
         ))
     } else {
         Err(error)
+    };
+    if restart_xp && expects_native_snapshot(paths) && !wait_for_xp_proxy_snapshot(paths) {
+        let _ = stop_xp_service(paths);
+        let _ = stop_xp_proxy_service(paths);
+        return Err(retain_original_error(
+            outcome.expect_err("runtime failure helper must return an error"),
+            Err(ExitError::new(
+                8,
+                "rollback_failed: restored xp-proxy snapshot did not become active",
+            )),
+        ));
     }
+    outcome
 }
 
 fn retain_original_error(original: ExitError, rollback: Result<(), ExitError>) -> ExitError {
@@ -220,9 +237,8 @@ fn rollback_runtime_binaries_and_services(
     runtime_defaults: &RuntimeDefaultsBackup,
 ) -> Result<(), ExitError> {
     if !stop_xp_proxy_service(paths) {
-        return Err(ExitError::new(
-            8,
-            "rollback_failed: unable to stop xp-proxy",
+        return Err(unrestored_transaction_backup_error(
+            "unable to stop xp-proxy before runtime rollback",
         ));
     }
     rollback_runtime_binaries(backups)?;

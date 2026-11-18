@@ -7,7 +7,8 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 use xp_proxy_core::control::{
-    CONTROL_PROTOCOL_VERSION, ControlOperation, ControlRequest, ControlResponse, encode_frame,
+    CONTROL_PROTOCOL_VERSION, ControlOperation, ControlRequest, ControlResponse, GenerationState,
+    encode_frame,
 };
 
 const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(45);
@@ -68,10 +69,21 @@ pub fn start_xp_proxy_service(paths: &Paths) -> bool {
     if !start_service(paths, "xp-proxy.service", "xp-proxy") {
         return false;
     }
+    wait_for_proxy_status(paths, |_| true)
+}
+
+pub(super) fn wait_for_xp_proxy_snapshot(paths: &Paths) -> bool {
+    service_commands_are_disabled(paths)
+        || wait_for_proxy_status(paths, |response| {
+            response.state == GenerationState::Active && response.generation > 0
+        })
+}
+
+fn wait_for_proxy_status(paths: &Paths, ready: impl Fn(&ControlResponse) -> bool) -> bool {
     let socket = paths.map_abs(Path::new("/run/xp-proxy/xp-proxy.sock"));
     let deadline = Instant::now() + service_ready_timeout();
     while Instant::now() < deadline {
-        if proxy_control_ready(&socket) {
+        if proxy_status(&socket).is_some_and(|response| ready(&response)) {
             return true;
         }
         thread::sleep(SERVICE_READY_POLL_INTERVAL);
@@ -79,8 +91,8 @@ pub fn start_xp_proxy_service(paths: &Paths) -> bool {
     false
 }
 
-fn proxy_control_ready(socket: &Path) -> bool {
-    fn probe(socket: &Path) -> anyhow::Result<bool> {
+fn proxy_status(socket: &Path) -> Option<ControlResponse> {
+    fn probe(socket: &Path) -> anyhow::Result<Option<ControlResponse>> {
         let mut stream = UnixStream::connect(socket)?;
         let timeout = Some(SERVICE_READY_POLL_INTERVAL);
         stream.set_read_timeout(timeout)?;
@@ -96,16 +108,17 @@ fn proxy_control_ready(socket: &Path) -> bool {
         stream.read_exact(&mut header)?;
         let len = u32::from_be_bytes(header) as usize;
         if len > 4096 {
-            return Ok(false);
+            return Ok(None);
         }
         let mut body = vec![0; len];
         stream.read_exact(&mut body)?;
         let response: ControlResponse = serde_json::from_slice(&body)?;
-        Ok(response.protocol_version == request.protocol_version
+        Ok((response.protocol_version == request.protocol_version
             && response.request_id == request.request_id
             && response.error.is_none())
+        .then_some(response))
     }
-    probe(socket).unwrap_or(false)
+    probe(socket).ok().flatten()
 }
 
 pub fn stop_xp_proxy_service(paths: &Paths) -> bool {

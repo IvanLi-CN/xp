@@ -25,16 +25,19 @@ pub async fn publish_snapshot(
         .any(|listener| listener.reality_tls_target.is_some())
     {
         let request_id = Uuid::new_v4().to_string();
-        let response = send_request(
-            &mut stream,
-            ControlRequest {
-                protocol_version: CONTROL_PROTOCOL_VERSION,
-                request_id: request_id.clone(),
-                generation,
-                operation: ControlOperation::Status,
-            },
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            send_request(
+                &mut stream,
+                ControlRequest {
+                    protocol_version: CONTROL_PROTOCOL_VERSION,
+                    request_id: request_id.clone(),
+                    generation,
+                    operation: ControlOperation::Status,
+                },
+            ),
         )
-        .await?;
+        .await??;
         if response.protocol_version != CONTROL_PROTOCOL_VERSION
             || response.request_id != request_id
             || response.error.is_some()
@@ -120,7 +123,22 @@ pub fn build_snapshot(
         {
             continue;
         }
-        let reality_tls_target = canary_bind.filter(|_| meta.managed_default);
+        let reality_tls_target = canary_bind.filter(|target| {
+            if !meta.managed_default {
+                return false;
+            }
+            let matches = target.ip().is_loopback()
+                && target.port() != 0
+                && target.port() != endpoint.port
+                && meta.reality.dest.parse::<std::net::SocketAddr>() == Ok(*target);
+            if !matches {
+                tracing::warn!(
+                    endpoint = %endpoint.endpoint_id,
+                    "managed REALITY TLS fallback target does not match the local canary"
+                );
+            }
+            matches
+        });
         let fallbacks = meta
             .canary_upstream
             .iter()
@@ -391,7 +409,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let socket = dir.path().join("proxy.sock");
         let listener = UnixListener::bind(&socket).unwrap();
-        let snapshot = managed_snapshot(true, true).unwrap();
+        let snapshot = managed_snapshot(Some(true), true).unwrap();
         let task = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let size = stream.read_u32().await.unwrap();
@@ -420,26 +438,32 @@ mod tests {
 
     #[test]
     fn managed_tls_target_does_not_depend_on_canary_upstream() {
-        let snapshot = managed_snapshot(true, true).unwrap();
+        let snapshot = managed_snapshot(Some(true), true).unwrap();
         assert_eq!(
             snapshot.listeners[0].reality_tls_target,
             Some(snapshot.listeners[0].reality.dest.parse().unwrap())
         );
         assert!(snapshot.listeners[0].fallbacks.is_empty());
         assert!(
-            managed_snapshot(true, false).unwrap().listeners[0]
+            managed_snapshot(Some(true), false).unwrap().listeners[0]
                 .reality_tls_target
                 .is_none()
         );
         assert!(
-            managed_snapshot(false, true).unwrap().listeners[0]
+            managed_snapshot(None, true).unwrap().listeners[0]
                 .reality_tls_target
                 .is_none()
+        );
+        let mismatched = managed_snapshot(Some(false), true).unwrap();
+        assert!(mismatched.listeners[0].reality_tls_target.is_none());
+        assert_eq!(
+            mismatched.listeners[0].reality.dest,
+            snapshot.listeners[0].reality.dest
         );
     }
 
     fn managed_snapshot(
-        canary_enabled: bool,
+        canary_matches_dest: Option<bool>,
         managed_default: bool,
     ) -> anyhow::Result<ProxySnapshot> {
         let reality = xp_test_fixtures::endpoint_reality();
@@ -465,7 +489,14 @@ mod tests {
             &BTreeMap::new(),
             &[],
             "cluster-key",
-            canary_enabled.then(|| reality["dest"].as_str().unwrap().parse().unwrap()),
+            canary_matches_dest.map(|matches_dest| {
+                let mut address: std::net::SocketAddr =
+                    reality["dest"].as_str().unwrap().parse().unwrap();
+                if !matches_dest {
+                    address.set_port(address.port() ^ 1);
+                }
+                address
+            }),
         )
     }
 
