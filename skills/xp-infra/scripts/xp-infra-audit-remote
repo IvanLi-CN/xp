@@ -1,0 +1,884 @@
+#!/bin/sh
+set -eu
+
+MAX_RAW_BYTES=65536
+READ_ERROR_SENTINEL=__XP_INFRA_READ_ERROR__
+XP_CONTAINER_IMAGE_PREFIX="${XP_CONTAINER_IMAGE_PREFIX:-ghcr.io/example/xp}"
+
+umask 077
+
+mode=host
+container=""
+env_file=/etc/xp/xp.env
+docker_access=none
+allow_direct_docker="${1:-false}"
+require_ingress_public_listener="${2:-true}"
+
+case "$allow_direct_docker" in true|false) ;; *) exit 1 ;; esac
+case "$require_ingress_public_listener" in true|false) ;; *) exit 1 ;; esac
+
+docker_cmd() {
+  case "$docker_access" in
+    direct) (unset DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG; docker --context default "$@") ;;
+    sudo) (unset DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG; sudo -n docker --context default "$@") ;;
+    *) return 1 ;;
+  esac
+}
+
+bounded_output() (
+  output_file="$(mktemp)" || exit 1
+  trap 'rm -f "$output_file"' 0 HUP INT TERM
+  dd iflag=fullblock bs="$((MAX_RAW_BYTES + 1))" count=1 of="$output_file" 2>/dev/null || exit 1
+  byte_count="$(wc -c < "$output_file" | tr -d '[:space:]')"
+  case "$byte_count" in ''|*[!0-9]*) exit 1 ;; esac
+  [ "$byte_count" -le "$MAX_RAW_BYTES" ] || exit 1
+  cat "$output_file"
+)
+
+bounded_command() (
+  status_file="$(mktemp)" || exit 1
+  trap 'rm -f "$status_file"' 0 HUP INT TERM
+  if (
+    set +e
+    "$@"
+    command_status=$?
+    printf '%s\n' "$command_status" > "$status_file"
+  ) | bounded_output; then
+    bounded_status=0
+  else
+    bounded_status=$?
+  fi
+  command_status="$(cat "$status_file" 2>/dev/null || true)"
+  [ "$bounded_status" -eq 0 ] && [ "$command_status" = 0 ]
+)
+
+direct_docker_host_environment_absent() {
+  env_dir="${env_file%/*}"
+  if [ -e "$env_file" ] || [ -L "$env_file" ]; then return 1; fi
+  if [ -e "$env_dir" ] || [ -L "$env_dir" ]; then
+    [ -d "$env_dir" ] && [ -r "$env_dir" ] && [ -x "$env_dir" ] || return 1
+  else
+    env_parent="${env_dir%/*}"
+    [ -d "$env_parent" ] && [ -r "$env_parent" ] && [ -x "$env_parent" ] || return 1
+  fi
+  return 0
+}
+
+xp_containers_from_inventory() {
+  printf '%s\n' "$1" | awk -v image_prefix="$XP_CONTAINER_IMAGE_PREFIX" '
+    NF == 0 { next }
+    NF != 2 { exit 1 }
+    $1 !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ { exit 1 }
+    index($2, image_prefix ":") == 1 || index($2, image_prefix "@") == 1 { print $1 }
+  '
+}
+
+if env_probe="$(sudo -n sh -c 'if [ -e "$1" ] || [ -L "$1" ]; then [ -r "$1" ] || exit 2; printf %s readable; else printf %s absent; fi' sh "$env_file" 2>/dev/null)"; then
+  case "$env_probe" in
+    readable|absent) ;;
+    *) exit 1 ;;
+  esac
+  docker_access=sudo
+else
+  env_probe_status=$?
+  # A Docker-operator account can audit a single container without host sudo.
+  # It can never select host mode because it cannot read the host environment.
+  case "$env_probe_status" in
+    1|127) ;;
+    *) exit 1 ;;
+  esac
+  [ "$allow_direct_docker" = true ] || exit 1
+  direct_docker_host_environment_absent || exit 1
+  env_probe=absent
+  docker_access=direct
+  command -v docker >/dev/null 2>&1 && docker_cmd ps >/dev/null 2>&1 || exit 1
+fi
+read_host_environment() {
+  bounded_command sudo -n awk '
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/^export[[:space:]]+/, "", line)
+      split(line, pair, "=")
+      if (pair[1] ~ /^(XP_BIND|XP_CLOUDFLARED_MONITOR_MODE|XP_CLOUDFLARED_OPENRC_SERVICE|XP_CLOUDFLARED_RESTART_MODE|XP_CLOUDFLARED_SYSTEMD_UNIT|XP_CLOUDFLARE_DDNS_FAST_INTERVAL_SECS|XP_CLOUDFLARE_DDNS_INTERVAL_SECS_NO_MONITOR|XP_CLOUDFLARE_DDNS_INTERVAL_SECS_WITH_MONITOR|XP_CLOUDFLARE_HOSTNAME|XP_DATA_DIR|XP_IP_GEO_ORIGIN|XP_XRAY_OPENRC_SERVICE|XP_XRAY_SYSTEMD_UNIT|XP_CLOUDFLARE_DDNS_ENABLED|XP_ENABLE_CLOUDFLARE|XP_IP_GEO_ENABLED)$/) {
+        if (seen[pair[1]]++) exit 1
+        print $0
+      }
+    }
+  ' "$env_file"
+}
+
+env_snapshot=""
+if [ "$env_probe" = readable ]; then
+  env_snapshot="$(read_host_environment 2>/dev/null)" || exit 1
+fi
+docker_inventory=""
+docker_available=false
+if [ "$env_probe" = absent ]; then
+  if docker_inventory="$(bounded_command docker_cmd ps --format '{{.Names}} {{.Image}}' 2>/dev/null)"; then
+    docker_available=true
+  elif [ "$docker_access" = sudo ] && [ "$allow_direct_docker" = true ]; then
+    docker_access=direct
+    docker_inventory="$(bounded_command docker_cmd ps --format '{{.Names}} {{.Image}}' 2>/dev/null)" || exit 1
+    docker_available=true
+  else
+    exit 1
+  fi
+elif sudo -n sh -c 'command -v docker >/dev/null 2>&1' 2>/dev/null; then
+  docker_inventory="$(bounded_command docker_cmd ps --format '{{.Names}} {{.Image}}' 2>/dev/null)" || exit 1
+  docker_available=true
+fi
+if [ "$env_probe" = absent ] && [ "$docker_available" = false ]; then exit 1; fi
+containers="$(xp_containers_from_inventory "$docker_inventory")" || exit 1
+container_count="$(printf '%s\n' "$containers" | awk 'NF { count++ } END { print count + 0 }')"
+if [ "$env_probe" = absent ]; then
+  [ "$container_count" -eq 1 ] || exit 1
+  container="$containers"
+  mode=container
+  docker_container_identity="$(bounded_command docker_cmd inspect -f '{{.Id}}' "$container" 2>/dev/null)" || exit 1
+  container="$docker_container_identity"
+else
+  [ "$container_count" -eq 0 ] || exit 1
+fi
+
+curl_bounded() (
+  status_file="$(mktemp)" || exit 1
+  trap 'rm -f "$status_file"' 0 HUP INT TERM
+  if (
+    set +e
+    curl "$@"
+    curl_status=$?
+    printf '%s\n' "$curl_status" > "$status_file"
+  ) | bounded_output; then
+    bounded_status=0
+  else
+    bounded_status=$?
+  fi
+  curl_status="$(cat "$status_file" 2>/dev/null || true)"
+  [ "$bounded_status" -eq 0 ] && [ "$curl_status" = 0 ]
+)
+
+env_value() {
+  key="$1"
+  if [ "$mode" = container ]; then
+    if value="$(bounded_command docker_cmd exec "$container" sh -c '
+      key="$1"
+      value="$(printenv "$key" 2>/dev/null)"
+      status=$?
+      case "$status" in
+        0|1) printf "%s" "$value" ;;
+        *) exit "$status" ;;
+      esac
+    ' sh "$key" 2>/dev/null)"; then
+      printf '%s' "$value"
+    else
+      printf '%s' "$READ_ERROR_SENTINEL"
+    fi
+  else
+    printf '%s\n' "$env_snapshot" | awk -v key="$key" ' { line = $0; sub(/^[[:space:]]+/, "", line); sub(/^export[[:space:]]+/, "", line); split(line, pair, "="); if (pair[1] == key) { value = substr(line, index(line, "=") + 1); found = 1 } } END { if (found) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); gsub(/^['\''"]|['\''"]$/, "", value); print value } }' | bounded_output
+  fi
+}
+
+raw_env_payload() {
+  key="$1"
+  marker="$2"
+  # Select only the requested public runtime key. Never spool the process
+  # environment (which may contain administrator credentials) into a temp file.
+  read_selected='
+    runtime_pid="$1"
+    key="$2"
+    marker="$3"
+    env_file="/proc/$runtime_pid/environ"
+    [ -r "$env_file" ] || exit 1
+    tr_status_file="$(mktemp)" || exit 1
+    trap '\''rm -f "$tr_status_file"'\'' 0 HUP INT TERM
+    (
+      set +e
+      # Encode original LF as SOH before mapping NUL to the awk record separator;
+      # otherwise a newline inside an environment value can become a fake entry.
+      tr "\\n\\000" "\\001\\n" < "$env_file"
+      tr_status=$?
+      printf "%s\\n" "$tr_status" > "$tr_status_file"
+      exit "$tr_status"
+    ) | awk -v key="$key" -v marker="$marker" '\''
+      BEGIN { invalid = sprintf("%c", 1) }
+      index($0, key "=") == 1 { count++; value = $0 }
+      END {
+        if (count > 1 || count == 1 && index(value, invalid) > 0) exit 1
+        if (count == 1) printf "%s%s", value, marker
+        else printf "%s", marker
+      }
+    '\''
+    awk_status=$?
+    tr_status="$(cat "$tr_status_file" 2>/dev/null || printf 1)"
+    [ "$awk_status" -eq 0 ] && [ "$tr_status" = 0 ]
+  '
+  if [ "$mode" = container ]; then
+    value="$(bounded_command docker_cmd exec "$container" sh -c "$read_selected" sh "$container_xp_pid" "$key" "$marker" 2>/dev/null)" || {
+      printf '%s%s' "$READ_ERROR_SENTINEL" "$marker"
+      return 0
+    }
+  else
+    value="$(bounded_command sudo -n sh -c "$read_selected" sh "$host_xp_pid" "$key" "$marker" 2>/dev/null)" || {
+      printf '%s%s' "$READ_ERROR_SENTINEL" "$marker"
+      return 0
+    }
+  fi
+  case "$value" in
+    "$key="*"$marker") printf '%s' "${value#"$key="}" ;;
+    "$marker") printf '%s' "$marker" ;;
+    *) printf '%s%s' "$READ_ERROR_SENTINEL" "$marker" ;;
+  esac
+}
+
+strict_bool_value() {
+  default_value="${2:-$READ_ERROR_SENTINEL}"
+  value="$(env_value "$1")"
+  if [ "$value" = "$READ_ERROR_SENTINEL" ]; then
+    printf '%s' "$READ_ERROR_SENTINEL"
+    return 0
+  fi
+  value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  case "$value" in
+    1|true|yes|on) printf true ;;
+    0|false|no|off) printf false ;;
+    '') printf '%s' "$default_value" ;;
+    *) printf '%s' "$READ_ERROR_SENTINEL" ;;
+  esac
+}
+
+service_active() {
+  systemd_name="$1"
+  openrc_name="$2"
+  if command -v systemctl >/dev/null 2>&1 && sudo -n systemctl is-active --quiet "$systemd_name"; then
+    return 0
+  fi
+  if command -v rc-service >/dev/null 2>&1 && sudo -n rc-service "$openrc_name" status >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+runtime_pid() {
+  process_name="$1"
+  sudo -n sh -c 'process_name="$1"; if pid_output=$(pidof "$process_name" 2>/dev/null); then set -- $pid_output; [ "$#" -eq 1 ] || exit 1; printf %s "$1"; else status=$?; [ "$status" -eq 1 ] || exit "$status"; fi' sh "$process_name" 2>/dev/null
+}
+
+runtime_starttime() {
+  runtime_pid="$1"
+  sudo -n sh -c '
+    stat_file="/proc/$1/stat"
+    [ -r "$stat_file" ] || exit 1
+    line=$(cat "$stat_file") || exit 1
+    line=${line#*) }
+    set -- $line
+    starttime="${20:-}"
+    case "$starttime" in ""|*[!0-9]*) exit 1 ;; esac
+    printf %s "$starttime"
+  ' sh "$runtime_pid" 2>/dev/null
+}
+
+ingress_runtime_pid() {
+  runtime_pid "$ingress_runtime"
+}
+
+ingress_runtime_starttime() {
+  runtime_starttime "$1"
+}
+
+xp_runtime_pid() {
+  runtime_pid xp
+}
+
+xp_runtime_starttime() {
+  runtime_starttime "$1"
+}
+
+ingress_service_active() {
+  systemd_name="$1"
+  openrc_name="$2"
+  if command -v systemctl >/dev/null 2>&1 && sudo -n systemctl is-active --quiet "$systemd_name"; then
+    runtime_pid="$(ingress_runtime_pid)" || return 1
+    [ -n "$runtime_pid" ] || return 1
+    main_pid="$(sudo -n systemctl show --property MainPID --value "$systemd_name" 2>/dev/null)" || return 1
+    [ "$main_pid" = "$runtime_pid" ] || return 1
+    return 0
+  fi
+  if command -v rc-service >/dev/null 2>&1 && sudo -n rc-service "$openrc_name" status >/dev/null 2>&1; then
+    runtime_pid="$(ingress_runtime_pid)" || return 1
+    [ -n "$runtime_pid" ] || return 1
+    pidfile="$(sudo -n sh -c 'service=$1; for candidate in "/run/supervise-$service.pid" "/var/run/supervise-$service.pid" "/run/$service.pid" "/var/run/$service.pid"; do if [ -r "$candidate" ]; then printf %s "$candidate"; exit 0; fi; done; exit 1' sh "$openrc_name" 2>/dev/null)" || return 1
+    service_pid="$(sudo -n cat "$pidfile" 2>/dev/null)" || return 1
+    case "$service_pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$service_pid" = "$runtime_pid" ] && return 0
+    supervisor_cmd="$(sudo -n sh -c 'tr "\\000" " " < "/proc/$1/cmdline"' sh "$service_pid" 2>/dev/null)" || return 1
+    case " $supervisor_cmd " in
+      *" supervise-daemon $openrc_name "*|*" /supervise-daemon $openrc_name ") ;;
+      *) return 1 ;;
+    esac
+    parent_pid="$(sudo -n sh -c 'stat_file="/proc/$1/stat"; [ -r "$stat_file" ] || exit 1; line=$(cat "$stat_file") || exit 1; line=${line#*) }; set -- $line; printf %s "${2:-}"' sh "$runtime_pid" 2>/dev/null)" || return 1
+    [ "$parent_pid" = "$service_pid" ] || return 1
+    return 0
+  fi
+  return 1
+}
+
+xp_service_active() {
+  systemd_name="$1"
+  openrc_name="$2"
+  if command -v systemctl >/dev/null 2>&1 && sudo -n systemctl is-active --quiet "$systemd_name"; then
+    runtime_pid="$(xp_runtime_pid)" || return 1
+    [ -n "$runtime_pid" ] || return 1
+    main_pid="$(sudo -n systemctl show --property MainPID --value "$systemd_name" 2>/dev/null)" || return 1
+    [ "$main_pid" = "$runtime_pid" ] || return 1
+    return 0
+  fi
+  if command -v rc-service >/dev/null 2>&1 && sudo -n rc-service "$openrc_name" status >/dev/null 2>&1; then
+    runtime_pid="$(xp_runtime_pid)" || return 1
+    [ -n "$runtime_pid" ] || return 1
+    pidfile="$(sudo -n sh -c 'service=$1; for candidate in "/run/supervise-$service.pid" "/var/run/supervise-$service.pid" "/run/$service.pid" "/var/run/$service.pid"; do if [ -r "$candidate" ]; then printf %s "$candidate"; exit 0; fi; done; exit 1' sh "$openrc_name" 2>/dev/null)" || return 1
+    service_pid="$(sudo -n cat "$pidfile" 2>/dev/null)" || return 1
+    case "$service_pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$service_pid" = "$runtime_pid" ] && return 0
+    supervisor_cmd="$(sudo -n sh -c 'tr "\\000" " " < "/proc/$1/cmdline"' sh "$service_pid" 2>/dev/null)" || return 1
+    case " $supervisor_cmd " in
+      *" supervise-daemon $openrc_name "*|*" /supervise-daemon $openrc_name ") ;;
+      *) return 1 ;;
+    esac
+    parent_pid="$(sudo -n sh -c 'stat_file="/proc/$1/stat"; [ -r "$stat_file" ] || exit 1; line=$(cat "$stat_file") || exit 1; line=${line#*) }; set -- $line; printf %s "${2:-}"' sh "$runtime_pid" 2>/dev/null)" || return 1
+    [ "$parent_pid" = "$service_pid" ] || return 1
+    return 0
+  fi
+  return 1
+}
+
+container_process_token() {
+  pattern="$1"
+  bounded_command docker_cmd exec -e XP_INFRA_PROCESS_ROOT=/proc "$container" sh -c '
+    pattern="$1"
+    self_pid="$$"
+    process_root="$XP_INFRA_PROCESS_ROOT"
+    process_count=0
+    process_id=""
+    for file in "$process_root"/[0-9]*/cmdline; do
+      [ -r "$file" ] || exit 1
+      candidate_id="${file#"$process_root"/}"
+      candidate_id="${candidate_id%/cmdline}"
+      [ "$candidate_id" = "$self_pid" ] && continue
+      case "$candidate_id" in ""|*[!0-9]*) exit 1 ;; esac
+      process_dir="${file%/cmdline}"
+      stat_file="${process_dir}/stat"
+      executable_file="${process_dir}/exe"
+      [ -r "$stat_file" ] || exit 1
+      stat_line_before="$(cat "$stat_file" 2>/dev/null)" || exit 1
+      stat_line_before="${stat_line_before#*) }"
+      set -- $stat_line_before
+      starttime_before="${20:-}"
+      case "$starttime_before" in ""|*[!0-9]*) exit 1 ;; esac
+      executable_before="$(readlink "$executable_file" 2>/dev/null)" || exit 1
+      command_line_before="$(tr "\\000" "\\n" < "$file" 2>/dev/null)" || exit 1
+      argv0_before="$(printf "%s\\n" "$command_line_before" | sed -n "1p")" || exit 1
+      executable_after="$(readlink "$executable_file" 2>/dev/null)" || exit 1
+      command_line_after="$(tr "\\000" "\\n" < "$file" 2>/dev/null)" || exit 1
+      stat_line_after="$(cat "$stat_file" 2>/dev/null)" || exit 1
+      stat_line_after="${stat_line_after#*) }"
+      set -- $stat_line_after
+      starttime_after="${20:-}"
+      case "$starttime_after" in ""|*[!0-9]*) exit 1 ;; esac
+      [ "$executable_before" = "$executable_after" ] || exit 1
+      [ "$command_line_before" = "$command_line_after" ] || exit 1
+      [ "$starttime_before" = "$starttime_after" ] || exit 1
+      case "$executable_after" in
+        "$pattern"|*/"$pattern")
+          case "$argv0_before" in
+            "$pattern"|*/"$pattern")
+              process_id="${candidate_id}:${starttime_after}"
+              process_count=$((process_count + 1))
+              ;;
+          esac
+          ;;
+      esac
+    done
+    if [ "$pattern" = xray ]; then
+      [ "$process_count" -eq 1 ] || exit 1
+      printf "%s" "$process_id"
+    else
+      [ "$process_count" -le 1 ] || exit 1
+      [ "$process_count" -eq 0 ] || printf "%s" "$process_id"
+    fi
+  ' sh "$pattern" 2>/dev/null
+}
+
+runtime_file_capture() {
+  path="$1"
+  marker="$2"
+  capture_command='
+    path="$1"
+    marker="$2"
+    invalid_control="$(printf '\''\001'\'')"
+    if [ -e "$path" ] || [ -L "$path" ]; then
+      [ -r "$path" ] || exit 2
+      exec 3<"$path" || exit 1
+      file_identity="$(stat -L -c "%d:%i" /proc/self/fd/3 2>/dev/null)" || exit 1
+      path_identity="$(stat -L -c "%d:%i" "$path" 2>/dev/null)" || exit 1
+      [ "$file_identity" = "$path_identity" ] || exit 1
+      if ! payload="$(tr "\\000" "\\001" <&3; read_status=$?; [ "$read_status" -eq 0 ] || exit "$read_status"; printf "%s" "$marker")"; then exit 1; fi
+      case "$payload" in *"$marker") value="${payload%"$marker"}" ;; *) exit 1 ;; esac
+      case "$value" in *"$invalid_control"*) exit 1 ;; esac
+      path_identity_after="$(stat -L -c "%d:%i" "$path" 2>/dev/null)" || exit 1
+      [ "$file_identity" = "$path_identity_after" ] || exit 1
+      printf "%s=%s" "$file_identity" "$value"
+      printf "%s" "$marker"
+    else
+      parent_dir=${path%/*}
+      [ -d "$parent_dir" ] && [ -r "$parent_dir" ] && [ -x "$parent_dir" ] || exit 2
+      [ -e "$path" ] || [ -L "$path" ] || printf "absent=%s" "$marker"
+    fi
+  '
+  if [ "$mode" = container ]; then
+    bounded_command docker_cmd exec "$container" sh -c "$capture_command" sh "$path" "$marker"
+  else
+    bounded_command sudo -n sh -c "$capture_command" sh "$path" "$marker"
+  fi
+}
+
+runtime_file_snapshot() {
+  snapshot_path="$1"
+  snapshot_marker=__xp_infra_file_snapshot_end__
+  snapshot_payload="$(runtime_file_capture "$snapshot_path" "$snapshot_marker")" || return 1
+  case "$snapshot_payload" in
+    *"$snapshot_marker") snapshot_body="${snapshot_payload%"$snapshot_marker"}" ;;
+    *) return 1 ;;
+  esac
+  case "$snapshot_body" in
+    *=*) snapshot_identity="${snapshot_body%%=*}"; snapshot_value="${snapshot_body#*=}" ;;
+    *) return 1 ;;
+  esac
+  case "$snapshot_identity" in
+    absent|[0-9]*:[0-9]*) ;;
+    *) return 1 ;;
+  esac
+}
+
+assert_runtime_files_unchanged() {
+  ddns_path="$1"
+  ddns_identity="$2"
+  ddns_value="$3"
+  cloudflare_path="$4"
+  cloudflare_identity="$5"
+  cloudflare_value="$6"
+  managed_path="$7"
+  managed_identity="$8"
+  managed_value="$9"
+  runtime_files_command='
+    marker=__xp_infra_runtime_file_end__
+    invalid_control="$(printf '\''\001'\'')"
+    read_fd() {
+      fd="$1"
+      case "$fd" in
+        3) tr "\\000" "\\001" <&3 ;;
+        4) tr "\\000" "\\001" <&4 ;;
+        5) tr "\\000" "\\001" <&5 ;;
+        6) tr "\\000" "\\001" <&6 ;;
+        *) exit 1 ;;
+      esac
+    }
+    open_fd() {
+      fd="$1"
+      path="$2"
+      case "$fd" in
+        3) exec 3<"$path" ;;
+        4) exec 4<"$path" ;;
+        5) exec 5<"$path" ;;
+        6) exec 6<"$path" ;;
+        *) exit 1 ;;
+      esac
+    }
+    check_file() {
+      path="$1"
+      expected_identity="$2"
+      expected_value="$3"
+      fd="$4"
+      [ "$path" = - ] && return 0
+      if [ "$expected_identity" = absent ]; then
+        [ ! -e "$path" ] && [ ! -L "$path" ] || exit 1
+        return 0
+      fi
+      [ -e "$path" ] || [ -L "$path" ] || exit 1
+      [ -r "$path" ] || exit 1
+      open_fd "$fd" "$path" || exit 1
+      file_identity="$(stat -L -c "%d:%i" "/proc/self/fd/$fd" 2>/dev/null)" || exit 1
+      path_identity="$(stat -L -c "%d:%i" "$path" 2>/dev/null)" || exit 1
+      [ "$file_identity" = "$expected_identity" ] || exit 1
+      [ "$path_identity" = "$expected_identity" ] || exit 1
+      if ! payload="$(read_fd "$fd"; read_status=$?; [ "$read_status" -eq 0 ] || exit "$read_status"; printf "%s" "$marker")"; then exit 1; fi
+      case "$payload" in *"$marker") value="${payload%"$marker"}" ;; *) exit 1 ;; esac
+      case "$value" in *"$invalid_control"*) exit 1 ;; esac
+      [ "$value" = "$expected_value" ] || exit 1
+      path_identity_after="$(stat -L -c "%d:%i" "$path" 2>/dev/null)" || exit 1
+      [ "$path_identity_after" = "$expected_identity" ] || exit 1
+    }
+    recheck_file() {
+      path="$1"
+      expected_identity="$2"
+      expected_value="$3"
+      [ "$path" = - ] && return 0
+      if [ "$expected_identity" = absent ]; then
+        [ ! -e "$path" ] && [ ! -L "$path" ] || exit 1
+        return 0
+      fi
+      [ -e "$path" ] || [ -L "$path" ] || exit 1
+      [ -r "$path" ] || exit 1
+      open_fd 6 "$path" || exit 1
+      file_identity="$(stat -L -c "%d:%i" /proc/self/fd/6 2>/dev/null)" || exit 1
+      path_identity="$(stat -L -c "%d:%i" "$path" 2>/dev/null)" || exit 1
+      [ "$file_identity" = "$expected_identity" ] || exit 1
+      [ "$path_identity" = "$expected_identity" ] || exit 1
+      if ! payload="$(read_fd 6; read_status=$?; [ "$read_status" -eq 0 ] || exit "$read_status"; printf "%s" "$marker")"; then exit 1; fi
+      case "$payload" in *"$marker") value="${payload%"$marker"}" ;; *) exit 1 ;; esac
+      case "$value" in *"$invalid_control"*) exit 1 ;; esac
+      [ "$value" = "$expected_value" ] || exit 1
+      path_identity_after="$(stat -L -c "%d:%i" "$path" 2>/dev/null)" || exit 1
+      [ "$path_identity_after" = "$expected_identity" ] || exit 1
+    }
+    check_file "$1" "$2" "$3" 3
+    check_file "$4" "$5" "$6" 4
+    check_file "$7" "$8" "$9" 5
+    recheck_file "$1" "$2" "$3"
+    recheck_file "$4" "$5" "$6"
+    recheck_file "$7" "$8" "$9"
+  '
+  if [ "$mode" = container ]; then
+    bounded_command docker_cmd exec "$container" sh -c "$runtime_files_command" sh "$ddns_path" "$ddns_identity" "$ddns_value" "$cloudflare_path" "$cloudflare_identity" "$cloudflare_value" "$managed_path" "$managed_identity" "$managed_value"
+  else
+    bounded_command sudo -n sh -c "$runtime_files_command" sh "$ddns_path" "$ddns_identity" "$ddns_value" "$cloudflare_path" "$cloudflare_identity" "$cloudflare_value" "$managed_path" "$managed_identity" "$managed_value"
+  fi
+}
+
+compact_json() {
+  awk '
+    BEGIN {
+      in_string = 0
+      escaped = 0
+      invalid = 0
+      carriage_return = sprintf("%c", 13)
+    }
+    {
+      for (i = 1; i <= length($0); i++) {
+        char = substr($0, i, 1)
+        if (char == carriage_return) {
+          if (in_string) invalid = 1
+        } else if (in_string) {
+          if (escaped) {
+            printf "%s", char
+            escaped = 0
+          } else if (char == "\\") {
+            printf "%s", char
+            escaped = 1
+          } else if (char == "\"") {
+            printf "%s", char
+            in_string = 0
+          } else {
+            printf "%s", char
+          }
+        } else if (char == "\"") {
+          printf "%s", char
+          in_string = 1
+        } else {
+          printf "%s", char
+        }
+      }
+      if (in_string) invalid = 1
+    }
+    END {
+      if (in_string || escaped || invalid) exit 1
+    }
+  '
+}
+
+emit_value() {
+  key="$1"
+  value="$2"
+  [ "$value" != "$READ_ERROR_SENTINEL" ] || exit 1
+  case "$key" in
+    *_json) value="$(printf '%s' "$value" | compact_json)" || exit 1 ;;
+    *) value="$(printf '%s' "$value" | tr -d '\r\n')" || exit 1 ;;
+  esac
+  printf '%s=%s\n' "$key" "$value"
+}
+
+strict_env_value() {
+  env_key="$1"
+  # Keep a marker after the raw value so command substitution retains trailing CR/LF.
+  marker=__xp_infra_env_value_end__
+  payload="$(raw_env_payload "$env_key" "$marker")" || exit 1
+  case "$payload" in
+    *"$marker") value="${payload%"$marker"}" ;;
+    *) exit 1 ;;
+  esac
+  [ "$value" != "$READ_ERROR_SENTINEL" ] || exit 1
+  sanitized="$(printf '%s' "$value" | tr -d '\r\n')"
+  [ "$value" = "$sanitized" ] || exit 1
+  printf '%s' "$value"
+}
+
+sync_node_meta() {
+  if [ "$mode" = container ]; then
+    docker_cmd exec "$container" xp-ops container run --dry-run >/dev/null 2>&1
+  else
+    sudo -n xp-ops xp sync-node-meta --dry-run >/dev/null 2>&1
+  fi
+}
+
+ingress_public_ports() {
+  if [ "$mode" = container ]; then
+    if ! raw_ports="$(bounded_command docker_cmd exec "$container" ss -H -ltnp 2>/dev/null)"; then
+      printf '%s' "$READ_ERROR_SENTINEL"
+      return 0
+    fi
+  else
+    if ! raw_ports="$(bounded_command sudo -n ss -H -ltnp 2>/dev/null)"; then
+      printf '%s' "$READ_ERROR_SENTINEL"
+      return 0
+    fi
+  fi
+  selected_ports="$(printf '%s\n' "$raw_ports" | awk -v owner="$ingress_runtime" -v pid="${host_ingress_pid:-${container_ingress_token%%:*}}" '
+    index($0, "\"" owner "\"") {
+      if (!index($0, "pid=" pid ",")) exit 1
+      address = $4
+      if (address ~ /^127\./ || address ~ /^\[?::1\]?:/ || address ~ /^localhost:/) next
+      port = address
+      sub(/^.*:/, "", port)
+      if (port ~ /^[1-9][0-9]*$/ && port + 0 <= 65535 && !seen[port]++) print port
+    }
+  ')" || return 1
+  printf '%s\n' "$selected_ports" | paste -sd, -
+}
+
+read_runtime_status() {
+  if [ "$mode" = container ]; then
+    bounded_command docker_cmd exec "$container" xp-ops runtime status --json
+  else
+    bounded_command sudo -n xp-ops runtime status --json
+  fi
+}
+runtime_json="$(read_runtime_status)" || exit 1
+case "$runtime_json" in
+  *'"runtime":"xp-proxy"'*) ingress_runtime=xp-proxy ;;
+  *'"runtime":"xray"'*) ingress_runtime=xray ;;
+  *) exit 1 ;;
+esac
+emit_value runtime_json "$runtime_json"
+
+if [ "$mode" = container ]; then
+  container_running="$(bounded_command docker_cmd inspect -f '{{.State.Running}}' "$container" 2>/dev/null)" || exit 1
+  case "$container_running" in true|false) ;; *) exit 1 ;; esac
+  container_started_at="$(bounded_command docker_cmd inspect -f '{{.State.StartedAt}}' "$container" 2>/dev/null)" || exit 1
+  [ -n "$container_started_at" ] || exit 1
+  container_xp_token="$(container_process_token xp)" || exit 1
+  [ -n "$container_xp_token" ] || exit 1
+  container_xp_pid="${container_xp_token%%:*}"
+  case "$container_xp_pid" in ''|*[!0-9]*) exit 1 ;; esac
+  container_ingress_token="$(container_process_token "$ingress_runtime")" || exit 1
+  container_cloudflared_token="$(container_process_token cloudflared)" || exit 1
+  if [ -n "$container_ingress_token" ]; then container_ingress_running=true; else container_ingress_running=false; fi
+  if [ -n "$container_cloudflared_token" ]; then container_cloudflared_running=true; else container_cloudflared_running=false; fi
+  echo "xp_service=$container_running"
+  echo "ingress_service=$container_ingress_running"
+  echo "cloudflared_service=$container_cloudflared_running"
+else
+  xray_systemd_name="$(env_value XP_XRAY_SYSTEMD_UNIT)"
+  xray_openrc_name="$(env_value XP_XRAY_OPENRC_SERVICE)"
+  if [ "$ingress_runtime" = xp-proxy ]; then
+    xray_systemd_name=xp-proxy; xray_openrc_name=xp-proxy
+  fi
+  cloudflared_systemd_name="$(env_value XP_CLOUDFLARED_SYSTEMD_UNIT)"
+  cloudflared_openrc_name="$(env_value XP_CLOUDFLARED_OPENRC_SERVICE)"
+  [ -n "$xray_systemd_name" ] || xray_systemd_name="$ingress_runtime"
+  [ -n "$xray_openrc_name" ] || xray_openrc_name="$ingress_runtime"
+  [ -n "$cloudflared_systemd_name" ] || cloudflared_systemd_name=cloudflared
+  [ -n "$cloudflared_openrc_name" ] || cloudflared_openrc_name=cloudflared
+  xp_service_state="$(xp_service_active xp xp && printf true || printf false)"
+  ingress_service_state="$(ingress_service_active "$xray_systemd_name" "$xray_openrc_name" && printf true || printf false)"
+  echo "xp_service=$xp_service_state"
+  echo "ingress_service=$ingress_service_state"
+  echo "cloudflared_service=$(service_active "$cloudflared_systemd_name" "$cloudflared_openrc_name" && printf true || printf false)"
+fi
+echo "runtime_mode=$mode"
+if [ "$mode" = container ]; then
+  echo "container_identity=$docker_container_identity"
+  echo "container_started_at=$container_started_at"
+  echo "container_ingress_token=$container_ingress_token"
+  echo "host_ingress_pid="
+  echo "host_ingress_starttime="
+else
+  host_xp_pid="$(xp_runtime_pid)" || exit 1
+  case "$host_xp_pid" in ''|*[!0-9]*) exit 1 ;; esac
+  host_xp_starttime="$(xp_runtime_starttime "$host_xp_pid")" || exit 1
+  if [ "$xp_service_state" = true ]; then
+    xp_service_active xp xp || exit 1
+  fi
+  host_ingress_pid="$(ingress_runtime_pid)" || exit 1
+  case "$host_ingress_pid" in ''|*[!0-9]*) exit 1 ;; esac
+  host_ingress_starttime="$(ingress_runtime_starttime "$host_ingress_pid")" || exit 1
+  if [ "$ingress_service_state" = true ]; then
+    ingress_service_active "$xray_systemd_name" "$xray_openrc_name" || exit 1
+  fi
+  echo "container_identity="
+  echo "container_started_at="
+  echo "container_ingress_token="
+  echo "host_ingress_pid=$host_ingress_pid"
+  echo "host_ingress_starttime=$host_ingress_starttime"
+fi
+
+data_dir="$(env_value XP_DATA_DIR)"
+[ "$data_dir" != "$READ_ERROR_SENTINEL" ] || exit 1
+[ -n "$data_dir" ] || data_dir=/var/lib/xp/data
+bind="$(env_value XP_BIND)"
+[ "$bind" != "$READ_ERROR_SENTINEL" ] || exit 1
+xp_port="${bind##*:}"
+case "$xp_port" in ''|*[!0-9]*) xp_port=62416 ;; esac
+if [ "$mode" = container ]; then
+  container_port_target="$xp_port"
+  docker_published_ports="$(bounded_command docker_cmd port "$container" "${container_port_target}/tcp" 2>/dev/null)" || exit 1
+  published_port="$(printf '%s\n' "$docker_published_ports" | awk -F: 'NF { print $NF; exit }')"
+  case "$published_port" in ''|*[!0-9]*) published_port=0 ;; esac
+  xp_port="$published_port"
+fi
+local_origin="http://127.0.0.1:${xp_port}"
+ddns_state_path="$data_dir/ddns_state.json"
+managed_default_state_path="$data_dir/managed-default-endpoints.json"
+
+emit_value ddns_enabled "$(strict_bool_value XP_CLOUDFLARE_DDNS_ENABLED)"
+emit_value ddns_monitor_mode "$(env_value XP_CLOUDFLARED_MONITOR_MODE)"
+emit_value ddns_restart_mode "$(env_value XP_CLOUDFLARED_RESTART_MODE)"
+emit_value ddns_fast_interval "$(env_value XP_CLOUDFLARE_DDNS_FAST_INTERVAL_SECS)"
+emit_value ddns_monitored_interval "$(env_value XP_CLOUDFLARE_DDNS_INTERVAL_SECS_WITH_MONITOR)"
+emit_value ddns_unmonitored_interval "$(env_value XP_CLOUDFLARE_DDNS_INTERVAL_SECS_NO_MONITOR)"
+runtime_file_snapshot "$ddns_state_path" || exit 1
+ddns_state_identity="$snapshot_identity"
+ddns_state_snapshot="$snapshot_value"
+emit_value ddns_state_json "$ddns_state_snapshot"
+# Geo opt-in writes `true`; a missing opt-in remains the supported false default.
+geo_enabled="$(strict_bool_value XP_IP_GEO_ENABLED false)"
+emit_value geo_enabled "$geo_enabled"
+geo_origin="$(env_value XP_IP_GEO_ORIGIN)"
+[ -n "$geo_origin" ] || geo_origin=https://api.country.is
+emit_value geo_origin "$geo_origin"
+if [ "$geo_enabled" = true ] && [ "$geo_origin" = https://api.country.is ]; then
+  geo_response="$(curl_bounded -fsS --noproxy '*' --max-time 10 --max-filesize "$MAX_RAW_BYTES" "${geo_origin%/}/" 2>/dev/null || true)"
+else
+  geo_response=""
+fi
+emit_value geo_response_json "$geo_response"
+emit_value health_json "$(curl_bounded -fsS --noproxy '*' --max-time 10 --max-filesize "$MAX_RAW_BYTES" "${local_origin}/api/health")"
+emit_value cluster_json "$(curl_bounded -fsS --noproxy '*' --max-time 10 --max-filesize "$MAX_RAW_BYTES" "${local_origin}/api/cluster/info")"
+node_name="$(strict_env_value XP_NODE_NAME)" || exit 1
+api_base="$(strict_env_value XP_API_BASE_URL)" || exit 1
+access_host="$(strict_env_value XP_ACCESS_HOST)" || exit 1
+emit_value node_name "$node_name"
+emit_value api_base "$api_base"
+emit_value access_host "$access_host"
+emit_value cloudflare_enabled "$(strict_bool_value XP_ENABLE_CLOUDFLARE)"
+emit_value cloudflare_hostname "$(env_value XP_CLOUDFLARE_HOSTNAME)"
+if [ "$mode" = host ]; then
+  cloudflare_settings_path=/etc/xp-ops/cloudflare_tunnel/settings.json
+  runtime_file_snapshot "$cloudflare_settings_path" || exit 1
+  cloudflare_settings_identity="$snapshot_identity"
+  cloudflare_settings_snapshot="$snapshot_value"
+  emit_value cloudflare_settings_json "$cloudflare_settings_snapshot"
+else
+  cloudflare_settings_path=
+  cloudflare_settings_identity=
+  cloudflare_settings_snapshot=
+  emit_value cloudflare_settings_json ""
+fi
+runtime_file_snapshot "$managed_default_state_path" || exit 1
+managed_default_state_identity="$snapshot_identity"
+managed_default_state_snapshot="$snapshot_value"
+emit_value managed_default_state_json "$managed_default_state_snapshot"
+echo "sync_node_meta=$(sync_node_meta && printf true || printf false)"
+if [ "$require_ingress_public_listener" = true ]; then
+  public_ports="$(ingress_public_ports)" || exit 1
+  emit_value ingress_public_ports "$public_ports"
+else
+  emit_value ingress_public_ports ""
+fi
+
+if [ "$docker_access" = sudo ]; then
+  env_probe_after="$(sudo -n sh -c 'if [ -e "$1" ] || [ -L "$1" ]; then [ -r "$1" ] || exit 2; printf %s readable; else printf %s absent; fi' sh "$env_file" 2>/dev/null)" || exit 1
+  [ "$env_probe_after" = "$env_probe" ] || exit 1
+  if [ "$env_probe" = readable ]; then
+    env_snapshot_after="$(read_host_environment 2>/dev/null)" || exit 1
+    [ "$env_snapshot_after" = "$env_snapshot" ] || exit 1
+  fi
+elif [ "$docker_access" = direct ]; then
+  direct_docker_host_environment_absent || exit 1
+else
+  exit 1
+fi
+if [ "$mode" = host ]; then
+  host_xp_pid_after="$(xp_runtime_pid)" || exit 1
+  [ "$host_xp_pid_after" = "$host_xp_pid" ] || exit 1
+  host_xp_starttime_after="$(xp_runtime_starttime "$host_xp_pid_after")" || exit 1
+  [ "$host_xp_starttime_after" = "$host_xp_starttime" ] || exit 1
+  if [ "$xp_service_state" = true ]; then
+    xp_service_active xp xp || exit 1
+  fi
+  [ "$(strict_env_value XP_NODE_NAME)" = "$node_name" ] || exit 1
+  [ "$(strict_env_value XP_API_BASE_URL)" = "$api_base" ] || exit 1
+  [ "$(strict_env_value XP_ACCESS_HOST)" = "$access_host" ] || exit 1
+  host_ingress_pid_after="$(ingress_runtime_pid)" || exit 1
+  [ "$host_ingress_pid_after" = "$host_ingress_pid" ] || exit 1
+  host_ingress_starttime_after="$(ingress_runtime_starttime "$host_ingress_pid_after")" || exit 1
+  [ "$host_ingress_starttime_after" = "$host_ingress_starttime" ] || exit 1
+  if [ "$ingress_service_state" = true ]; then
+    ingress_service_active "$xray_systemd_name" "$xray_openrc_name" || exit 1
+  fi
+fi
+docker_inventory_after=""
+docker_available_after=false
+if [ "$env_probe" = absent ]; then
+  docker_inventory_after="$(bounded_command docker_cmd ps --format '{{.Names}} {{.Image}}' 2>/dev/null)" || exit 1
+  docker_available_after=true
+elif sudo -n sh -c 'command -v docker >/dev/null 2>&1' 2>/dev/null; then
+  docker_inventory_after="$(bounded_command docker_cmd ps --format '{{.Names}} {{.Image}}' 2>/dev/null)" || exit 1
+  docker_available_after=true
+fi
+[ "$docker_available_after" = "$docker_available" ] || exit 1
+[ "$docker_inventory_after" = "$docker_inventory" ] || exit 1
+if [ "$mode" = container ]; then
+  docker_container_identity_after="$(bounded_command docker_cmd inspect -f '{{.Id}}' "$container" 2>/dev/null)" || exit 1
+  [ "$docker_container_identity_after" = "$docker_container_identity" ] || exit 1
+  container_running_after="$(bounded_command docker_cmd inspect -f '{{.State.Running}}' "$container" 2>/dev/null)" || exit 1
+  [ "$container_running_after" = "$container_running" ] || exit 1
+  container_started_at_after="$(bounded_command docker_cmd inspect -f '{{.State.StartedAt}}' "$container" 2>/dev/null)" || exit 1
+  [ "$container_started_at_after" = "$container_started_at" ] || exit 1
+  container_xp_token_after="$(container_process_token xp)" || exit 1
+  [ "$container_xp_token_after" = "$container_xp_token" ] || exit 1
+  [ "$(strict_env_value XP_NODE_NAME)" = "$node_name" ] || exit 1
+  [ "$(strict_env_value XP_API_BASE_URL)" = "$api_base" ] || exit 1
+  [ "$(strict_env_value XP_ACCESS_HOST)" = "$access_host" ] || exit 1
+  container_ingress_token_after="$(container_process_token "$ingress_runtime")" || exit 1
+  [ "$container_ingress_token_after" = "$container_ingress_token" ] || exit 1
+  container_cloudflared_token_after="$(container_process_token cloudflared)" || exit 1
+  [ "$container_cloudflared_token_after" = "$container_cloudflared_token" ] || exit 1
+  docker_published_ports_after="$(bounded_command docker_cmd port "$container" "${container_port_target}/tcp" 2>/dev/null)" || exit 1
+  [ "$docker_published_ports_after" = "$docker_published_ports" ] || exit 1
+fi
+containers_after="$(xp_containers_from_inventory "$docker_inventory_after")" || exit 1
+[ "$containers_after" = "$containers" ] || exit 1
+if [ "$env_probe" = absent ]; then
+  [ "$(printf '%s\n' "$containers_after" | awk 'NF { count++ } END { print count + 0 }')" -eq 1 ] || exit 1
+else
+  [ -z "$containers_after" ] || exit 1
+fi
+
+if [ "$mode" = host ]; then
+  cloudflare_final_path="$cloudflare_settings_path"
+else
+  cloudflare_final_path=-
+fi
+assert_runtime_files_unchanged "$ddns_state_path" "$ddns_state_identity" "$ddns_state_snapshot" "$cloudflare_final_path" "$cloudflare_settings_identity" "$cloudflare_settings_snapshot" "$managed_default_state_path" "$managed_default_state_identity" "$managed_default_state_snapshot" || exit 1
+
+[ "$(read_runtime_status)" = "$runtime_json" ] || exit 1

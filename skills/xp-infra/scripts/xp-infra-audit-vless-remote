@@ -1,0 +1,209 @@
+#!/bin/sh
+set -eu
+
+MAX_RAW_BYTES=65536
+
+access_host="${1:-}"
+vless_port="${2:-}"
+allow_direct_docker="${3:-false}"
+runtime_mode="${4:-}"
+container_identity="${5:-}"
+container_started_at="${6:-}"
+host_ingress_pid="${7:-}"
+host_ingress_starttime="${8:-}"
+container_ingress_token="${9:-}"
+ingress_runtime="${10:-xray}"
+case "$ingress_runtime" in xray|xp-proxy) ;; *) exit 2 ;; esac
+case "$access_host" in ''|*[!A-Za-z0-9.-]*) exit 2 ;; esac
+case "$vless_port" in ''|*[!0-9]*) exit 2 ;; esac
+case "$allow_direct_docker" in true|false) ;; *) exit 2 ;; esac
+case "$runtime_mode" in host|container) ;; *) exit 2 ;; esac
+if [ "$runtime_mode" = host ]; then
+  [ -z "$container_identity" ] && [ -z "$container_started_at" ] && [ -z "$container_ingress_token" ] || exit 2
+  case "$host_ingress_pid" in ''|*[!0-9]*) exit 2 ;; esac
+  case "$host_ingress_starttime" in ''|*[!0-9]*) exit 2 ;; esac
+else
+  case "$container_identity" in ''|*[!0-9a-f]*) exit 2 ;; esac
+  [ "${#container_identity}" -eq 64 ] || exit 2
+  case "$container_started_at" in ''|*[!0-9TZ:.-]*) exit 2 ;; esac
+  [ -z "$host_ingress_pid" ] && [ -z "$host_ingress_starttime" ] || exit 2
+  case "$container_ingress_token" in ''|*[!0-9:]*|:*|*:) exit 2 ;; esac
+  container_ingress_pid="${container_ingress_token%%:*}"
+  container_ingress_starttime="${container_ingress_token#*:}"
+  case "$container_ingress_pid" in ''|*[!0-9]*) exit 2 ;; esac
+  case "$container_ingress_starttime" in ''|*[!0-9]*) exit 2 ;; esac
+fi
+
+env_file=/etc/xp/xp.env
+docker_access=none
+docker_cmd() {
+  case "$docker_access" in
+    direct) (unset DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG; docker --context default "$@") ;;
+    sudo) (unset DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG; sudo -n docker --context default "$@") ;;
+    *) return 1 ;;
+  esac
+}
+
+direct_docker_host_environment_absent() {
+  env_dir="${env_file%/*}"
+  if [ -e "$env_file" ] || [ -L "$env_file" ]; then return 1; fi
+  if [ -e "$env_dir" ] || [ -L "$env_dir" ]; then
+    [ -d "$env_dir" ] && [ -r "$env_dir" ] && [ -x "$env_dir" ] || return 1
+  else
+    env_parent="${env_dir%/*}"
+    [ -d "$env_parent" ] && [ -r "$env_parent" ] && [ -x "$env_parent" ] || return 1
+  fi
+  return 0
+}
+
+container_host_environment_absent() {
+  case "$docker_access" in
+    direct) direct_docker_host_environment_absent ;;
+    sudo) sudo -n sh -c '[ ! -e "$1" ] && [ ! -L "$1" ]' sh "$env_file" 2>/dev/null ;;
+    *) return 1 ;;
+  esac
+}
+
+bounded_output() (
+  output_file="$(mktemp)" || exit 1
+  trap 'rm -f "$output_file"' 0 HUP INT TERM
+  dd iflag=fullblock bs="$((MAX_RAW_BYTES + 1))" count=1 of="$output_file" 2>/dev/null || exit 1
+  byte_count="$(wc -c < "$output_file" | tr -d '[:space:]')"
+  case "$byte_count" in ''|*[!0-9]*) exit 1 ;; esac
+  [ "$byte_count" -le "$MAX_RAW_BYTES" ] || exit 1
+  cat "$output_file"
+)
+
+bounded_command() (
+  status_file="$(mktemp)" || exit 1
+  trap 'rm -f "$status_file"' 0 HUP INT TERM
+  if (
+    set +e
+    "$@"
+    command_status=$?
+    printf '%s\n' "$command_status" > "$status_file"
+  ) | bounded_output; then
+    bounded_status=0
+  else
+    bounded_status=$?
+  fi
+  command_status="$(cat "$status_file" 2>/dev/null || true)"
+  [ "$bounded_status" -eq 0 ] && [ "$command_status" = 0 ]
+)
+
+container_ingress_runtime_token() {
+  bounded_command docker_cmd exec -e XP_INFRA_PROCESS_ROOT=/proc "$container_identity" sh -c '
+    owner="$1"
+    self_pid="$$"
+    process_root="$XP_INFRA_PROCESS_ROOT"
+    process_count=0
+    process_token=""
+    for file in "$process_root"/[0-9]*/cmdline; do
+      [ -r "$file" ] || exit 1
+      candidate_pid="${file#"$process_root"/}"
+      candidate_pid="${candidate_pid%/cmdline}"
+      [ "$candidate_pid" = "$self_pid" ] && continue
+      case "$candidate_pid" in ""|*[!0-9]*) exit 1 ;; esac
+      process_dir="${file%/cmdline}"
+      stat_file="${process_dir}/stat"
+      executable_file="${process_dir}/exe"
+      [ -r "$stat_file" ] || exit 1
+      stat_line_before="$(cat "$stat_file" 2>/dev/null)" || exit 1
+      stat_line_before="${stat_line_before#*) }"
+      set -- $stat_line_before
+      starttime_before="${20:-}"
+      case "$starttime_before" in ""|*[!0-9]*) exit 1 ;; esac
+      executable_before="$(readlink "$executable_file" 2>/dev/null)" || exit 1
+      command_line_before="$(tr "\\000" "\\n" < "$file" 2>/dev/null)" || exit 1
+      argv0_before="$(printf "%s\\n" "$command_line_before" | sed -n "1p")" || exit 1
+      executable_after="$(readlink "$executable_file" 2>/dev/null)" || exit 1
+      command_line_after="$(tr "\\000" "\\n" < "$file" 2>/dev/null)" || exit 1
+      stat_line_after="$(cat "$stat_file" 2>/dev/null)" || exit 1
+      stat_line_after="${stat_line_after#*) }"
+      set -- $stat_line_after
+      starttime_after="${20:-}"
+      case "$starttime_after" in ""|*[!0-9]*) exit 1 ;; esac
+      [ "$executable_before" = "$executable_after" ] || exit 1
+      [ "$command_line_before" = "$command_line_after" ] || exit 1
+      [ "$starttime_before" = "$starttime_after" ] || exit 1
+      case "$executable_after" in
+        "$owner"|*/"$owner")
+          case "$argv0_before" in
+            "$owner"|*/"$owner")
+              process_token="${candidate_pid}:${starttime_after}"
+              process_count=$((process_count + 1))
+              ;;
+          esac
+          ;;
+      esac
+    done
+    [ "$process_count" -eq 1 ] || exit 1
+    printf "%s" "$process_token"
+  ' sh "$ingress_runtime" 2>/dev/null
+}
+
+host_ingress_runtime_pid() {
+  sudo -n sh -c 'if pid_output=$(pidof "$1" 2>/dev/null); then set -- $pid_output; [ "$#" -eq 1 ] || exit 1; printf %s "$1"; else status=$?; [ "$status" -eq 1 ] || exit "$status"; fi' sh "$ingress_runtime" 2>/dev/null
+}
+
+host_ingress_runtime_starttime() {
+  runtime_pid="$1"
+  sudo -n sh -c '
+    stat_file="/proc/$1/stat"
+    [ -r "$stat_file" ] || exit 1
+    line=$(cat "$stat_file") || exit 1
+    line=${line#*) }
+    set -- $line
+    starttime="${20:-}"
+    case "$starttime" in ""|*[!0-9]*) exit 1 ;; esac
+    printf %s "$starttime"
+  ' sh "$runtime_pid" 2>/dev/null
+}
+
+if [ "$runtime_mode" = host ]; then
+  sudo -n test -r "$env_file" || exit 1
+  [ "$(host_ingress_runtime_pid)" = "$host_ingress_pid" ] || exit 1
+  [ "$(host_ingress_runtime_starttime "$host_ingress_pid")" = "$host_ingress_starttime" ] || exit 1
+  status_h1="$(bounded_command curl --http1.1 -sS --noproxy '*' --max-time 15 --resolve "${access_host}:${vless_port}:127.0.0.1" "https://${access_host}:${vless_port}/generate_204" -o /dev/null -w '%{http_code} %{http_version}' 2>/dev/null)" || exit 1
+  status_h2="$(bounded_command curl --http2 -sS --noproxy '*' --max-time 15 --resolve "${access_host}:${vless_port}:127.0.0.1" "https://${access_host}:${vless_port}/generate_204" -o /dev/null -w '%{http_code} %{http_version}' 2>/dev/null)" || exit 1
+  [ "$(host_ingress_runtime_pid)" = "$host_ingress_pid" ] || exit 1
+  [ "$(host_ingress_runtime_starttime "$host_ingress_pid")" = "$host_ingress_starttime" ] || exit 1
+else
+  docker_access=sudo
+  if ! bounded_command docker_cmd inspect -f '{{.Id}}' "$container_identity" >/dev/null 2>&1; then
+    [ "$allow_direct_docker" = true ] || exit 1
+    docker_access=direct
+    container_host_environment_absent || exit 1
+    bounded_command docker_cmd inspect -f '{{.Id}}' "$container_identity" >/dev/null 2>&1 || exit 1
+  fi
+  if ! container_host_environment_absent; then
+    [ "$docker_access" = sudo ] && [ "$allow_direct_docker" = true ] || exit 1
+    docker_access=direct
+    container_host_environment_absent || exit 1
+    bounded_command docker_cmd inspect -f '{{.Id}}' "$container_identity" >/dev/null 2>&1 || exit 1
+  fi
+  observed_identity="$(bounded_command docker_cmd inspect -f '{{.Id}}' "$container_identity" 2>/dev/null)" || exit 1
+  [ "$observed_identity" = "$container_identity" ] || exit 1
+  observed_running="$(bounded_command docker_cmd inspect -f '{{.State.Running}}' "$container_identity" 2>/dev/null)" || exit 1
+  [ "$observed_running" = true ] || exit 1
+  observed_started_at="$(bounded_command docker_cmd inspect -f '{{.State.StartedAt}}' "$container_identity" 2>/dev/null)" || exit 1
+  [ "$observed_started_at" = "$container_started_at" ] || exit 1
+  [ "$(container_ingress_runtime_token)" = "$container_ingress_token" ] || exit 1
+  container_host_environment_absent || exit 1
+  status_h1="$(bounded_command docker_cmd exec "$container_identity" curl --http1.1 -sS --noproxy '*' --max-time 15 --resolve "${access_host}:${vless_port}:127.0.0.1" "https://${access_host}:${vless_port}/generate_204" -o /dev/null -w '%{http_code} %{http_version}' 2>/dev/null)" || exit 1
+  status_h2="$(bounded_command docker_cmd exec "$container_identity" curl --http2 -sS --noproxy '*' --max-time 15 --resolve "${access_host}:${vless_port}:127.0.0.1" "https://${access_host}:${vless_port}/generate_204" -o /dev/null -w '%{http_code} %{http_version}' 2>/dev/null)" || exit 1
+  observed_identity_after="$(bounded_command docker_cmd inspect -f '{{.Id}}' "$container_identity" 2>/dev/null)" || exit 1
+  [ "$observed_identity_after" = "$container_identity" ] || exit 1
+  observed_running_after="$(bounded_command docker_cmd inspect -f '{{.State.Running}}' "$container_identity" 2>/dev/null)" || exit 1
+  [ "$observed_running_after" = true ] || exit 1
+  observed_started_at_after="$(bounded_command docker_cmd inspect -f '{{.State.StartedAt}}' "$container_identity" 2>/dev/null)" || exit 1
+  [ "$observed_started_at_after" = "$container_started_at" ] || exit 1
+  [ "$(container_ingress_runtime_token)" = "$container_ingress_token" ] || exit 1
+  container_host_environment_absent || exit 1
+fi
+
+if [ "$status_h1" = "204 1.1" ] && [ "$status_h2" = "204 2" ]; then
+  echo "vless_ingress=true"
+else
+  echo "vless_ingress=false"
+fi

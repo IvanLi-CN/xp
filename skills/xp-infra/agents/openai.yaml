@@ -1,0 +1,6 @@
+interface:
+  display_name: "XP Infra"
+  short_description: "校验 XP 私人策略并审计 Xray 或 xp-proxy 节点"
+  default_prompt: >-
+    使用 $xp-infra 校验私人策略，执行只读端口预检和完整审计，
+    并指导已单独授权的 XP 部署、升级或恢复。私人配置保留在仓库外。

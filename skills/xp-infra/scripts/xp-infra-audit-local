@@ -1,0 +1,11 @@
+#!/usr/bin/env bun
+import { normalizeBasic, normalizePublicHealth, encodeRecords } from "./audit.ts";
+import { reportError } from "./cli.ts";
+import { ensure } from "./input.ts";
+import { boundedInput } from "./process.ts";
+try {
+  const mode = process.argv[2];
+  ensure(process.argv.length === 3 && (mode === "basic" || mode === "public-health"), "usage: xp-infra-audit-local basic|public-health");
+  const input = await boundedInput(Bun.stdin.stream());
+  process.stdout.write(encodeRecords(mode === "basic" ? normalizeBasic(input) : normalizePublicHealth(input)));
+} catch (error) { reportError(error); }

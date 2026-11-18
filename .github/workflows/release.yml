@@ -330,8 +330,28 @@ jobs:
           cache-from: type=gha,scope=release-runtime
           cache-to: type=gha,mode=max,scope=release-runtime
 
+  package-skill:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ inputs.head_sha }}"}
+      - name: package project-owned skill
+        env:
+          SOURCE_SHA: ${{ inputs.head_sha }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          python3 scripts/package-xp-infra-skill.py --version "$VERSION" \
+            --source-sha "$SOURCE_SHA" --output-dir skill-release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: "xp-infra-skill-${{ github.run_id }}-bundle"
+          path: skill-release
+
   publish-release:
-    needs: [prepare, build, publish-static-web, publish-image]
+    needs: [prepare, build, publish-static-web, publish-image, package-skill]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093

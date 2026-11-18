@@ -2021,3 +2021,15 @@ systemd、OpenRC、Docker/Compose 共用实现。无 xp.env 的容器必须指�
 自动回滚在恢复 XP 备份前实际检查备份版本，失败时保留现有程序、事务备份与诊断，不把 xp-ops 退回缺少保护的版本。
 
 容器镜像替换同样不得覆盖为不支持此账本的版本。
+
+### 项目内 XP 运维 Skill
+
+`skills/xp-infra/` 是运维 Skill 的唯一维护来源，与 XP 使用相同版本和源码 SHA。
+GitHub Release 提供 `xp-infra-skill-vVERSION.tar.gz` 及独立 SHA256 校验文件。
+包内清单绑定版本、完整源码 SHA、依赖和文件摘要；解压后使用本机 Bun 直接运行。
+安装、保留旧版本及切换发现路径见 [操作手册](../../skills/xp-infra/references/runbook.md)。
+私人配置继续保留在 `~/.config/xp-infra/`，不得纳入仓库或发布资产。
+
+审计与端口预检支持节点声明的 active `xray` 或 `xp-proxy` runtime。
+两者统一校验服务、进程身份与入口归属，并验证真实 HTTP/1.1 和 HTTP/2 HTTPS 回落。
+未知、切换中、失败或观测缺失不允许跳过检查；旧 toolkit 副本不再作为本项目维护来源。

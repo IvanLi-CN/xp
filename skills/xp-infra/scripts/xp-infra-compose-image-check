@@ -1,0 +1,3 @@
+# Compose image check source anchor
+
+The executable wrapper has been retired. The single active implementation is the typed `composeImageMatches` function in [preflight.ts](preflight.ts), covered by the XP behavior tests. This nonexecutable reference preserves existing contract links; it is not a CLI or runtime fallback.

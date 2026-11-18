@@ -316,13 +316,21 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("exactly one release type label", workflow)
         self.assertIn("exactly one release channel label", workflow)
 
+    def test_project_skill_packages_the_locked_release_source(self) -> None:
+        workflow = (Path(__file__).parents[1] / "workflows" / "release.yml").read_text()
+        package = workflow.split("  package-skill:", 1)[1].split("  publish-release:", 1)[0]
+        self.assertIn('with: {ref: "${{ inputs.head_sha }}"}', package)
+        self.assertIn("VERSION: ${{ needs.prepare.outputs.version }}", package)
+        self.assertIn("python3 scripts/package-xp-infra-skill.py", package)
+        self.assertIn('name: "xp-infra-skill-${{ github.run_id }}-bundle"', package)
+
     def test_static_web_gate_precedes_image_and_release(self) -> None:
         workflow = (Path(__file__).parents[1] / "workflows" / "release.yml").read_text()
         helper = (Path(__file__).parents[1] / "scripts" / "deploy-edgeone.sh").read_text()
         self.assertIn("publish-static-web:", workflow)
         self.assertIn("needs: [prepare, build]", workflow)
         self.assertIn("needs: [prepare, build, publish-static-web]", workflow)
-        self.assertIn("needs: [prepare, build, publish-static-web, publish-image]", workflow)
+        self.assertIn("needs: [prepare, build, publish-static-web, publish-image, package-skill]", workflow)
         self.assertIn("bash .github/scripts/deploy-edgeone.sh", workflow)
         self.assertIn('with: {ref: "${{ github.workflow_sha }}"}', workflow)
         self.assertIn('manifest.get("artifact") != expected_archive', workflow)

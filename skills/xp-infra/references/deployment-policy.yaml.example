@@ -1,0 +1,17 @@
+schema_version: 1
+owner_confirmed: false
+geo:
+  enabled: false
+  origin: <configured-origin>
+  owner_authorized_third_party_lookup: false
+public_hostname:
+  zone: <configured-zone>
+defaults:
+  cloudflare_tunnel: true
+  cloudflare_ddns: true
+  ip_geo_enrichment: true
+  managed_default_vless: true
+  managed_default_ss2022: false
+  direct_docker: false
+  vless_port: automatic_preflight
+node_overrides: {}

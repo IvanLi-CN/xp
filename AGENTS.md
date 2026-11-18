@@ -10,6 +10,12 @@
 - `scripts/`: repo tooling and helper scripts.
 - Build artifacts: `target/`, `web/dist/` (generated; don’t edit).
 
+## Project-owned Skills
+
+- `xp-infra` 的唯一维护来源为本仓库 `skills/xp-infra/`，与 XP 同版本通过 GitHub Release 发布。
+- 本项目专用 Skill 不适用通用可复用 Skills 由 `agent-toolkit` 维护的路由规则。
+- 私人配置和节点验收记录保持在仓库外。
+
 ## Deployment Contract
 
 - Owner-facing deployment truth lives in `docs/ops/README.md` and the active `docs/specs/**/SPEC.md` files, not in ad hoc chat decisions.

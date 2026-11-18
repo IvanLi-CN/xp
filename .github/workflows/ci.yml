@@ -24,6 +24,17 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
+  xp-infra:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ env.TARGET_SHA }}"}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with: {bun-version-file: .bun-version}
+      - run: bun test ./skills/xp-infra/tests
+      - run: python3 scripts/test-package-xp-infra-skill.py
+
   rust:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
