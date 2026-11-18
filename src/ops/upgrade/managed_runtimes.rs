@@ -735,8 +735,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn runtime_rollback_restores_both_binaries() {
+    #[test]
+    fn runtime_rollback_restores_both_binaries() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
         let bin = tmp.path().join("usr/local/bin");
@@ -750,23 +750,24 @@ mod tests {
         fs::write(&xray_backup, b"old-xray").unwrap();
         fs::write(&cloudflared_backup, b"old-cloudflared").unwrap();
 
-        rollback_runtime_binaries_and_services(
-            &paths,
-            &[
+        let backups =
+            [(&xray, xray_backup), (&cloudflared, cloudflared_backup)].map(|(dest, backup)| {
                 RuntimeBinaryBackup {
-                    dest: xray.clone(),
-                    backup: Some(xray_backup),
-                },
-                RuntimeBinaryBackup {
-                    dest: cloudflared.clone(),
-                    backup: Some(cloudflared_backup),
-                },
-            ],
-            &RuntimeDefaultsBackup { files: Vec::new() },
-            RuntimeTarget::Xray,
-        )
-        .await
-        .unwrap();
+                    dest: dest.clone(),
+                    backup: Some(backup),
+                }
+            });
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(rollback_runtime_binaries_and_services(
+                &paths,
+                &backups,
+                &RuntimeDefaultsBackup { files: Vec::new() },
+                RuntimeTarget::Xray,
+            ))
+            .unwrap();
 
         assert_eq!(fs::read(xray).unwrap(), b"old-xray");
         assert_eq!(fs::read(cloudflared).unwrap(), b"old-cloudflared");
