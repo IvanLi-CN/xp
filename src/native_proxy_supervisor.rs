@@ -19,6 +19,30 @@ pub async fn publish_snapshot(
 ) -> anyhow::Result<()> {
     let generation = snapshot.generation;
     let mut stream = UnixStream::connect(socket).await?;
+    if snapshot
+        .listeners
+        .iter()
+        .any(|listener| listener.reality_tls_target.is_some())
+    {
+        let request_id = Uuid::new_v4().to_string();
+        let response = send_request(
+            &mut stream,
+            ControlRequest {
+                protocol_version: CONTROL_PROTOCOL_VERSION,
+                request_id: request_id.clone(),
+                generation,
+                operation: ControlOperation::Status,
+            },
+        )
+        .await?;
+        if response.protocol_version != CONTROL_PROTOCOL_VERSION
+            || response.request_id != request_id
+            || response.error.is_some()
+            || !response.reality_tls_fallback_v1
+        {
+            anyhow::bail!("native proxy does not support managed REALITY TLS fallback");
+        }
+    }
     let request = ControlRequest {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: Uuid::new_v4().to_string(),
@@ -68,6 +92,7 @@ pub fn build_snapshot(
     users: &BTreeMap<String, crate::domain::User>,
     memberships: &[crate::state::NodeUserEndpointMembership],
     cluster_ca_key_pem: &str,
+    canary_bind: Option<std::net::SocketAddr>,
 ) -> anyhow::Result<ProxySnapshot> {
     let mut listeners = Vec::new();
     let mut endpoint_ids = BTreeMap::new();
@@ -95,6 +120,7 @@ pub fn build_snapshot(
         {
             continue;
         }
+        let reality_tls_target = canary_bind.filter(|_| meta.managed_default);
         let fallbacks = meta
             .canary_upstream
             .iter()
@@ -111,6 +137,7 @@ pub fn build_snapshot(
         listeners.push(ListenerSnapshot {
             bind: format!("0.0.0.0:{}", endpoint.port),
             path: crate::protocol::VLESS_XHTTP_PATH.to_string(),
+            reality_tls_target,
             reality: RealitySnapshot {
                 dest: meta.reality.dest,
                 server_names: meta.reality.server_names,
@@ -141,12 +168,16 @@ pub fn build_snapshot(
             snapshot_users.push(UserSnapshot { uuid });
         }
     }
-    Ok(ProxySnapshot {
+    let snapshot = ProxySnapshot {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         generation: 1,
         listeners,
         users: snapshot_users,
-    })
+    };
+    snapshot
+        .validate_reality_tls_targets()
+        .map_err(anyhow::Error::msg)?;
+    Ok(snapshot)
 }
 
 fn next_persistent_generation() -> anyhow::Result<u64> {
@@ -197,6 +228,7 @@ pub async fn publish_reconciled_snapshot(
     users: &BTreeMap<String, crate::domain::User>,
     memberships: &[crate::state::NodeUserEndpointMembership],
     cluster_ca_key_pem: &str,
+    canary_bind: Option<std::net::SocketAddr>,
 ) {
     let enabled = env::var("XP_NATIVE_PROXY_ENABLED")
         .ok()
@@ -216,6 +248,7 @@ pub async fn publish_reconciled_snapshot(
         users,
         memberships,
         cluster_ca_key_pem,
+        canary_bind,
     ) {
         Ok(mut snapshot) => {
             match next_persistent_generation() {
@@ -324,6 +357,7 @@ mod tests {
                     },
                     error: None,
                     metrics: None,
+                    reality_tls_fallback_v1: false,
                 };
                 stream
                     .write_all(&encode_frame(&response).unwrap())
@@ -350,6 +384,103 @@ mod tests {
         .unwrap();
         publish_snapshot(&socket, snapshot).await.unwrap();
         task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_proxy_never_receives_the_new_snapshot() {
+        let dir = tempdir().unwrap();
+        let socket = dir.path().join("proxy.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let snapshot = managed_snapshot(Some("127.0.0.1:39043"), true).unwrap();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let size = stream.read_u32().await.unwrap();
+            let mut frame = size.to_be_bytes().to_vec();
+            frame.resize(frame.len() + size as usize, 0);
+            stream.read_exact(&mut frame[4..]).await.unwrap();
+            let request: ControlRequest = decode_frame(&frame).unwrap();
+            assert!(matches!(request.operation, ControlOperation::Status));
+            let response = serde_json::json!({
+                "protocol_version": CONTROL_PROTOCOL_VERSION,
+                "request_id": request.request_id,
+                "generation": 12,
+                "state": "active",
+                "error": null,
+            });
+            stream
+                .write_all(&encode_frame(&response).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(stream.read(&mut [0]).await.unwrap(), 0);
+        });
+        let err = publish_snapshot(&socket, snapshot).await.unwrap_err();
+        assert!(err.to_string().contains("does not support"));
+        task.await.unwrap();
+    }
+
+    #[test]
+    fn managed_tls_target_does_not_depend_on_canary_upstream() {
+        for bind in ["127.0.0.1:39043", "[::1]:39043"] {
+            let snapshot = managed_snapshot(Some(bind), true).unwrap();
+            assert_eq!(
+                snapshot.listeners[0].reality_tls_target,
+                Some(bind.parse().unwrap())
+            );
+            assert!(snapshot.listeners[0].fallbacks.is_empty());
+            assert!(
+                managed_snapshot(Some(bind), false).unwrap().listeners[0]
+                    .reality_tls_target
+                    .is_none()
+            );
+        }
+        assert!(
+            managed_snapshot(None, true).unwrap().listeners[0]
+                .reality_tls_target
+                .is_none()
+        );
+        for bind in [
+            "0.0.0.0:39043",
+            "192.0.2.1:39043",
+            "127.0.0.1:443",
+            "127.0.0.1:0",
+        ] {
+            assert!(managed_snapshot(Some(bind), true).is_err(), "{bind}");
+        }
+        let mut snapshot = managed_snapshot(Some("127.0.0.1:39043"), true).unwrap();
+        snapshot.listeners[0].reality.dest = "127.0.0.1:39044".into();
+        assert!(snapshot.validate().is_err());
+    }
+
+    fn managed_snapshot(
+        bind: Option<&str>,
+        managed_default: bool,
+    ) -> anyhow::Result<ProxySnapshot> {
+        let mut reality = xp_test_fixtures::endpoint_reality().clone();
+        reality["dest"] = serde_json::json!(bind.unwrap_or("127.0.0.1:39043"));
+        let endpoint = Endpoint {
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().into(),
+            node_id: xp_test_fixtures::primary_node_id().into(),
+            tag: xp_test_fixtures::primary_endpoint_tag().into(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::json!({
+                "reality": reality,
+                "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+                "short_ids": xp_test_fixtures::endpoint_short_ids(),
+                "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
+                "transport": "xhttp",
+                "ingress_owner": "native",
+                "managed_default": managed_default
+            }),
+        };
+        build_snapshot(
+            &endpoint.node_id,
+            std::slice::from_ref(&endpoint),
+            &BTreeMap::new(),
+            &[],
+            "cluster-key",
+            bind.map(|bind| bind.parse().unwrap()),
+        )
     }
 
     #[test]
@@ -398,6 +529,7 @@ mod tests {
             &users,
             &memberships,
             "cluster-key",
+            None,
         )
         .unwrap();
         assert_eq!(snapshot.protocol_version, CONTROL_PROTOCOL_VERSION);

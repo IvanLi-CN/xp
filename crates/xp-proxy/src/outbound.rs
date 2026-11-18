@@ -431,6 +431,7 @@ mod tests {
                 path: "/xp-xhttp".into(),
                 xmux: XmuxSnapshot::default(),
                 fallbacks: vec![],
+                reality_tls_target: None,
                 reality: RealitySnapshot {
                     dest: "127.0.0.1:1".into(),
                     server_names: vec!["example.test".into()],

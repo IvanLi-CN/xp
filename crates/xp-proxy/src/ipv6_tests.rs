@@ -77,6 +77,7 @@ fn listener_snapshot(bind: SocketAddr) -> ListenerSnapshot {
         },
         xmux: XmuxSnapshot::default(),
         fallbacks: vec![],
+        reality_tls_target: None,
     }
 }
 

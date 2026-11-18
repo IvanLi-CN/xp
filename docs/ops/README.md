@@ -88,6 +88,12 @@ XP snapshot 的 `0.0.0.0:PORT` 为自动 wildcard，在支持 IPv6 的 Linux 上
 
 ### Host-managed target contract
 
+托管默认 XHTTP 端点启用 HTTPS canary 后，同一接入端口的 `/generate_204` 应返回 204。
+本机 canary 监听地址必须与 `reality.dest` 一致。`canary_upstream` 可留空。
+
+升级应同时使用匹配的 XP 与 xp-proxy 资产。旧运行时未声明 TLS fallback 能力时，
+XP 会拒绝发布要求此能力的新 snapshot。
+
 The target host-managed contract is one independent `xp-proxy` service on both systemd and OpenRC.
 XP coordinates snapshots through the socket but does not spawn, supervise or kill the service.
 Xray -> native follows:

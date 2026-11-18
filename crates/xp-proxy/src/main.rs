@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -321,25 +321,44 @@ async fn handle_tls_or_fallback(
             .await?;
         return xhttp_h2::serve(tls, users, listener.path, listener.xmux.into(), traffic).await;
     }
-    let fallback = listener
-        .fallbacks
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("unauthenticated TLS has no fallback"))?;
-    let target = FallbackTarget::parse(&fallback.target).map_err(anyhow::Error::msg)?;
-    if !fallback.authorities.is_empty()
-        && !fallback
-            .authorities
-            .iter()
-            .any(|authority| authority == &target.authority)
-    {
-        anyhow::bail!("fallback authority is not allowlisted");
-    }
-    let mut outbound = TcpStream::connect(&target.authority).await?;
+    let mut outbound = if let Some(target) = listener.reality_tls_target {
+        if parsed.is_err() {
+            anyhow::bail!("invalid TLS ClientHello for managed REALITY fallback");
+        }
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            TcpStream::connect(target),
+        )
+        .await
+        .context("managed REALITY TLS target dial timed out")?
+        .context("managed REALITY TLS target dial failed")?
+    } else {
+        let fallback = listener
+            .fallbacks
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("unauthenticated TLS has no fallback"))?;
+        let target = FallbackTarget::parse(&fallback.target).map_err(anyhow::Error::msg)?;
+        if !fallback.authorities.is_empty()
+            && !fallback
+                .authorities
+                .iter()
+                .any(|authority| authority == &target.authority)
+        {
+            anyhow::bail!("fallback authority is not allowlisted");
+        }
+        TcpStream::connect(&target.authority).await?
+    };
     outbound.write_all(&hello).await?;
     traffic.add_uplink(hello.len() as u64);
     if !buffered_extra.is_empty() {
         outbound.write_all(&buffered_extra).await?;
         traffic.add_uplink(buffered_extra.len() as u64);
+    }
+    if listener.reality_tls_target.is_some() {
+        let (uplink, downlink) = tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await?;
+        traffic.add_uplink(uplink);
+        traffic.add_downlink(downlink);
+        return Ok(());
     }
     let (mut ri, mut wi) = inbound.into_split();
     let (mut ro, mut wo) = outbound.into_split();
@@ -594,6 +613,7 @@ async fn handle_control(
         }
         let transition = listener_runtime.transition.lock().await;
         let (_, active) = manager.state();
+        let is_status = matches!(&request.operation, ControlOperation::Status);
         let result = match request.operation {
             ControlOperation::Prepare { snapshot } => {
                 let generation = snapshot.generation;
@@ -635,6 +655,7 @@ async fn handle_control(
             state,
             error,
             metrics: Some(traffic.snapshot()),
+            reality_tls_fallback_v1: is_status,
         };
         // The response snapshot is serialized with the operation, but a slow
         // reader must not hold the shared state-transition lock during I/O.
@@ -680,6 +701,7 @@ mod tests {
                 path: "/xp-xhttp".into(),
                 xmux: XmuxSnapshot::default(),
                 fallbacks: vec![],
+                reality_tls_target: None,
                 reality: RealitySnapshot {
                     dest: "127.0.0.1:1".into(),
                     server_names: vec!["example.test".into()],

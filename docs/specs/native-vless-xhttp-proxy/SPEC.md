@@ -178,6 +178,16 @@ XP 是唯一的 endpoint/user 权威。XP 生成的 snapshot 必须完整描述�
 
 ### Protocol and fallback contract
 
+托管默认 XHTTP 端点启用 HTTPS canary 时，XP 发布可选的 `reality_tls_target`。
+目标必须是与 `reality.dest` 一致的本机 canary loopback 地址和非零端口，
+且不得指回任何接入端口。合法但未通过 REALITY 认证的 TLS ClientHello 和后续数据
+透传给该目标，由 canary 终止 TLS 并处理 HTTP 路由。SNI 和 Host 不参与目标选择。
+拨号失败关闭连接；有认证的代理流量与明文流量保留原路径。
+
+`canary_upstream` 是 canary 收到 HTTP 请求后的可选上游，不决定 TLS 路由是否存在。
+XP 必须在同一 control v2 连接的 `Status` 响应中确认 `reality_tls_fallback_v1`，
+才发送含该目标的 `Prepare` 请求。旧 snapshot 仍可读取。
+
 - **REQ-VLESS:** 入站和出站只承诺 TCP stream 与 `encryption: none` VLESS；用户认证失败、
   framing 错误或非法 destination 必须 fail closed。
 - **REQ-REALITY:** REALITY server/client 必须覆盖锁定基线中的 key schedule、SNI、ALPN、

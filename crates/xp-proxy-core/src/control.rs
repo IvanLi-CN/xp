@@ -40,6 +40,8 @@ pub struct ListenerSnapshot {
     pub bind: String,
     pub path: String,
     pub reality: RealitySnapshot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reality_tls_target: Option<std::net::SocketAddr>,
     #[serde(default)]
     pub xmux: XmuxSnapshot,
     #[serde(default)]
@@ -151,6 +153,8 @@ pub struct ControlResponse {
     pub error: Option<String>,
     #[serde(default)]
     pub metrics: Option<TrafficSnapshot>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reality_tls_fallback_v1: bool,
 }
 
 pub fn encode_frame<T: Serialize>(value: &T) -> Result<Vec<u8>, serde_json::Error> {
@@ -398,6 +402,25 @@ impl Default for GenerationManager {
 }
 
 impl ProxySnapshot {
+    pub fn validate_reality_tls_targets(&self) -> Result<(), String> {
+        for listener in &self.listeners {
+            if let Some(target) = listener.reality_tls_target
+                && (!target.ip().is_loopback()
+                    || target.port() == 0
+                    || listener.reality.dest.parse::<std::net::SocketAddr>().ok() != Some(target)
+                    || self.listeners.iter().any(|ingress| {
+                        ingress
+                            .bind
+                            .parse::<std::net::SocketAddr>()
+                            .is_ok_and(|bind| bind.port() == target.port())
+                    }))
+            {
+                return Err("invalid managed REALITY TLS target".into());
+            }
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.protocol_version != CONTROL_PROTOCOL_VERSION {
             return Err(format!(
@@ -408,6 +431,7 @@ impl ProxySnapshot {
         if self.generation == 0 {
             return Err("generation must be non-zero".into());
         }
+        self.validate_reality_tls_targets()?;
         for listener in &self.listeners {
             if listener.bind.parse::<std::net::SocketAddr>().is_err() {
                 return Err(format!("invalid listener bind: {}", listener.bind));
@@ -497,6 +521,7 @@ mod tests {
                 },
                 xmux: XmuxSnapshot::default(),
                 fallbacks: Vec::new(),
+                reality_tls_target: None,
             }],
             users: vec![UserSnapshot {
                 uuid: uuid::Uuid::nil().to_string(),

@@ -97,6 +97,7 @@ pub struct ReconcileHandle {
     mesh_state_applied: Arc<AtomicBool>,
     mesh_gate_authoritative: Arc<AtomicBool>,
     snapshot_installing: Arc<AtomicBool>,
+    managed_canary_bind: Arc<std::sync::OnceLock<Option<std::net::SocketAddr>>>,
     mesh_gate_lock: Arc<RwLock<()>>,
     mesh_epoch_barrier: Arc<RwLock<()>>,
 }
@@ -109,6 +110,10 @@ impl Drop for SnapshotInstallAdmission {
     }
 }
 impl ReconcileHandle {
+    pub fn initialize_managed_canary(&self, bind: Option<std::net::SocketAddr>) {
+        let _ = self.managed_canary_bind.set(bind);
+    }
+
     pub fn request(&self, req: ReconcileRequest) {
         if let Some(tx) = &self.tx {
             let _ = tx.send(req);
@@ -269,6 +274,7 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         mesh_state_applied: Arc::new(AtomicBool::new(false)),
         mesh_gate_authoritative: Arc::new(AtomicBool::new(false)),
         snapshot_installing: Arc::new(AtomicBool::new(false)),
+        managed_canary_bind: Arc::default(),
         mesh_gate_lock: Arc::new(RwLock::new(())),
         mesh_epoch_barrier: Arc::new(RwLock::new(())),
     };
@@ -628,21 +634,19 @@ async fn reconcile_once_with_runtime(
     let reverse_mesh_enabled = config.reverse_mesh_enabled
         && cluster_mesh_enabled
         && crate::reverse_mesh::NATIVE_REVERSE_ENABLED;
-    let native_snapshot_inputs = (
-        snapshot.endpoints.clone(),
-        snapshot.users_by_id.clone(),
-        snapshot.memberships.clone(),
-    );
     // Native ingress is independent of the legacy Xray data plane. Publish first so a stopped
     // Xray cannot prevent xp-proxy from receiving the desired snapshot during a runtime handoff.
-    crate::native_proxy_supervisor::publish_reconciled_snapshot(
-        &local_node_id,
-        &native_snapshot_inputs.0,
-        &native_snapshot_inputs.1,
-        &native_snapshot_inputs.2,
-        cluster_ca_key_pem,
-    )
-    .await;
+    if let Some(canary_bind) = restart_handle.managed_canary_bind.get() {
+        crate::native_proxy_supervisor::publish_reconciled_snapshot(
+            &local_node_id,
+            &snapshot.endpoints,
+            &snapshot.users_by_id,
+            &snapshot.memberships,
+            cluster_ca_key_pem,
+            *canary_bind,
+        )
+        .await;
+    }
 
     let outcome = reconcile_snapshot(
         config.xray_api_addr,
