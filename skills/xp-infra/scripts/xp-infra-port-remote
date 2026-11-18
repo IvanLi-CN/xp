@@ -1,0 +1,527 @@
+#!/bin/sh
+# Bounded system observation only; local interpretation lives in preflight.ts.
+set -eu
+echo XP_INFRA_PORT_PREFLIGHT=1 >/dev/null
+env_file=/etc/xp/xp.env
+container=""
+XP_CONTAINER_IMAGE_PREFIX="${XP_CONTAINER_IMAGE_PREFIX:-ghcr.io/example/xp}"
+MAX_PREFLIGHT_STATE_BYTES=32768
+MAX_PREFLIGHT_DISCOVERY_BYTES=32768
+PREFLIGHT_COMMAND_TIMEOUT_SECONDS=15
+bounded_preflight_input() (
+  output_file="$(mktemp)" || exit 1
+  trap "rm -f \"$output_file\"" 0 HUP INT TERM
+  dd iflag=fullblock bs="$((MAX_PREFLIGHT_DISCOVERY_BYTES + 1))" count=1 of="$output_file" 2>/dev/null || exit 1
+  byte_count="$(wc -c < "$output_file" | tr -d "[:space:]")"
+  case "$byte_count" in ""|*[!0-9]*) exit 1 ;; esac
+  [ "$byte_count" -le "$MAX_PREFLIGHT_DISCOVERY_BYTES" ] || exit 1
+  cat "$output_file"
+)
+bounded_preflight_command() (
+  status_file="$(mktemp)" || exit 1
+  trap "rm -f \"$status_file\"" 0 HUP INT TERM
+  if (
+    set +e
+    timeout "$PREFLIGHT_COMMAND_TIMEOUT_SECONDS" "$@"
+    command_status=$?
+    printf "%s\n" "$command_status" > "$status_file"
+  ) | bounded_preflight_input; then
+    bounded_status=0
+  else
+    bounded_status=$?
+  fi
+  command_status="$(cat "$status_file" 2>/dev/null || true)"
+  [ "$bounded_status" -eq 0 ] && [ "$command_status" = 0 ]
+)
+command -v timeout >/dev/null 2>&1 || exit 1
+bounded_preflight_command sudo -n true >/dev/null || exit 1
+host_env=false
+host_env_status="$(bounded_preflight_command sudo -n sh -c 'if [ -e "$1" ]; then [ -r "$1" ] || exit 1; printf %s readable; else printf %s absent; fi' sh "$env_file" 2>/dev/null)" || exit 1
+case "$host_env_status" in
+  readable) host_env=true ;;
+  absent) ;;
+  *) exit 1 ;;
+esac
+host_env_snapshot=""
+read_host_environment() {
+  bounded_preflight_command sudo -n awk '
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/^export[[:space:]]+/, "", line)
+      split(line, pair, "=")
+      if (pair[1] ~ /^(XP_XRAY_SYSTEMD_UNIT|XP_XRAY_OPENRC_SERVICE|XP_XRAY_API_ADDR|XP_DATA_DIR)$/) {
+        if (seen[pair[1]]++) exit 1
+        print $0
+      }
+    }
+  ' "$env_file"
+}
+if [ "$host_env" = true ]; then
+  host_env_snapshot="$(read_host_environment 2>/dev/null)" || exit 1
+fi
+host_env_value() {
+  key="$1"
+  printf '%s\n' "$host_env_snapshot" | awk -v key="$key" '
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/^export[[:space:]]+/, "", line)
+      split(line, pair, "=")
+      if (pair[1] == key) {
+        value = substr(line, index(line, "=") + 1)
+        found = 1
+      }
+    }
+    END { if (found) printf "%s", value }
+  '
+}
+normalize_env_value() {
+  value="$(printf "%s" "$1" | sed "s/^[[:space:]]*//;s/[[:space:]]*$//")"
+  single_quote="$(printf "\\047")"
+  case "$value" in
+    \"*\") value="${value#\"}"; value="${value%\"}" ;;
+    "$single_quote"*"$single_quote") value="${value#"$single_quote"}"; value="${value%"$single_quote"}" ;;
+  esac
+  printf %s "$value"
+}
+docker_path="$(bounded_preflight_command sudo -n sh -c 'docker_path="$(command -v docker 2>/dev/null || true)"; for candidate in "$docker_path" /usr/bin/docker /usr/local/bin/docker; do if [ -n "$candidate" ] && [ -x "$candidate" ]; then printf %s "$candidate"; exit 0; fi; done; printf %s absent' 2>/dev/null)" || exit 1
+case "$docker_path" in
+  absent|/*) ;;
+  *) exit 1 ;;
+esac
+if [ "$docker_path" = absent ]; then
+  docker_socket="$(bounded_preflight_command sudo -n sh -c 'if [ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]; then printf %s present; else printf %s absent; fi' sh "$ingress_runtime" 2>/dev/null)" || exit 1
+  [ "$docker_socket" = absent ] || exit 1
+fi
+docker_preflight() (
+  unset DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG
+  bounded_preflight_command sudo -n "$docker_path" --context default "$@"
+)
+containers=""
+container_count=0
+docker_inventory=""
+if [ "$docker_path" != absent ]; then
+  docker_inventory="$(docker_preflight ps --format '{{.Names}} {{.Image}}' 2>/dev/null)" || exit 1
+  containers="$(printf '%s\n' "$docker_inventory" | awk -v image_prefix="$XP_CONTAINER_IMAGE_PREFIX" '
+    NF == 0 { next }
+    NF != 2 || $1 !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ { exit 1 }
+    index($2, image_prefix ":") == 1 || index($2, image_prefix "@") == 1 { print $1 }
+  ')" || exit 1
+  container_count="$(printf '%s\n' "$containers" | awk 'NF { count++ } END { print count + 0 }')"
+  [ "$container_count" -le 1 ] || exit 1
+fi
+if [ "$host_env" = true ] && [ "$container_count" -ne 0 ]; then
+  exit 1
+fi
+ingress_systemd_unit=xray
+ingress_openrc_service=xray
+ingress_api_addr=127.0.0.1:10085
+state_path=""
+legacy_state_path=""
+state_selector=absent
+if [ "$container_count" -eq 1 ]; then
+  container="$containers"
+  container_snapshot="$(docker_preflight inspect --format '{{.Id}} {{.State.StartedAt}} {{.State.Running}}' "$container" 2>/dev/null)" || exit 1
+  set -- $container_snapshot
+  [ "$#" -eq 3 ] && [ "$3" = true ] && [ "${#1}" -eq 64 ] || exit 1
+  case "$1" in *[!0-9a-f]*) exit 1 ;; esac
+  case "$2" in ''|*[!0-9TZ:.-]*) exit 1 ;; esac
+  container="$1"
+  data_dir="$(docker_preflight exec "$container" sh -c 'if [ -n "${XP_DATA_DIR:-}" ]; then printf %s "$XP_DATA_DIR"; else printf %s /var/lib/xp/data; fi' sh "$ingress_runtime" 2>/dev/null)" || exit 1
+  ingress_api_addr="$(docker_preflight exec "$container" sh -c 'printf %s "${XP_XRAY_API_ADDR:-127.0.0.1:10085}"' 2>/dev/null)" || exit 1
+  case "$data_dir" in /*) ;; *) exit 1 ;; esac
+  state_path="$data_dir/managed-default-endpoints.json"
+  legacy_state_path="$data_dir/container/managed_default_endpoints.json"
+  state_selector=container
+elif [ "$host_env" = true ]; then
+  ingress_systemd_unit="$(host_env_value XP_XRAY_SYSTEMD_UNIT)" || exit 1
+  ingress_openrc_service="$(host_env_value XP_XRAY_OPENRC_SERVICE)" || exit 1
+  ingress_api_addr="$(host_env_value XP_XRAY_API_ADDR)" || exit 1
+  ingress_systemd_unit="$(normalize_env_value "$ingress_systemd_unit")"
+  ingress_openrc_service="$(normalize_env_value "$ingress_openrc_service")"
+  ingress_api_addr="$(normalize_env_value "$ingress_api_addr")"
+  [ -n "$ingress_systemd_unit" ] || ingress_systemd_unit=xray
+  [ -n "$ingress_openrc_service" ] || ingress_openrc_service=xray
+  [ -n "$ingress_api_addr" ] || ingress_api_addr=127.0.0.1:10085
+  case "$ingress_systemd_unit" in *[!A-Za-z0-9_.@-]*) exit 1 ;; esac
+  case "$ingress_openrc_service" in *[!A-Za-z0-9_.-]*) exit 1 ;; esac
+  data_dir="$(host_env_value XP_DATA_DIR)" || exit 1
+  data_dir="$(normalize_env_value "$data_dir")"
+  [ -n "$data_dir" ] || data_dir=/var/lib/xp/data
+  case "$data_dir" in /*) ;; *) exit 1 ;; esac
+  state_path="$data_dir/managed-default-endpoints.json"
+  legacy_state_path="$data_dir/container/managed_default_endpoints.json"
+  state_selector="$(bounded_preflight_command sudo -n sh -c 'data_dir=$1; state_path=$2; legacy_state_path=$3; [ -d "$data_dir" ] && [ -r "$data_dir" ] && [ -x "$data_dir" ] || exit 1; if [ -e "$state_path" ]; then printf %s current; elif [ -e "$legacy_state_path" ]; then printf %s legacy; else printf %s absent; fi' sh "$data_dir" "$state_path" "$legacy_state_path" 2>/dev/null)" || exit 1
+fi
+read_managed_state() {
+  if [ "$container_count" -eq 1 ]; then
+    docker_preflight exec "$container" sh -c 'path=$1; legacy_path=$2; limit=$3; if [ -e "$path" ]; then dd if="$path" bs="$((limit + 1))" count=1 2>/dev/null; elif [ -e "$legacy_path" ]; then dd if="$legacy_path" bs="$((limit + 1))" count=1 2>/dev/null; else printf %s "{}"; fi' sh "$state_path" "$legacy_state_path" "$MAX_PREFLIGHT_STATE_BYTES"
+    return
+  fi
+  case "$state_selector" in
+    current) bounded_preflight_command sudo -n dd if="$state_path" bs="$((MAX_PREFLIGHT_STATE_BYTES + 1))" count=1 2>/dev/null ;;
+    legacy) bounded_preflight_command sudo -n dd if="$legacy_state_path" bs="$((MAX_PREFLIGHT_STATE_BYTES + 1))" count=1 2>/dev/null ;;
+    absent) printf %s '{}' ;;
+    *) return 1 ;;
+  esac
+}
+read_runtime_status() {
+  if [ -n "$container" ]; then
+    docker_preflight exec "$container" xp-ops runtime status --json
+  else
+    bounded_preflight_command sudo -n xp-ops runtime status --json
+  fi
+}
+runtime_json="$(read_runtime_status)" || exit 1
+case "$runtime_json" in
+  *'"runtime":"xp-proxy"'*) ingress_runtime=xp-proxy
+    ingress_systemd_unit=xp-proxy; ingress_openrc_service=xp-proxy ;;
+  *'"runtime":"xray"'*) ingress_runtime=xray ;;
+  *) exit 1 ;;
+esac
+printf 'runtime_json=%s\n' "$runtime_json"
+
+state="$(read_managed_state)" || exit 1
+case "$ingress_api_addr" in
+  127.*:*)
+    ingress_api_host="${ingress_api_addr%:*}"
+    old_ifs="$IFS"
+    IFS=.
+    set -- $ingress_api_host
+    IFS="$old_ifs"
+    [ "$#" -eq 4 ] || exit 1
+    for octet in "$@"; do
+      case "$octet" in
+        [0-9]|[0-9][0-9]|[0-9][0-9][0-9]) ;;
+        *) exit 1 ;;
+      esac
+      [ "$octet" -le 255 ] || exit 1
+    done
+    ;;
+  \[::1\]:*) ;;
+  *) exit 1 ;;
+esac
+ingress_api_port="${ingress_api_addr##*:}"
+[ "$ingress_api_port" -ge 1 ] && [ "$ingress_api_port" -le 65535 ] || exit 1
+[ "$(printf '%s' "$state" | wc -c | tr -d '[:space:]')" -le "$MAX_PREFLIGHT_STATE_BYTES" ] || exit 1
+printf 'state_b64=%s\n' "$(printf '%s' "$state" | base64 | tr -d '\r\n')"
+
+collect_host_listeners() {
+  if command -v ss >/dev/null 2>&1; then
+    bounded_preflight_command sudo -n ss -H -ltnp 2>/dev/null
+  elif command -v netstat >/dev/null 2>&1; then
+    bounded_preflight_command sudo -n netstat -ltnp 2>/dev/null
+  else
+    return 1
+  fi
+}
+host_listeners="$(collect_host_listeners)" || exit 1
+runtime_listeners="$host_listeners"
+collect_published_ports() {
+  published_ports=""
+  if [ "$docker_path" != absent ]; then
+    docker_ids="$(docker_preflight ps -q 2>/dev/null)" || return 1
+    for docker_id in $docker_ids; do
+      container_ports="$(docker_preflight port "$docker_id" 2>/dev/null)" || return 1
+      container_published_ports="$(printf '%s\n' "$container_ports" | awk -v max="$MAX_PREFLIGHT_DISCOVERY_BYTES" '
+        function emit(port) {
+          value = port "\n"
+          if (bytes + length(value) > max) { invalid = 1; return }
+          print port
+          bytes += length(value)
+        }
+        NF == 0 { next }
+        {
+          value = $NF
+          sub(/^.*:/, "", value)
+          count = split(value, bounds, "-")
+          if (count < 1 || count > 2 || bounds[1] !~ /^[1-9][0-9]*$/ || (count == 2 && bounds[2] !~ /^[1-9][0-9]*$/)) { invalid = 1; next }
+          first = bounds[1] + 0
+          last = count == 2 ? bounds[2] + 0 : first
+          if (first > 65535 || last > 65535 || last < first) { invalid = 1; next }
+          for (port = first; port <= last; port++) { emit(port); if (invalid) exit 1 }
+        }
+        END { if (invalid) exit 1 }
+      ')" || return 1
+      published_ports="${published_ports}
+${container_published_ports}"
+      [ "$(printf '%s' "$published_ports" | wc -c | tr -d "[:space:]")" -le "$MAX_PREFLIGHT_DISCOVERY_BYTES" ] || return 1
+    done
+  fi
+  printf '%s' "$published_ports"
+}
+published_ports="$(collect_published_ports)" || exit 1
+collect_runtime_listeners() {
+  if [ -n "$container" ]; then
+    if docker_preflight exec "$container" sh -c 'command -v ss >/dev/null 2>&1'; then docker_preflight exec "$container" ss -H -ltnp
+    elif docker_preflight exec "$container" sh -c 'command -v netstat >/dev/null 2>&1'; then docker_preflight exec "$container" netstat -ltnp
+    else return 1
+    fi
+  else
+    printf '%s' "$host_listeners"
+  fi
+}
+runtime_listeners="$(collect_runtime_listeners)" || exit 1
+listener_ports="$(printf '%s\n%s\n%s\n' "$host_listeners" "$runtime_listeners" "$published_ports" | awk '
+  function add_port(port) { seen[port] = 1 }
+  /^[1-9][0-9]*$/ { if ($1 <= 65535) add_port($1); next }
+  NF == 0 || /^(Proto|Active)[[:space:]]/ { next }
+  NF < 4 { invalid = 1; next }
+  { value=$4; sub(/^.*:/, "", value); if (value !~ /^[1-9][0-9]*$/ || value > 65535) { invalid = 1; next }; add_port(value) }
+  END {
+    if (invalid) exit 1
+    output = ""
+    for (port in seen) output = output (output ? "," : "") port
+    print output
+  }
+')" || exit 1
+printf 'occupied_ports=%s\n' "$listener_ports"
+printf 'ingress_ports=%s\n' "$(printf '%s\n' "$runtime_listeners" | awk -v owner="$ingress_runtime" '
+  index($0, "\"" owner "\"") || $0 ~ ("[0-9]+/" owner "([[:space:]]|$)") {
+    value=$4; if (value ~ /^127\./ || value ~ /^\[?::1\]?:/) next
+    sub(/^.*:/, "", value)
+    if (value ~ /^[1-9][0-9]*$/ && value <= 65535 && !seen[value]++) print value
+  }' | sort -n | paste -sd, -)"
+printf 'ingress_listener_pids=%s\n' "$(printf '%s\n' "$runtime_listeners" | awk -v owner="$ingress_runtime" '
+  index($0, "\"" owner "\",pid=") {
+    value=$0; sub("^.*\"" owner "\",pid=", "", value); sub(/[^0-9].*$/, "", value)
+    if (!seen[value]++) print value
+  }
+  $0 ~ ("[0-9]+/" owner "([[:space:]]|$)") {
+    for (field=1;field<=NF;field++) if ($field ~ ("^[0-9]+/" owner "$")) {
+      split($field, parts, "/"); if (!seen[parts[1]]++) print parts[1]
+    }
+  }' | sort -n | paste -sd, -)"
+read_ingress_pid() {
+  if [ -n "$container" ]; then
+    docker_preflight exec "$container" sh -c 'if pid_output=$(pidof "$1" 2>/dev/null); then set -- $pid_output; [ "$#" -eq 1 ] || exit 1; printf %s "$1"; else status=$?; [ "$status" -eq 1 ] || exit "$status"; fi' sh "$ingress_runtime" 2>/dev/null
+  else
+    bounded_preflight_command sudo -n sh -c 'if pid_output=$(pidof "$1" 2>/dev/null); then set -- $pid_output; [ "$#" -eq 1 ] || exit 1; printf %s "$1"; else status=$?; [ "$status" -eq 1 ] || exit "$status"; fi' sh "$ingress_runtime" 2>/dev/null
+  fi
+}
+read_ephemeral_range() {
+  if [ -n "$container" ]; then
+    docker_preflight exec "$container" sh -c 'sysctl -n net.ipv4.ip_local_port_range 2>/dev/null || cat /proc/sys/net/ipv4/ip_local_port_range' 2>/dev/null
+  else
+    bounded_preflight_command sudo -n sh -c 'sysctl -n net.ipv4.ip_local_port_range 2>/dev/null || cat /proc/sys/net/ipv4/ip_local_port_range' 2>/dev/null
+  fi
+}
+read_reserved_ports() {
+  if [ -n "$container" ]; then
+    docker_preflight exec "$container" sh -c 'sysctl -n net.ipv4.ip_local_reserved_ports 2>/dev/null || cat /proc/sys/net/ipv4/ip_local_reserved_ports' 2>/dev/null
+  else
+    bounded_preflight_command sudo -n sh -c 'sysctl -n net.ipv4.ip_local_reserved_ports 2>/dev/null || cat /proc/sys/net/ipv4/ip_local_reserved_ports' 2>/dev/null
+  fi
+}
+read_unprivileged_port_start() {
+  if [ -n "$container" ]; then
+    docker_preflight exec "$container" sh -c 'sysctl -n net.ipv4.ip_unprivileged_port_start 2>/dev/null || cat /proc/sys/net/ipv4/ip_unprivileged_port_start' 2>/dev/null
+  else
+    bounded_preflight_command sudo -n sh -c 'sysctl -n net.ipv4.ip_unprivileged_port_start 2>/dev/null || cat /proc/sys/net/ipv4/ip_unprivileged_port_start' 2>/dev/null
+  fi
+}
+read_ingress_api() {
+  [ -n "$ingress_runtime_pid" ] || return 0
+  if [ "$ingress_runtime" = xp-proxy ]; then
+    if [ -n "$container" ]; then
+      docker_preflight exec "$container" dd \
+        if=/var/lib/xp-proxy/last-successful-snapshot.json \
+        bs="$((MAX_PREFLIGHT_STATE_BYTES + 1))" count=1 2>/dev/null
+    else
+      bounded_preflight_command sudo -n dd \
+        if=/var/lib/xp-proxy/last-successful-snapshot.json \
+        bs="$((MAX_PREFLIGHT_STATE_BYTES + 1))" count=1 2>/dev/null
+    fi
+    return
+  fi
+  if [ -n "$container" ]; then
+    docker_preflight exec "$container" xray api lsi --server="$ingress_api_addr" --isOnlyTags=false 2>/dev/null
+  else
+    bounded_preflight_command sudo -n xray api lsi --server="$ingress_api_addr" --isOnlyTags=false 2>/dev/null
+  fi
+}
+read_ingress_starttime() {
+  [ -n "$ingress_runtime_pid" ] || return 0
+  stat_reader='line=$(cat "/proc/$1/stat") || exit 1; line=${line#*) }; set -- $line; value=${20:-}; case "$value" in ""|*[!0-9]*) exit 1 ;; esac; printf %s "$value"'
+  if [ -n "$container" ]; then
+    docker_preflight exec "$container" sh -c "$stat_reader" sh "$ingress_runtime_pid" 2>/dev/null
+  else
+    bounded_preflight_command sudo -n sh -c "$stat_reader" sh "$ingress_runtime_pid" 2>/dev/null
+  fi
+}
+read_ingress_process_security() {
+  [ -n "$ingress_runtime_pid" ] || { printf '%s' unavailable; return 0; }
+  if [ -n "$container" ]; then
+    docker_preflight exec "$container" awk '/^Uid:/{uid=$3}/^CapEff:/{cap=$2}END{if(uid=="" || cap=="")exit 1; print uid,cap}' "/proc/$ingress_runtime_pid/status" 2>/dev/null
+  else
+    bounded_preflight_command sudo -n awk '/^Uid:/{uid=$3}/^CapEff:/{cap=$2}END{if(uid=="" || cap=="")exit 1; print uid,cap}' "/proc/$ingress_runtime_pid/status" 2>/dev/null
+  fi
+}
+revalidate_host_service() {
+  [ -n "$container" ] && return 0
+  [ -n "$ingress_runtime_pid" ] || return 0
+  if command -v systemctl >/dev/null 2>&1 && bounded_preflight_command sudo -n systemctl is-active --quiet "$ingress_systemd_unit" >/dev/null; then
+    [ "$ingress_service" = active ] || return 1
+    ingress_service_pid_after="$(bounded_preflight_command sudo -n systemctl show --property MainPID --value "$ingress_systemd_unit" 2>/dev/null)" || return 1
+    [ "$ingress_service_pid_after" = "$ingress_service_pid" ] || return 1
+    return 0
+  fi
+  if command -v rc-service >/dev/null 2>&1 && bounded_preflight_command sudo -n rc-service "$ingress_openrc_service" status >/dev/null; then
+    [ "$ingress_service" = active ] || return 1
+    ingress_pidfile_after="$(bounded_preflight_command sudo -n sh -c 'service=$1; for candidate in "/run/supervise-$service.pid" "/var/run/supervise-$service.pid" "/run/$service.pid" "/var/run/$service.pid"; do if [ -r "$candidate" ]; then printf %s "$candidate"; exit 0; fi; done; exit 1' sh "$ingress_openrc_service" 2>/dev/null)" || return 1
+    [ "$ingress_pidfile_after" = "$ingress_pidfile" ] || return 1
+    ingress_service_pid_after="$(bounded_preflight_command sudo -n cat "$ingress_pidfile_after" 2>/dev/null)" || return 1
+    [ "$ingress_service_pid_after" = "$ingress_service_pid" ] || return 1
+    return 0
+  fi
+  return 1
+}
+if [ -n "$container" ]; then
+  ephemeral_range="$(read_ephemeral_range)" || exit 1
+  reserved_ports="$(read_reserved_ports)" || exit 1
+  unprivileged_port_start="$(read_unprivileged_port_start)" || exit 1
+  ingress_runtime_pid="$(read_ingress_pid)" || exit 1
+  ingress_starttime="$(read_ingress_starttime)" || exit 1
+  ingress_api_json="$(read_ingress_api)" || exit 1
+  if [ -n "$ingress_runtime_pid" ]; then
+    ingress_security="$(read_ingress_process_security)" || exit 1
+  else
+    ingress_security=unavailable
+  fi
+  if [ "$ingress_security" = unavailable ]; then
+    container_user_raw="$(docker_preflight inspect --format '{{.Config.User}}' "$container" 2>/dev/null)" || exit 1
+    container_cap_drop="$(docker_preflight inspect --format '{{json .HostConfig.CapDrop}}' "$container" 2>/dev/null)" || exit 1
+    container_cap_add="$(docker_preflight inspect --format '{{json .HostConfig.CapAdd}}' "$container" 2>/dev/null)" || exit 1
+    container_capability=0
+    case "$container_cap_add" in *NET_BIND_SERVICE*) container_capability=0000000000000400 ;; esac
+    container_user="$container_user_raw"
+    container_user="${container_user%%:*}"
+    if [ -z "$container_user" ] || [ "$container_user" = root ] || [ "$container_user" = 0 ]; then
+      case "$container_cap_drop" in
+        *ALL*|*NET_BIND_SERVICE*) [ "$container_capability" != 0 ] || container_capability=0 ;;
+        *) [ "$container_capability" != 0 ] || container_capability=0000000000000400 ;;
+      esac
+      ingress_security="0 $container_capability"
+    else
+      case "$container_user" in
+        *[!0-9]*) container_user="$(docker_preflight exec "$container" id -u "$container_user" 2>/dev/null)" || exit 1 ;;
+      esac
+      case "$container_user" in [1-9][0-9]*) ingress_security="$container_user $container_capability" ;; *) exit 1 ;; esac
+    fi
+  fi
+  if [ -n "$ingress_runtime_pid" ]; then ingress_service=active; else ingress_service=inactive; fi
+else
+  ephemeral_range="$(read_ephemeral_range)" || exit 1
+  reserved_ports="$(read_reserved_ports)" || exit 1
+  unprivileged_port_start="$(read_unprivileged_port_start)" || exit 1
+  ingress_runtime_pid="$(read_ingress_pid)" || exit 1
+  ingress_starttime="$(read_ingress_starttime)" || exit 1
+  ingress_api_json="$(read_ingress_api)" || exit 1
+  if [ -n "$ingress_runtime_pid" ]; then
+    ingress_security="$(read_ingress_process_security)" || exit 1
+  else
+    ingress_security='unavailable'
+  fi
+  if [ -n "$ingress_runtime_pid" ]; then
+    ingress_service=inactive
+    ingress_service_pid=""
+    if command -v systemctl >/dev/null 2>&1 && bounded_preflight_command sudo -n systemctl is-active --quiet "$ingress_systemd_unit" >/dev/null; then
+      ingress_service_pid="$(bounded_preflight_command sudo -n systemctl show --property MainPID --value "$ingress_systemd_unit" 2>/dev/null)" || exit 1
+      ingress_service=active
+      [ "$ingress_service_pid" = "$ingress_runtime_pid" ] || exit 1
+    elif command -v rc-service >/dev/null 2>&1 && bounded_preflight_command sudo -n rc-service "$ingress_openrc_service" status >/dev/null; then
+      ingress_pidfile="$(bounded_preflight_command sudo -n sh -c 'service=$1; for candidate in "/run/supervise-$service.pid" "/var/run/supervise-$service.pid" "/run/$service.pid" "/var/run/$service.pid"; do if [ -r "$candidate" ]; then printf %s "$candidate"; exit 0; fi; done; exit 1' sh "$ingress_openrc_service" 2>/dev/null)" || exit 1
+      ingress_service_pid="$(bounded_preflight_command sudo -n cat "$ingress_pidfile" 2>/dev/null)" || exit 1
+      [ -n "$ingress_service_pid" ] || exit 1
+      case "$ingress_service_pid" in *[!0-9]*) exit 1 ;; esac
+      if [ "$ingress_service_pid" != "$ingress_runtime_pid" ]; then
+        ingress_supervisor_cmd="$(bounded_preflight_command sudo -n sh -c 'tr "\\000" " " < "/proc/$1/cmdline"' sh "$ingress_service_pid" 2>/dev/null)" || exit 1
+        case " $ingress_supervisor_cmd " in
+          *" supervise-daemon $ingress_openrc_service "*|*" /supervise-daemon $ingress_openrc_service "*) ;;
+          *) exit 1 ;;
+        esac
+        ingress_parent_pid="$(bounded_preflight_command sudo -n sh -c 'stat_file="/proc/$1/stat"; [ -r "$stat_file" ] || exit 1; line=$(cat "$stat_file") || exit 1; line=${line#*) }; set -- $line; printf %s "${2:-}"' sh "$ingress_runtime_pid" 2>/dev/null)" || exit 1
+        [ -n "$ingress_parent_pid" ] || exit 1
+        case "$ingress_parent_pid" in *[!0-9]*) exit 1 ;; esac
+        [ "$ingress_parent_pid" = "$ingress_service_pid" ] || exit 1
+      fi
+      ingress_service=active
+    fi
+    [ "$ingress_service" = active ] || exit 1
+  else
+    ingress_service=inactive
+  fi
+fi
+host_env_status_after="$(bounded_preflight_command sudo -n sh -c 'if [ -e "$1" ]; then [ -r "$1" ] || exit 1; printf %s readable; else printf %s absent; fi' sh "$env_file" 2>/dev/null)" || exit 1
+[ "$host_env_status_after" = "$host_env_status" ] || exit 1
+if [ "$host_env" = true ]; then
+  host_env_snapshot_after="$(read_host_environment 2>/dev/null)" || exit 1
+  [ "$host_env_snapshot_after" = "$host_env_snapshot" ] || exit 1
+  state_selector_after="$(bounded_preflight_command sudo -n sh -c 'data_dir=$1; state_path=$2; legacy_state_path=$3; [ -d "$data_dir" ] && [ -r "$data_dir" ] && [ -x "$data_dir" ] || exit 1; if [ -e "$state_path" ]; then printf %s current; elif [ -e "$legacy_state_path" ]; then printf %s legacy; else printf %s absent; fi' sh "$data_dir" "$state_path" "$legacy_state_path" 2>/dev/null)" || exit 1
+  [ "$state_selector_after" = "$state_selector" ] || exit 1
+fi
+docker_path_after="$(bounded_preflight_command sudo -n sh -c 'docker_path="$(command -v docker 2>/dev/null || true)"; for candidate in "$docker_path" /usr/bin/docker /usr/local/bin/docker; do if [ -n "$candidate" ] && [ -x "$candidate" ]; then printf %s "$candidate"; exit 0; fi; done; printf %s absent' 2>/dev/null)" || exit 1
+[ "$docker_path_after" = "$docker_path" ] || exit 1
+if [ "$docker_path" = absent ]; then
+  docker_socket_after="$(bounded_preflight_command sudo -n sh -c 'if [ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]; then printf %s present; else printf %s absent; fi' sh "$ingress_runtime" 2>/dev/null)" || exit 1
+  [ "$docker_socket_after" = "$docker_socket" ] || exit 1
+else
+  docker_inventory_after="$(docker_preflight ps --format '{{.Names}} {{.Image}}' 2>/dev/null)" || exit 1
+  [ "$docker_inventory_after" = "$docker_inventory" ] || exit 1
+  containers_after="$(printf '%s\n' "$docker_inventory_after" | awk -v image_prefix="$XP_CONTAINER_IMAGE_PREFIX" '
+    NF == 0 { next }
+    NF != 2 || $1 !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ { exit 1 }
+    index($2, image_prefix ":") == 1 || index($2, image_prefix "@") == 1 { print $1 }
+  ')" || exit 1
+  container_count_after="$(printf '%s\n' "$containers_after" | awk 'NF { count++ } END { print count + 0 }')"
+  [ "$container_count_after" -le 1 ] || exit 1
+  [ "$containers_after" = "$containers" ] || exit 1
+  [ "$container_count_after" = "$container_count" ] || exit 1
+fi
+state_after="$(read_managed_state)" || exit 1
+[ "$(printf '%s' "$state_after" | wc -c | tr -d '[:space:]')" -le "$MAX_PREFLIGHT_STATE_BYTES" ] || exit 1
+[ "$state_after" = "$state" ] || exit 1
+published_ports_after="$(collect_published_ports)" || exit 1
+[ "$published_ports_after" = "$published_ports" ] || exit 1
+ephemeral_range_after="$(read_ephemeral_range)" || exit 1
+reserved_ports_after="$(read_reserved_ports)" || exit 1
+unprivileged_port_start_after="$(read_unprivileged_port_start)" || exit 1
+[ "$ephemeral_range_after" = "$ephemeral_range" ] || exit 1
+[ "$reserved_ports_after" = "$reserved_ports" ] || exit 1
+[ "$unprivileged_port_start_after" = "$unprivileged_port_start" ] || exit 1
+host_listeners_after="$(collect_host_listeners)" || exit 1
+[ "$host_listeners_after" = "$host_listeners" ] || exit 1
+runtime_listeners_after="$(collect_runtime_listeners)" || exit 1
+[ "$runtime_listeners_after" = "$runtime_listeners" ] || exit 1
+ingress_runtime_pid_after="$(read_ingress_pid)" || exit 1
+[ "$ingress_runtime_pid_after" = "$ingress_runtime_pid" ] || exit 1
+ingress_starttime_after="$(read_ingress_starttime)" || exit 1
+[ "$ingress_starttime_after" = "$ingress_starttime" ] || exit 1
+if [ -n "$container" ]; then
+  container_snapshot_after="$(docker_preflight inspect --format '{{.Id}} {{.State.StartedAt}} {{.State.Running}}' "$container" 2>/dev/null)" || exit 1
+  [ "$container_snapshot_after" = "$container_snapshot" ] || exit 1
+fi
+ingress_api_json_after="$(read_ingress_api)" || exit 1
+[ "$ingress_api_json_after" = "$ingress_api_json" ] || exit 1
+if [ -n "$ingress_runtime_pid" ]; then
+  ingress_security_after="$(read_ingress_process_security)" || exit 1
+  [ "$ingress_security_after" = "$ingress_security" ] || exit 1
+elif [ -n "$container" ]; then
+  container_user_after="$(docker_preflight inspect --format '{{.Config.User}}' "$container" 2>/dev/null)" || exit 1
+  container_cap_drop_after="$(docker_preflight inspect --format '{{json .HostConfig.CapDrop}}' "$container" 2>/dev/null)" || exit 1
+  container_cap_add_after="$(docker_preflight inspect --format '{{json .HostConfig.CapAdd}}' "$container" 2>/dev/null)" || exit 1
+  [ "$container_user_after" = "$container_user_raw" ] || exit 1
+  [ "$container_cap_drop_after" = "$container_cap_drop" ] || exit 1
+  [ "$container_cap_add_after" = "$container_cap_add" ] || exit 1
+fi
+revalidate_host_service || exit 1
+printf 'ephemeral_range=%s\n' "$ephemeral_range"
+printf 'reserved_ports=%s\n' "$reserved_ports"
+printf 'unprivileged_port_start=%s\n' "$unprivileged_port_start"
+printf 'ingress_runtime_pid=%s\n' "$ingress_runtime_pid"
+printf 'ingress_service=%s\n' "$ingress_service"
+printf 'ingress_security=%s\n' "$ingress_security"
+printf 'ingress_api_b64=%s\n' "$(printf '%s' "$ingress_api_json" | base64 | tr -d '\r\n')"
+
+[ "$(read_runtime_status)" = "$runtime_json" ] || exit 1

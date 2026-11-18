@@ -1,0 +1,7 @@
+# XP inventory template
+
+Keep live node inventory out of the public repository. When a deployment needs a local copy, record only sanitized role, OS, service manager, release and audit status. Store aliases in a protected configuration and never include addresses, domains, ports, credentials, home paths or private exception details.
+
+| Alias | Role | OS | Service manager | Release | Audit |
+| --- | --- | --- | --- | --- | --- |
+| `<node-alias>` | primary/follower | `<os>` | `<systemd/openrc/compose>` | `<release>` | revalidate with `xp-infra audit` |

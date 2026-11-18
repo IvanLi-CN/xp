@@ -1,0 +1,50 @@
+#!/bin/sh
+set -eu
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  echo "os_pretty=${PRETTY_NAME:-}"
+  echo "os_id=${ID:-}"
+  echo "os_version=${VERSION_ID:-}"
+else
+  echo "os_pretty=$(uname -s)"
+  echo "os_id="
+  echo "os_version="
+fi
+
+svc_mgr=unknown
+if command -v rc-service >/dev/null 2>&1; then
+  svc_mgr=openrc
+elif command -v systemctl >/dev/null 2>&1; then
+  svc_mgr=systemd
+fi
+echo "svc_mgr=$svc_mgr"
+
+xp_bin=""
+if [ -x /usr/local/bin/xp ]; then
+  xp_bin=/usr/local/bin/xp
+elif command -v xp >/dev/null 2>&1; then
+  xp_bin="$(command -v xp)"
+fi
+
+if [ -n "$xp_bin" ]; then
+  echo "xp_present=yes"
+  echo "xp_bin=$xp_bin"
+  ver=$("$xp_bin" --version 2>/dev/null || "$xp_bin" -V 2>/dev/null || echo unknown)
+  echo "xp_version=$ver"
+else
+  echo "xp_present=no"
+  echo "xp_bin="
+  echo "xp_version="
+fi
+
+ui_listen=no
+metrics_listen=no
+if command -v ss >/dev/null 2>&1; then
+  if ss -ltn 2>/dev/null | grep -q ":62416"; then ui_listen=yes; fi
+  if ss -ltn 2>/dev/null | grep -q ":10085"; then metrics_listen=yes; fi
+elif command -v netstat >/dev/null 2>&1; then
+  if netstat -ltn 2>/dev/null | grep -q ":62416"; then ui_listen=yes; fi
+  if netstat -ltn 2>/dev/null | grep -q ":10085"; then metrics_listen=yes; fi
+fi
+echo "ui_listen=$ui_listen"
+echo "metrics_listen=$metrics_listen"
