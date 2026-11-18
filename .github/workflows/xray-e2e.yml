@@ -65,3 +65,21 @@ jobs:
         env:
           XRAY_DOCKER_TAG: 26.3.27
         run: scripts/e2e/run-local-xray-e2e.sh
+
+      - name: Managed HTTPS fallback parity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          fixture="$(mktemp -d)"
+          trap 'rm -rf "$fixture"' EXIT
+          gh release download v3.48.15 --repo "$GITHUB_REPOSITORY" \
+            --pattern xray-linux-x86_64 --dir "$fixture"
+          checksum="$(jq -er '.xray_sha256' scripts/perf/xp-proxy/config.json)"
+          printf '%s  %s\n' "$checksum" "$fixture/xray-linux-x86_64" | sha256sum --check
+          chmod +x "$fixture/xray-linux-x86_64"
+          cargo build --locked -p xp -p xp-proxy --bin xp --bin xp-proxy
+          python3 scripts/testbox/native-reality-canary.py \
+            "${CARGO_TARGET_DIR:-target}/debug/xp" \
+            "${CARGO_TARGET_DIR:-target}/debug/xp-proxy" \
+            "$fixture/xray-linux-x86_64"
