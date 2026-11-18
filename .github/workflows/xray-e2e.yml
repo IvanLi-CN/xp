@@ -94,6 +94,7 @@ jobs:
             --env XP_DISPOSABLE_CI_HOST=1 \
             --volume "$fixture:/fixture:ro" \
             --volume "$PWD/scripts/testbox/native-reality-host.py:/probe.py:ro" \
+            --volume "$PWD/scripts/testbox/openrc-container-net:/testbox-net:ro" \
             debian:trixie-slim bash -euc '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
@@ -101,5 +102,7 @@ jobs:
                 openrc bash curl iproute2 openssl python3
               mkdir -p /run/openrc
               touch /run/openrc/softlevel
+              install -m 0755 /testbox-net /etc/init.d/testbox-net
+              rc-service testbox-net start
               python3 /probe.py openrc /fixture
             '
