@@ -94,7 +94,7 @@ jobs:
             --env XP_DISPOSABLE_CI_HOST=1 \
             --volume "$fixture:/fixture:ro" \
             --volume "$PWD/scripts/testbox/native-reality-host.py:/probe.py:ro" \
-            ubuntu:24.04 bash -euc '
+            debian:trixie-slim bash -euc '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
               apt-get install -y -qq --no-install-recommends \
