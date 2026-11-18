@@ -188,6 +188,14 @@ fn finish_runtime_failure(
 ) -> Result<(), ExitError> {
     if rollback_xp_on_failure {
         rollback_xp_after_runtime_failure(paths, data_dir, xp_backup, error, restart_xp)
+    } else if restart_xp && !start_xp_service(paths) {
+        Err(retain_original_error(
+            error,
+            Err(ExitError::new(
+                8,
+                "rollback_failed: unable to restart current XP",
+            )),
+        ))
     } else {
         Err(error)
     }
@@ -211,6 +219,12 @@ fn rollback_runtime_binaries_and_services(
     backups: &[RuntimeBinaryBackup],
     runtime_defaults: &RuntimeDefaultsBackup,
 ) -> Result<(), ExitError> {
+    if !stop_xp_proxy_service(paths) {
+        return Err(ExitError::new(
+            8,
+            "rollback_failed: unable to stop xp-proxy",
+        ));
+    }
     rollback_runtime_binaries(backups)?;
     restore_runtime_defaults(runtime_defaults)?;
     if !reload_systemd_units(paths) {
