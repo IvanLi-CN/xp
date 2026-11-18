@@ -458,7 +458,7 @@ class WorkflowContractTests(unittest.TestCase):
         release = (workflows / "release.yml").read_text()
         measurement = (workflows / "release-performance.yml").read_text()
         self.assertIn("uses: ./.github/workflows/release-build.yml", release)
-        self.assertIn("needs: [prepare, build, publish-static-web, publish-image]", release)
+        self.assertIn("needs: [prepare, build, publish-static-web, publish-image, package-skill]", release)
         self.assertIn("uses: ./.github/workflows/release-build.yml", measurement)
         self.assertIn("push: false", measurement)
         self.assertNotIn("ncipollo/release-action", measurement)
