@@ -37,7 +37,14 @@ def assert_ingress(owner):
         listeners = run("ss", "-H", "-lntp", f"sport = :{PORT}", capture_output=True, text=True)
         lines = listeners.stdout.splitlines()
         if lines:
-            assert len(lines) == 1 and f'("{owner}",' in lines[0], lines
+            assert len(lines) == 1, lines
+            # ss scans process FDs before querying sockets; a new listener may
+            # appear between those observations. Require ownership on a later
+            # sample within the existing bound, never accept an unknown owner.
+            if "users:" not in lines[0]:
+                time.sleep(0.25)
+                continue
+            assert f'("{owner}",' in lines[0], lines
         response = subprocess.run(
             ["curl", "--http2", "--noproxy", "*", "--max-time", "2",
              "--silent", "--cacert", CERTS / "cert.pem", "--resolve",
