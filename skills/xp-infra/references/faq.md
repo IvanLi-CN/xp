@@ -1,0 +1,235 @@
+# 上线与排障 FAQ
+
+面向“把一台新机器接入 XP 集群”的常见问题。答案只写可复用事实与命令形态；
+别名、地址、域名、端口、凭据留在仓库外。
+
+分两类，阅读时先分清：
+
+- **只读**：观测、审计、preflight，可随时执行。
+- **需授权**：部署、升级、runtime 切换、成员驱逐，必须已有主人明确授权。
+
+## 首次上线
+
+### 上线前至少确认哪些事实？
+
+- 私人策略已确认（`xp-infra policy check` 通过），清单里只有小写 SSH 别名。
+- SSH 操作员已登记，且不是 `root`、`xp`。
+- 资源下限：cgroup 内存 ≥ 256 MiB，根分区可用 ≥ 1 GiB，`free -m` 有真实余量。
+- 目标节点身份唯一：名称、`access_host`、管理地址都不与现有成员冲突。
+
+### 先跑什么，后跑什么？
+
+先只读观测，再动配置：
+
+```sh
+xp-infra inventory
+xp-infra status ALIAS
+xp-infra version ALIAS
+xp-infra port preflight ALIAS
+xp-infra audit ALIAS
+```
+
+`audit` 通过才进入部署；任何非零结果都停下保留证据，不要把失败改记为通过。
+`inventory` 只要有一个节点探测失败就返回非零，这是“有节点异常”而非“本机不能继续”的信号，
+按节点逐个判断，不要因为一个历史节点的失败阻塞目标节点。
+
+## SSH 与账户
+
+### NAT 容器上 SSH 连不上，或认证一直被拒？
+
+LXC/Incus 类 NAT 实例的 sshd 监听**内网地址**；供应商公网 IP 的 `:22` 常属于网关。
+
+- 实例内 `ss -ltnp` 只看到 `10.x.x.x:22`，就说明没有公网映射。
+- 在面板建立显式映射（例如 `公网 60122 → 内网 22`）。
+- 公网 `:22` 能完成 TCP 握手不代表认证可用：网关也可能代理握手。
+
+### 怎么证明公网端口落在目标实例而不是网关？
+
+比对 host key 指纹，两边一致才继续：
+
+- 实例内：`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
+- 本机：`ssh-keyscan -p <公网端口> -t ed25519 <主机> | ssh-keygen -lf -`
+
+不一致说明映射指向了别的主机，此时任何密码或公钥尝试都无意义。
+
+### 为什么加了 sshd 加固配置却不生效？
+
+OpenSSH 对同一关键字**取第一次出现的值**，
+`Include /etc/ssh/sshd_config.d/*.conf` 按文件名顺序读取。
+供应商常放 `00-<provider>-auth.conf` 打开 root/密码登录，后写的 `99-hardening.conf` 会被忽略。
+
+- 加固文件必须排序在前，例如 `00-hardening.conf`。
+- 用生效值复核，而不是只看配置文本：
+
+```sh
+sudo sshd -T | grep -iE '^(permitrootlogin|passwordauthentication)'
+sudo sshd -T | grep -iE '^(kbdinteractive|pubkeyauthentication)'
+```
+
+- 必须同时验证三条：新用户公钥可登、`root` 公钥被拒、密码/交互认证被拒。
+
+### `rc-service sshd reload` 后立刻连不上正常吗？
+
+reload 后短时间内可能出现 `banner exchange` 超时。等 10–30 秒再判定；
+持续失败则回读 `logread` / `/var/log/messages`，不要盲目改端口或反复 reload。
+
+### 新用户公钥正确却被拒，日志写 `account is locked`？
+
+`adduser -D`（Alpine）或未设密码的账户在 `shadow` 中处于锁定状态，
+即使公钥正确 sshd 也会拒绝。
+
+- Alpine 没有 `useradd`，用 `adduser -D -s /bin/ash <name>`。
+- 设一个随机密码解除锁定（随后仍关闭密码认证）：
+
+```sh
+PW=$(head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 24)
+printf '%s:%s\n' '<name>' "$PW" | chpasswd
+```
+
+判定依据是登录成功，不是文件权限看起来正确。
+
+## XP 部署
+
+### `xp-ops deploy` 报 stdin 冲突怎么办？
+
+一次只能提供一个 stdin 密钥：
+
+```text
+invalid_args: --join-token-stdin conflicts with --cloudflare-token-stdin
+```
+
+Cloudflare token 的解析顺序是
+`flag/stdin → CLOUDFLARE_API_TOKEN → /etc/xp-ops/cloudflare_tunnel/api_token`，
+把它预先落盘，用 stdin 传 join token。
+
+### 写入前怎么先看到完整计划？
+
+加 `--dry-run`，它会列出将写的路径、创建的用户、改写的 DNS 记录和要跑的服务命令，
+但不做任何 POST/PUT/PATCH/DELETE 与文件写入。
+
+### 目标主机名上残留旧 Tunnel/CNAME 会怎样？
+
+直接部署会因“非托管或歧义 DNS 记录”失败，或另建一条重复 Tunnel。
+托管路径只在**持久化身份完全匹配**时复用，条件是：
+
+- `/etc/xp-ops/cloudflare_tunnel/settings.json` 的
+  `account_id`/`zone_id`/`hostname`/`tunnel_id` 与本次请求一致；
+- `/etc/cloudflared/<tunnel_id>.json` 存在且 `TunnelID` 等于该 Tunnel。
+
+可以把这两份身份文件按目标值先落盘再部署；
+remote ingress 与 CNAME 仍由 `xp-ops deploy` 在预检后原子改写。
+
+### 托管入口端口要怎么映射？
+
+先看该端口承载什么协议：
+
+- 托管 VLESS/XHTTP 是 TCP，映射 **TCP** 即可；
+- 启用了 SS2022 端点时该端口同时承载 UDP，必须建立 **TCP + UDP** 映射；
+- SSH 端口只需 TCP。
+
+映射后从外网实测对应协议，不要只凭面板显示“已添加”判定可用。
+
+## 集群成员
+
+### 加入集群报 `503 staged_join_capability_unavailable`？
+
+准入会向**每个当前 voter** 读取能力，缺 `cluster.membership-lifecycle-v1`
+或 `cluster.join.staged-v1` 就失败。链路失败不会降级重试：
+Mesh 探测失败不会改走公网，voter 的公网地址返回 5xx 同样失败。
+
+### 怎么只读定位是哪个 voter 阻塞了加入？
+
+逐个 voter 的管理地址直接请求能力清单，看缺哪一项：
+
+```sh
+curl -s https://<voter-api>/api/capabilities
+```
+
+典型故障是某个 voter 的 Tunnel 挂掉，Cloudflare 返回 `530`。
+
+### 某个 voter 不可达时能怎么处理？
+
+只有两条合法路径，都需要授权：
+
+1. 修复该 voter（供应商侧续费/解封、恢复 Tunnel），再重试加入；
+2. 由当前 leader 显式驱逐：`xp-ops xp evict-unreachable-voter --node-id <id>`
+   默认 dry-run，再以 `--apply --expected-membership <fingerprint>`
+   与对应的 endpoint 参数执行。
+
+不得为了让新节点加入而绕过能力检查、改写 Raft 文件或伪造 voter。
+
+### 驱逐 voter 会连带删掉什么？
+
+dry-run 会列出该节点名下的 endpoint 与 membership 指纹。
+执行时必须显式带 `--delete-endpoints --expected-endpoint-ids <ids>`，
+否则不会删；operation 完成后节点与其 endpoint 从 DesiredState 消失。
+
+### join token 过期后要重建节点吗？
+
+不用。过期的 token 只让 `xp join` 返回 `join token is expired`，
+不会留下 learner 或加入会话；节点本地 `pending-join.json` 保留密钥，重试复用同一身份。
+
+但顺序很重要：**先确认全部 voter 可达且能力完整，再签发 token**，否则 token 先过期。
+
+## Runtime 与升级
+
+### 切到 `xp-proxy` 报 `xp-proxy does not exist`？
+
+首次 `xp-ops deploy` 只安装 `xp`/`xp-ops`/`xray`/`cloudflared`，
+`xp-proxy` 需要随后的一次官方升级才落地：
+
+```sh
+sudo xp-ops upgrade --version VERSION
+```
+
+`xp-ops upgrade` 没有 `--yes`，不要编造确认参数。
+
+### 切换失败后节点服务全停了怎么办？
+
+`runtime switch` 会先停 `xp` 与旧 runtime。失败时立刻切回可用的那个恢复服务：
+
+```sh
+sudo xp-ops runtime switch --to xray --yes
+sudo xp-ops runtime status --json
+```
+
+### 怎么证明 runtime 切换真的成功？
+
+四条同时对得上，缺一不算成功：
+
+- `xp-ops runtime status --json` 为 `{"runtime":"xp-proxy","state":"active"}`；
+- `ss -ltnp` 中托管端口只有 `xp-proxy` 一个 owner，`xray` 未监听；
+- `xray` 服务为 stopped，`xp`/`xp-proxy`/`cloudflared` 为 started；
+- 本地 canary 返回 204：
+  `curl --resolve <access_host>:39043:127.0.0.1 https://<access_host>:39043/generate_204`
+
+## 验收与记录
+
+### 公网入口怎么算通过？
+
+两种协议都要过，且管理入口独立可用：
+
+```sh
+curl -sk -o /dev/null -w '%{http_code}\n' --http1.1 https://<access_host>:<port>/generate_204
+curl -sk -o /dev/null -w '%{http_code}\n' --http2  https://<access_host>:<port>/generate_204
+curl -s -o /dev/null -w '%{http_code}\n' https://<api-base-url>/api/health
+```
+
+期望 `204 / 204 / 200`。
+
+### DDNS 记录还指向旧地址？
+
+XP 接管后会按节点真实出口改写记录。核对本地状态而不是猜：
+
+- `/var/lib/xp/data/ddns_state.json` 里 `status=up`、`current_ipv4` 为实际出口；
+- 节点内 `wget -qO- https://cloudflare.com/cdn-cgi/trace | grep ^ip=` 与 DNS 解析一致。
+
+### 审计失败能临时放宽策略吗？
+
+不能。`audit` 的失败要么修节点，要么在私人策略里记录**已获批准**的例外及理由。
+为消除失败而放宽策略会让后续节点继承错误基线。
+
+### 这些记录应该放哪里？
+
+- 仓库内：只放脱敏的合同、模板和可复用经验（本目录）。
+- 仓库外：别名、地址、域名、端口、凭据、验收记录，放私人运维目录。
