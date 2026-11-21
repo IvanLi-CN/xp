@@ -54,37 +54,45 @@ proxy-groups:
       - 🔒 高质量
       - 🤯 落地
       - 🤯 All
+      - DIRECT
 
   # Visible regional leaves only consume direct Reality candidates.
   - name: 🔒 Japan
     type: select
+    empty-fallback: REJECT
     use: [xp-system-generated]
     filter: '(?:日本|🇯🇵|Japan|JP)|(?:^hinet\-reality$)'
     exclude-filter: '^hinet\-ss$'
   - name: 🔒 HongKong
     type: select
+    empty-fallback: REJECT
     use: [xp-system-generated]
     filter: '(?:香港|🇭🇰|HongKong|Hong Kong|HK)|(?:^hk2\-reality$)'
     exclude-filter: '^hk2\-ss$'
   - name: 🔒 Taiwan
     type: select
+    empty-fallback: REJECT
     use: [xp-system-generated]
     filter: '台湾|台灣|🇹🇼|Taiwan|TW'
   - name: 🔒 Korea
     type: select
+    empty-fallback: REJECT
     use: [xp-system-generated]
     filter: '韩国|韓國|🇰🇷|Korea|KR'
   - name: 🔒 Singapore
     type: select
+    empty-fallback: REJECT
     use: [xp-system-generated]
     filter: '(?:新加坡|🇸🇬|Singapore|SG)|(?:^sg\-reality$)'
     exclude-filter: '^sg\-ss$'
   - name: 🔒 US
     type: select
+    empty-fallback: REJECT
     use: [xp-system-generated]
     filter: '美国|🇺🇸|United States|USA|US'
   - name: 🔒 Other
     type: select
+    empty-fallback: REJECT
     use: [xp-system-generated]
     filter: '.*'
     exclude-filter: "(?:日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|\
@@ -171,6 +179,7 @@ proxy-groups:
     timeout: 1000
     max-failed-times: 1
     lazy: false
+    empty-fallback: REJECT
     use: [xp-system-generated]
     filter: '^(?:hinet\-reality|hinet\-ss\-chain|hinet\-reality\-chain)$'
   - name: 🛬 hk2
@@ -180,6 +189,7 @@ proxy-groups:
     timeout: 1000
     max-failed-times: 1
     lazy: false
+    empty-fallback: REJECT
     use: [xp-system-generated]
     filter: '^(?:hk2\-reality|hk2\-ss\-chain|hk2\-reality\-chain)$'
   - name: 🛬 sg
@@ -189,6 +199,7 @@ proxy-groups:
     timeout: 1000
     max-failed-times: 1
     lazy: false
+    empty-fallback: REJECT
     use: [xp-system-generated]
     filter: '^(?:sg\-reality|sg\-ss\-chain|sg\-reality\-chain)$'
 
@@ -201,6 +212,7 @@ proxy-groups:
     url: https://www.gstatic.com/generate_204
     interval: 300
     tolerance: 0
+    empty-fallback: REJECT
     use: [xp-system-generated]
     filter: '^(?:hinet\-reality|hk2\-reality|sg\-reality)$'
   - name: 🤯 All
@@ -242,7 +254,7 @@ proxy-groups:
     url: https://www.gstatic.com/generate_204
     interval: 300
     tolerance: 0
-    proxies: [🚀 节点选择, 🤯 落地, 🤯 All]
+    proxies: [🚀 节点选择, 🤯 落地, 🤯 All, DIRECT]
 
   # Relay groups are hidden and live at the end of the system-managed sequence.
   - name: 🛣️ hinet-example-invalid

@@ -118,7 +118,7 @@ providerA:
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>(),
-        vec![MIHOMO_RELAY_REJECT_FALLBACK]
+        vec![MIHOMO_FAIL_CLOSED_FALLBACK]
     );
     assert!(shared_relay.get("use").is_none());
     assert!(shared_relay.get("filter").is_none());
@@ -258,11 +258,11 @@ providerA:
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>(),
-        vec![MIHOMO_RELAY_REJECT_FALLBACK]
+        vec![MIHOMO_FAIL_CLOSED_FALLBACK]
     );
     assert_eq!(
         relay.get("empty-fallback"),
-        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()))
+        Some(&Value::String(MIHOMO_FAIL_CLOSED_FALLBACK.to_string()))
     );
     assert!(relay.get("use").is_none());
     assert!(relay.get("filter").is_none());

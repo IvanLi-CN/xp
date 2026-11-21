@@ -164,7 +164,7 @@ pub(super) fn build_mihomo_relay_group(
         ("hidden", serde_yaml::Value::Bool(true)),
         (
             "empty-fallback",
-            serde_yaml::Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()),
+            serde_yaml::Value::String(MIHOMO_FAIL_CLOSED_FALLBACK.to_string()),
         ),
     ] {
         map.insert(serde_yaml::Value::String(key.to_string()), value);
@@ -174,7 +174,7 @@ pub(super) fn build_mihomo_relay_group(
         map.insert(
             serde_yaml::Value::String("proxies".to_string()),
             serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
-                MIHOMO_RELAY_REJECT_FALLBACK.to_string(),
+                MIHOMO_FAIL_CLOSED_FALLBACK.to_string(),
             )]),
         );
     } else if let Some(system_provider_name) = system_provider_name {
