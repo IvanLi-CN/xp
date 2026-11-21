@@ -191,26 +191,32 @@ operation 完成后节点与其 endpoint 从 DesiredState 消失。
 
 ### 切到 `xp-proxy` 报 `capability_missing` 或服务起不来？
 
-两种不同故障，对应两种修法，先看真实错误串：
+`xp-ops deploy` 会同时安装 `xray` 与带校验和的 `xp-proxy` 资产，
+所以新节点在部署后即可直接切换 runtime。仍然失败时按真实错误串判断：
 
 - `capability_missing: xp-proxy service asset is not installed; run xp-ops init first`
-  —— 服务资产缺失，跑 `sudo xp-ops init` 补齐即可。
+  —— 缺的是 **service 资产**（init 写出的 init 脚本），不是二进制；
+  跑 `sudo xp-ops init` 补齐。
 - `service_error: selected ingress runtime did not become ready`
-  —— 服务单元在但二进制起不来，通常是 `xp-proxy` 可执行文件没装。
-  注意此时 runtime 状态是 `failed`，而 `xp-ops upgrade` 要求 runtime 处于 active，
-  否则直接以 `service_error: ingress runtime must be active before upgrade` 中止。
-  所以先把 runtime 切回可用值，再升级：
+  —— 服务起来了又退出。先确认二进制存在且可执行：
+
+```sh
+ls -l /usr/local/bin/xp-proxy && xp-ops install --only xp-proxy
+```
+
+注意切换失败后 runtime 状态是 `failed`，而 `xp-ops upgrade` 要求 runtime 处于 active，
+否则以 `service_error: ingress runtime must be active before upgrade` 中止。
+需要升级时就先切回可用 runtime：
 
 ```sh
 sudo xp-ops runtime switch --to xray --yes
 sudo xp-ops upgrade --version VERSION
 ```
 
-升级会安装 release 中已提供且带校验和的 `xp-proxy` 资产，缺该资产时不会凭空生成。
 `xp-ops upgrade` 没有 `--yes`，不要编造确认参数。
 
-另外注意 `xp-ops deploy` 的安装范围：它不安装 `xp-ops` 自身，
-`xp` 只在显式 `--xp-bin` 时复制，`cloudflared` 只在启用 Cloudflare 时处理。
+`xp-ops deploy` 不安装 `xp-ops` 自身；`xp` 只在显式 `--xp-bin` 时复制，
+`cloudflared` 只在启用 Cloudflare 时处理。
 
 ### 切换失败后节点服务全停了怎么办？
 
