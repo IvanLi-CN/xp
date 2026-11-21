@@ -14,7 +14,8 @@
 
 - 私人策略已确认（`xp-infra policy check` 通过），清单里只有小写 SSH 别名。
 - SSH 操作员已登记，且不是 `root`、`xp`。
-- 资源下限：cgroup 内存 ≥ 256 MiB，根分区可用 ≥ 1 GiB，`free -m` 有真实余量。
+- 资源下限：`docs/ops/README.md` 的 Low-memory host defaults 覆盖 `256 MB` 无 swap 场景；
+  升级前两个写文件系统各需 ≥ 128 MiB 可用；`free -m` 要有真实余量。
 - 目标节点身份唯一：名称、`access_host`、管理地址都不与现有成员冲突。
 
 ### 先跑什么，后跑什么？
@@ -40,7 +41,7 @@ xp-infra audit ALIAS
 LXC/Incus 类 NAT 实例的 sshd 监听**内网地址**；供应商公网 IP 的 `:22` 常属于网关。
 
 - 实例内 `ss -ltnp` 只看到 `10.x.x.x:22`，就说明没有公网映射。
-- 在面板建立显式映射（例如 `公网 60122 → 内网 22`）。
+- 在面板建立显式映射（例如 `公网 <公网端口> → 内网 22`）。
 - 公网 `:22` 能完成 TCP 握手不代表认证可用：网关也可能代理握手。
 
 ### 怎么证明公网端口落在目标实例而不是网关？
@@ -137,6 +138,10 @@ remote ingress 与 CNAME 仍由 `xp-ops deploy` 在预检后原子改写。
 或 `cluster.join.staged-v1` 就失败。链路失败不会降级重试：
 Mesh 探测失败不会改走公网，voter 的公网地址返回 5xx 同样失败。
 
+当前源码里真正把门的常量是 `cluster.membership-lifecycle-v1`；
+`cluster.join.staged-v1` 仍会广播，但未在加入路径强制。
+看到 503 时先按能力清单逐项核对，不要只盯某一个名字。
+
 ### 怎么只读定位是哪个 voter 阻塞了加入？
 
 逐个 voter 的管理地址直接请求能力清单，看缺哪一项：
@@ -161,28 +166,39 @@ curl -s https://<voter-api>/api/capabilities
 ### 驱逐 voter 会连带删掉什么？
 
 dry-run 会列出该节点名下的 endpoint 与 membership 指纹。
-执行时必须显式带 `--delete-endpoints --expected-endpoint-ids <ids>`，
-否则不会删；operation 完成后节点与其 endpoint 从 DesiredState 消失。
+执行时若该节点仍有 endpoint，`--apply` 必须同时带
+`--delete-endpoints --expected-endpoint-ids <ids>`，缺少会被直接拒绝（`invalid_args`）；
+operation 完成后节点与其 endpoint 从 DesiredState 消失。
 
 ### join token 过期后要重建节点吗？
 
-不用。过期的 token 只让 `xp join` 返回 `join token is expired`，
-不会留下 learner 或加入会话；节点本地 `pending-join.json` 保留密钥，重试复用同一身份。
+不用重建节点，但会换一份节点身份。`xp join` 收到 token 过期这类
+客户端错误（4xx）时会删除本地 `pending-join.json`；重试时用新 token 生成新的密钥与 CSR。
+只有传输错误、超时或 5xx 这类未删除文件的失败，才会复用原身份重试。
+若文件仍在而 token 变了，`xp join` 会直接拒绝
+（`pending join belongs to another token or node configuration`）。
 
-但顺序很重要：**先确认全部 voter 可达且能力完整，再签发 token**，否则 token 先过期。
+所以顺序很重要：**先确认全部 voter 可达且能力完整，再签发 token**，否则 token 先过期。
 
 ## Runtime 与升级
 
-### 切到 `xp-proxy` 报 `xp-proxy does not exist`？
+### 切到 `xp-proxy` 报 `capability_missing` 或服务起不来？
 
-首次 `xp-ops deploy` 只安装 `xp`/`xp-ops`/`xray`/`cloudflared`，
-`xp-proxy` 需要随后的一次官方升级才落地：
+两种不同故障，对应两种修法，先看真实错误串：
+
+- `capability_missing: xp-proxy service asset is not installed; run xp-ops init first`
+  —— 服务资产缺失，跑 `sudo xp-ops init` 补齐即可。
+- `service_error: selected ingress runtime did not become ready`
+  —— 服务单元在但二进制起不来，通常是 `xp-proxy` 可执行文件没装；官方升级会安装该资产：
 
 ```sh
 sudo xp-ops upgrade --version VERSION
 ```
 
 `xp-ops upgrade` 没有 `--yes`，不要编造确认参数。
+
+另外注意 `xp-ops deploy` 的安装范围：它不安装 `xp-ops` 自身，
+`xp` 只在显式 `--xp-bin` 时复制，`cloudflared` 只在启用 Cloudflare 时处理。
 
 ### 切换失败后节点服务全停了怎么办？
 
@@ -197,7 +213,8 @@ sudo xp-ops runtime status --json
 
 四条同时对得上，缺一不算成功：
 
-- `xp-ops runtime status --json` 为 `{"runtime":"xp-proxy","state":"active"}`；
+- `xp-ops runtime status --json` 为 `{"runtime":"xp-proxy","state":"active","error":null}`
+  （比对 `runtime`/`state`/`error` 三个字段，成功时 `error` 为 `null`）；
 - `ss -ltnp` 中托管端口只有 `xp-proxy` 一个 owner，`xray` 未监听；
 - `xray` 服务为 stopped，`xp`/`xp-proxy`/`cloudflared` 为 started；
 - 本地 canary 返回 204：
@@ -212,7 +229,7 @@ sudo xp-ops runtime status --json
 ```sh
 curl -sk -o /dev/null -w '%{http_code}\n' --http1.1 https://<access_host>:<port>/generate_204
 curl -sk -o /dev/null -w '%{http_code}\n' --http2  https://<access_host>:<port>/generate_204
-curl -s -o /dev/null -w '%{http_code}\n' https://<api-base-url>/api/health
+curl -s -o /dev/null -w '%{http_code}\n' <api-base-url>/api/health
 ```
 
 期望 `204 / 204 / 200`。
@@ -221,7 +238,8 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<api-base-url>/api/health
 
 XP 接管后会按节点真实出口改写记录。核对本地状态而不是猜：
 
-- `/var/lib/xp/data/ddns_state.json` 里 `status=up`、`current_ipv4` 为实际出口；
+- `/var/lib/xp/data/ddns_state.json` 的 `snapshot.status` 为 `up`、
+  `snapshot.current_ipv4` 为实际出口（字段在 `snapshot` 下，不在顶层）；
 - 节点内 `wget -qO- https://cloudflare.com/cdn-cgi/trace | grep ^ip=` 与 DNS 解析一致。
 
 ### 审计失败能临时放宽策略吗？
