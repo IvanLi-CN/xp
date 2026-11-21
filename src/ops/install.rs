@@ -246,7 +246,7 @@ async fn install_xray(
 
 fn verify_xp_proxy(paths: &Paths, mode: Mode, bin_abs: &Path) -> Result<(), ExitError> {
     if mode == Mode::DryRun {
-        eprintln!("would verify: xp-proxy --version");
+        eprintln!("would verify: xp-proxy --help");
         return Ok(());
     }
 
@@ -265,14 +265,20 @@ fn verify_xp_proxy(paths: &Paths, mode: Mode, bin_abs: &Path) -> Result<(), Exit
         return Ok(());
     }
 
+    // `xp-proxy` does not expose `--version`; `--help` is the only argument that proves the
+    // downloaded asset parses as the expected CLI without requiring a snapshot or socket.
+    run_xp_proxy_help_probe(bin_abs)
+}
+
+fn run_xp_proxy_help_probe(bin_abs: &Path) -> Result<(), ExitError> {
     let status = Command::new(bin_abs)
-        .args(["--version"])
+        .arg("--help")
         .status()
         .map_err(|e| ExitError::new(4, format!("verification_failed: {e}")))?;
     if !status.success() {
         return Err(ExitError::new(
             4,
-            "verification_failed: xp-proxy --version failed",
+            "verification_failed: xp-proxy --help failed",
         ));
     }
     Ok(())
@@ -421,7 +427,9 @@ async fn install_xp_proxy(
 fn release_repo() -> (String, String) {
     let repo = std::env::var("XP_OPS_GITHUB_REPO").unwrap_or_else(|_| "IvanLi-CN/xp".to_string());
     match repo.split_once('/') {
-        Some((owner, name)) if !owner.trim().is_empty() && !name.trim().is_empty() => {
+        Some((owner, name))
+            if !owner.trim().is_empty() && !name.trim().is_empty() && !name.contains('/') =>
+        {
             (owner.trim().to_string(), name.trim().to_string())
         }
         _ => ("IvanLi-CN".to_string(), "xp".to_string()),
@@ -721,6 +729,40 @@ mod tests {
         assert!(msg.contains("refusing to replace directory path"));
         assert!(dest.is_dir());
         assert!(staged.exists());
+    }
+
+    #[test]
+    fn verify_xp_proxy_accepts_help_and_rejects_a_missing_binary() {
+        let root = unique_tmp_dir("xp-ops-install-verify");
+        fs::create_dir_all(&root).unwrap();
+        let bin = root.join("xp-proxy");
+        fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
+        chmod(&bin, 0o755).ok();
+
+        let paths = Paths::new(root.clone());
+        assert!(verify_xp_proxy(&paths, Mode::Real, &bin).is_ok());
+
+        let missing = root.join("absent");
+        let err = verify_xp_proxy(&paths, Mode::Real, &missing).unwrap_err();
+        assert_eq!(err.code, 4);
+        assert!(err.message.contains("not executable"));
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn xp_proxy_help_probe_rejects_an_unsupported_flag_binary() {
+        // The probe must fail for a binary that rejects `--help`, which is what a wrong or
+        // truncated asset looks like. `--version` is not a valid `xp-proxy` flag.
+        let root = unique_tmp_dir("xp-ops-install-help-probe");
+        fs::create_dir_all(&root).unwrap();
+        let bin = root.join("xp-proxy-broken");
+        fs::write(&bin, "#!/bin/sh\nexit 2\n").unwrap();
+        chmod(&bin, 0o755).ok();
+
+        let err = run_xp_proxy_help_probe(&bin).unwrap_err();
+        assert_eq!(err.code, 4);
+        assert!(err.message.contains("--help failed"));
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]

@@ -92,8 +92,9 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
 - join 测试必须覆盖 Phase 1 不等待 catch-up、同指纹幂等重试、冲突请求、响应丢失、joiner/leader
   重启、promotion failure retry、expiry cleanup、无关 stale learner 存在时的 fresh join，以及
   旧 state/existing-node recovery 兼容。
-- deploy 测试必须证明新节点在部署后同时具备 `xray` 与 `xp-proxy` 二进制，
-  且缺少该发布资产或校验不一致时明确失败而不是静默跳过。
+- deploy 测试必须证明新节点在部署后同时具备 `xray` 与 `xp-proxy` 二进制；发布未提供该资产时
+  deploy 只警告并保持 Xray runtime，而显式 `xp-ops install --only xp-proxy` 与校验不一致时
+  必须明确失败，不得静默跳过。
 
 ## 参考
 
