@@ -41,6 +41,7 @@ pub(super) fn inject_mihomo_provider(
         fallback_proxies.push("🤯 落地".to_string());
     }
     fallback_proxies.push("🤯 All".to_string());
+    fallback_proxies.push("DIRECT".to_string());
     groups.push(mihomo_fallback_group("💎 节点选择", true, fallback_proxies));
 }
 
@@ -75,5 +76,6 @@ fn inject_node_selector_groups(
         fallback_proxies.push("🤯 落地".to_string());
     }
     fallback_proxies.push("🤯 All".to_string());
+    fallback_proxies.push("DIRECT".to_string());
     groups.push(mihomo_fallback_group("💎 节点选择", true, fallback_proxies));
 }

@@ -85,6 +85,10 @@
 - `🤯 All` 必须含当前输出的 `🛬 {base}`，并先于所有隐藏 `🌟 {Region}`。
   Landing Group 按稳定 base 顺序去重，随后保持既有 canonical region order。
 - `💎 高质量` 作为 owner-facing 高质量入口必须保留兜底层：无论用户 mixin 是否显式声明，它都必须至少包含 `🔒 高质量`，并且在最终输出中还必须提供一个非地区直连接入面的兜底聚合入口；当前命名族中该兜底入口为 `🤯 All`。若未来重命名或替换聚合组，仍必须保留“高质量入口之上存在全局兜底层”的语义，不能让 `💎 高质量` 退化成仅剩单一路径且无兜底的壳组。
+- 任何成员完全由 `use` + `filter` 派生的系统组（`🛬 {base}`、`🤯 落地`、`🔒 {Region}`）必须显式声明
+  `empty-fallback: REJECT`；不得依赖 Mihomo 默认的 `COMPATIBLE` 占位符，也不得让空组回落直连。
+- `💎 高质量` 与 `💎 节点选择` 的成员链末位必须是 `DIRECT` 逃逸成员：只有当全部系统候选不可用时才允许
+  落到 `DIRECT`，正常状态下不得选中它。该逃逸成员是“不得彻底断网”的唯一授权直连路径。
 - 最终 Mihomo 配置图的强约束由 [contracts/final-mihomo-config.md](./contracts/final-mihomo-config.md) 定义：
   - `🔒 {Region}` 是 visible `select` 叶子组，只承载直连 reality 候选
   - `🌟 {Region}` 是 hidden `fallback`，且只能包装 `🔒 {Region}`
@@ -217,6 +221,12 @@
   不含目标、`DIRECT` 或 `COMPATIBLE`。
 - Given relay 无 Reality，When 渲染，Then 只用 `[REJECT]` 与 `empty-fallback: REJECT`；
   chain 不可用，`{base}-reality` 直连仍可用。
+- Given 系统组成员完全由 provider filter 派生，When provider 为空或 filter 未命中，Then
+  `🛬 {base}`、`🤯 落地`、`🔒 {Region}` 必须解析为 `[REJECT]`，不得出现 `COMPATIBLE`。
+- Given 全部系统候选不可用，When 解析 `💎 高质量` 或 `💎 节点选择`，Then 末位 `DIRECT` 生效并保持可联网；
+  When 任一系统候选可用，Then 不得选中 `DIRECT`。
+- Given 任一组 `use` 非空且没有静态 `proxies`，When 检查最终 provider 主配置，Then 该组必须带
+  `empty-fallback: REJECT`。
 - Given provider 主配置，When 检查顶层 `proxies`，Then 不包含系统生成的 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`。
 - Given provider 主配置，When 检查 `proxy-groups` 与用户组引用，Then 不再出现 `🛣️ {Region}` 兼容地区别名，也不再出现共享 `🛣️ JP/HK/SG` 主路径。
 - Given 任何 Mihomo profile，When 最终 provider 主配置或 system payload 中存在未定义引用，Then `PUT` 必须返回 `400 invalid_request`，并指出未定义引用所在字段/组名。

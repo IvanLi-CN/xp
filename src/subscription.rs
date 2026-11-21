@@ -1252,7 +1252,7 @@ const MIHOMO_LEGACY_OUTER_GROUP: &str = "🛣️ JP/HK/TW";
 const MIHOMO_OUTER_FILTER: &str =
     "(?i)(日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|新加坡|🇸🇬|Singapore|SG)";
 const MIHOMO_OUTER_URL_TEST_TOLERANCE: i64 = 50;
-const MIHOMO_RELAY_REJECT_FALLBACK: &str = "REJECT";
+const MIHOMO_FAIL_CLOSED_FALLBACK: &str = "REJECT";
 const MIHOMO_PROXY_GROUP_HELPER_KEY: &str = "proxy-group";
 const MIHOMO_PROXY_GROUP_WITH_RELAY_HELPER_KEY: &str = "proxy-group_with_relay";
 const MIHOMO_APP_PROXY_GROUP_HELPER_KEY: &str = "app-proxy-group";
@@ -1925,6 +1925,10 @@ fn inject_mihomo_region_groups(
             serde_yaml::Value::String("select".to_string()),
         );
         visible_map.insert(
+            serde_yaml::Value::String("empty-fallback".to_string()),
+            serde_yaml::Value::String(MIHOMO_FAIL_CLOSED_FALLBACK.to_string()),
+        );
+        visible_map.insert(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
         );
@@ -2147,6 +2151,10 @@ fn inject_mihomo_provider_landing_groups(
             serde_yaml::Value::Bool(false),
         );
         map.insert(
+            serde_yaml::Value::String("empty-fallback".to_string()),
+            serde_yaml::Value::String(MIHOMO_FAIL_CLOSED_FALLBACK.to_string()),
+        );
+        map.insert(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
         );
@@ -2194,6 +2202,10 @@ fn inject_mihomo_provider_region_groups(
         visible_map.insert(
             serde_yaml::Value::String("type".to_string()),
             serde_yaml::Value::String("select".to_string()),
+        );
+        visible_map.insert(
+            serde_yaml::Value::String("empty-fallback".to_string()),
+            serde_yaml::Value::String(MIHOMO_FAIL_CLOSED_FALLBACK.to_string()),
         );
         visible_map.insert(
             serde_yaml::Value::String("use".to_string()),
@@ -2671,6 +2683,10 @@ fn mihomo_provider_url_test_group(
         serde_yaml::Value::Number(serde_yaml::Number::from(0)),
     );
     map.insert(
+        serde_yaml::Value::String("empty-fallback".to_string()),
+        serde_yaml::Value::String(MIHOMO_FAIL_CLOSED_FALLBACK.to_string()),
+    );
+    map.insert(
         serde_yaml::Value::String("use".to_string()),
         serde_yaml::Value::Sequence(provider_values.to_vec()),
     );
@@ -2725,6 +2741,7 @@ fn inject_mihomo_default_aggregate_groups(
                 proxies.push(MIHOMO_AUTOMATIC_LANDING_POOL_GROUP.to_string());
             }
             proxies.push("🤯 All".to_string());
+            proxies.push("DIRECT".to_string());
             proxies
         }),
     ];
@@ -5437,6 +5454,8 @@ struct ClashConfig {
     proxies: Vec<ClashProxy>,
 }
 
+#[cfg(test)]
+mod mihomo_fail_closed_tests;
 #[cfg(test)]
 mod mihomo_interpolation_tests;
 #[cfg(test)]

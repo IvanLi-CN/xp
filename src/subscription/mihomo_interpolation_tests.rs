@@ -139,7 +139,7 @@ rules: []
                 .iter()
                 .filter_map(Value::as_str)
                 .collect::<Vec<_>>(),
-            vec!["🚀 节点选择", "🤯 落地", "🤯 All"]
+            vec!["🚀 节点选择", "🤯 落地", "🤯 All", "DIRECT"]
         );
     };
 

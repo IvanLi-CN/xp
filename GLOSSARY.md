@@ -32,6 +32,14 @@ _Avoid_: Automatic landing pool, access point pool
 The hidden `🤯 落地` group that health-tests every subscribed `*-reality` Access Point.
 _Avoid_: Manual landing group, `🤯 All`
 
+**Empty Fallback**:
+The explicit `REJECT` member a provider-derived system group exposes while it has no candidate.
+_Avoid_: `COMPATIBLE` placeholder, silent direct
+
+**Escape Direct**:
+The trailing `DIRECT` member of `💎 高质量` and `💎 节点选择`, reachable only when no system candidate is available.
+_Avoid_: Silent direct, `COMPATIBLE`
+
 **Mihomo Group Interpolation**:
 The render-time expansion of reserved entries inside a user's Mihomo proxy group.
 It resolves to generated groups and preserves surrounding literal references.

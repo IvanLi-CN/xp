@@ -18,3 +18,7 @@
 - 2026-06-16: relay 外层健康检查切到托管 VLESS 端口自身的 HTTPS canary（`https://<access_host[:port]>/generate_204`），并冻结地区组合同为：`🌟 {Region}` 是 hidden source group，`🔒 {Region}` 是 owner-facing 可见入口，`🤯 {Region}` 是 hidden `url-test` 包装组。
 - 2026-06-23: 托管 VLESS 的 SNI/dest 收敛为固定协议事实：`server_names=[node.access_host]`、`dest=XP_VLESS_CANARY_BIND`；canary 增加 endpoint-level `canary_upstream` 透明 TLS 终止反代，并通过 HTTP authority 匹配 endpoint。
 - 2026-06-28: 托管 VLESS canary 增加 endpoint-level `accepted_authorities` 无序 `host[:port]` 别名集合；省略端口时按 HTTPS 默认 `443` 解释。公共未命中和未配置 upstream 的表面统一收敛为普通纯文本 `404 Not Found`，不暴露内部协议和匹配细节。
+- 2026-11-21: `🛬 {base}`、`🤯 落地` 与 `🔒 {Region}` 显式声明
+  `empty-fallback: REJECT`，不再依赖 Mihomo 默认的 `COMPATIBLE` 占位符。
+  `💎 高质量` 与 `💎 节点选择` 的成员链末位固定追加 `DIRECT` 逃逸成员，
+  使 provider 空窗口保持可联网，同时避免落地/地区组静默直连。
