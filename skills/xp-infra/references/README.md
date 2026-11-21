@@ -5,6 +5,7 @@
 
 - [CLI 合同](cli.md)
 - [操作手册](runbook.md)
+- [上线与排障 FAQ](faq.md)
 - [策略模板](deployment-policy.yaml.example)
 - [清单模板](hosts.txt.example)
 - [环境变量模板](xp.env.template)

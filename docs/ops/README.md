@@ -49,11 +49,16 @@ Current support boundaries that operators must know:
 
 ## Native VLESS XHTTP data plane boundary
 
-The released `xp-proxy` binary is part of the host-managed ingress runtime. Installing the binary
-or service asset does not change traffic ownership. The node starts in Xray runtime unless an
-operator explicitly uses `xp-ops runtime switch --to xp-proxy --yes`. That operation stops XP and
-both possible ingress services, verifies the old owner is stopped, starts exactly one selected
-runtime, and starts XP only after the selected service is ready.
+The released `xp-proxy` binary is part of the host-managed ingress runtime. `xp-ops deploy` installs
+it alongside `xray` and verifies the download against the XP release `checksums.txt`; `xray` comes
+from `XTLS/Xray-core` and `cloudflared` from the distro or Cloudflare, so neither uses that file.
+A node deployed from a release that predates the asset keeps Xray and only logs a warning;
+`xp-ops install --only xp-proxy` treats the same absence as a hard error, and the `xp-proxy`
+binary is never installed without a matching `checksums.txt` entry.
+Installing the binary or service asset does not change traffic ownership. The node starts in Xray
+runtime unless an operator explicitly uses `xp-ops runtime switch --to xp-proxy --yes`. That
+operation stops XP and both possible ingress services, verifies the old owner is stopped, starts
+exactly one selected runtime, and starts XP only after the selected service is ready.
 
 The production design is recorded in
 [the native proxy SPEC](../specs/native-vless-xhttp-proxy/SPEC.md) and

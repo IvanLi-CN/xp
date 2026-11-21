@@ -15,6 +15,7 @@ description: 管理 XP 节点的部署前检查、升级指导和只读审计，
 
 - [CLI 合同](references/cli.md)：命令、依赖、失败语义和边界。
 - [操作手册](references/runbook.md)：安装、检查、升级和恢复顺序。
+- [上线与排障 FAQ](references/faq.md)：首次上线的常见疑问与判定依据。
 - [来源](ORIGIN.md)：迁移来源与许可。
 
 ## 配置与授权
