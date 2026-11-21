@@ -134,13 +134,16 @@ remote ingress 与 CNAME 仍由 `xp-ops deploy` 在预检后原子改写。
 
 ### 加入集群报 `503 staged_join_capability_unavailable`？
 
-准入会向**每个当前 voter** 读取能力，缺 `cluster.membership-lifecycle-v1`
-或 `cluster.join.staged-v1` 就失败。链路失败不会降级重试：
-Mesh 探测失败不会改走公网，voter 的公网地址返回 5xx 同样失败。
+先分清两种失败：
 
-当前源码里真正把门的常量是 `cluster.membership-lifecycle-v1`；
-`cluster.join.staged-v1` 仍会广播，但未在加入路径强制。
-看到 503 时先按能力清单逐项核对，不要只盯某一个名字。
+- voter 缺 `cluster.membership-lifecycle-v1`（加入路径**真正**读的唯一能力门），
+  返回 `409 coordinated_upgrade_required`，需要把所有 voter 升级完再重试；
+- 能力探测本身失败（Mesh 传输、探测预算、旧公网回落预检），
+  返回 `503 staged_join_capability_unavailable`。
+
+`cluster.join.staged-v1` 会出现在能力清单里，但当前加入路径并不强制它，
+不要为它单独排查。链路失败不会降级重试：Mesh 探测失败不会改走公网，
+voter 的公网地址返回 5xx 同样失败。
 
 ### 怎么只读定位是哪个 voter 阻塞了加入？
 
@@ -166,8 +169,10 @@ curl -s https://<voter-api>/api/capabilities
 ### 驱逐 voter 会连带删掉什么？
 
 dry-run 会列出该节点名下的 endpoint 与 membership 指纹。
-执行时若该节点仍有 endpoint，`--apply` 必须同时带
-`--delete-endpoints --expected-endpoint-ids <ids>`，缺少会被直接拒绝（`invalid_args`）；
+`--apply` **无条件**要求 `--delete-endpoints`（即使该节点没有 endpoint），
+并带 `--expected-endpoint-ids <ids>`；无 endpoint 时传空值。
+缺少 `--delete-endpoints` 是 `invalid_args`；
+endpoint 集与 preview 不一致则是 `409 conflict`（"endpoint set changed"），需要重新跑 dry-run。
 operation 完成后节点与其 endpoint 从 DesiredState 消失。
 
 ### join token 过期后要重建节点吗？
@@ -189,12 +194,17 @@ operation 完成后节点与其 endpoint 从 DesiredState 消失。
 - `capability_missing: xp-proxy service asset is not installed; run xp-ops init first`
   —— 服务资产缺失，跑 `sudo xp-ops init` 补齐即可。
 - `service_error: selected ingress runtime did not become ready`
-  —— 服务单元在但二进制起不来，通常是 `xp-proxy` 可执行文件没装；官方升级会安装该资产：
+  —— 服务单元在但二进制起不来，通常是 `xp-proxy` 可执行文件没装。
+  注意此时 runtime 状态是 `failed`，而 `xp-ops upgrade` 要求 runtime 处于 active，
+  否则直接以 `service_error: ingress runtime must be active before upgrade` 中止。
+  所以先把 runtime 切回可用值，再升级：
 
 ```sh
+sudo xp-ops runtime switch --to xray --yes
 sudo xp-ops upgrade --version VERSION
 ```
 
+升级会安装 release 中已提供且带校验和的 `xp-proxy` 资产，缺该资产时不会凭空生成。
 `xp-ops upgrade` 没有 `--yes`，不要编造确认参数。
 
 另外注意 `xp-ops deploy` 的安装范围：它不安装 `xp-ops` 自身，
