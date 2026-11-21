@@ -6,7 +6,15 @@ The user-owned Mihomo `mixin_yaml` may use the reserved interpolation entries `�
 
 Every subscribed node with a generated Reality access proxy receives a landing group, even when it has no chain proxy. The landing group starts with the node's Reality access proxy, followed by available chain candidates.
 
-The system keeps `🔒 落地` as the `url-test` group over every generated `🛬 {base}` group and adds `🤯 落地` as a hidden `url-test` pool over every subscribed `*-reality` Access Point. Both `💎 高质量` and `💎 节点选择` use the automatic pool before `🤯 All`: their fallback orders are `🔒 高质量`, `🤯 落地`, `🤯 All` and `🚀 节点选择`, `🤯 落地`, `🤯 All`, respectively. Regional `🤯 {region}` groups are not generated.
+The system keeps `🔒 落地` as the `url-test` group over every generated `🛬 {base}`
+group and adds `🤯 落地` as a hidden `url-test` pool over every subscribed
+`*-reality` Access Point. Both `💎 高质量` and `💎 节点选择` use the automatic pool
+before `🤯 All`: their fallback orders are `🔒 高质量`, `🤯 落地`, `🤯 All`, `DIRECT`
+and `🚀 节点选择`, `🤯 落地`, `🤯 All`, `DIRECT`, respectively. The trailing `DIRECT`
+member is the single escape used only when every system candidate is unavailable;
+groups whose members come only from a provider filter declare
+`empty-fallback: REJECT` instead of exposing Mihomo's `COMPATIBLE` placeholder.
+Regional `🤯 {region}` groups are not generated.
 
 Application groups, including a group such as `🎵 Spotify`, must be able to use the same placeholders. The rendered application group must list each expanded `🛬 {node}` entry explicitly; showing only regional groups is insufficient.
 
