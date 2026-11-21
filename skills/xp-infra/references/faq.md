@@ -169,10 +169,12 @@ curl -s https://<voter-api>/api/capabilities
 ### 驱逐 voter 会连带删掉什么？
 
 dry-run 会列出该节点名下的 endpoint 与 membership 指纹。
-`--apply` **无条件**要求 `--delete-endpoints`（即使该节点没有 endpoint），
-并带 `--expected-endpoint-ids <ids>`；无 endpoint 时传空值。
+`--apply` **无条件**要求 `--delete-endpoints`（即使该节点没有 endpoint）。
+有 endpoint 时再带 `--expected-endpoint-ids <id,id>`；
+没有 endpoint 时**省略**该参数（不要传空字符串，空串会变成 `[""]` 而触发 409），
+`--delete-endpoints` 仍要保留。
 缺少 `--delete-endpoints` 是 `invalid_args`；
-endpoint 集与 preview 不一致则是 `409 conflict`（"endpoint set changed"），需要重新跑 dry-run。
+endpoint 集与 preview 不一致则是 `409 conflict`（endpoint set changed），需要重新跑 dry-run。
 operation 完成后节点与其 endpoint 从 DesiredState 消失。
 
 ### join token 过期后要重建节点吗？
