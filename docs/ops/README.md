@@ -55,6 +55,8 @@ from `XTLS/Xray-core` and `cloudflared` from the distro or Cloudflare, so neithe
 A node deployed from a release that predates the asset keeps Xray and only logs a warning;
 `xp-ops install --only xp-proxy` treats the same absence as a hard error, and no binary is ever
 installed without a matching `checksums.txt` entry.
+`xp-ops install --only xp-proxy` treats the same absence as a hard error, and the `xp-proxy`
+binary is never installed without a matching `checksums.txt` entry.
 Installing the binary or service asset does not change traffic ownership. The node starts in Xray
 runtime unless an operator explicitly uses `xp-ops runtime switch --to xp-proxy --yes`. That
 operation stops XP and both possible ingress services, verifies the old owner is stopped, starts
