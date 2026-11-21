@@ -321,7 +321,7 @@ async fn install_xp_proxy(
         eprintln!("would resolve xp release: IvanLi-CN/xp ({version})");
         eprintln!("would download checksummed asset: {asset}");
         eprintln!("would install to: /usr/local/bin/xp-proxy");
-        eprintln!("would verify: xp-proxy --version");
+        eprintln!("would verify: xp-proxy --help");
         return Ok(());
     }
 
@@ -383,6 +383,11 @@ async fn install_xp_proxy(
 
     let tmp_dir = workspace_path(paths);
     ensure_dir(&tmp_dir).map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+    let dest = paths.usr_local_bin_xp_proxy();
+    if let Some(parent) = dest.parent() {
+        ensure_dir(parent).map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+    }
+
     let result = async {
         let checksums_path = tmp_dir.join("checksums.txt");
         download_to_path(&checksum, &checksums_path)
@@ -390,18 +395,17 @@ async fn install_xp_proxy(
             .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
         let expected = read_release_checksum(&checksums_path, asset)?;
 
-        let staged = tmp_dir.join(asset);
+        // Stage next to the destination: `/tmp` is often a separate mount, and the final
+        // `rename` into `/usr/local/bin` would otherwise fail with EXDEV on those hosts.
+        let staged = tmp_path_next_to(&dest);
         download_to_path(&download_url, &staged)
             .await
             .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
         if sha256_file(&staged)? != expected {
+            let _ = fs::remove_file(&staged);
             return Err(ExitError::new(6, "checksum_mismatch"));
         }
 
-        let dest = paths.usr_local_bin_xp_proxy();
-        if let Some(parent) = dest.parent() {
-            ensure_dir(parent).map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
-        }
         chmod(&staged, 0o755).ok();
         replace_file_with_backup(&dest, &staged)
             .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
@@ -750,18 +754,32 @@ mod tests {
     }
 
     #[test]
-    fn xp_proxy_help_probe_rejects_an_unsupported_flag_binary() {
-        // The probe must fail for a binary that rejects `--help`, which is what a wrong or
-        // truncated asset looks like. `--version` is not a valid `xp-proxy` flag.
+    fn xp_proxy_help_probe_requires_the_help_flag_specifically() {
+        // A binary that only accepts the wrong flag must be rejected, so a regression back to
+        // `--version` cannot pass this test.
         let root = unique_tmp_dir("xp-ops-install-help-probe");
         fs::create_dir_all(&root).unwrap();
-        let bin = root.join("xp-proxy-broken");
-        fs::write(&bin, "#!/bin/sh\nexit 2\n").unwrap();
-        chmod(&bin, 0o755).ok();
 
-        let err = run_xp_proxy_help_probe(&bin).unwrap_err();
+        let only_version = root.join("xp-proxy-only-version");
+        fs::write(
+            &only_version,
+            "#!/bin/sh\n[ \"$1\" = \"--version\" ] && exit 0\nexit 2\n",
+        )
+        .unwrap();
+        chmod(&only_version, 0o755).ok();
+        let err = run_xp_proxy_help_probe(&only_version).unwrap_err();
         assert_eq!(err.code, 4);
         assert!(err.message.contains("--help failed"));
+
+        let only_help = root.join("xp-proxy-only-help");
+        fs::write(
+            &only_help,
+            "#!/bin/sh\n[ \"$1\" = \"--help\" ] && exit 0\nexit 2\n",
+        )
+        .unwrap();
+        chmod(&only_help, 0o755).ok();
+        assert!(run_xp_proxy_help_probe(&only_help).is_ok());
+
         fs::remove_dir_all(&root).ok();
     }
 
