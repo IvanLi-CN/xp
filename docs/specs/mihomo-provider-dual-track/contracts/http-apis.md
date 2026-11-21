@@ -108,6 +108,10 @@ Response:
 - 用户 `proxy-groups[*].proxies` 中精确等于 `🌟 <region>` 或 `🛬 <node>` 的占位项在最终渲染阶段展开为当前用户有候选的地区组和全部实际落地组。
 - `🔒 高质量` 与 `🔒 {Region}` 通过 `use: [xp-system-generated]` 与 `filter` 动态包含 `{base}-reality` 接入点，并通过 `exclude-filter` 排除系统 `{base}-ss` 直连接入候选。
 - `💎 高质量` 作为 owner-facing 高质量入口不得失去兜底层；最终主配置必须稳定提供“高质量入口 + 全局兜底入口”两层语义。若 `💎 高质量` 本身不直接引用 `🤯 All`，则必须存在另一个稳定 owner-facing 包装组同时暴露 `💎 高质量` 与 `🤯 All`，不能让最终入口仅剩 `🔒 高质量` 单一路径。
+- `🛬 {base}`、`🤯 落地` 与 `🔒 {Region}` 的成员完全由 provider filter 派生，必须显式声明
+  `empty-fallback: REJECT`；provider 为空或 filter 未命中时不得出现 `COMPATIBLE`，也不得回落直连。
+- `💎 高质量` 与 `💎 节点选择` 的成员链末位必须是 `DIRECT`；该逃逸成员只在全部系统候选不可用时生效，
+  是 provider 空窗口内保持联网的唯一授权路径。
 - per-base relay 组 `🛣️ {relay-base}` 按 `Node.access_host` 聚合生成；同一 `access_host` 下的落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名。若 `relay-base` 等于历史地区 alias 基名，则输出必须加内部前缀消歧，不得重新生成 `🛣️ {Region}`。
 - relay 必含其他已订阅节点 `*-reality`，排除目标、`*-chain` 和 `DIRECT`。
   provider-only 主配置可用精确 filter；provider 可追加但不能独占。无候选只用

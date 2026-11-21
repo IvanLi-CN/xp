@@ -581,14 +581,14 @@ providerB:
             .get("proxies")
             .and_then(Value::as_sequence)
             .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(vec![MIHOMO_RELAY_REJECT_FALLBACK]),
+        Some(vec![MIHOMO_FAIL_CLOSED_FALLBACK]),
         "a relay without another subscribed Reality must fail closed"
     );
     assert!(relay_group.get("use").is_none());
     assert!(relay_group.get("filter").is_none());
     assert_eq!(
         relay_group.get("empty-fallback"),
-        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()))
+        Some(&Value::String(MIHOMO_FAIL_CLOSED_FALLBACK.to_string()))
     );
     assert_eq!(
         relay_group.get("url").and_then(Value::as_str),
@@ -1778,7 +1778,7 @@ providerA:
             .collect::<Vec<_>>()
     };
 
-    assert_eq!(group_refs("💎 高质量"), vec!["🔒 高质量", "🤯 All"]);
+    assert_eq!(group_refs("💎 高质量"), ["🔒 高质量", "🤯 All", "DIRECT"]);
     assert_eq!(
         groups
             .iter()
@@ -2468,14 +2468,14 @@ providerA:
             .get("proxies")
             .and_then(Value::as_sequence)
             .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(vec![MIHOMO_RELAY_REJECT_FALLBACK]),
+        Some(vec![MIHOMO_FAIL_CLOSED_FALLBACK]),
         "relay groups without Reality candidates must fail closed"
     );
     assert!(relay.get("use").is_none());
     assert!(relay.get("filter").is_none());
     assert_eq!(
         relay.get("empty-fallback"),
-        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string())),
+        Some(&Value::String(MIHOMO_FAIL_CLOSED_FALLBACK.to_string())),
         "external relay groups must override Mihomo's COMPATIBLE empty fallback"
     );
     assert_eq!(
@@ -2544,7 +2544,7 @@ providerA:
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>(),
-        vec![MIHOMO_RELAY_REJECT_FALLBACK]
+        vec![MIHOMO_FAIL_CLOSED_FALLBACK]
     );
     assert!(relay.get("use").is_none());
     assert!(relay.get("filter").is_none());
@@ -2657,10 +2657,10 @@ rules: []
         .iter()
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
-    assert_eq!(relay_proxy_names, vec![MIHOMO_RELAY_REJECT_FALLBACK]);
+    assert_eq!(relay_proxy_names, vec![MIHOMO_FAIL_CLOSED_FALLBACK]);
     assert_eq!(
         relay_group.get("empty-fallback"),
-        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()))
+        Some(&Value::String(MIHOMO_FAIL_CLOSED_FALLBACK.to_string()))
     );
 }
 
@@ -3330,7 +3330,7 @@ fn build_mihomo_yaml_injects_default_high_quality_candidates() {
     );
     assert_eq!(
         group_refs("💎 高质量"),
-        vec!["🔒 高质量", "🤯 落地", "🤯 All"]
+        vec!["🔒 高质量", "🤯 落地", "🤯 All", "DIRECT"]
     );
 }
 
@@ -4754,11 +4754,11 @@ rules: []
         .expect("relay group should receive the REJECT sentinel");
     assert_eq!(
         proxies,
-        &vec![Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string())]
+        &vec![Value::String(MIHOMO_FAIL_CLOSED_FALLBACK.to_string())]
     );
     assert_eq!(
         relay.get("empty-fallback"),
-        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()))
+        Some(&Value::String(MIHOMO_FAIL_CLOSED_FALLBACK.to_string()))
     );
 
     let reality = root

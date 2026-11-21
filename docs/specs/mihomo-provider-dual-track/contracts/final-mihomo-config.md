@@ -38,7 +38,9 @@ The generated system aggregate groups must obey these contracts:
 - `🔒 高质量` must not be hidden.
 - `💎 高质量` is hidden.
 - `💎 高质量` must be `type: fallback`.
-- `💎 高质量` must contain exactly `["🔒 高质量", "🔒 落地", "🤯 All"]` in that order.
+- `💎 高质量` must contain `["🔒 高质量", "🤯 落地", "🤯 All", "DIRECT"]` in that order;
+  `🤯 落地` is omitted only when the profile has no Access Points.
+- `💎 高质量` must end with `DIRECT` as the escape member.
 - `🤯 All` is hidden.
 - `🤯 All` must be `type: url-test`.
 - `🤯 All` must reference each generated `🛬 {base}` first in deterministic base order, followed
@@ -59,7 +61,9 @@ The generated system aggregate groups must obey these contracts:
   candidates.
 - `💎 节点选择` is hidden.
 - `💎 节点选择` must be `type: fallback`.
-- `💎 节点选择` must contain exactly `["🚀 节点选择", "🤯 All"]` in that order.
+- `💎 节点选择` must contain `["🚀 节点选择", "🤯 落地", "🤯 All", "DIRECT"]` in that order;
+  `🤯 落地` is omitted only when the profile has no Access Points.
+- `💎 节点选择` must end with `DIRECT` as the escape member.
 
 ## System Proxy Group Sequence
 
@@ -82,6 +86,22 @@ Required constraints:
   `Japan`, `HongKong`, `Taiwan`, `Korea`, `Singapore`, `US`, `Other`.
 - User-defined groups must remain outside that system-owned sequence.
 - Hidden relay groups must not be interleaved into the high-quality / region / landing / node-selector sequence.
+
+## Fail-Closed Empty Fallback And Escape Direct
+
+System groups whose members are derived entirely from a provider `use` + `filter` pair have no
+static member to keep them non-empty.
+
+- `🛬 {base}`, the hidden Automatic Landing Pool `🤯 落地`, and every visible `🔒 {Region}` must
+  declare `empty-fallback: REJECT`.
+- No such group may rely on Mihomo's implicit `COMPATIBLE` placeholder, and none may fall back to
+  `DIRECT` through an empty member list.
+- `💎 高质量` and `💎 节点选择` must end with `DIRECT`. The escape member is reachable only when
+  every preceding member is unavailable; it is the single authorized way for the rendered graph to
+  keep working while the system provider payload is empty.
+- A missing or unavailable system provider is therefore an explicit `REJECT` at group level plus a
+  direct escape at the two hidden aggregate entries, never a silent direct substitution inside a
+  landing or region group.
 
 ## Per-Base Relay Fail-Closed Contract
 

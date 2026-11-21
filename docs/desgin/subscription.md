@@ -243,7 +243,9 @@ proxy-groups:
 - 聚合组：`🔒 高质量`、`💎 高质量`、`🚀 节点选择`、`💎 节点选择`、`🤯 落地` 与 `🤯 All`。
 - 中转组：按 `Node.access_host` 聚合的隐藏 `🛣️ {relay-base}`。
 
-`🤯 {Region}` 不生成。`🔒 落地` 继续列实际 `🛬 {base}`；`🤯 落地` 只列当前订阅实际生成的 `*-reality` 接入点，没有接入点时不生成。`🤯 All` 继续先列实际 `🛬 {base}`，再列七个 `🌟 {Region}`，按稳定顺序去重。`💎 高质量` 的 fallback 顺序固定为 `🔒 高质量`、`🤯 落地`、`🤯 All`；`💎 节点选择` 的 fallback 顺序固定为 `🚀 节点选择`、`🤯 落地`、`🤯 All`。
+`🤯 {Region}` 不生成。`🔒 落地` 继续列实际 `🛬 {base}`；`🤯 落地` 只列当前订阅实际生成的 `*-reality` 接入点，没有接入点时不生成。`🤯 All` 继续先列实际 `🛬 {base}`，再列七个 `🌟 {Region}`，按稳定顺序去重。`💎 高质量` 的 fallback 顺序固定为 `🔒 高质量`、`🤯 落地`、`🤯 All`、`DIRECT`；`💎 节点选择` 的 fallback 顺序固定为 `🚀 节点选择`、`🤯 落地`、`🤯 All`、`DIRECT`。末位 `DIRECT` 是唯一授权的逃逸成员，只在全部系统候选不可用时生效。
+
+成员完全由 provider `use` + `filter` 派生的系统组（`🛬 {base}`、`🤯 落地`、`🔒 {Region}`）必须显式声明 `empty-fallback: REJECT`。provider payload 为空或 filter 未命中时，这些组显示 `REJECT` 而不是 Mihomo 默认的 `COMPATIBLE` 占位符，也不会静默回落直连。
 
 每个存在 Reality access proxy 或链式候选的订阅节点都生成 `🛬 {base}`；如果存在 Reality access proxy，Reality 直连必须排在该落地组首位。`🚀 节点选择` 在落地组后追加 Reality 直连，不追加 `{base}-ss`。
 
