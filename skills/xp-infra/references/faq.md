@@ -129,28 +129,12 @@ remote ingress 与 CNAME 仍由 `xp-ops deploy` 在预检后原子改写。
 - SSH 端口只需 TCP。
 
 映射后从外网实测对应协议，不要只凭面板显示“已添加”判定可用。
-先看该端口承载什么协议：
-
-- 托管 VLESS/XHTTP 是 TCP，映射 **TCP** 即可；
-- 启用了 SS2022 端点时该端口同时承载 UDP，必须建立 **TCP + UDP** 映射；
-- SSH 端口只需 TCP。
-
-映射后从外网实测对应协议，不要只凭面板显示“已添加”判定可用。
 
 ## 集群成员
 
 ### 加入集群报 `503 staged_join_capability_unavailable`？
 
 先分清两种失败：
-
-- voter 缺 `cluster.membership-lifecycle-v1`（加入路径**真正**读的唯一能力门），
-  返回 `409 coordinated_upgrade_required`，需要把所有 voter 升级完再重试；
-- 能力探测本身失败（Mesh 传输、探测预算、旧公网回落预检），
-  返回 `503 staged_join_capability_unavailable`。
-
-`cluster.join.staged-v1` 会出现在能力清单里，但当前加入路径并不强制它，
-不要为它单独排查。链路失败不会降级重试：Mesh 探测失败不会改走公网，
-voter 的公网地址返回 5xx 同样失败。
 
 - voter 缺 `cluster.membership-lifecycle-v1`（加入路径**真正**读的唯一能力门），
   返回 `409 coordinated_upgrade_required`，需要把所有 voter 升级完再重试；
@@ -207,25 +191,6 @@ operation 完成后节点与其 endpoint 从 DesiredState 消失。
 
 ### 切到 `xp-proxy` 报 `capability_missing` 或服务起不来？
 
-`xp-ops deploy` 会同时安装 `xray` 与 `xp-proxy`；其中 `xp-proxy` 对照 XP release 的
-`checksums.txt` 校验，`xray` 来自 `XTLS/Xray-core`，不走该文件。
-若匹配版本尚未提供该资产，deploy 只警告并让节点继续用 Xray，不会失败；
-`xp-ops install --only xp-proxy` 则把缺失当作硬错误。任何二进制都不会跳过校验安装。
-仍然失败时按真实错误串判断：
-
-- `capability_missing: xp-proxy service asset is not installed; run xp-ops init first`
-  —— 缺的是 **service 资产**（init 写出的 init 脚本），不是二进制；
-  跑 `sudo xp-ops init` 补齐。
-- `service_error: selected ingress runtime did not become ready`
-  —— 服务起来了又退出。先确认二进制存在且可执行：
-
-```sh
-ls -l /usr/local/bin/xp-proxy && xp-ops install --only xp-proxy
-```
-
-注意切换失败后 runtime 状态是 `failed`，而 `xp-ops upgrade` 要求 runtime 处于 active，
-否则以 `service_error: ingress runtime must be active before upgrade` 中止。
-需要升级时就先切回可用 runtime：
 `xp-ops deploy` 会同时安装 `xray` 与 `xp-proxy`；其中 `xp-proxy` 对照 XP release 的
 `checksums.txt` 校验，`xray` 来自 `XTLS/Xray-core`，不走该文件。
 若匹配版本尚未提供该资产，deploy 只警告并让节点继续用 Xray，不会失败；
