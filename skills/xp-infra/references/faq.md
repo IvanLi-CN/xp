@@ -191,8 +191,10 @@ operation 完成后节点与其 endpoint 从 DesiredState 消失。
 
 ### 切到 `xp-proxy` 报 `capability_missing` 或服务起不来？
 
-`xp-ops deploy` 会同时安装 `xray` 与带校验和的 `xp-proxy` 资产，
-所以新节点在部署后即可直接切换 runtime。仍然失败时按真实错误串判断：
+`xp-ops deploy` 会同时安装 `xray` 与 `xp-proxy`（来自同一份带 `checksums.txt` 的发布）。
+若匹配版本尚未提供该资产，deploy 只警告并让节点继续用 Xray，不会失败；
+`xp-ops install --only xp-proxy` 则把缺失当作硬错误。任何二进制都不会跳过校验安装。
+仍然失败时按真实错误串判断：
 
 - `capability_missing: xp-proxy service asset is not installed; run xp-ops init first`
   —— 缺的是 **service 资产**（init 写出的 init 脚本），不是二进制；
