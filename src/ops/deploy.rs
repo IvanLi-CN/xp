@@ -327,7 +327,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
 
     if mode == Mode::DryRun {
         eprintln!("deploy plan:");
-        eprintln!("  - install xray");
+        eprintln!("  - install xray and xp-proxy");
         if plan.cloudflare_enabled {
             eprintln!("  - install cloudflared");
         }
@@ -357,7 +357,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     install::cmd_install(
         paths.clone(),
         InstallArgs {
-            only: Some(InstallOnly::Xray),
+            only: None,
             xray_version: plan.xray_version.clone(),
             dry_run: mode == Mode::DryRun,
         },
