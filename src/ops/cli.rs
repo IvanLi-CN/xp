@@ -184,6 +184,7 @@ pub struct IngressGuardDisableArgs {
 pub enum InstallOnly {
     Cloudflared,
     Xray,
+    XpProxy,
 }
 
 #[derive(Args, Debug, Clone)]

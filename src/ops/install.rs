@@ -50,11 +50,14 @@ pub async fn cmd_install(paths: Paths, args: InstallArgs) -> Result<(), ExitErro
         return Err(ExitError::new(2, "unsupported_platform"));
     }
 
+    let policy = install_xp_proxy_policy(args.only);
     match args.only {
         Some(InstallOnly::Cloudflared) => install_cloudflared(&paths, distro, arch, mode).await?,
         Some(InstallOnly::Xray) => install_xray(&paths, arch, &args.xray_version, mode).await?,
+        Some(InstallOnly::XpProxy) => install_xp_proxy(&paths, arch, mode, policy).await?,
         None => {
-            install_xray(&paths, arch, &args.xray_version, mode).await?;
+            install_xray(&paths, arch.clone(), &args.xray_version, mode).await?;
+            install_xp_proxy(&paths, arch, mode, policy).await?;
         }
     }
 
@@ -239,6 +242,236 @@ async fn install_xray(
             format!("install_failed: cleanup workspace: {error}"),
         )),
     }
+}
+
+fn verify_xp_proxy(paths: &Paths, mode: Mode, bin_abs: &Path) -> Result<(), ExitError> {
+    if mode == Mode::DryRun {
+        eprintln!("would verify: xp-proxy --help");
+        return Ok(());
+    }
+
+    let bin = if bin_abs.starts_with(paths.root()) {
+        bin_abs.to_path_buf()
+    } else {
+        paths.map_abs(bin_abs)
+    };
+    if !bin.exists() || !is_executable(&bin) {
+        return Err(ExitError::new(
+            4,
+            "verification_failed: xp-proxy is not executable",
+        ));
+    }
+    if is_test_root(paths.root()) {
+        return Ok(());
+    }
+
+    // `xp-proxy` does not expose `--version`; `--help` is the only argument that proves the
+    // downloaded asset parses as the expected CLI without requiring a snapshot or socket.
+    run_xp_proxy_help_probe(bin_abs)
+}
+
+fn run_xp_proxy_help_probe(bin_abs: &Path) -> Result<(), ExitError> {
+    let status = Command::new(bin_abs)
+        .arg("--help")
+        .status()
+        .map_err(|e| ExitError::new(4, format!("verification_failed: {e}")))?;
+    if !status.success() {
+        return Err(ExitError::new(
+            4,
+            "verification_failed: xp-proxy --help failed",
+        ));
+    }
+    Ok(())
+}
+
+/// Whether a missing `xp-proxy` release asset is fatal.
+///
+/// The explicit `xp-ops install --only xp-proxy` command must fail loudly, while a deploy against
+/// an older release that predates the asset stays usable: it warns and leaves the node on Xray.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum XpProxyAssetPolicy {
+    Required,
+    Optional,
+}
+
+fn install_xp_proxy_policy(only: Option<InstallOnly>) -> XpProxyAssetPolicy {
+    match only {
+        Some(InstallOnly::XpProxy) => XpProxyAssetPolicy::Required,
+        _ => XpProxyAssetPolicy::Optional,
+    }
+}
+/// Install the checksummed `xp-proxy` asset from the release matching this `xp-ops` build.
+///
+/// Host-managed nodes must be able to select the native runtime right after a fresh deploy,
+/// so deploy installs this alongside Xray instead of requiring a later upgrade.
+async fn install_xp_proxy(
+    paths: &Paths,
+    arch: CpuArch,
+    mode: Mode,
+    policy: XpProxyAssetPolicy,
+) -> Result<(), ExitError> {
+    let version = crate::version::VERSION;
+    let asset = match arch {
+        CpuArch::X86_64 => "xp-proxy-linux-x86_64",
+        CpuArch::Aarch64 => "xp-proxy-linux-aarch64",
+        CpuArch::Other(_) => return Err(ExitError::new(2, "unsupported_platform")),
+    };
+
+    if mode == Mode::DryRun {
+        eprintln!("would resolve xp release: IvanLi-CN/xp ({version})");
+        eprintln!("would download checksummed asset: {asset}");
+        eprintln!("would install to: /usr/local/bin/xp-proxy");
+        eprintln!("would verify: xp-proxy --version");
+        return Ok(());
+    }
+
+    let api_base = std::env::var("XP_OPS_GITHUB_API_BASE_URL")
+        .unwrap_or_else(|_| "https://api.github.com".to_string());
+    let (owner, repo) = release_repo();
+    let release = match fetch_github_release(&api_base, &owner, &repo, version).await {
+        Ok(release) => release,
+        Err(error) if policy == XpProxyAssetPolicy::Optional => {
+            eprintln!(
+                "warning: cannot resolve release {version} for {asset}; \
+                 leaving xp-proxy uninstalled ({error})"
+            );
+            return Ok(());
+        }
+        Err(error) => return Err(ExitError::new(3, format!("install_failed: {error}"))),
+    };
+
+    let Some(download_url) = release
+        .assets
+        .iter()
+        .find(|a| a.name == asset)
+        .map(|a| a.browser_download_url.clone())
+    else {
+        if policy == XpProxyAssetPolicy::Optional {
+            eprintln!(
+                "warning: release {version} does not publish {asset}; \
+                 leaving xp-proxy uninstalled"
+            );
+            return Ok(());
+        }
+        return Err(ExitError::new(
+            3,
+            format!("install_failed: release {version} does not publish {asset}"),
+        ));
+    };
+
+    let checksum = match release
+        .assets
+        .iter()
+        .find(|a| a.name == "checksums.txt")
+        .map(|a| a.browser_download_url.clone())
+    {
+        Some(url) => url,
+        None if policy == XpProxyAssetPolicy::Optional => {
+            eprintln!(
+                "warning: release {version} publishes {asset} without checksums.txt; \
+                 refusing to install an unverified binary"
+            );
+            return Ok(());
+        }
+        None => {
+            return Err(ExitError::new(
+                6,
+                format!("checksum_mismatch: release {version} does not publish checksums.txt"),
+            ));
+        }
+    };
+
+    let tmp_dir = workspace_path(paths);
+    ensure_dir(&tmp_dir).map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+    let result = async {
+        let checksums_path = tmp_dir.join("checksums.txt");
+        download_to_path(&checksum, &checksums_path)
+            .await
+            .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+        let expected = read_release_checksum(&checksums_path, asset)?;
+
+        let staged = tmp_dir.join(asset);
+        download_to_path(&download_url, &staged)
+            .await
+            .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+        if sha256_file(&staged)? != expected {
+            return Err(ExitError::new(6, "checksum_mismatch"));
+        }
+
+        let dest = paths.usr_local_bin_xp_proxy();
+        if let Some(parent) = dest.parent() {
+            ensure_dir(parent).map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+        }
+        chmod(&staged, 0o755).ok();
+        replace_file_with_backup(&dest, &staged)
+            .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+
+        verify_xp_proxy(paths, Mode::Real, &dest)
+    }
+    .await;
+    let cleanup = cleanup_workspace(&tmp_dir);
+    match (result, cleanup) {
+        (Err(error), Err(cleanup_error)) => Err(ExitError::new(
+            error.code,
+            format!("{}; cleanup workspace: {cleanup_error}", error.message),
+        )),
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(()), Ok(_)) => Ok(()),
+        (Ok(()), Err(error)) => Err(ExitError::new(
+            3,
+            format!("install_failed: cleanup workspace: {error}"),
+        )),
+    }
+}
+
+fn release_repo() -> (String, String) {
+    let repo = std::env::var("XP_OPS_GITHUB_REPO").unwrap_or_else(|_| "IvanLi-CN/xp".to_string());
+    match repo.split_once('/') {
+        Some((owner, name))
+            if !owner.trim().is_empty() && !name.trim().is_empty() && !name.contains('/') =>
+        {
+            (owner.trim().to_string(), name.trim().to_string())
+        }
+        _ => ("IvanLi-CN".to_string(), "xp".to_string()),
+    }
+}
+
+fn read_release_checksum(path: &Path, asset: &str) -> Result<[u8; 32], ExitError> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| ExitError::new(6, format!("checksum_mismatch: {e}")))?;
+    for raw in content.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let sha = parts.next().unwrap_or("");
+        let name = parts.next().unwrap_or("");
+        if name != asset {
+            continue;
+        }
+        if sha.len() != 64 {
+            return Err(ExitError::new(6, "checksum_mismatch: invalid sha256"));
+        }
+        let bytes =
+            hex::decode(sha).map_err(|_| ExitError::new(6, "checksum_mismatch: invalid sha256"))?;
+        let Ok(arr) = <[u8; 32]>::try_from(bytes.as_slice()) else {
+            return Err(ExitError::new(6, "checksum_mismatch: invalid sha256"));
+        };
+        return Ok(arr);
+    }
+    Err(ExitError::new(
+        6,
+        format!("checksum_mismatch: missing {asset} in checksums.txt"),
+    ))
+}
+
+fn sha256_file(path: &Path) -> Result<[u8; 32], ExitError> {
+    use sha2::Digest;
+    let data = fs::read(path).map_err(|e| ExitError::new(6, format!("checksum_mismatch: {e}")))?;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(&data);
+    Ok(hasher.finalize().into())
 }
 
 fn verify_xray(paths: &Paths, mode: Mode, bin_abs: &Path) -> Result<(), ExitError> {
@@ -496,5 +729,85 @@ mod tests {
         assert!(msg.contains("refusing to replace directory path"));
         assert!(dest.is_dir());
         assert!(staged.exists());
+    }
+
+    #[test]
+    fn verify_xp_proxy_accepts_help_and_rejects_a_missing_binary() {
+        let root = unique_tmp_dir("xp-ops-install-verify");
+        fs::create_dir_all(&root).unwrap();
+        let bin = root.join("xp-proxy");
+        fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
+        chmod(&bin, 0o755).ok();
+
+        let paths = Paths::new(root.clone());
+        assert!(verify_xp_proxy(&paths, Mode::Real, &bin).is_ok());
+
+        let missing = root.join("absent");
+        let err = verify_xp_proxy(&paths, Mode::Real, &missing).unwrap_err();
+        assert_eq!(err.code, 4);
+        assert!(err.message.contains("not executable"));
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn xp_proxy_help_probe_rejects_an_unsupported_flag_binary() {
+        // The probe must fail for a binary that rejects `--help`, which is what a wrong or
+        // truncated asset looks like. `--version` is not a valid `xp-proxy` flag.
+        let root = unique_tmp_dir("xp-ops-install-help-probe");
+        fs::create_dir_all(&root).unwrap();
+        let bin = root.join("xp-proxy-broken");
+        fs::write(&bin, "#!/bin/sh\nexit 2\n").unwrap();
+        chmod(&bin, 0o755).ok();
+
+        let err = run_xp_proxy_help_probe(&bin).unwrap_err();
+        assert_eq!(err.code, 4);
+        assert!(err.message.contains("--help failed"));
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn explicit_xp_proxy_install_is_required_while_deploy_tolerates_absence() {
+        assert_eq!(
+            install_xp_proxy_policy(Some(InstallOnly::XpProxy)),
+            XpProxyAssetPolicy::Required
+        );
+        assert_eq!(install_xp_proxy_policy(None), XpProxyAssetPolicy::Optional);
+        assert_eq!(
+            install_xp_proxy_policy(Some(InstallOnly::Xray)),
+            XpProxyAssetPolicy::Optional
+        );
+    }
+
+    #[test]
+    fn read_release_checksum_selects_the_requested_asset() {
+        let root = unique_tmp_dir("xp-ops-install-checksums");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("checksums.txt");
+        let xp_proxy_sha = "b".repeat(64);
+        fs::write(
+            &path,
+            format!(
+                "{}  xp-linux-aarch64\n{}  xp-proxy-linux-aarch64\n",
+                "a".repeat(64),
+                xp_proxy_sha
+            ),
+        )
+        .unwrap();
+
+        let expected = read_release_checksum(&path, "xp-proxy-linux-aarch64").unwrap();
+        assert_eq!(hex::encode(expected), xp_proxy_sha);
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn read_release_checksum_rejects_a_missing_asset() {
+        let root = unique_tmp_dir("xp-ops-install-checksums-missing");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("checksums.txt");
+        fs::write(&path, format!("{}  xp-linux-aarch64\n", "a".repeat(64))).unwrap();
+
+        let err = read_release_checksum(&path, "xp-proxy-linux-aarch64").unwrap_err();
+        assert!(err.message.contains("missing xp-proxy-linux-aarch64"));
+        fs::remove_dir_all(&root).ok();
     }
 }

@@ -66,6 +66,11 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
 - host-managed startup 的 managed-default reconcile 在后台持续重试到成功，因此 learner 初次复制
   超过旧的短重试窗口时也不会永久遗漏配置端点。
 - `GET /api/cluster/info` 提供 leader 的 XP 版本，供部署命令锁定版本。
+- `xp-ops deploy` 必须同时安装与本次发布匹配的 `xray`、`xp-proxy` 和（启用时）`cloudflared`
+  资产，并校验 `checksums.txt`。发布尚未提供 `xp-proxy` 时，deploy 只警告并保持 Xray runtime，
+  不得失败；显式 `xp-ops install --only xp-proxy` 必须把该缺失报告为错误。
+  新节点在 deploy 完成后即可显式切换到任一受支持 runtime，不得要求先执行一次
+  `xp-ops upgrade` 才能获得 `xp-proxy`。
 - 所有节点必须使用字节完全一致的 PHC；轮换会使旧管理员 Token 和由旧 PHC 签发的短期登录 Token 失效。
 - host-managed join 依次执行 Tunnel/DNS provision（不启动服务）、`xp join`、
   `/etc/xp/xp.env` 写入，再按 `xray`、`xp`、`cloudflared` 顺序启用并启动或重启，逐个确认 ready。
@@ -87,6 +92,9 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
 - join 测试必须覆盖 Phase 1 不等待 catch-up、同指纹幂等重试、冲突请求、响应丢失、joiner/leader
   重启、promotion failure retry、expiry cleanup、无关 stale learner 存在时的 fresh join，以及
   旧 state/existing-node recovery 兼容。
+- deploy 测试必须证明新节点在部署后同时具备 `xray` 与 `xp-proxy` 二进制；发布未提供该资产时
+  deploy 只警告并保持 Xray runtime，而显式 `xp-ops install --only xp-proxy` 与校验不一致时
+  必须明确失败，不得静默跳过。
 
 ## 参考
 
