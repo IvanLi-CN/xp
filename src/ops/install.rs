@@ -50,13 +50,14 @@ pub async fn cmd_install(paths: Paths, args: InstallArgs) -> Result<(), ExitErro
         return Err(ExitError::new(2, "unsupported_platform"));
     }
 
+    let policy = install_xp_proxy_policy(args.only);
     match args.only {
         Some(InstallOnly::Cloudflared) => install_cloudflared(&paths, distro, arch, mode).await?,
         Some(InstallOnly::Xray) => install_xray(&paths, arch, &args.xray_version, mode).await?,
-        Some(InstallOnly::XpProxy) => install_xp_proxy(&paths, arch, mode).await?,
+        Some(InstallOnly::XpProxy) => install_xp_proxy(&paths, arch, mode, policy).await?,
         None => {
             install_xray(&paths, arch.clone(), &args.xray_version, mode).await?;
-            install_xp_proxy(&paths, arch, mode).await?;
+            install_xp_proxy(&paths, arch, mode, policy).await?;
         }
     }
 
@@ -277,11 +278,32 @@ fn verify_xp_proxy(paths: &Paths, mode: Mode, bin_abs: &Path) -> Result<(), Exit
     Ok(())
 }
 
+/// Whether a missing `xp-proxy` release asset is fatal.
+///
+/// The explicit `xp-ops install --only xp-proxy` command must fail loudly, while a deploy against
+/// an older release that predates the asset stays usable: it warns and leaves the node on Xray.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum XpProxyAssetPolicy {
+    Required,
+    Optional,
+}
+
+fn install_xp_proxy_policy(only: Option<InstallOnly>) -> XpProxyAssetPolicy {
+    match only {
+        Some(InstallOnly::XpProxy) => XpProxyAssetPolicy::Required,
+        _ => XpProxyAssetPolicy::Optional,
+    }
+}
 /// Install the checksummed `xp-proxy` asset from the release matching this `xp-ops` build.
 ///
 /// Host-managed nodes must be able to select the native runtime right after a fresh deploy,
 /// so deploy installs this alongside Xray instead of requiring a later upgrade.
-async fn install_xp_proxy(paths: &Paths, arch: CpuArch, mode: Mode) -> Result<(), ExitError> {
+async fn install_xp_proxy(
+    paths: &Paths,
+    arch: CpuArch,
+    mode: Mode,
+    policy: XpProxyAssetPolicy,
+) -> Result<(), ExitError> {
     let version = crate::version::VERSION;
     let asset = match arch {
         CpuArch::X86_64 => "xp-proxy-linux-x86_64",
@@ -300,32 +322,58 @@ async fn install_xp_proxy(paths: &Paths, arch: CpuArch, mode: Mode) -> Result<()
     let api_base = std::env::var("XP_OPS_GITHUB_API_BASE_URL")
         .unwrap_or_else(|_| "https://api.github.com".to_string());
     let (owner, repo) = release_repo();
-    let release = fetch_github_release(&api_base, &owner, &repo, version)
-        .await
-        .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+    let release = match fetch_github_release(&api_base, &owner, &repo, version).await {
+        Ok(release) => release,
+        Err(error) if policy == XpProxyAssetPolicy::Optional => {
+            eprintln!(
+                "warning: cannot resolve release {version} for {asset}; \
+                 leaving xp-proxy uninstalled ({error})"
+            );
+            return Ok(());
+        }
+        Err(error) => return Err(ExitError::new(3, format!("install_failed: {error}"))),
+    };
 
-    let download_url = release
+    let Some(download_url) = release
         .assets
         .iter()
         .find(|a| a.name == asset)
         .map(|a| a.browser_download_url.clone())
-        .ok_or_else(|| {
-            ExitError::new(
-                3,
-                format!("install_failed: release {version} does not publish {asset}"),
-            )
-        })?;
-    let checksum = release
+    else {
+        if policy == XpProxyAssetPolicy::Optional {
+            eprintln!(
+                "warning: release {version} does not publish {asset}; \
+                 leaving xp-proxy uninstalled"
+            );
+            return Ok(());
+        }
+        return Err(ExitError::new(
+            3,
+            format!("install_failed: release {version} does not publish {asset}"),
+        ));
+    };
+
+    let checksum = match release
         .assets
         .iter()
         .find(|a| a.name == "checksums.txt")
         .map(|a| a.browser_download_url.clone())
-        .ok_or_else(|| {
-            ExitError::new(
+    {
+        Some(url) => url,
+        None if policy == XpProxyAssetPolicy::Optional => {
+            eprintln!(
+                "warning: release {version} publishes {asset} without checksums.txt; \
+                 refusing to install an unverified binary"
+            );
+            return Ok(());
+        }
+        None => {
+            return Err(ExitError::new(
                 6,
                 format!("checksum_mismatch: release {version} does not publish checksums.txt"),
-            )
-        })?;
+            ));
+        }
+    };
 
     let tmp_dir = workspace_path(paths);
     ensure_dir(&tmp_dir).map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
@@ -673,6 +721,19 @@ mod tests {
         assert!(msg.contains("refusing to replace directory path"));
         assert!(dest.is_dir());
         assert!(staged.exists());
+    }
+
+    #[test]
+    fn explicit_xp_proxy_install_is_required_while_deploy_tolerates_absence() {
+        assert_eq!(
+            install_xp_proxy_policy(Some(InstallOnly::XpProxy)),
+            XpProxyAssetPolicy::Required
+        );
+        assert_eq!(install_xp_proxy_policy(None), XpProxyAssetPolicy::Optional);
+        assert_eq!(
+            install_xp_proxy_policy(Some(InstallOnly::Xray)),
+            XpProxyAssetPolicy::Optional
+        );
     }
 
     #[test]

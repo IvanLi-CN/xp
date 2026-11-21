@@ -67,8 +67,10 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
   超过旧的短重试窗口时也不会永久遗漏配置端点。
 - `GET /api/cluster/info` 提供 leader 的 XP 版本，供部署命令锁定版本。
 - `xp-ops deploy` 必须同时安装与本次发布匹配的 `xray`、`xp-proxy` 和（启用时）`cloudflared`
-  资产，并校验 `checksums.txt`。新节点在 deploy 完成后即可显式切换到任一受支持 runtime，
-  不得要求先执行一次 `xp-ops upgrade` 才能获得 `xp-proxy`。
+  资产，并校验 `checksums.txt`。发布尚未提供 `xp-proxy` 时，deploy 只警告并保持 Xray runtime，
+  不得失败；显式 `xp-ops install --only xp-proxy` 必须把该缺失报告为错误。
+  新节点在 deploy 完成后即可显式切换到任一受支持 runtime，不得要求先执行一次
+  `xp-ops upgrade` 才能获得 `xp-proxy`。
 - 所有节点必须使用字节完全一致的 PHC；轮换会使旧管理员 Token 和由旧 PHC 签发的短期登录 Token 失效。
 - host-managed join 依次执行 Tunnel/DNS provision（不启动服务）、`xp join`、
   `/etc/xp/xp.env` 写入，再按 `xray`、`xp`、`cloudflared` 顺序启用并启动或重启，逐个确认 ready。
