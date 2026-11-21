@@ -53,8 +53,6 @@ The released `xp-proxy` binary is part of the host-managed ingress runtime. `xp-
 it alongside `xray` and verifies the download against the XP release `checksums.txt`; `xray` comes
 from `XTLS/Xray-core` and `cloudflared` from the distro or Cloudflare, so neither uses that file.
 A node deployed from a release that predates the asset keeps Xray and only logs a warning;
-`xp-ops install --only xp-proxy` treats the same absence as a hard error, and no binary is ever
-installed without a matching `checksums.txt` entry.
 `xp-ops install --only xp-proxy` treats the same absence as a hard error, and the `xp-proxy`
 binary is never installed without a matching `checksums.txt` entry.
 Installing the binary or service asset does not change traffic ownership. The node starts in Xray
