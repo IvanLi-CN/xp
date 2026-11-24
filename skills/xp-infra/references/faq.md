@@ -264,6 +264,9 @@ sudo xp-ops runtime switch --to xray --yes
 sudo xp-ops runtime status --json
 ```
 
+切换失败时实现会停掉 `xp` 和两个 ingress runtime，并禁用二者的 boot enablement，
+避免重启后静默启动错误 runtime；下一次成功的 `runtime switch` 会重新收敛 boot enablement。
+
 ### 怎么证明 runtime 切换真的成功？
 
 四条同时对得上，缺一不算成功：
@@ -272,6 +275,9 @@ sudo xp-ops runtime status --json
   （比对 `runtime`/`state`/`error` 三个字段，成功时 `error` 为 `null`）；
 - `ss -ltnp` 中托管端口只有 `xp-proxy` 一个 owner，`xray` 未监听；
 - `xray` 服务为 stopped，`xp`/`xp-proxy`/`cloudflared` 为 started；
+- boot enablement 与所选 runtime 一致：systemd `systemctl is-enabled xp-proxy.service` 为
+  `enabled` 且 `systemctl is-enabled xray.service` 为 `disabled`；OpenRC 用
+  `rc-update show default` 确认只有所选 runtime。
 - 本地 canary 返回 204：
   `curl --resolve <access_host>:39043:127.0.0.1 https://<access_host>:39043/generate_204`
 

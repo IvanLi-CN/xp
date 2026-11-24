@@ -111,6 +111,7 @@ async fn build_plan_reuses_matching_persisted_tunnel_without_conflict() {
         overwrite_existing: false,
         non_interactive: true,
         dry_run: true,
+        runtime: crate::ops::cli::DeployRuntimeArg::Auto,
     };
 
     unsafe { std::env::set_var("CLOUDFLARE_API_BASE_URL", server.uri()) };

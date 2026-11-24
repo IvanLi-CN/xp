@@ -1,4 +1,4 @@
-use crate::ops::cli::{ExitError, RuntimeStatusArgs, RuntimeSwitchArgs, RuntimeTargetArg};
+use crate::ops::cli::ExitError;
 use crate::ops::paths::Paths;
 use crate::ops::runtime_activation::{
     start_xp_proxy_service, start_xp_service, start_xray_service, stop_xp_proxy_service,
@@ -11,6 +11,45 @@ use std::fs;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeTarget {
+    Xray,
+    XpProxy,
+}
+
+impl RuntimeTarget {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Xray => "xray",
+            Self::XpProxy => "xp-proxy",
+        }
+    }
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct RuntimeSwitchArgs {
+    #[arg(long, value_enum)]
+    pub to: RuntimeTargetArg,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct RuntimeStatusArgs {
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeTargetArg {
+    Xray,
+    XpProxy,
+}
+
+/// `xp-ops deploy --runtime` selection mode.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeployRuntimeArg {
+    Auto,
     Xray,
     XpProxy,
 }
@@ -41,11 +80,13 @@ impl Default for RuntimeState {
     }
 }
 
-fn load_state(paths: &Paths) -> Result<RuntimeState, ExitError> {
+/// Reads the persisted runtime state without applying the legacy missing-state default.
+fn read_state_file(paths: &Paths) -> Result<Option<RuntimeState>, ExitError> {
     match fs::read(paths.etc_xp_runtime_state()) {
         Ok(bytes) => serde_json::from_slice(&bytes)
+            .map(Some)
             .map_err(|error| ExitError::new(5, format!("runtime_state_invalid: {error}"))),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(RuntimeState::default()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(ExitError::new(
             5,
             format!("runtime_state_read_failed: {error}"),
@@ -53,21 +94,51 @@ fn load_state(paths: &Paths) -> Result<RuntimeState, ExitError> {
     }
 }
 
+fn load_state(paths: &Paths) -> Result<RuntimeState, ExitError> {
+    Ok(read_state_file(paths)?.unwrap_or_default())
+}
+
+pub(super) fn persisted_state_runtime(paths: &Paths) -> Result<Option<RuntimeTarget>, ExitError> {
+    Ok(read_state_file(paths)?.map(|state| state.runtime))
+}
+
+/// Resolves the node-local runtime without changing the legacy missing-state contract.
+///
+/// A missing state file still means Xray unless a fresh deploy persisted an explicit choice
+/// before its services were activated.
+pub(super) fn legacy_or_persisted_runtime(paths: &Paths) -> Result<RuntimeTarget, ExitError> {
+    if let Some(target) = persisted_state_runtime(paths)? {
+        return Ok(target);
+    }
+    Ok(crate::ops::runtime_selection::load_deploy_selection(paths)?.unwrap_or(RuntimeTarget::Xray))
+}
+
 pub(super) fn expects_native_snapshot(paths: &Paths) -> bool {
-    load_state(paths).is_ok_and(|state| {
-        state.runtime == RuntimeTarget::XpProxy && state.state != RuntimeStateKind::Failed
-    })
+    match read_state_file(paths) {
+        Ok(Some(state)) => {
+            state.runtime == RuntimeTarget::XpProxy && state.state != RuntimeStateKind::Failed
+        }
+        Ok(None) => matches!(
+            crate::ops::runtime_selection::load_deploy_selection(paths),
+            Ok(Some(RuntimeTarget::XpProxy))
+        ),
+        Err(_) => false,
+    }
 }
 
 pub(super) fn upgrade_runtime_target(paths: &Paths) -> Result<RuntimeTarget, ExitError> {
-    let state = load_state(paths)?;
-    if state.state != RuntimeStateKind::Active {
-        return Err(ExitError::new(
-            7,
-            "service_error: ingress runtime must be active before upgrade",
-        ));
+    match read_state_file(paths)? {
+        Some(state) => {
+            if state.state != RuntimeStateKind::Active {
+                return Err(ExitError::new(
+                    7,
+                    "service_error: ingress runtime must be active before upgrade",
+                ));
+            }
+            Ok(state.runtime)
+        }
+        None => legacy_or_persisted_runtime(paths),
     }
-    Ok(state.runtime)
 }
 
 fn save_state(paths: &Paths, state: &RuntimeState) -> Result<(), ExitError> {
@@ -78,7 +149,34 @@ fn save_state(paths: &Paths, state: &RuntimeState) -> Result<(), ExitError> {
     Ok(())
 }
 
-fn update_xp_env(paths: &Paths, target: RuntimeTarget) -> Result<(), ExitError> {
+/// Persists an active runtime only after the selected services actually became ready.
+pub(super) fn record_active_runtime(paths: &Paths, target: RuntimeTarget) -> Result<(), ExitError> {
+    save_state(
+        paths,
+        &RuntimeState {
+            runtime: target,
+            state: RuntimeStateKind::Active,
+            error: None,
+        },
+    )
+}
+
+pub(super) fn record_failed_activation(
+    paths: &Paths,
+    target: RuntimeTarget,
+    message: &str,
+) -> Result<(), ExitError> {
+    save_state(
+        paths,
+        &RuntimeState {
+            runtime: target,
+            state: RuntimeStateKind::Failed,
+            error: Some(message.to_string()),
+        },
+    )
+}
+
+pub(super) fn update_xp_env(paths: &Paths, target: RuntimeTarget) -> Result<(), ExitError> {
     let path = paths.etc_xp_env();
     let original = fs::read_to_string(&path).unwrap_or_default();
     let mut lines = Vec::new();
@@ -129,8 +227,8 @@ pub fn cmd_runtime_status(paths: Paths, args: RuntimeStatusArgs) -> Result<(), E
         );
     } else {
         println!(
-            "runtime={:?} state={:?} error={}",
-            state.runtime,
+            "runtime={} state={:?} error={}",
+            state.runtime.as_str(),
             state.state,
             state.error.as_deref().unwrap_or("")
         );
@@ -140,11 +238,23 @@ pub fn cmd_runtime_status(paths: Paths, args: RuntimeStatusArgs) -> Result<(), E
 
 pub fn cmd_runtime_switch(paths: Paths, args: RuntimeSwitchArgs) -> Result<(), ExitError> {
     let target = target_from_arg(args.to);
-    let current = load_state(&paths)?;
-    if current.runtime == target && current.state == RuntimeStateKind::Active {
-        println!("runtime already active: {:?}", target);
+    let state = read_state_file(&paths)?;
+    let deploy_selection = crate::ops::runtime_selection::load_deploy_selection(&paths)?;
+    let active_target = state
+        .as_ref()
+        .filter(|state| state.state == RuntimeStateKind::Active)
+        .map(|state| state.runtime);
+    let has_persisted_choice = state.is_some() || deploy_selection.is_some();
+    // A legacy node without any persisted choice is already on its implicit Xray runtime.
+    if active_target == Some(target) || (!has_persisted_choice && target == RuntimeTarget::Xray) {
+        println!("runtime already active: {}", target.as_str());
         return Ok(());
     }
+    let current = state
+        .as_ref()
+        .map(|state| state.runtime)
+        .or(deploy_selection)
+        .unwrap_or(RuntimeTarget::Xray);
     if !args.yes && !args.dry_run {
         return Err(ExitError::new(
             2,
@@ -154,10 +264,12 @@ pub fn cmd_runtime_switch(paths: Paths, args: RuntimeSwitchArgs) -> Result<(), E
     if args.dry_run {
         println!(
             concat!(
-                "would switch {:?} -> {:?}; XP stopped; current runtime stopped; ",
-                "target runtime started; XP restarted"
+                "would switch {} -> {}; XP stopped; current runtime stopped; ",
+                "target runtime started; target enabled at boot; other runtime disabled at boot; ",
+                "XP restarted"
             ),
-            current.runtime, target
+            current.as_str(),
+            target.as_str()
         );
         return Ok(());
     }
@@ -171,15 +283,9 @@ pub fn cmd_runtime_switch(paths: Paths, args: RuntimeSwitchArgs) -> Result<(), E
     )?;
     match switch_runtime(&paths, target) {
         Ok(()) => {
-            save_state(
-                &paths,
-                &RuntimeState {
-                    runtime: target,
-                    state: RuntimeStateKind::Active,
-                    error: None,
-                },
-            )?;
-            println!("runtime active: {:?}", target);
+            record_active_runtime(&paths, target)?;
+            crate::ops::runtime_selection::remove_deploy_selection(&paths);
+            println!("runtime active: {}", target.as_str());
             Ok(())
         }
         Err(error) => {
@@ -187,14 +293,8 @@ pub fn cmd_runtime_switch(paths: Paths, args: RuntimeSwitchArgs) -> Result<(), E
             let _ = stop_xp_service(&paths);
             let _ = stop_xray_service(&paths);
             let _ = stop_xp_proxy_service(&paths);
-            let _ = save_state(
-                &paths,
-                &RuntimeState {
-                    runtime: target,
-                    state: RuntimeStateKind::Failed,
-                    error: Some(message),
-                },
-            );
+            crate::ops::runtime_boot::disable_all_boot(&paths);
+            let _ = record_failed_activation(&paths, target, &message);
             Err(error)
         }
     }
@@ -225,6 +325,9 @@ fn switch_runtime(paths: &Paths, target: RuntimeTarget) -> Result<(), ExitError>
             "service_error: stop xp-proxy before runtime switch failed",
         ));
     }
+    // Boot enablement follows the selected runtime. Any failure here aborts before the target
+    // starts and the caller fails closed.
+    crate::ops::runtime_boot::reconcile_runtime_boot(paths, target)?;
     update_xp_env(paths, target)?;
     let target_started = match target {
         RuntimeTarget::Xray => start_xray_service(paths),
@@ -265,5 +368,137 @@ mod tests {
         let dir = tempdir().unwrap();
         let paths = Paths::new(dir.path().to_path_buf());
         assert_eq!(load_state(&paths).unwrap().runtime, RuntimeTarget::Xray);
+    }
+
+    #[test]
+    fn missing_state_keeps_legacy_xray_for_upgrade_and_boot() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().to_path_buf());
+        assert_eq!(persisted_state_runtime(&paths).unwrap(), None);
+        assert_eq!(upgrade_runtime_target(&paths).unwrap(), RuntimeTarget::Xray);
+        assert_eq!(
+            legacy_or_persisted_runtime(&paths).unwrap(),
+            RuntimeTarget::Xray
+        );
+        assert!(!expects_native_snapshot(&paths));
+    }
+
+    #[test]
+    fn fresh_deploy_selection_preserves_xp_proxy_before_activation() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().to_path_buf());
+        crate::ops::runtime_selection::persist_deploy_selection(&paths, RuntimeTarget::XpProxy)
+            .unwrap();
+
+        assert_eq!(persisted_state_runtime(&paths).unwrap(), None);
+        assert!(paths.etc_xp_runtime_state().exists() == false);
+        assert_eq!(
+            upgrade_runtime_target(&paths).unwrap(),
+            RuntimeTarget::XpProxy
+        );
+        assert_eq!(
+            legacy_or_persisted_runtime(&paths).unwrap(),
+            RuntimeTarget::XpProxy
+        );
+        assert!(expects_native_snapshot(&paths));
+    }
+
+    #[test]
+    fn failed_and_switching_states_block_upgrade() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().to_path_buf());
+        record_failed_activation(&paths, RuntimeTarget::XpProxy, "boom").unwrap();
+
+        let error = upgrade_runtime_target(&paths).expect_err("failed state must block upgrade");
+        assert!(error.message.contains("must be active before upgrade"));
+        assert!(!expects_native_snapshot(&paths));
+    }
+
+    #[test]
+    fn switch_persists_active_state_and_drops_the_deploy_selection() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().to_path_buf());
+        crate::ops::runtime_selection::persist_deploy_selection(&paths, RuntimeTarget::XpProxy)
+            .unwrap();
+
+        cmd_runtime_switch(
+            paths.clone(),
+            RuntimeSwitchArgs {
+                to: RuntimeTargetArg::Xray,
+                yes: true,
+                dry_run: false,
+            },
+        )
+        .unwrap();
+
+        let state = read_state_file(&paths).unwrap().expect("state file");
+        assert_eq!(state.runtime, RuntimeTarget::Xray);
+        assert_eq!(state.state, RuntimeStateKind::Active);
+        assert_eq!(
+            crate::ops::runtime_selection::load_deploy_selection(&paths).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn switch_to_the_persisted_deploy_selection_is_not_a_noop() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().to_path_buf());
+        fs::create_dir_all(paths.systemd_unit_dir()).unwrap();
+        fs::write(
+            paths.systemd_unit_dir().join("xp-proxy.service"),
+            "[Service]\n",
+        )
+        .unwrap();
+        crate::ops::runtime_selection::persist_deploy_selection(&paths, RuntimeTarget::XpProxy)
+            .unwrap();
+
+        cmd_runtime_switch(
+            paths.clone(),
+            RuntimeSwitchArgs {
+                to: RuntimeTargetArg::XpProxy,
+                yes: true,
+                dry_run: false,
+            },
+        )
+        .unwrap();
+
+        let state = read_state_file(&paths).unwrap().expect("state file");
+        assert_eq!(state.runtime, RuntimeTarget::XpProxy);
+        assert_eq!(state.state, RuntimeStateKind::Active);
+    }
+
+    #[test]
+    fn switch_requires_confirmation_without_yes() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().to_path_buf());
+        let error = cmd_runtime_switch(
+            paths,
+            RuntimeSwitchArgs {
+                to: RuntimeTargetArg::XpProxy,
+                yes: false,
+                dry_run: false,
+            },
+        )
+        .expect_err("a switch must require --yes");
+        assert!(error.message.starts_with("confirmation_required:"));
+    }
+
+    #[test]
+    fn legacy_node_switch_to_xray_stays_a_noop() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().to_path_buf());
+
+        cmd_runtime_switch(
+            paths.clone(),
+            RuntimeSwitchArgs {
+                to: RuntimeTargetArg::Xray,
+                yes: true,
+                dry_run: false,
+            },
+        )
+        .unwrap();
+
+        assert!(read_state_file(&paths).unwrap().is_none());
     }
 }

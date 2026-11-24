@@ -9,6 +9,7 @@ use crate::ops::runtime_activation::{
     stop_xray_service_named, wait_for_restored_xp_proxy_snapshot, wait_for_xp_proxy_snapshot,
     xp_proxy_service_installed,
 };
+use crate::ops::runtime_boot::reconcile_runtime_boot;
 use crate::ops::upgrade_artifacts::managed_cloudflared_dest;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -148,6 +149,23 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
         return Err(unrestored_transaction_backup_error(
             "unable to stop xray before activating xp-proxy",
         ));
+    }
+    // Boot enablement follows the persisted runtime; the selected runtime itself never changes.
+    if let Err(err) = reconcile_runtime_boot(paths, target) {
+        let runtime_rollback =
+            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults, target)
+                .await;
+        let restart_xp = runtime_rollback.is_ok();
+        let err = retain_original_error(err, runtime_rollback);
+        return Err(finish_runtime_failure(
+            paths,
+            xp_backup,
+            data_dir,
+            err,
+            rollback_xp_on_failure,
+            restart_xp,
+        )
+        .expect_err("runtime failure helper must return an error"));
     }
     if let Err(err) = reconcile_managed_runtime_defaults(paths, target).await {
         let runtime_rollback =

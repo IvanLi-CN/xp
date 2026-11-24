@@ -16,8 +16,15 @@ XP 的控制面继续拥有 Raft、节点、endpoint、用户和成员关系的�
 两者通过受权限保护的本机 control socket 交换完整的 Proxy Snapshot；
 `xp-proxy` 不读取 Raft、SQLite 或 Web 状态。
 
-节点默认使用 Xray runtime。只有 `xp-ops runtime switch --to xp-proxy --yes` 可以改变节点本地
-运行时选择；本地状态缺失按 Xray active 解释，切换中或失败状态禁止 XP 继续提供入口流量。
+运行时选择是节点本地状态，不进入 Raft。新建 host-managed 部署默认选择 `xp-proxy`；已有节点保留
+其已选 runtime（含缺省状态下的 legacy Xray），deploy 和 upgrade 都不会隐式翻转。只有
+`xp-ops runtime switch --to xray|xp-proxy --yes` 可以改变既有节点的选择。
+本地 `/etc/xp/runtime.json` 缺失时，若存在 deploy 的 runtime-selection 记录则沿用该选择，
+否则仍按 Xray active 解释；legacy 节点没有该记录，因此不会被翻转。新建部署在服务真正激活前
+只在 `/etc/xp-ops/deploy/runtime-selection.json` 记录选择，不用伪造 active 状态。切换中或失败
+状态禁止 XP 继续提供入口流量。
+节点启动引导（systemd/OpenRC）必须只启用所选 runtime 并禁用另一个；deploy、runtime switch
+和 upgrade 都按持久化选择收敛 boot enablement，失败时 fail closed，绝不回退到另一 runtime。
 
 本主题锁定以下首个生产协议范围：
 

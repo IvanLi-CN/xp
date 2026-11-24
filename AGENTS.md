@@ -23,6 +23,14 @@
 - Host-managed `xp + xray + cloudflared` on `systemd` Linux nodes.
 - Host-managed `xp + xray + cloudflared` on `OpenRC` Linux nodes.
 - Single-image Docker / Compose nodes driven by `xp-ops container run`.
+- Host-managed nodes install both `xray` and `xp-proxy` but run exactly one ingress runtime.
+  Runtime selection is node-local, never Raft state. A fresh host-managed deployment selects
+  `xp-proxy` by default; an existing node keeps its persisted runtime, and a node without
+  persisted state keeps the legacy implicit Xray choice. `xp-ops deploy --runtime` accepts only
+  `auto`/`xray`/`xp-proxy`; a conflicting explicit choice on an existing node fails and points at
+  `xp-ops runtime switch --to <target> --yes`. Deploy, runtime switch, and upgrade must keep
+  init-system boot enablement exclusive to the selected runtime, and a failed activation must
+  never silently fall back to the other runtime. Containers stay Xray-only.
 - Host-managed upgrades must not be treated as a compatibility afterthought for container-only features. If a managed-default VLESS / Mihomo relay / canary behavior is shipped, the expected host-managed upgrade path must be explicit and tested.
 - Managed runtime memory defaults are part of every deployment path: Xray uses
   `GOMEMLIMIT=48MiB`, `GOGC=100`, and level-0 `bufferSize=0`; cloudflared uses
@@ -342,8 +350,9 @@
   for signed lifecycle-capability verification; this exception never permits skipping that voter
   or falling back from a configured Mesh endpoint.
 - Host-managed initial joins provision Tunnel/DNS without starting `cloudflared`, then join the
-  cluster and write `/etc/xp/xp.env` before enabling then starting or restarting `xray`, `xp`,
-  and optional `cloudflared` in order with readiness checks. A joined node is successful only
+  cluster and write `/etc/xp/xp.env` before enabling then starting or restarting the selected
+  ingress runtime (`xray` or `xp-proxy`), `xp`, and optional `cloudflared` in order with
+  readiness checks. A joined node is successful only
   after its public `api_base_url/health` returns HTTP `200`; post-join health failure preserves
   membership and metadata for retry. Geo remains disabled by default and is written only by explicit
   host-managed `--ip-geo` / TUI opt-in, never by automatic backfill.

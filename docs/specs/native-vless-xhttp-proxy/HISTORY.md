@@ -1,5 +1,10 @@
 # 主题历史
 
+- 2026-11-24：新建 host-managed 部署默认选择 `xp-proxy`，既有节点保留原 runtime，缺失状态仍按
+  legacy Xray；新增 `xp-ops deploy --runtime` 与 `/etc/xp-ops/deploy/runtime-selection.json`
+  重试记录，deploy/switch/upgrade 统一收敛 systemd/OpenRC boot enablement，失败 fail closed。
+  容器仍为 Xray-only。
+
 - 对齐宿主单节点单模式合同：显式节点 runtime 切换接管本机受支持的 XHTTP 端点，不要求逐端点 owner 迁移。
   HTTPS fallback 修复与服务验收见 [PR #493][fallback-pr]。候选 `ca844c86` 的 [GitHub Actions][fallback-ci] 在
   systemd/OpenRC 下完成 Xray、xp-proxy 重启、升级及坏运行时回滚，恢复二进制和 HTTPS/H2
