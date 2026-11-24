@@ -227,8 +227,10 @@ Cloudflare Tunnel、`<node>-xp` CNAME 或 `<node>-ep` A/AAAA 记录。保留它�
 
 `xp-ops deploy` 会同时安装 `xray` 与 `xp-proxy`；其中 `xp-proxy` 对照 XP release 的
 `checksums.txt` 校验，`xray` 来自 `XTLS/Xray-core`，不走该文件。
-若匹配版本尚未提供该资产，deploy 只警告并让节点继续用 Xray，不会失败；
-`xp-ops install --only xp-proxy` 则把缺失当作硬错误；`xp-proxy` 二进制不会跳过校验安装。
+若匹配版本尚未提供该资产，既有节点升级只警告并保留原 runtime；全新 deploy 默认选
+`xp-proxy` 时则会以 `capability_missing: release has no xp-proxy binary` 失败，需要显式
+`--runtime xray` 重试。`xp-ops install --only xp-proxy` 同样把缺失当作硬错误；
+`xp-proxy` 二进制不会跳过校验安装。
 仍然失败时按真实错误串判断：
 
 - `capability_missing: xp-proxy service asset is not installed; run xp-ops init first`

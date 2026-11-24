@@ -371,8 +371,8 @@ Notes:
   legacy Xray on an existing deployment without runtime state, and selects `xp-proxy` for a fresh
   node. `--runtime xray` / `--runtime xp-proxy` are accepted on a fresh node; on an existing node
   a conflicting choice fails and requires `xp-ops runtime switch --to <target> --yes`.
-- With `--enable-services`, deploy enables the selected ingress runtime at boot, disables the
-  other one, starts the selected runtime, starts `xp`, and waits for the xp-proxy
+- With `--enable-services`, deploy enables the selected ingress runtime and `xp` at boot,
+  disables the other ingress runtime, starts the selected runtime, starts `xp`, and waits for the xp-proxy
   snapshot/managed HTTPS fallback readiness before reporting success. A failed activation stops
   `xp` and both ingress runtimes, disables both ingress boot entries, records a failed runtime
   state and exits non-zero; deploy never falls back to the other runtime.

@@ -28,6 +28,8 @@ pub(super) fn managed_service_activation_steps(
             .into_iter()
             .map(ManagedServiceActivationStep::Boot)
             .collect();
+    // `xp` is the control plane, not an ingress runtime: deploy must enable it at boot too.
+    steps.push(ManagedServiceActivationStep::Boot(BootStep::Enable("xp")));
     steps.push(ManagedServiceActivationStep::StartOrRestart(ingress));
     steps.push(ManagedServiceActivationStep::StartOrRestart("xp"));
     steps.push(ManagedServiceActivationStep::WaitReady(ingress));

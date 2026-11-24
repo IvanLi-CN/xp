@@ -13,6 +13,7 @@ fn post_join_service_activation_orders_and_waits_each_service() {
         vec![
             ManagedServiceActivationStep::Boot(BootStep::Disable("xp-proxy")),
             ManagedServiceActivationStep::Boot(BootStep::Enable("xray")),
+            ManagedServiceActivationStep::Boot(BootStep::Enable("xp")),
             ManagedServiceActivationStep::StartOrRestart("xray"),
             ManagedServiceActivationStep::StartOrRestart("xp"),
             ManagedServiceActivationStep::WaitReady("xray"),
@@ -24,6 +25,7 @@ fn post_join_service_activation_orders_and_waits_each_service() {
         vec![
             ManagedServiceActivationStep::Boot(BootStep::Disable("xray")),
             ManagedServiceActivationStep::Boot(BootStep::Enable("xp-proxy")),
+            ManagedServiceActivationStep::Boot(BootStep::Enable("xp")),
             ManagedServiceActivationStep::StartOrRestart("xp-proxy"),
             ManagedServiceActivationStep::StartOrRestart("xp"),
             ManagedServiceActivationStep::WaitReady("xp-proxy"),
@@ -38,6 +40,7 @@ fn deploy_activation_keeps_cloudflared_boot_enablement_and_readiness() {
         managed_service_activation_steps(RuntimeTarget::XpProxy, false, true),
         vec![
             ManagedServiceActivationStep::Boot(BootStep::Enable("xp-proxy")),
+            ManagedServiceActivationStep::Boot(BootStep::Enable("xp")),
             ManagedServiceActivationStep::StartOrRestart("xp-proxy"),
             ManagedServiceActivationStep::StartOrRestart("xp"),
             ManagedServiceActivationStep::WaitReady("xp-proxy"),

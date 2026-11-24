@@ -358,7 +358,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
                 crate::ops::runtime_boot::ingress_service_name(plan.runtime_selection.target);
             let other =
                 crate::ops::runtime_boot::other_ingress_service_name(plan.runtime_selection.target);
-            eprintln!("  - enable {ingress} at boot and disable {other} at boot");
+            eprintln!("  - enable {ingress} and xp at boot, disable {other} at boot");
             eprintln!(
                 "  - start services: {ingress}, xp{}",
                 if plan.cloudflare_enabled {
@@ -621,7 +621,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     if plan.enable_services {
         if mode == Mode::DryRun {
             eprintln!(
-                "would enable {} at boot and disable {} at boot; would start {} and xp{}",
+                "would enable {} and xp at boot, disable {} at boot; would start {} and xp{}",
                 crate::ops::runtime_boot::ingress_service_name(plan.runtime_selection.target),
                 crate::ops::runtime_boot::other_ingress_service_name(plan.runtime_selection.target),
                 crate::ops::runtime_boot::ingress_service_name(plan.runtime_selection.target),
