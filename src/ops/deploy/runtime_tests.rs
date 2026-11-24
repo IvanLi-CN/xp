@@ -62,7 +62,7 @@ fn no_cloudflare_deploy_args(xp_bin: PathBuf) -> DeployArgs {
         ip_geo_enabled: false,
         account_id: None,
         zone_id: None,
-        hostname: None,
+        hostname: xp_test_fixtures::none(),
         tunnel_name: None,
         origin_url: None,
         migrate_existing_tunnel: false,
@@ -78,7 +78,7 @@ fn no_cloudflare_deploy_args(xp_bin: PathBuf) -> DeployArgs {
         cloudflare_token: None,
         cloudflare_token_stdin: false,
         cloudflare_token_stdin_value: None,
-        api_base_url: Some("https://node-1.example.test".to_string()),
+        api_base_url: Some(xp_test_fixtures::service_fixture564().to_owned()),
         xray_version: "latest".to_string(),
         runtime: crate::ops::cli::DeployRuntimeArg::Auto,
         enable_services_toggle: crate::ops::cli::EnableServicesToggle {
