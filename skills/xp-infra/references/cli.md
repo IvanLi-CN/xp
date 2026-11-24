@@ -27,6 +27,11 @@ SSH 操作员必须为已登记的非 root、非 xp 用户。
 入口检查使用统一的 `ingress_*` 名称，所选服务及真实公网监听必须一致。
 辅助 Xray loopback API 的存在不改变 xp-proxy 入口归属。
 
+`runtime ALIAS` 额外比对开机自启项：systemd 用 `systemctl is-enabled`，OpenRC 用
+`rc-update show default`（无需 root）。只有“所选 runtime 已启用且另一个未启用”才算一致，
+其余组合返回非零。`/etc/xp` 可能是 `0750 root:xp`，探针改用 `sudo -n xp-ops runtime status --json`
+读取，不再直接读 `/etc/xp/runtime.json`。
+
 端口预检要求托管状态、所选进程、服务和监听匹配。
 Xray 使用 inbound inventory 校验；xp-proxy 使用持久快照的单一监听和 generation 校验。
 多监听或缺失证据必须失败，不得猜选端口。快照仅在内存中解析，不输出凭据或保存私人副本。
