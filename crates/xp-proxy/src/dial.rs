@@ -31,10 +31,16 @@ pub(crate) async fn connect_authority(authority: &str) -> io::Result<TcpStream> 
 
 async fn connect_resolved(addrs: impl ToSocketAddrs) -> io::Result<TcpStream> {
     let candidates: Vec<SocketAddr> = lookup_host(addrs).await?.collect();
-    first_connection(candidates, HAPPY_EYEBALLS_DELAY, |addr| async move {
-        TcpStream::connect(addr).await
-    })
-    .await
+    let connect = |addr| async move { TcpStream::connect(addr).await };
+    match candidates.as_slice() {
+        [] => Err(io::Error::new(
+            io::ErrorKind::AddrNotAvailable,
+            "no resolved address to dial",
+        )),
+        // No choice to race: keep the direct connect (and its zero extra scheduling cost).
+        [addr] => connect(*addr).await,
+        _ => first_connection(candidates, HAPPY_EYEBALLS_DELAY, connect).await,
+    }
 }
 
 /// Returns the first successful connection, starting one more candidate every `delay` while
