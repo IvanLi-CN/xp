@@ -373,7 +373,9 @@ Transport and public probes require OpenSSH and curl. No Ruby/Python runtime.`);
     return;
   }
   if (request.command === "port") {
-    console.log(preflight(await remote(host, "xp-infra-port-remote"), host));
+    console.log(
+      preflight(await remote(host, "xp-infra-port-remote", [String(p!.direct_docker)]), host),
+    );
     return;
   }
   if (request.command === "runtime") {

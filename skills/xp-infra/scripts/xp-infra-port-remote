@@ -8,6 +8,59 @@ XP_CONTAINER_IMAGE_PREFIX="${XP_CONTAINER_IMAGE_PREFIX:-ghcr.io/ivanli-cn/xp}"
 MAX_PREFLIGHT_STATE_BYTES=32768
 MAX_PREFLIGHT_DISCOVERY_BYTES=32768
 PREFLIGHT_COMMAND_TIMEOUT_SECONDS=15
+# An approved private Docker-operator account can preflight its own container
+# without host sudo. Such an account can never select host mode, because it
+# cannot read the host environment.
+#
+# PROC_LISTENERS is a self-contained script for images without `ss` or
+# `netstat` (the published XP image ships neither). It emits the same
+# 'LISTEN ... addr:port ... users:(("proc",pid=N))' shape the awk parsers
+# below already understand, derived from /proc alone. Single quotes are
+# escaped so it stays one literal argument.
+PROC_LISTENERS='set -eu
+owners="$(mktemp)" || exit 1
+parser_dir="$(mktemp -d)" || exit 1
+trap '\''rm -f "$owners"; rm -rf "$parser_dir"'\'' 0 HUP INT TERM
+for fd in /proc/[0-9]*/fd/*; do
+  target="$(readlink "$fd" 2>/dev/null)" || continue
+  case "$target" in "socket:["*"]") ;; *) continue ;; esac
+  inode="${target#socket:[}"; inode="${inode%]}"
+  case "$inode" in ""|*[!0-9]*) continue ;; esac
+  pid="${fd#/proc/}"; pid="${pid%%/*}"
+  case "$pid" in ""|*[!0-9]*) continue ;; esac
+  comm="$(cat "/proc/$pid/comm" 2>/dev/null)" || continue
+  printf "%s %s %s\n" "$inode" "$comm" "$pid" >> "$owners"
+done
+for table in /proc/net/tcp /proc/net/tcp6; do
+  [ -r "$table" ] || continue
+  while read -r sl local rem st rest; do
+    [ "$sl" = "sl" ] && continue
+    [ "$st" = "0A" ] || continue
+    hexaddr="${local%%:*}"
+    hexport="${local##*:}"
+    port=$((0x$hexport))
+    [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || exit 1
+    case "${#hexaddr}" in
+      8)
+        value=$((0x$hexaddr))
+        addr="$((value % 256)).$((value / 256 % 256)).$((value / 65536 % 256)).$((value / 16777216 % 256))"
+        ;;
+      32)
+        if [ "$hexaddr" = "00000000000000000000000001000000" ]; then addr="[::1]"; else addr="[::]"; fi
+        ;;
+      *) exit 1 ;;
+    esac
+    inode="$(printf "%s\n" "$rest" | tr -s " " "\n" | sed -n "6p")"
+    owner=""
+    if [ -n "$inode" ]; then
+      owner="$(awk -v inode="$inode" '\''$1 == inode { printf "users:((\"%s\",pid=%s,fd=3))", $2, $3; exit }'\'' "$owners")"
+    fi
+    printf "LISTEN 0 128 %s:%s 0.0.0.0:* %s\n" "$addr" "$port" "$owner"
+  done < "$table"
+done'
+allow_direct_docker="${1:-false}"
+case "$allow_direct_docker" in true|false) ;; *) exit 1 ;; esac
+privilege=unresolved
 bounded_preflight_input() (
   output_file="$(mktemp)" || exit 1
   trap "rm -f \"$output_file\"" 0 HUP INT TERM
@@ -34,9 +87,48 @@ bounded_preflight_command() (
   [ "$bounded_status" -eq 0 ] && [ "$command_status" = 0 ]
 )
 command -v timeout >/dev/null 2>&1 || exit 1
-bounded_preflight_command sudo -n true >/dev/null || exit 1
+if bounded_preflight_command sudo -n true >/dev/null; then
+  privilege=sudo
+elif [ "$allow_direct_docker" = true ]; then
+  privilege=direct
+else
+  exit 1
+fi
+
+# Host-only privileged reads fail closed on a Docker-operator account: such an
+# account can never select host mode, so this is unreachable rather than silent.
+host_privileged() {
+  [ "$privilege" = sudo ] || return 1
+  bounded_preflight_command sudo -n "$@"
+}
+
+# Reads that are valid unprivileged (docker discovery, sockets, sysctl, listeners).
+host_read() {
+  case "$privilege" in
+    sudo) bounded_preflight_command sudo -n "$@" ;;
+    direct) bounded_preflight_command "$@" ;;
+    *) return 1 ;;
+  esac
+}
+
+direct_docker_host_environment_absent() {
+  env_dir="${env_file%/*}"
+  if [ -e "$env_file" ] || [ -L "$env_file" ]; then return 1; fi
+  if [ -e "$env_dir" ] || [ -L "$env_dir" ]; then
+    [ -d "$env_dir" ] && [ -r "$env_dir" ] && [ -x "$env_dir" ] || return 1
+  else
+    [ -d "${env_dir%/*}" ] && [ -r "${env_dir%/*}" ] && [ -x "${env_dir%/*}" ] || return 1
+  fi
+  return 0
+}
+
 host_env=false
-host_env_status="$(bounded_preflight_command sudo -n sh -c 'if [ -e "$1" ]; then [ -r "$1" ] || exit 1; printf %s readable; else printf %s absent; fi' sh "$env_file" 2>/dev/null)" || exit 1
+if [ "$privilege" = sudo ]; then
+  host_env_status="$(host_privileged sh -c 'if [ -e "$1" ]; then [ -r "$1" ] || exit 1; printf %s readable; else printf %s absent; fi' sh "$env_file" 2>/dev/null)" || exit 1
+else
+  direct_docker_host_environment_absent || exit 1
+  host_env_status=absent
+fi
 case "$host_env_status" in
   readable) host_env=true ;;
   absent) ;;
@@ -85,18 +177,18 @@ normalize_env_value() {
   esac
   printf %s "$value"
 }
-docker_path="$(bounded_preflight_command sudo -n sh -c 'docker_path="$(command -v docker 2>/dev/null || true)"; for candidate in "$docker_path" /usr/bin/docker /usr/local/bin/docker; do if [ -n "$candidate" ] && [ -x "$candidate" ]; then printf %s "$candidate"; exit 0; fi; done; printf %s absent' 2>/dev/null)" || exit 1
+docker_path="$(host_read sh -c 'docker_path="$(command -v docker 2>/dev/null || true)"; for candidate in "$docker_path" /usr/bin/docker /usr/local/bin/docker; do if [ -n "$candidate" ] && [ -x "$candidate" ]; then printf %s "$candidate"; exit 0; fi; done; printf %s absent' 2>/dev/null)" || exit 1
 case "$docker_path" in
   absent|/*) ;;
   *) exit 1 ;;
 esac
 if [ "$docker_path" = absent ]; then
-  docker_socket="$(bounded_preflight_command sudo -n sh -c 'if [ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]; then printf %s present; else printf %s absent; fi' 2>/dev/null)" || exit 1
+  docker_socket="$(host_read sh -c 'if [ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]; then printf %s present; else printf %s absent; fi' 2>/dev/null)" || exit 1
   [ "$docker_socket" = absent ] || exit 1
 fi
 docker_preflight() (
   unset DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG
-  bounded_preflight_command sudo -n "$docker_path" --context default "$@"
+  host_read "$docker_path" --context default "$@"
 )
 containers=""
 container_count=0
@@ -209,9 +301,9 @@ printf 'state_b64=%s\n' "$(printf '%s' "$state" | base64 | tr -d '\r\n')"
 
 collect_host_listeners() {
   if command -v ss >/dev/null 2>&1; then
-    bounded_preflight_command sudo -n ss -H -ltnp 2>/dev/null
+    host_read ss -H -ltnp 2>/dev/null
   elif command -v netstat >/dev/null 2>&1; then
-    bounded_preflight_command sudo -n netstat -ltnp 2>/dev/null
+    host_read netstat -ltnp 2>/dev/null
   else
     return 1
   fi
@@ -256,7 +348,7 @@ collect_runtime_listeners() {
   if [ -n "$container" ]; then
     if docker_preflight exec "$container" sh -c 'command -v ss >/dev/null 2>&1'; then docker_preflight exec "$container" ss -H -ltnp
     elif docker_preflight exec "$container" sh -c 'command -v netstat >/dev/null 2>&1'; then docker_preflight exec "$container" netstat -ltnp
-    else return 1
+    else docker_preflight exec "$container" sh -c "$PROC_LISTENERS"
     fi
   else
     printf '%s' "$host_listeners"
@@ -265,10 +357,12 @@ collect_runtime_listeners() {
 runtime_listeners="$(collect_runtime_listeners)" || exit 1
 listener_ports="$(printf '%s\n%s\n%s\n' "$host_listeners" "$runtime_listeners" "$published_ports" | awk '
   function add_port(port) { seen[port] = 1 }
-  /^[1-9][0-9]*$/ { if ($1 <= 65535) add_port($1); next }
+  # Compare numerically: after sub() the port is a string, and "9001" > "65535"
+  # as strings would wrongly reject ordinary ports.
+  /^[1-9][0-9]*$/ { if ($1 + 0 <= 65535) add_port($1 + 0); next }
   NF == 0 || /^(Proto|Active)[[:space:]]/ { next }
   NF < 4 { invalid = 1; next }
-  { value=$4; sub(/^.*:/, "", value); if (value !~ /^[1-9][0-9]*$/ || value > 65535) { invalid = 1; next }; add_port(value) }
+  { value=$4; sub(/^.*:/, "", value); if (value !~ /^[1-9][0-9]*$/ || value + 0 > 65535) { invalid = 1; next }; add_port(value + 0) }
   END {
     if (invalid) exit 1
     output = ""
@@ -304,21 +398,21 @@ read_ephemeral_range() {
   if [ -n "$container" ]; then
     docker_preflight exec "$container" sh -c 'sysctl -n net.ipv4.ip_local_port_range 2>/dev/null || cat /proc/sys/net/ipv4/ip_local_port_range' 2>/dev/null
   else
-    bounded_preflight_command sudo -n sh -c 'sysctl -n net.ipv4.ip_local_port_range 2>/dev/null || cat /proc/sys/net/ipv4/ip_local_port_range' 2>/dev/null
+    host_read sh -c 'sysctl -n net.ipv4.ip_local_port_range 2>/dev/null || cat /proc/sys/net/ipv4/ip_local_port_range' 2>/dev/null
   fi
 }
 read_reserved_ports() {
   if [ -n "$container" ]; then
     docker_preflight exec "$container" sh -c 'sysctl -n net.ipv4.ip_local_reserved_ports 2>/dev/null || cat /proc/sys/net/ipv4/ip_local_reserved_ports' 2>/dev/null
   else
-    bounded_preflight_command sudo -n sh -c 'sysctl -n net.ipv4.ip_local_reserved_ports 2>/dev/null || cat /proc/sys/net/ipv4/ip_local_reserved_ports' 2>/dev/null
+    host_read sh -c 'sysctl -n net.ipv4.ip_local_reserved_ports 2>/dev/null || cat /proc/sys/net/ipv4/ip_local_reserved_ports' 2>/dev/null
   fi
 }
 read_unprivileged_port_start() {
   if [ -n "$container" ]; then
     docker_preflight exec "$container" sh -c 'sysctl -n net.ipv4.ip_unprivileged_port_start 2>/dev/null || cat /proc/sys/net/ipv4/ip_unprivileged_port_start' 2>/dev/null
   else
-    bounded_preflight_command sudo -n sh -c 'sysctl -n net.ipv4.ip_unprivileged_port_start 2>/dev/null || cat /proc/sys/net/ipv4/ip_unprivileged_port_start' 2>/dev/null
+    host_read sh -c 'sysctl -n net.ipv4.ip_unprivileged_port_start 2>/dev/null || cat /proc/sys/net/ipv4/ip_unprivileged_port_start' 2>/dev/null
   fi
 }
 read_ingress_api() {
@@ -453,7 +547,12 @@ else
     ingress_service=inactive
   fi
 fi
-host_env_status_after="$(bounded_preflight_command sudo -n sh -c 'if [ -e "$1" ]; then [ -r "$1" ] || exit 1; printf %s readable; else printf %s absent; fi' sh "$env_file" 2>/dev/null)" || exit 1
+if [ "$privilege" = sudo ]; then
+  host_env_status_after="$(host_privileged sh -c 'if [ -e "$1" ]; then [ -r "$1" ] || exit 1; printf %s readable; else printf %s absent; fi' sh "$env_file" 2>/dev/null)" || exit 1
+else
+  direct_docker_host_environment_absent || exit 1
+  host_env_status_after=absent
+fi
 [ "$host_env_status_after" = "$host_env_status" ] || exit 1
 if [ "$host_env" = true ]; then
   host_env_snapshot_after="$(read_host_environment 2>/dev/null)" || exit 1
@@ -461,10 +560,10 @@ if [ "$host_env" = true ]; then
   state_selector_after="$(bounded_preflight_command sudo -n sh -c 'data_dir=$1; state_path=$2; legacy_state_path=$3; [ -d "$data_dir" ] && [ -r "$data_dir" ] && [ -x "$data_dir" ] || exit 1; if [ -e "$state_path" ]; then printf %s current; elif [ -e "$legacy_state_path" ]; then printf %s legacy; else printf %s absent; fi' sh "$data_dir" "$state_path" "$legacy_state_path" 2>/dev/null)" || exit 1
   [ "$state_selector_after" = "$state_selector" ] || exit 1
 fi
-docker_path_after="$(bounded_preflight_command sudo -n sh -c 'docker_path="$(command -v docker 2>/dev/null || true)"; for candidate in "$docker_path" /usr/bin/docker /usr/local/bin/docker; do if [ -n "$candidate" ] && [ -x "$candidate" ]; then printf %s "$candidate"; exit 0; fi; done; printf %s absent' 2>/dev/null)" || exit 1
+docker_path_after="$(host_read sh -c 'docker_path="$(command -v docker 2>/dev/null || true)"; for candidate in "$docker_path" /usr/bin/docker /usr/local/bin/docker; do if [ -n "$candidate" ] && [ -x "$candidate" ]; then printf %s "$candidate"; exit 0; fi; done; printf %s absent' 2>/dev/null)" || exit 1
 [ "$docker_path_after" = "$docker_path" ] || exit 1
 if [ "$docker_path" = absent ]; then
-  docker_socket_after="$(bounded_preflight_command sudo -n sh -c 'if [ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]; then printf %s present; else printf %s absent; fi' 2>/dev/null)" || exit 1
+  docker_socket_after="$(host_read sh -c 'if [ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]; then printf %s present; else printf %s absent; fi' 2>/dev/null)" || exit 1
   [ "$docker_socket_after" = "$docker_socket" ] || exit 1
 else
   docker_inventory_after="$(docker_preflight ps --format '{{.Names}} {{.Image}}' 2>/dev/null)" || exit 1
