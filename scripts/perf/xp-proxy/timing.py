@@ -7,7 +7,7 @@ import sys
 import time
 
 elapsed = time.time() - int(os.environ["PERF_JOB_STARTED"])
-budget = 360 if os.environ["PROFILE"] == "full" else 180
+budget = 360 if os.environ["PROFILE"] == "full" else 240
 value = dict(
     stage=sys.argv[1],
     seconds=elapsed,

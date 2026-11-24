@@ -8,7 +8,16 @@
   "xray_asset": "xray-linux-x86_64",
   "xray_sha256": "ba15b5b3658d3b89008d601e730859d06a5db3691320f0130fd91a37bc63412d",
   "slot_ms": 2000,
-  "sweeps": 2,
+  "rounds": {
+    "light": 3,
+    "full": 2
+  },
+  "repeats": {
+    "light": {
+      "upload@8": 3
+    },
+    "full": {}
+  },
   "light": [
     1,
     8
