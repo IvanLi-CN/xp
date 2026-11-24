@@ -80,7 +80,8 @@ Replaying the previously failing artifact through the new decision shows the int
   `inbound/c8/upload: throughput below 90% of main (median round ratio 0.898)`.
 
 Three A/A dispatches of the light profile on this branch measured `candidate_sha = main`
-(`d7871a83`) with the new sampling. Each run made 9 paired rounds per scenario:
+(`d7871a83`) with the new sampling. Each run measured three rotated rounds per scenario, and
+`upload@8` aggregated three repeats inside each round:
 
 | Run         | c8/upload rounds    | Median | vs Xray | Result  |
 | ----------- | ------------------- | -----: | ------: | ------- |
