@@ -91,6 +91,10 @@ impl Paths {
         self.map_abs(Path::new("/etc/xp-ops/deploy/settings.json"))
     }
 
+    pub fn etc_xp_ops_deploy_runtime_selection(&self) -> PathBuf {
+        self.map_abs(Path::new("/etc/xp-ops/deploy/runtime-selection.json"))
+    }
+
     pub fn etc_xp_ops_dir(&self) -> PathBuf {
         self.map_abs(Path::new("/etc/xp-ops"))
     }

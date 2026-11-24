@@ -52,18 +52,14 @@ pub async fn cmd_tui(paths: Paths) -> Result<(), crate::ops::cli::ExitError> {
 }
 
 async fn run_deploy(paths: Paths, values: AppValues) -> Result<(), crate::ops::cli::ExitError> {
+    let cloudflare_toggle = deploy::cloudflare_toggle(values.cloudflare_enabled);
+    let ddns_toggle = deploy::ddns_toggle(values.ddns_enabled);
     let args = DeployArgs {
         xp_bin: None,
         node_name: values.node_name,
         access_host: values.access_host,
-        cloudflare_toggle: crate::ops::cli::CloudflareToggle {
-            cloudflare: values.cloudflare_enabled,
-            no_cloudflare: !values.cloudflare_enabled,
-        },
-        ddns_toggle: crate::ops::cli::DdnsToggle {
-            ddns: values.ddns_enabled,
-            no_ddns: !values.ddns_enabled,
-        },
+        cloudflare_toggle,
+        ddns_toggle,
         ip_geo_enabled: values.ip_geo_enabled,
         account_id: values.account_id,
         zone_id: values.zone_id,
@@ -85,6 +81,7 @@ async fn run_deploy(paths: Paths, values: AppValues) -> Result<(), crate::ops::c
         cloudflare_token_stdin_value: None,
         api_base_url: values.api_base_url,
         xray_version: values.xray_version,
+        runtime: crate::ops::cli::DeployRuntimeArg::Auto,
         enable_services_toggle: crate::ops::cli::EnableServicesToggle {
             enable_services: values.enable_services,
             no_enable_services: !values.enable_services,

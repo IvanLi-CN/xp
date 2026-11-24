@@ -11,11 +11,11 @@ Docker deployment guide.
 
 `xp` is expected to remain deployable across these owner-facing environments:
 
-| Deployment shape            | Runtime manager              | Status          | Typical node class                                                    | Notes                                                                                                 |
-| --------------------------- | ---------------------------- | --------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Host-managed service node   | systemd                      | fully supported | host-managed service node with init-managed `xp + xray + cloudflared` | `xp`, `xray`, and optional `cloudflared` are installed on the host and managed by systemd             |
-| Host-managed service node   | OpenRC                       | fully supported | host-managed service node with init-managed `xp + xray + cloudflared` | `xp`, `xray`, and optional `cloudflared` are installed on the host and managed by OpenRC              |
-| Single-image container node | Docker Compose / OCI runtime | fully supported | official single-image container node                                  | `xp-ops container run` owns bootstrap/join, child process supervision, and missing endpoint bootstrap |
+| Deployment shape            | Runtime manager              | Status          | Typical node class                                          | Notes                                                                                                                             |
+| --------------------------- | ---------------------------- | --------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Host-managed service node   | systemd                      | fully supported | host-managed service node with init-managed ingress runtime | `xp`, `xray`, and `xp-proxy` are installed; one selected ingress runtime plus optional `cloudflared` are start-managed by systemd |
+| Host-managed service node   | OpenRC                       | fully supported | host-managed service node with init-managed ingress runtime | `xp`, `xray`, and `xp-proxy` are installed; one selected ingress runtime plus optional `cloudflared` are start-managed by OpenRC  |
+| Single-image container node | Docker Compose / OCI runtime | fully supported | official single-image container node                        | `xp-ops container run` owns bootstrap/join, child process supervision, and missing endpoint bootstrap                             |
 
 Current support boundaries that operators must know:
 
@@ -52,13 +52,19 @@ Current support boundaries that operators must know:
 The released `xp-proxy` binary is part of the host-managed ingress runtime. `xp-ops deploy` installs
 it alongside `xray` and verifies the download against the XP release `checksums.txt`; `xray` comes
 from `XTLS/Xray-core` and `cloudflared` from the distro or Cloudflare, so neither uses that file.
-A node deployed from a release that predates the asset keeps Xray and only logs a warning;
-`xp-ops install --only xp-proxy` treats the same absence as a hard error, and the `xp-proxy`
-binary is never installed without a matching `checksums.txt` entry.
-Installing the binary or service asset does not change traffic ownership. The node starts in Xray
-runtime unless an operator explicitly uses `xp-ops runtime switch --to xp-proxy --yes`. That
-operation stops XP and both possible ingress services, verifies the old owner is stopped, starts
-exactly one selected runtime, and starts XP only after the selected service is ready.
+A node upgraded by a release that predates the asset keeps its persisted runtime and only logs a
+warning; `xp-ops install --only xp-proxy` treats the same absence as a hard error, and the
+`xp-proxy` binary is never installed without a matching `checksums.txt` entry. A fresh `deploy`
+of such a release fails with `capability_missing` and requires an explicit `--runtime xray`; the
+deploy runtime selection is only persisted after the selected runtime binary exists.
+Installing the binary or service asset does not change traffic ownership. A new host-managed
+node deployed by `xp-ops deploy` selects the `xp-proxy` runtime by default; every existing node
+keeps the runtime it already selected. An existing node without a persisted runtime state keeps
+its legacy Xray choice, so deploy and upgrade never flip it. Changing an existing node requires
+an explicit `xp-ops runtime switch --to <xray|xp-proxy> --yes`: that operation stops XP and both
+possible ingress services, verifies the old owner is stopped, starts exactly one selected
+runtime, starts XP only after the selected service is ready, and makes boot enablement match the
+selected runtime.
 
 The production design is recorded in
 [the native proxy SPEC](../specs/native-vless-xhttp-proxy/SPEC.md) and
@@ -361,9 +367,24 @@ Notes:
 - `xp-ops deploy` supports passing the Cloudflare API token via `--cloudflare-token` (riskier) or `--cloudflare-token-stdin` (preferred over the flag).
 - Token resolution priority for deploy is: `flag/stdin` → `CLOUDFLARE_API_TOKEN` → `/etc/xp-ops/cloudflare_tunnel/api_token`.
 - `xp-ops deploy --ddns` reuses that token source, then writes an `xp`-readable runtime copy to `/etc/xp/cloudflare_ddns_api_token`.
+- `xp-ops deploy --runtime auto` is the default. It preserves a persisted local runtime, keeps
+  legacy Xray on an existing deployment without runtime state, and selects `xp-proxy` for a fresh
+  node. `--runtime xray` / `--runtime xp-proxy` are accepted on a fresh node; on an existing node
+  a conflicting choice fails and requires `xp-ops runtime switch --to <target> --yes`.
+  A node that only has the deploy selection (no `/etc/xp/runtime.json`) was never activated:
+  `xp-ops runtime status` reports `not_activated` and `xp-ops upgrade` refuses until the node is
+  activated by a deploy or an explicit `xp-ops runtime switch`.
+- With `--enable-services`, deploy enables the selected ingress runtime and `xp` at boot,
+  disables the other ingress runtime, starts the selected runtime, starts `xp`, and waits
+  for the xp-proxy snapshot/managed HTTPS fallback readiness before reporting success.
+  The runtime state is `switching` during that window and only becomes `active` after
+  readiness. A failed activation stops `xp` and both ingress runtimes, disables both
+  ingress boot entries, records a failed runtime state and exits non-zero; deploy never
+  falls back to the other runtime.
 - For a host-managed join, deploy provisions Tunnel/DNS without starting `cloudflared`, runs
-  `xp join`, writes `/etc/xp/xp.env`, then enables, starts or restarts, and confirms `xray`, `xp`, and optional
-  `cloudflared` in that order. With `--enable-services`, final `https://<api-base-url>/health`
+  `xp join`, writes `/etc/xp/xp.env`, then enables, starts or restarts, and confirms the selected
+  ingress runtime (`xray` or `xp-proxy`), `xp`, and optional `cloudflared` in that order. With
+  `--enable-services`, final `https://<api-base-url>/health`
   must return HTTP `200`. A `post_join_health_failed` result retains the joined member and its
   metadata; rerun deploy after repairing the service or public routing without issuing a new join
   token.
@@ -600,7 +621,9 @@ Expected result:
 - `/etc/xp/xp.env` contains `XP_ENABLE_CLOUDFLARE`, `XP_CLOUDFLARE_ACCOUNT_ID`,
   `XP_CLOUDFLARE_ZONE_ID`, `XP_CLOUDFLARE_HOSTNAME`, `XP_DEFAULT_VLESS_*`,
   `XP_DEFAULT_SS_PORT`, `XP_VLESS_CANARY_*`, and `XP_CLOUDFLARE_DDNS_*`.
-- `xp`, `xray`, and optional `cloudflared` are installed and started under the host init system.
+- `xp`, `xray`, and `xp-proxy` are installed; exactly one ingress runtime is started under the
+  host init system. A fresh deploy selects `xp-proxy` (see `--runtime` above), an existing node
+  keeps its persisted choice, and optional `cloudflared` is started when configured.
 - Post-bootstrap relay probing uses `https://<access_host[:managed_vless_port]>/generate_204` instead of the admin origin.
 
 Operational audit:
@@ -1444,11 +1467,18 @@ Current rollout semantics:
   runtime services are ready, before replacing `xp-ops` itself. On OpenRC, each managed restart
   is `stop -> stopped -> start -> started`; `stopping` and every unrecognized status are
   nonterminal. This prevents XP's runtime recovery loop from racing an OpenRC service transition.
-- A release contains a checksummed `xp-proxy` asset and matching service assets. Installation and
-  upgrade preserve Xray runtime by default. Runtime selection is explicit and local:
-  `xp-ops runtime status` reads the persisted state and `xp-ops runtime switch --to xp-proxy --yes`
-  performs the stop, port-release, start, readiness and XP restart sequence. A failed switch stops
-  both ingress services and records a failed state; it never silently changes owner.
+- A release contains a checksummed `xp-proxy` asset and matching service assets. Runtime selection
+  is node-local, never Raft state. `xp-ops deploy --runtime auto` (the default) preserves a
+  persisted runtime, keeps legacy Xray on a node that has XP env or cluster identity but no
+  persisted runtime, and selects `xp-proxy` only for a genuinely fresh node. The fresh choice is
+  persisted in `/etc/xp-ops/deploy/runtime-selection.json` before any join/`xp.env` mutation, so a
+  retried deploy cannot be misclassified as legacy. An explicit `--runtime` that differs from a
+  persisted choice fails and points at `xp-ops runtime switch --to <target> --yes`.
+  `xp-ops runtime status` reads the persisted state; `xp-ops runtime switch` performs the
+  stop, port-release, start, readiness and XP restart sequence and reconciles boot enablement
+  (selected runtime enabled, other runtime disabled). A failed switch stops both ingress services,
+  disables both ingress boot entries and records a failed state; it never silently changes owner.
+  `xp-ops upgrade` preserves the persisted runtime and only reconciles boot enablement.
 - Deferring the `xp-ops` replacement prevents a self-update from ending the locked release phase before the service binaries and managed runtimes are updated.
 - A service restart is accepted only after systemd reports the unit active or OpenRC reports the
   service started on two successive checks. OpenRC stop is likewise accepted only after two exact

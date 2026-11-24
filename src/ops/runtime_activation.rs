@@ -325,7 +325,7 @@ fn test_enable_service_restart() -> bool {
         )
 }
 
-fn command_succeeds(program: &str, args: &[&str]) -> bool {
+pub(super) fn command_succeeds(program: &str, args: &[&str]) -> bool {
     Command::new(program)
         .args(args)
         .status()

@@ -47,7 +47,7 @@ pub async fn cmd_init(paths: Paths, args: InitArgs) -> Result<(), ExitError> {
             write_openrc_upgrade_trigger_delegate(&paths, mode)?;
             write_openrc_upgrade_policy(&paths, mode)?;
             if args.enable_services {
-                enable_openrc_services(mode)?;
+                enable_openrc_services(&paths, mode)?;
             }
         }
         InitSystem::None => {}
@@ -586,19 +586,7 @@ fn parse_env_kv(line: &str) -> Option<(String, String)> {
 }
 
 fn enable_systemd_services(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
-    if mode == Mode::DryRun {
-        eprintln!("would run: systemctl daemon-reload");
-        eprintln!("would run: systemctl enable --now xray.service");
-        eprintln!("would run: systemctl enable --now xp.service");
-        return Ok(());
-    }
-    if is_test_root(paths.root()) {
-        return Ok(());
-    }
-    run_or_fail("systemctl", &["daemon-reload"])?;
-    run_or_fail("systemctl", &["enable", "--now", "xray.service"])?;
-    run_or_fail("systemctl", &["enable", "--now", "xp.service"])?;
-    Ok(())
+    crate::ops::runtime_boot::enable_selected_services(paths, InitSystem::Systemd, mode)
 }
 
 fn write_openrc_scripts(paths: &Paths, _args: &InitArgs, mode: Mode) -> Result<(), ExitError> {
@@ -731,19 +719,8 @@ esac
     .to_string()
 }
 
-fn enable_openrc_services(mode: Mode) -> Result<(), ExitError> {
-    if mode == Mode::DryRun {
-        eprintln!("would run: rc-update add xray default");
-        eprintln!("would run: rc-update add xp default");
-        eprintln!("would run: rc-service xray start");
-        eprintln!("would run: rc-service xp start");
-        return Ok(());
-    }
-    run_or_fail("rc-update", &["add", "xray", "default"])?;
-    run_or_fail("rc-update", &["add", "xp", "default"])?;
-    run_or_fail("rc-service", &["xray", "start"])?;
-    run_or_fail("rc-service", &["xp", "start"])?;
-    Ok(())
+fn enable_openrc_services(paths: &Paths, mode: Mode) -> Result<(), ExitError> {
+    crate::ops::runtime_boot::enable_selected_services(paths, InitSystem::OpenRc, mode)
 }
 
 fn ensure_user_group(distro: Distro, user: &str, home: &Path) -> Result<(), ExitError> {

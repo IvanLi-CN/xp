@@ -82,27 +82,9 @@ pub enum RuntimeCommand {
     Status(RuntimeStatusArgs),
 }
 
-#[derive(Args, Debug, Clone)]
-pub struct RuntimeSwitchArgs {
-    #[arg(long, value_enum)]
-    pub to: RuntimeTargetArg,
-    #[arg(long)]
-    pub yes: bool,
-    #[arg(long)]
-    pub dry_run: bool,
-}
-
-#[derive(Args, Debug, Clone)]
-pub struct RuntimeStatusArgs {
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeTargetArg {
-    Xray,
-    XpProxy,
-}
+pub use crate::ops::runtime::{
+    DeployRuntimeArg, RuntimeStatusArgs, RuntimeSwitchArgs, RuntimeTargetArg,
+};
 
 #[derive(Args, Debug, Clone)]
 pub struct InstallArgs {
@@ -703,6 +685,10 @@ pub struct DeployArgs {
 
     #[arg(long, value_name = "SEMVER|latest", default_value = "latest")]
     pub xray_version: String,
+
+    /// Ingress runtime; `auto` preserves a persisted choice, fresh nodes default to xp-proxy.
+    #[arg(long, value_enum, default_value = "auto")]
+    pub runtime: crate::ops::runtime::DeployRuntimeArg,
 
     #[command(flatten)]
     pub enable_services_toggle: EnableServicesToggle,

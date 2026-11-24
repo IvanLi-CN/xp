@@ -1,3 +1,4 @@
+use super::activation::ensure_service_command_succeeded;
 use super::*;
 use axum::{Router, http::StatusCode, routing::get};
 use clap::Parser;
@@ -516,6 +517,7 @@ async fn build_plan_cloudflare_token_missing_error_is_actionable() {
         overwrite_existing: false,
         non_interactive: true,
         dry_run: true,
+        runtime: crate::ops::cli::DeployRuntimeArg::Auto,
     };
 
     let plan = build_plan(&paths, &args).await.unwrap();
@@ -575,6 +577,7 @@ async fn build_plan_allows_default_vless_port_without_server_names() {
         overwrite_existing: false,
         non_interactive: true,
         dry_run: true,
+        runtime: crate::ops::cli::DeployRuntimeArg::Auto,
     };
 
     let plan = build_plan(&paths, &args).await.unwrap();
@@ -630,6 +633,7 @@ async fn build_plan_rejects_zero_managed_default_ports() {
         overwrite_existing: false,
         non_interactive: true,
         dry_run: true,
+        runtime: crate::ops::cli::DeployRuntimeArg::Auto,
     };
 
     let plan = build_plan(&paths, &args).await.unwrap();
@@ -697,6 +701,7 @@ async fn build_plan_rejects_zero_managed_default_ports_from_existing_env() {
         overwrite_existing: false,
         non_interactive: true,
         dry_run: true,
+        runtime: crate::ops::cli::DeployRuntimeArg::Auto,
     };
 
     let plan = build_plan(&paths, &args).await.unwrap();
@@ -768,6 +773,7 @@ async fn build_plan_detects_token_need_from_existing_managed_vless_env() {
         overwrite_existing: false,
         non_interactive: true,
         dry_run: true,
+        runtime: crate::ops::cli::DeployRuntimeArg::Auto,
     };
 
     let plan = build_plan(&paths, &args).await.unwrap();
@@ -777,26 +783,6 @@ async fn build_plan_detects_token_need_from_existing_managed_vless_env() {
             .any(|e| e.contains("cloudflare token missing")),
         "expected existing managed vless env to require cloudflare token, got: {:?}",
         plan.errors
-    );
-}
-
-#[test]
-fn post_join_service_activation_orders_and_waits_each_service() {
-    assert_eq!(managed_service_names(false), ["xray", "xp"]);
-    assert_eq!(managed_service_names(true), ["xray", "xp", "cloudflared"]);
-    assert_eq!(
-        managed_service_activation_steps(true),
-        vec![
-            ManagedServiceActivationStep::Enable("xray"),
-            ManagedServiceActivationStep::StartOrRestart("xray"),
-            ManagedServiceActivationStep::WaitReady("xray"),
-            ManagedServiceActivationStep::Enable("xp"),
-            ManagedServiceActivationStep::StartOrRestart("xp"),
-            ManagedServiceActivationStep::WaitReady("xp"),
-            ManagedServiceActivationStep::Enable("cloudflared"),
-            ManagedServiceActivationStep::StartOrRestart("cloudflared"),
-            ManagedServiceActivationStep::WaitReady("cloudflared"),
-        ]
     );
 }
 

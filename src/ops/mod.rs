@@ -26,12 +26,14 @@ mod platform;
 mod preflight;
 mod runtime;
 mod runtime_activation;
+mod runtime_boot;
 #[cfg(test)]
 #[path = "init_runtime_defaults_tests.rs"]
 mod runtime_defaults_tests;
 #[cfg(test)]
 #[path = "init_runtime_defaults_xray_tests.rs"]
 mod runtime_defaults_xray_tests;
+mod runtime_selection;
 mod status;
 mod tui;
 mod upgrade;

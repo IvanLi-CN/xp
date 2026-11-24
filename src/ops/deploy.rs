@@ -7,7 +7,7 @@ use crate::ops::cloudflare::{self, CloudflareTokenSource, DnsRecordInfo, TunnelI
 use crate::ops::init;
 use crate::ops::install;
 use crate::ops::paths::Paths;
-use crate::ops::platform::{InitSystem, detect_distro, detect_init_system};
+use crate::ops::platform::{detect_distro, detect_init_system};
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, write_string_if_changed};
 use crate::ops::xp;
 use dialoguer::Confirm;
@@ -20,6 +20,7 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod activation;
 mod input_validation;
 
 const DEFAULT_ORIGIN_URL: &str = "http://127.0.0.1:62416";
@@ -69,6 +70,7 @@ struct DeployPlan {
     api_base_url_source: ValueSource,
     join_token_present: bool,
     xray_version: String,
+    runtime_selection: crate::ops::runtime_selection::RuntimeSelection,
     enable_services: bool,
     cloudflare_enabled: bool,
     ddns_enabled: bool,
@@ -328,6 +330,11 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     if mode == Mode::DryRun {
         eprintln!("deploy plan:");
         eprintln!("  - install xray and xp-proxy");
+        eprintln!(
+            "  - ingress runtime: {} ({})",
+            plan.runtime_selection.target.as_str(),
+            plan.runtime_selection.source.label()
+        );
         if plan.cloudflare_enabled {
             eprintln!("  - install cloudflared");
         }
@@ -347,7 +354,22 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
             eprintln!("  - xp bootstrap (xp init)");
         }
         if plan.enable_services {
-            eprintln!("  - enable and start services: xray, xp, cloudflared (when configured)");
+            let ingress =
+                crate::ops::runtime_boot::ingress_service_name(plan.runtime_selection.target);
+            let other =
+                crate::ops::runtime_boot::other_ingress_service_name(plan.runtime_selection.target);
+            eprintln!("  - enable {ingress} and xp at boot, disable {other} at boot");
+            eprintln!(
+                "  - start services: {ingress}, xp{}",
+                if plan.cloudflare_enabled {
+                    ", cloudflared"
+                } else {
+                    ""
+                }
+            );
+            if plan.runtime_selection.target == crate::ops::runtime::RuntimeTarget::XpProxy {
+                eprintln!("  - wait for the xp-proxy snapshot / managed HTTPS fallback readiness");
+            }
             if plan.join_token_present || cluster_metadata_exists(&paths) {
                 eprintln!("  - verify public api_base_url/health returns HTTP 200 after join");
             }
@@ -374,6 +396,18 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
             },
         )
         .await?;
+    }
+
+    // The selected runtime must exist before its choice is made durable. Installing binaries does
+    // not create XP env or cluster identity, so a retry still resolves as a fresh deployment.
+    if mode == Mode::Real {
+        ensure_selected_runtime_available(&paths, plan.runtime_selection.target)?;
+        // Persist the fresh choice before any join/xp.env mutation: a retried deploy must resolve
+        // the same runtime instead of being misread as a legacy Xray node.
+        crate::ops::runtime_selection::persist_deploy_selection(
+            &paths,
+            plan.runtime_selection.target,
+        )?;
     }
 
     // Run `xp-ops init` first so the `xp` group (and related init-system files) exist;
@@ -587,7 +621,10 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     if plan.enable_services {
         if mode == Mode::DryRun {
             eprintln!(
-                "would enable services: xray, xp{}",
+                "would enable {} and xp at boot, disable {} at boot; would start {} and xp{}",
+                crate::ops::runtime_boot::ingress_service_name(plan.runtime_selection.target),
+                crate::ops::runtime_boot::other_ingress_service_name(plan.runtime_selection.target),
+                crate::ops::runtime_boot::ingress_service_name(plan.runtime_selection.target),
                 if plan.cloudflare_enabled {
                     ", cloudflared"
                 } else {
@@ -599,7 +636,32 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         if !is_test_root(paths.root()) {
             let distro = detect_distro(&paths).map_err(|e| ExitError::new(2, e))?;
             let init_system = detect_init_system(distro, None);
-            enable_and_start_services(init_system, plan.cloudflare_enabled).await?;
+            // XP publishes a native snapshot only while the local state is switching/active, so
+            // open the activation window before any service starts.
+            crate::ops::runtime::record_switching_runtime(&paths, plan.runtime_selection.target)?;
+            if let Err(error) = activation::enable_and_start_services(
+                &paths,
+                init_system,
+                plan.runtime_selection.target,
+                plan.cloudflare_enabled,
+            )
+            .await
+            {
+                let message = error.message.clone();
+                let _ = crate::ops::runtime_activation::stop_xp_service(&paths);
+                let _ = crate::ops::runtime_activation::stop_xray_service(&paths);
+                let _ = crate::ops::runtime_activation::stop_xp_proxy_service(&paths);
+                crate::ops::runtime_boot::disable_all_boot(&paths);
+                if let Err(state_error) = crate::ops::runtime::record_failed_activation(
+                    &paths,
+                    plan.runtime_selection.target,
+                    &message,
+                ) {
+                    eprintln!("runtime state not persisted: {}", state_error.message);
+                }
+                return Err(error);
+            }
+            crate::ops::runtime::record_active_runtime(&paths, plan.runtime_selection.target)?;
             if plan.cloudflare_enabled {
                 cloudflare::set_managed_tunnel_enabled(&paths, true)?;
             }
@@ -629,6 +691,8 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
 }
 
 async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, ExitError> {
+    let runtime_selection =
+        crate::ops::runtime_selection::resolve_deploy_runtime(paths, args.runtime)?;
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
     let join_token_present = args.join_token.is_some() || args.join_token_stdin_value.is_some();
@@ -967,6 +1031,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
         api_base_url_source,
         join_token_present,
         xray_version: args.xray_version.clone(),
+        runtime_selection,
         enable_services: args.enable_services_toggle.enabled(),
         cloudflare_enabled,
         ddns_enabled,
@@ -982,6 +1047,36 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
         warnings,
         errors,
     })
+}
+
+pub(crate) fn cloudflare_toggle(enabled: bool) -> crate::ops::cli::CloudflareToggle {
+    crate::ops::cli::CloudflareToggle {
+        cloudflare: enabled,
+        no_cloudflare: !enabled,
+    }
+}
+
+pub(crate) fn ddns_toggle(enabled: bool) -> crate::ops::cli::DdnsToggle {
+    crate::ops::cli::DdnsToggle {
+        ddns: enabled,
+        no_ddns: !enabled,
+    }
+}
+
+/// A release that predates the `xp-proxy` asset must not persist an unachievable fresh choice.
+fn ensure_selected_runtime_available(
+    paths: &Paths,
+    target: crate::ops::runtime::RuntimeTarget,
+) -> Result<(), ExitError> {
+    if target == crate::ops::runtime::RuntimeTarget::XpProxy
+        && !paths.usr_local_bin_xp_proxy().exists()
+    {
+        return Err(ExitError::new(
+            6,
+            "capability_missing: release has no xp-proxy binary; rerun with --runtime xray",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_managed_default_port_value(
@@ -1639,6 +1734,14 @@ fn render_plan(plan: &DeployPlan) {
         }
         .to_string(),
     );
+    line(
+        "runtime",
+        format!(
+            "{} ({})",
+            plan.runtime_selection.target.as_str(),
+            plan.runtime_selection.source.label()
+        ),
+    );
 
     if !plan.warnings.is_empty() {
         eprintln!("{}", warn("warnings:"));
@@ -1652,166 +1755,6 @@ fn render_plan(plan: &DeployPlan) {
         for e in &plan.errors {
             eprintln!("  - {}", err(e));
         }
-    }
-}
-
-async fn wait_for_service(init_system: InitSystem, name: &str) -> Result<(), ExitError> {
-    if init_system == InitSystem::None {
-        return Ok(());
-    }
-
-    let service = match init_system {
-        InitSystem::Systemd => format!("{name}.service"),
-        InitSystem::OpenRc | InitSystem::None => name.to_string(),
-    };
-
-    for _ in 0..10 {
-        let ok = match init_system {
-            InitSystem::Systemd => std::process::Command::new("systemctl")
-                .args(["is-active", "--quiet", service.as_str()])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false),
-            InitSystem::OpenRc => std::process::Command::new("rc-service")
-                .args([name, "status"])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false),
-            InitSystem::None => true,
-        };
-        if ok {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-
-    Err(ExitError::new(
-        6,
-        format!("service_failed: {name} is not running"),
-    ))
-}
-
-fn managed_service_names(cloudflare_enabled: bool) -> &'static [&'static str] {
-    if cloudflare_enabled {
-        &["xray", "xp", "cloudflared"]
-    } else {
-        &["xray", "xp"]
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum ManagedServiceActivationStep {
-    Enable(&'static str),
-    StartOrRestart(&'static str),
-    WaitReady(&'static str),
-}
-
-fn managed_service_activation_steps(cloudflare_enabled: bool) -> Vec<ManagedServiceActivationStep> {
-    managed_service_names(cloudflare_enabled)
-        .iter()
-        .flat_map(|service| {
-            [
-                ManagedServiceActivationStep::Enable(service),
-                ManagedServiceActivationStep::StartOrRestart(service),
-                ManagedServiceActivationStep::WaitReady(service),
-            ]
-        })
-        .collect()
-}
-
-async fn enable_and_start_services(
-    init_system: InitSystem,
-    cloudflare_enabled: bool,
-) -> Result<(), ExitError> {
-    if init_system == InitSystem::None {
-        return Ok(());
-    }
-
-    if init_system == InitSystem::Systemd {
-        ensure_service_command_succeeded(
-            "systemd",
-            "daemon-reload",
-            std::process::Command::new("systemctl")
-                .args(["daemon-reload"])
-                .status()
-                .map(|status| status.success()),
-        )?;
-    }
-
-    for step in managed_service_activation_steps(cloudflare_enabled) {
-        match step {
-            ManagedServiceActivationStep::Enable(service) => match init_system {
-                InitSystem::Systemd => {
-                    let unit = format!("{service}.service");
-                    ensure_service_command_succeeded(
-                        service,
-                        "enable",
-                        std::process::Command::new("systemctl")
-                            .args(["enable", unit.as_str()])
-                            .status()
-                            .map(|status| status.success()),
-                    )?;
-                }
-                InitSystem::OpenRc => {
-                    ensure_service_command_succeeded(
-                        service,
-                        "enable",
-                        std::process::Command::new("rc-update")
-                            .args(["add", service, "default"])
-                            .status()
-                            .map(|status| status.success()),
-                    )?;
-                }
-                InitSystem::None => {}
-            },
-            ManagedServiceActivationStep::StartOrRestart(service) => match init_system {
-                InitSystem::Systemd => {
-                    let unit = format!("{service}.service");
-                    ensure_service_command_succeeded(
-                        service,
-                        "start/restart",
-                        std::process::Command::new("systemctl")
-                            .args(["restart", unit.as_str()])
-                            .status()
-                            .map(|status| status.success()),
-                    )?;
-                }
-                InitSystem::OpenRc => {
-                    ensure_service_command_succeeded(
-                        service,
-                        "start/restart",
-                        std::process::Command::new("rc-service")
-                            .args([service, "restart"])
-                            .status()
-                            .map(|status| status.success()),
-                    )?;
-                }
-                InitSystem::None => {}
-            },
-            ManagedServiceActivationStep::WaitReady(service) => {
-                wait_for_service(init_system, service).await?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn ensure_service_command_succeeded(
-    service: &str,
-    action: &str,
-    result: io::Result<bool>,
-) -> Result<(), ExitError> {
-    let succeeded = result.map_err(|error| {
-        ExitError::new(6, format!("service_failed: {service} {action}: {error}"))
-    })?;
-    if succeeded {
-        Ok(())
-    } else {
-        Err(ExitError::new(
-            6,
-            format!("service_failed: {service} {action} failed"),
-        ))
     }
 }
 
@@ -2412,5 +2355,7 @@ fn generate_admin_token() -> String {
 mod cloudflare_runtime_env_tests;
 #[cfg(test)]
 mod persisted_tunnel_reuse_tests;
+#[cfg(test)]
+mod runtime_tests;
 #[cfg(test)]
 mod tests;

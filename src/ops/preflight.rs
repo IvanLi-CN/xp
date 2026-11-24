@@ -375,6 +375,11 @@ fn preflight_deploy(paths: &Paths, args: &DeployArgs) -> Result<(), ExitError> {
         Target::dir_if_exists(paths.etc_sudoers_d_dir(), "sudoers.d dir"),
         Target::file_if_exists(paths.etc_sudoers_xp_upgrade(), "xp upgrade sudoers"),
         Target::dir_if_exists(paths.usr_local_libexec_dir(), "libexec dir"),
+        Target::dir(paths.etc_xp_ops_deploy_dir(), "deploy runtime selection"),
+        Target::file(
+            paths.etc_xp_ops_deploy_runtime_selection(),
+            "deploy runtime selection",
+        ),
     ];
 
     if cloudflare_enabled {
