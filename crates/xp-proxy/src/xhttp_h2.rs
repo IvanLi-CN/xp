@@ -121,7 +121,7 @@ async fn open_stream(
         .map_err(|error| anyhow!(error))?;
     let permit = SessionPermit { session, permit };
     let mut outbound =
-        TcpStream::connect((vless.destination.0.as_str(), vless.destination.1)).await?;
+        crate::dial::connect_tcp(vless.destination.0.as_str(), vless.destination.1).await?;
     outbound.set_nodelay(true)?;
     let extra = &buffered[consumed..];
     if !extra.is_empty() {
