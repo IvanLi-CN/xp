@@ -146,7 +146,8 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
 - per-peer HTTPS Mesh transport、breaker、fallback 与本地 telemetry；Raft、leader forwarding、
   node history、探针、管理 fan-out 与 SSE 共用进程级传输 bundle。托管 Mesh 使用 HTTP/2-only
   client，每 origin 最多保留一条 idle connection，idle timeout 为 120 秒；公网 direct
-  fallback 使用独立的长期 client。Vision/TCP 与 XHTTP managed-default endpoint 都可生成
+  fallback 使用独立的长期兼容 client：ALPN 协商 HTTP/2、自动回退 HTTP/1.1，每 origin 最多
+  保留一条 idle connection，idle timeout 为 90 秒。Vision/TCP 与 XHTTP managed-default endpoint 都可生成
   Direct Mesh URL，后者使用 Reality fallback 承载既有签名 HTTP/2；Native Reverse 不再参与
   通用请求，空白 `access_host` 与歧义 endpoint 仍直接选择 Public fallback。
 - durable local internal idempotency ledger。

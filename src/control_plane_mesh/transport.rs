@@ -5,6 +5,11 @@ use super::{MeshAwareHttpClient, MeshRequestError};
 pub const MESH_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 pub(crate) const PUBLIC_HEALTH_PROBE_BUDGET: Duration = Duration::from_secs(30);
 const MESH_POOL_MAX_IDLE_PER_HOST: usize = 1;
+const PUBLIC_DIRECT_POOL_MAX_IDLE_PER_HOST: usize = 1;
+const PUBLIC_DIRECT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+const PUBLIC_DIRECT_TCP_KEEPALIVE: Duration = Duration::from_secs(30);
+const PUBLIC_DIRECT_HTTP2_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+const PUBLIC_DIRECT_HTTP2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[cfg(test)]
 #[path = "public_health_budget_tests.rs"]
@@ -68,14 +73,26 @@ fn authenticated_client_builder(
 }
 
 fn public_direct_client_builder() -> reqwest::ClientBuilder {
-    // Public API origins may terminate HTTP/2 without sending END_STREAM; keep
-    // the signed direct control-plane path on a bounded HTTP/1.1 exchange.
-    reqwest::Client::builder()
-        .http1_only()
+    public_direct_policy(reqwest::Client::builder())
+}
+
+fn public_direct_policy(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    // Keep one reusable HTTP/2 connection per public origin. HTTP/1.1 origins still
+    // negotiate down automatically through ALPN, and the idle cap keeps their
+    // keep-alive sockets bounded as well. A bounded idle timeout avoids reusing
+    // sockets that an edge has already closed without a GOAWAY.
+    builder
         // Cloudflare rejects requests without a User-Agent with HTTP 403/1010 at the
         // edge before the signed XP request reaches the registered public endpoint.
         .user_agent("xp")
         .redirect(reqwest::redirect::Policy::none())
+        .pool_max_idle_per_host(PUBLIC_DIRECT_POOL_MAX_IDLE_PER_HOST)
+        .pool_idle_timeout(PUBLIC_DIRECT_POOL_IDLE_TIMEOUT)
+        .tcp_keepalive(PUBLIC_DIRECT_TCP_KEEPALIVE)
+        .http2_adaptive_window(true)
+        .http2_keep_alive_interval(PUBLIC_DIRECT_HTTP2_KEEPALIVE_INTERVAL)
+        .http2_keep_alive_timeout(PUBLIC_DIRECT_HTTP2_KEEPALIVE_TIMEOUT)
+        .http2_keep_alive_while_idle(true)
 }
 
 fn strict_mesh_client(
@@ -124,9 +141,9 @@ pub(crate) fn build_mesh_http_client_with_policy(
         authenticated_client_builder(cluster_ca_pem, &identity_pem)?,
         policy,
     )?;
-    let public_direct = authenticated_client_builder(cluster_ca_pem, &identity_pem)?
-        .http1_only()
-        .build()?;
+    let public_direct =
+        public_direct_policy(authenticated_client_builder(cluster_ca_pem, &identity_pem)?)
+            .build()?;
     let client = MeshAwareHttpClient::from_transport_clients(mesh, public_direct);
     #[cfg(not(test))]
     let client = client.with_direct_validation_required();

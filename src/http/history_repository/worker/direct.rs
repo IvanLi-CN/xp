@@ -1,6 +1,11 @@
 use axum::http::Method;
 use serde::de::DeserializeOwned;
-use std::time::Instant;
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock, Mutex},
+    time::Instant,
+};
+use tokio::sync::Semaphore;
 
 use crate::{
     control_plane_mesh::{MeshPeerTarget, MeshRequest, PeerDirectPath},
@@ -17,6 +22,21 @@ const MAX_REPAIR_RESPONSE_BODY_BYTES: usize = 2 * 1024 * 1024;
 const REPAIR_RESPONSE_CHANGED_CODE: &str = "repository_repair_response_changed";
 const REPAIR_RESPONSE_CHANGED_MESSAGE: &str =
     "repository repair response changed before completion";
+const MAX_IN_FLIGHT_REPOSITORY_REQUESTS: usize = 4;
+
+static REPOSITORY_REQUEST_LIMITERS: LazyLock<Mutex<HashMap<String, Arc<Semaphore>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn repository_request_limiter(peer_node_id: &str) -> Arc<Semaphore> {
+    let mut limiters = match REPOSITORY_REQUEST_LIMITERS.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    limiters
+        .entry(peer_node_id.to_owned())
+        .or_insert_with(|| Arc::new(Semaphore::new(MAX_IN_FLIGHT_REPOSITORY_REQUESTS)))
+        .clone()
+}
 
 fn is_repair_response_changed_error(code: Option<&str>, message: &str) -> bool {
     code == Some(REPAIR_RESPONSE_CHANGED_CODE)
@@ -213,12 +233,29 @@ async fn send_repository_request_on_path_body(
     max_success_body_bytes: usize,
 ) -> Result<Vec<u8>, RepositoryDirectError> {
     let started = Instant::now();
+    let limiter = repository_request_limiter(&peer.node_id);
+    let _permit = tokio::time::timeout(REPOSITORY_REQUEST_BUDGET, limiter.acquire_owned())
+        .await
+        .map_err(|_| {
+            RepositoryDirectError::Transport(anyhow::anyhow!("repository request queue timed out"))
+        })?
+        .map_err(|_| {
+            RepositoryDirectError::Transport(anyhow::anyhow!(
+                "repository request limiter is closed"
+            ))
+        })?;
+    let remaining = REPOSITORY_REQUEST_BUDGET.saturating_sub(started.elapsed());
+    if remaining.is_zero() {
+        return Err(RepositoryDirectError::Transport(anyhow::anyhow!(
+            "repository request queue exhausted the request budget"
+        )));
+    }
     let request = MeshRequest {
         method,
         path_and_query: path_and_query.to_owned(),
         content_type: (!body.is_empty()).then(|| "application/json".to_owned()),
         body,
-        total_budget: REPOSITORY_REQUEST_BUDGET,
+        total_budget: remaining,
         // History traffic is bound to the registered public HTTPS api_base_url. Ambiguous
         // transport outcomes fail closed instead of probing Mesh or Reverse Mesh.
         allow_ambiguous_fallback: false,
@@ -301,11 +338,12 @@ async fn send_repository_request_on_path_body(
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_REPAIR_RESPONSE_BODY_BYTES, REPAIR_RESPONSE_CHANGED_CODE,
-        REPAIR_RESPONSE_CHANGED_MESSAGE, RepositoryDirectError, is_repair_response_changed_error,
-        read_bounded_body,
+        MAX_IN_FLIGHT_REPOSITORY_REQUESTS, MAX_REPAIR_RESPONSE_BODY_BYTES,
+        REPAIR_RESPONSE_CHANGED_CODE, REPAIR_RESPONSE_CHANGED_MESSAGE, RepositoryDirectError,
+        is_repair_response_changed_error, read_bounded_body, repository_request_limiter,
     };
     use crate::control_plane_mesh::PeerDirectPath;
+    use std::time::Duration;
     use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
     #[test]
@@ -413,5 +451,27 @@ mod tests {
             .await
             .expect("body at the limit must be accepted");
         assert_eq!(body.len(), MAX_REPAIR_RESPONSE_BODY_BYTES);
+    }
+
+    #[tokio::test]
+    async fn repository_request_limiter_caps_in_flight_requests_per_peer() {
+        let peer = format!("limiter-test-{}", crate::id::new_ulid_string());
+        let limiter = repository_request_limiter(&peer);
+        let mut permits = Vec::new();
+        for _ in 0..MAX_IN_FLIGHT_REPOSITORY_REQUESTS {
+            permits.push(limiter.clone().acquire_owned().await.unwrap());
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), limiter.clone().acquire_owned())
+                .await
+                .is_err()
+        );
+        drop(permits);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), limiter.acquire_owned())
+                .await
+                .expect("permit after release")
+                .is_ok()
+        );
     }
 }
