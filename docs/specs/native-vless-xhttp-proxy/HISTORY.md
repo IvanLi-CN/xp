@@ -1,5 +1,11 @@
 # 主题历史
 
+- 2026-11-24：修正性能门禁 A/A 误报。轻量改为 3 轮轮转采样，每个场景取逐轮配对比值的
+  中位数判定，`upload@8` 每轮重复三次；90%/+5ms 阈值与人工豁免语义不变，轻量设计预算
+  调整为 240 秒。证据见 [PR #501][perf-noise-pr]。
+
+[perf-noise-pr]: https://github.com/IvanLi-CN/xp/pull/501
+
 - 2026-11-24：出站拨号改为 250 ms 错峰双栈并发（Happy Eyeballs 语义），取代按解析顺序串行尝试。
   现场故障为 us2 实例残留 `default via fe80::1 dev eth1` 的 IPv6 黑洞路由：AAAA 连接挂起使所有域名代理
   目标超时，而 canary/fallback 仍 204、审计全绿。四个域名拨号点（raw fallback、TLS fallback、VLESS 目标、

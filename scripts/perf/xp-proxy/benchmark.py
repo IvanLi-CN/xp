@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import socket
 import resource as usage
+import statistics
 import subprocess
 import threading
 import time
@@ -56,6 +57,52 @@ def verify(directory, sha, role):
         if Path(name).name != name or digest(directory / name) != value:
             raise ValueError(f"{role}: checksum mismatch: {name}")
     return manifest
+
+
+def median(values):
+    return statistics.median(values)
+
+
+def orders(rounds):
+    """Rotate the three subjects so every one takes every start position once."""
+    base = ("candidate", "main", "Xray")
+    if rounds == 1:
+        return [base]
+    if rounds == 2:
+        # Two rounds cannot balance three positions; keep the opposite-order pair.
+        return [base, tuple(reversed(base))]
+    return [tuple(base[index:] + base[:index]) for index in range(rounds)]
+
+
+def combine(results):
+    """Aggregate repeated loads of one cell; validity keeps the worst repeat."""
+    if len(results) == 1:
+        return results[0]
+
+    def middle(key):
+        values = [result.get(key) for result in results]
+        return None if any(value is None for value in values) else median(values)
+
+    return dict(
+        mbps=middle("mbps"),
+        p50_ms=middle("p50_ms"),
+        p95_ms=middle("p95_ms"),
+        samples=min(result.get("samples", 0) for result in results),
+        confirmed_bytes=min(result.get("confirmed_bytes", 0) for result in results),
+        incomplete=max(result.get("incomplete", 0) for result in results),
+        seconds=sum(result.get("seconds", 0) for result in results),
+        termination=results[-1].get("termination"),
+        errors=[error for result in results for error in result.get("errors", [])],
+        repeat_mbps=[result.get("mbps") for result in results],
+        generator_cpu_seconds=sum(
+            result.get("generator_cpu_seconds", 0) for result in results
+        ),
+        generator_telemetry=[
+            sample
+            for result in results
+            for sample in result.get("generator_telemetry", [])
+        ],
+    )
 
 
 def port():
@@ -239,27 +286,41 @@ def configs(directory, origin, remote, local, fallback):
     return server, client, snapshot, outbound
 
 
-def compare(rows):
-    failures = []
-    cases = itertools.product(
+def scenarios(rows):
+    return itertools.product(
         sorted({r["direction"] for r in rows}),
         sorted({r["concurrency"] for r in rows}),
         ("latency", "upload", "download"),
     )
-    for direction, concurrency, workload in cases:
-        subset = [
-            r
-            for r in rows
-            if (r["direction"], r["concurrency"], r["workload"])
-            == (direction, concurrency, workload)
-        ]
+
+
+def group(rows, direction, concurrency, workload):
+    return {
+        name: sorted(
+            (
+                r
+                for r in rows
+                if (r["direction"], r["concurrency"], r["workload"])
+                == (direction, concurrency, workload)
+                and r["program"] == name
+            ),
+            key=lambda r: r["sweep"],
+        )
+        for name in ("candidate", "main", "Xray")
+    }
+
+
+def compare(rows, rounds):
+    """Decide per scenario from rotated rounds; one outlier round cannot fail."""
+    failures = []
+    for direction, concurrency, workload in scenarios(rows):
         label = f"{direction}/c{concurrency}/{workload}"
-        grouped = {
-            name: [r for r in subset if r["program"] == name]
-            for name in ("candidate", "main", "Xray")
-        }
-        if any(len(values) != 2 for values in grouped.values()):
-            failures.append(f"{label}: missing sweep")
+        grouped = group(rows, direction, concurrency, workload)
+        if any(
+            [r["sweep"] for r in values] != list(range(rounds))
+            for values in grouped.values()
+        ):
+            failures.append(f"{label}: missing round")
             continue
         for name, values in grouped.items():
             if any(
@@ -273,17 +334,88 @@ def compare(rows):
             ):
                 failures.append(f"{label}/{name}: invalid measurement")
         for baseline in ("main", "Xray"):
-            # Compare each opposite-order sweep; do not hide a failed round by averaging.
-            for a, b in zip(grouped["candidate"], grouped[baseline]):
-                if workload == "latency":
-                    if any(
-                        a[key] is None or b[key] is None or a[key] > b[key] + 5
-                        for key in ("p50_ms", "p95_ms")
-                    ):
-                        failures.append(f"{label}: latency exceeds {baseline} +5ms")
-                elif a["mbps"] < b["mbps"] * 0.9:
-                    failures.append(f"{label}: throughput below 90% of {baseline}")
+            pairs = list(zip(grouped["candidate"], grouped[baseline]))
+            if workload == "latency":
+                limit = CONFIG["latency_delta_ms"]
+                for key in ("p50_ms", "p95_ms"):
+                    deltas = [
+                        None if a[key] is None or b[key] is None else a[key] - b[key]
+                        for a, b in pairs
+                    ]
+                    if any(delta is None for delta in deltas):
+                        failures.append(f"{label}: missing {key} sample vs {baseline}")
+                    elif median(deltas) > limit:
+                        failures.append(
+                            f"{label}: {key} exceeds {baseline} +{limit}ms "
+                            f"(median round delta {median(deltas):.3f}ms)"
+                        )
+            else:
+                ratios = [a["mbps"] / b["mbps"] for a, b in pairs]
+                observed = median(ratios)
+                if observed < CONFIG["throughput_ratio"]:
+                    failures.append(
+                        f"{label}: throughput below "
+                        f"{CONFIG['throughput_ratio'] * 100:.0f}% of {baseline} "
+                        f"(median round ratio {observed:.3f})"
+                    )
     return failures
+
+
+def headroom(rows, direct):
+    """The direct origin control must sit clear of the fastest proxied result."""
+    failures = []
+    for workload in sorted({r["workload"] for r in rows}):
+        control = next((r for r in direct if r["workload"] == workload), None)
+        if control is None or control.get("errors") or control.get("samples", 0) == 0:
+            failures.append(f"{workload}: direct control missing or invalid")
+            continue
+        if workload == "latency":
+            continue
+        observed = max(r["mbps"] for r in rows if r["workload"] == workload)
+        if control["mbps"] < observed * 1.2:
+            failures.append(f"{workload}: direct capacity has insufficient headroom")
+    return failures
+
+
+def noise(rows, rounds):
+    """Report the same-run round spread behind every decision."""
+    entries = []
+    for direction, concurrency, workload in scenarios(rows):
+        label = f"{direction}/c{concurrency}/{workload}"
+        grouped = group(rows, direction, concurrency, workload)
+        if any(
+            [r["sweep"] for r in values] != list(range(rounds))
+            for values in grouped.values()
+        ):
+            continue
+        for baseline in ("main", "Xray"):
+            a = grouped["candidate"]
+            b = grouped[baseline]
+            metrics = {}
+            if workload == "latency":
+                for key in ("p50_ms", "p95_ms"):
+                    metrics[key] = [
+                        None if x[key] is None or y[key] is None else x[key] - y[key]
+                        for x, y in zip(a, b)
+                    ]
+            else:
+                metrics["throughput_ratio"] = [
+                    x["mbps"] / y["mbps"] for x, y in zip(a, b)
+                ]
+            for metric, values in metrics.items():
+                if any(value is None for value in values):
+                    continue
+                entries.append(
+                    dict(
+                        scenario=label,
+                        baseline=baseline,
+                        metric=metric,
+                        rounds=[round(value, 4) for value in values],
+                        median=round(median(values), 4),
+                        spread=round(max(values) - min(values), 4),
+                    )
+                )
+    return entries
 
 
 def main():
@@ -308,6 +440,8 @@ def main():
     report = dict(
         schema_version=1,
         profile=args.profile,
+        rounds=CONFIG["rounds"][args.profile],
+        repeats=CONFIG["repeats"][args.profile],
         candidate_sha=args.candidate_sha,
         main_sha=args.baseline_sha,
         independent_main=args.candidate_sha != args.baseline_sha,
@@ -321,11 +455,13 @@ def main():
         ),
         measurement="error",
         rows=rows,
+        noise=[],
         telemetry=telemetry,
         direct=direct,
     )
     harness = args.candidate / "perf_harness"
     processes = Processes(args.output)
+    rounds = CONFIG["rounds"][args.profile]
     origin_port, remote, local, fallback = (port() for _ in range(4))
 
     def load(address, concurrency, workload):
@@ -418,9 +554,7 @@ def main():
                     ),
                 )
             )
-        for sweep, order in enumerate(
-            (("candidate", "main", "Xray"), ("Xray", "main", "candidate"))
-        ):
+        for sweep, order in enumerate(orders(rounds)):
             for direction in (
                 ("inbound",) if args.profile == "light" else ("inbound", "outbound")
             ):
@@ -497,6 +631,9 @@ def main():
                         for concurrency, workload in itertools.product(
                             CONFIG[args.profile], ("latency", "upload", "download")
                         ):
+                            repeats = CONFIG["repeats"][args.profile].get(
+                                f"{workload}@{concurrency}", 1
+                            )
                             done = threading.Event()
 
                             def observe():
@@ -516,17 +653,27 @@ def main():
                             monitor = threading.Thread(target=observe)
                             monitor.start()
                             try:
-                                result = load(
-                                    f"127.0.0.1:{local}", concurrency, workload
-                                )
-                            except Exception as error:
-                                result = dict(
-                                    samples=0,
-                                    mbps=0,
-                                    p50_ms=None,
-                                    p95_ms=None,
-                                    errors=[str(error)],
-                                )
+                                results = []
+                                for _ in range(repeats):
+                                    try:
+                                        results.append(
+                                            load(
+                                                f"127.0.0.1:{local}",
+                                                concurrency,
+                                                workload,
+                                            )
+                                        )
+                                    except Exception as error:
+                                        results.append(
+                                            dict(
+                                                samples=0,
+                                                mbps=0,
+                                                p50_ms=None,
+                                                p95_ms=None,
+                                                errors=[str(error)],
+                                            )
+                                        )
+                                result = combine(results)
                             finally:
                                 done.set()
                                 monitor.join()
@@ -563,13 +710,8 @@ def main():
                             )
                     finally:
                         group.stop()
-        failures = compare(rows)
-        for row in rows:
-            control = next(r for r in direct if r["workload"] == row["workload"])
-            if control["errors"] or (
-                row["workload"] != "latency" and control["mbps"] < row["mbps"] * 1.2
-            ):
-                failures.append("direct capacity has insufficient headroom")
+        failures = compare(rows, rounds) + headroom(rows, direct)
+        report["noise"] = noise(rows, rounds)
         report.update(
             measurement="failure" if failures else "success", failures=failures
         )
@@ -580,10 +722,32 @@ def main():
         report["execute_seconds"] = time.monotonic() - start
         (args.output / "measurement.json").write_text(json.dumps(report, indent=2))
         summary = f"## xp-proxy performance ({args.profile})\n\nMeasurement: **{report['measurement']}**\n\nCandidate: `{args.candidate_sha}`; main: `{args.baseline_sha}`.\n\n"
-        summary += "|Program|Direction|Concurrency|Load|Sweep|Samples|Mbps|p50 ms|p95 ms|Errors|CPU %|Peak PSS MiB|\n|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|\n"
+        summary += (
+            f"Decision: {rounds} rotated rounds per scenario; a scenario fails only when "
+            f"the median round ratio is below {CONFIG['throughput_ratio']:.0%} of main/Xray "
+            f"or the median p50/p95 delta exceeds {CONFIG['latency_delta_ms']} ms.\n\n"
+        )
+        if not report["independent_main"]:
+            summary += (
+                "Candidate and main are the same source commit: candidate/main ratios "
+                "are an A/A noise sample, not an independent regression comparison.\n\n"
+            )
+        summary += (
+            "|Program|Direction|Concurrency|Load|Round|Samples|Mbps|p50 ms|p95 ms|"
+            "Errors|CPU %|Peak PSS MiB|\n"
+            "|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|\n"
+        )
         for row in rows:
             summary += f"|{row['program'].replace('candidate', 'xp-proxy (candidate)').replace('main', 'xp-proxy (main)')}|{row['direction']}|{row['concurrency']}|{row['workload']}|{row['sweep']}|{row['samples']}|{row['mbps']:.2f}|{row['p50_ms']}|{row['p95_ms']}|{len(row['errors'])}|{row['resources']['cpu_percent']}|{row['resources']['peak_pss_mib']}|\n"
         summary += "\nCPU: sampled process interval, 100% = one logical core. PSS: sampled load peak.\n"
+        summary += "\n|Scenario|Baseline|Metric|Rounds|Median|Spread|\n|---|---|---|---|---|---|\n"
+        for entry in report["noise"]:
+            rounds_text = ", ".join(f"{value:g}" for value in entry["rounds"])
+            summary += (
+                f"|{entry['scenario']}|{entry['baseline']}|{entry['metric']}|"
+                f"{rounds_text}|{entry['median']:g}|{entry['spread']:g}|\n"
+            )
+        summary += "\nNoise table: per-round values used for the median decision.\n"
         summary += "\n" + "\n".join(
             f"- {failure}" for failure in report.get("failures", [])
         )

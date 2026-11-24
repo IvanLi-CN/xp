@@ -5,7 +5,7 @@ import json
 import tempfile
 import unittest
 from policy import related, gate, validate_receipt, disposition
-from benchmark import compare, verify, digest, CONFIG, ROOT
+from benchmark import combine, compare, headroom, orders, verify, digest, CONFIG, ROOT
 from github import seal
 
 
@@ -177,8 +177,8 @@ class PolicyTests(unittest.TestCase):
         second["reason"] = "changed"
         self.assertNotEqual(second["digest"], seal(second))
 
-    def test_fixed_thresholds_and_no_missing_samples_success(self):
-        rows = [
+    def rows(self, rounds=3, mbps=100):
+        return [
             dict(
                 program=name,
                 direction="inbound",
@@ -187,7 +187,7 @@ class PolicyTests(unittest.TestCase):
                 sweep=sweep,
                 samples=100,
                 confirmed_bytes=1024 * 1024,
-                mbps=100,
+                mbps=mbps,
                 p50_ms=1,
                 p95_ms=2,
                 errors=[],
@@ -195,18 +195,111 @@ class PolicyTests(unittest.TestCase):
             )
             for name in ("candidate", "main", "Xray")
             for workload in ("latency", "upload", "download")
-            for sweep in range(2)
+            for sweep in range(rounds)
         ]
-        self.assertEqual(compare(rows), [])
-        rows[2]["mbps"] = 89
-        self.assertTrue(compare(rows))
-        rows[2]["mbps"] = 100
+
+    def test_rotated_rounds_give_every_subject_every_position(self):
+        positions = [list(order) for order in orders(3)]
+        for name in ("candidate", "main", "Xray"):
+            self.assertEqual(
+                sorted(order.index(name) for order in positions), [0, 1, 2]
+            )
+
+    def test_fixed_thresholds_and_no_missing_samples_success(self):
+        rows = self.rows()
+        self.assertEqual(compare(rows, 3), [])
+        # One depressed round is same-run noise, not a scenario regression.
+        rows[3]["mbps"] = 80
+        self.assertEqual(compare(rows, 3), [])
+        # A majority of rounds below 90% is a scenario regression.
+        rows[4]["mbps"] = 80
+        self.assertTrue(compare(rows, 3))
+        rows[4]["mbps"] = 100
         rows[0]["samples"] = 99
-        self.assertTrue(compare(rows))
+        self.assertTrue(compare(rows, 3))
         rows[0]["samples"] = 100
         rows[0]["errors"] = ["bad checksum"]
-        self.assertTrue(compare(rows))
-        self.assertTrue(compare(rows[:-1]))
+        self.assertTrue(compare(rows, 3))
+        self.assertTrue(compare(rows[:-1], 3))
+
+    def test_repeated_cell_keeps_worst_repeat_validity(self):
+        combined = combine(
+            [
+                dict(mbps=100, p50_ms=1, p95_ms=2, samples=120,
+                     confirmed_bytes=2 * 1024 * 1024, errors=[]),
+                dict(mbps=90, p50_ms=1, p95_ms=2, samples=0,
+                     confirmed_bytes=0, errors=["short read"]),
+                dict(mbps=110, p50_ms=1, p95_ms=2, samples=130,
+                     confirmed_bytes=2 * 1024 * 1024, errors=[]),
+            ]
+        )
+        self.assertEqual(combined["mbps"], 100)
+        self.assertEqual(combined["samples"], 0)
+        self.assertEqual(combined["confirmed_bytes"], 0)
+        self.assertEqual(combined["errors"], ["short read"])
+        self.assertEqual(combined["repeat_mbps"], [100, 90, 110])
+
+    def test_same_source_noise_sample_passes_the_gate(self):
+        # 2026-11-24 push run 45399956338 measured the same commit d7871a83 as
+        # both candidate and main. inbound/c8/upload was 2738.96 vs 3118.19 Mbps
+        # (ratio 0.878) in one sweep and 3025.18 vs 3164.75 (0.956) in the other.
+        rows = self.rows(rounds=3)
+        observed = {
+            ("candidate", 0): 2738.96,
+            ("candidate", 1): 3025.18,
+            ("candidate", 2): 3069.0,
+            ("main", 0): 3118.19,
+            ("main", 1): 3164.75,
+            ("main", 2): 3093.0,
+            ("Xray", 0): 2733.04,
+            ("Xray", 1): 2697.92,
+            ("Xray", 2): 2715.0,
+        }
+        for row in rows:
+            if row["workload"] == "upload":
+                row["mbps"] = observed[(row["program"], row["sweep"])]
+        self.assertEqual(compare(rows, 3), [])
+        # The same shape with a sustained 15% candidate regression must fail.
+        for row in rows:
+            if row["program"] == "candidate" and row["workload"] == "upload":
+                row["mbps"] *= 0.85
+        self.assertTrue(compare(rows, 3))
+
+    def test_latency_uses_the_median_round_delta(self):
+        rows = self.rows()
+        rows[0]["p95_ms"] = 8
+        self.assertEqual(compare(rows, 3), [])
+        rows[1]["p95_ms"] = 8
+        self.assertTrue(compare(rows, 3))
+        rows[0]["p95_ms"] = None
+        self.assertIn(
+            "inbound/c1/latency: missing p95_ms sample vs main", compare(rows, 3)
+        )
+
+    def test_direct_control_needs_headroom_over_the_fastest_result(self):
+        rows = self.rows()
+        direct = [
+            dict(
+                workload=workload,
+                samples=100,
+                errors=[],
+                mbps=130 if workload == "upload" else 1000,
+            )
+            for workload in ("latency", "upload", "download")
+        ]
+        self.assertEqual(headroom(rows, direct), [])
+        direct[1]["mbps"] = 119
+        self.assertEqual(
+            headroom(rows, direct),
+            ["upload: direct capacity has insufficient headroom"],
+        )
+        direct[1]["errors"] = ["short read"]
+        self.assertIn(
+            "upload: direct control missing or invalid", headroom(rows, direct)
+        )
+        self.assertIn(
+            "upload: direct control missing or invalid", headroom(rows, direct[:2])
+        )
 
     def test_workflows_separate_measurement_and_mark_privileges(self):
         root = Path(__file__).resolve().parents[3]
