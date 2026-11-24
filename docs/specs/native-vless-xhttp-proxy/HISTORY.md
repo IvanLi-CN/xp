@@ -1,5 +1,9 @@
 # 主题历史
 
+- 2026-11-24：出站拨号改为 250 ms 错峰双栈并发（Happy Eyeballs 语义），取代按解析顺序串行尝试。
+  现场故障为 us2 实例残留 `default via fe80::1 dev eth1` 的 IPv6 黑洞路由：AAAA 连接挂起使所有域名代理
+  目标超时，而 canary/fallback 仍 204、审计全绿。四个域名拨号点（raw fallback、TLS fallback、VLESS 目标、
+  XHTTP `stream-one`）统一走 `dial::connect_tcp`/`connect_authority`；不新增自有 DNS。
 - 2026-11-24：新建 host-managed 部署默认选择 `xp-proxy`，既有节点保留原 runtime，缺失状态仍按
   legacy Xray；新增 `xp-ops deploy --runtime` 与 `/etc/xp-ops/deploy/runtime-selection.json`
   重试记录，deploy/switch/upgrade 统一收敛 systemd/OpenRC boot enablement，失败 fail closed。

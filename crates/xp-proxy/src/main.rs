@@ -21,6 +21,7 @@ use xp_proxy_core::{
     vless::{decode_request, is_authorized},
 };
 
+mod dial;
 #[cfg(test)]
 mod ipv6_tests;
 mod listen;
@@ -256,7 +257,7 @@ async fn handle_raw_fallback(
     {
         anyhow::bail!("fallback authority is not allowlisted");
     }
-    let outbound = TcpStream::connect(&target.authority).await?;
+    let outbound = dial::connect_authority(&target.authority).await?;
     relay_tcp(inbound, outbound, traffic).await
 }
 
@@ -346,7 +347,7 @@ async fn handle_tls_or_fallback(
         {
             anyhow::bail!("fallback authority is not allowlisted");
         }
-        TcpStream::connect(&target.authority).await?
+        dial::connect_authority(&target.authority).await?
     };
     outbound.write_all(&hello).await?;
     traffic.add_uplink(hello.len() as u64);
@@ -417,7 +418,7 @@ async fn handle_vless(
         anyhow::bail!("unauthorized VLESS user");
     }
     let mut outbound =
-        TcpStream::connect((request.destination.0.as_str(), request.destination.1)).await?;
+        dial::connect_tcp(request.destination.0.as_str(), request.destination.1).await?;
     inbound.write_all(&[0, 0]).await?;
     if consumed < header.len() {
         let payload = &header[consumed..];

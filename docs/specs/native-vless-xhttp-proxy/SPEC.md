@@ -123,8 +123,10 @@ metadata 缺少该字段仍保持 Xray；`transport: xhttp` 本身不启用 nati
 - **REQ-IP-EXPLICIT:** 非 wildcard 地址只绑定指定接口和地址族；显式 `[::]:PORT` 为 IPv6-only wildcard，不隐式扩大 IPv4 监听范围。
 - **REQ-IP-DEGRADE:** 自动 wildcard 仅在内核明确不支持或禁用 IPv6/双栈时退回 IPv4；端口冲突、权限和资源错误必须失败。显式 IPv6
   地址绑定失败不得退回 IPv4。所有所需监听完成后才可激活 generation；候选失败恢复旧 generation 的监听，恢复失败报告停止。
-- **REQ-IP-CHAIN:** 入站连接、出站代理远端、本地出站 listener 和 VLESS 最终 TCP 目标均支持 IPv4/IPv6；保留系统解析与现有拨号策略，不新增
-  DNS 或 Happy Eyeballs。IPv4-mapped peer 按 IPv4 记录。
+- **REQ-IP-CHAIN:** 入站连接、出站代理远端、本地出站 listener 和 VLESS 最终 TCP 目标均支持 IPv4/IPv6；仍使用系统解析，
+  不引入自有 DNS。解析出多个地址时按 250 ms 错峰并发拨号（Happy Eyeballs 语义）：首个成功连接胜出并取消其余
+  尝试，单个地址失败立即启动下一个候选，全部失败返回最后一个错误。任何地址族挂起都不得阻塞另一地址族的可用连接
+  （例如 AAAA 黑洞时域名代理请求必须继续走 IPv4）。IPv4-mapped peer 按 IPv4 记录。
 - **REQ-IP-FALLBACK:** 已配置的 HTTP/HTTPS/H2/h2c 固定 fallback 支持合法的 bracketed IPv6 authority；保留精确
   allowlist、端口、Host、SNI 和既有 header 合同，拒绝畸形 bracket、地址与端口，不增加任意转发。
 - **REQ-IP-COMPAT:** 保留 snapshot bind 表达和 control protocol v2，不增加开关，不改 endpoint
