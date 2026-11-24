@@ -8,7 +8,7 @@ import {
   normalizeBasic,
   normalizePublicHealth,
 } from "../scripts/audit.ts";
-import { parseArgs } from "../scripts/cli.ts";
+import { bootSelection, parseArgs } from "../scripts/cli.ts";
 import { policyYaml, records, strictJson, timestamp } from "../scripts/input.ts";
 import { httpResult, inRange, probe, publicAddress, publicTarget } from "../scripts/network.ts";
 import { inventory, policy } from "../scripts/policy.ts";
@@ -494,5 +494,97 @@ describe("VER-FOUNDATION-XP-06 fresh local entrypoints", () => {
         { env: { XP_INFRA_CONFIG_DIR: dir, PATH: dir } },
       ),
     ).toBe("policy: OK\n");
+  });
+});
+describe("BOOT-RUNTIME-XP-01 runtime boot selection evidence", () => {
+  const evidence = (patch: Record<string, string> = {}) =>
+    Object.entries({
+      runtime: "xp-proxy",
+      boot_manager: "openrc",
+      boot_xray: "true",
+      boot_xp_proxy: "false",
+      boot_selected: "false",
+      boot_other: "true",
+      boot_consistent: "false",
+      ...patch,
+    })
+      .map(([key, value]) => `${key}=${value}`)
+      .join("\n");
+  test("consistent selection passes for both runtimes and managers", () => {
+    for (const [runtime, manager] of [
+      ["xp-proxy", "openrc"],
+      ["xray", "systemd"],
+    ])
+      expect(
+        bootSelection(
+          evidence({
+            runtime,
+            boot_manager: manager,
+            boot_xray: runtime === "xray" ? "true" : "false",
+            boot_xp_proxy: runtime === "xp-proxy" ? "true" : "false",
+            boot_selected: "true",
+            boot_other: "false",
+            boot_consistent: "true",
+          }),
+        ),
+      ).toEqual({
+        kind: "host",
+        runtime,
+        manager,
+        selectedBoot: true,
+        otherBoot: false,
+        consistent: true,
+      });
+  });
+  test("a selected runtime missing at boot is reported inconsistent", () => {
+    expect(bootSelection(evidence())).toEqual({
+      kind: "host",
+      runtime: "xp-proxy",
+      manager: "openrc",
+      selectedBoot: false,
+      otherBoot: true,
+      consistent: false,
+    });
+  });
+  test("container-managed nodes report no host boot selection", () => {
+    expect(
+      bootSelection(
+        ["runtime=xray", "boot_manager=container", "boot_consistent=not_applicable"].join("\n"),
+      ),
+    ).toEqual({ kind: "container", runtime: "xray" });
+    expect(() =>
+      bootSelection(
+        [
+          "runtime=xray",
+          "boot_manager=container",
+          "boot_consistent=not_applicable",
+          "boot_xray=true",
+        ].join("\n"),
+      ),
+    ).toThrow();
+  });
+  test.each([
+    evidence({ boot_consistent: "true" }),
+    evidence({ boot_other: "false" }),
+    evidence({ runtime: "xray" }),
+    evidence({ boot_xray: "false", boot_xp_proxy: "true" }),
+    evidence({ boot_manager: "runit" }),
+    evidence({ boot_selected: "yes" }),
+    evidence({ boot_consistent: "true" }).replace("boot_other=true\n", ""),
+  ])("rejecting contradictory or incomplete evidence: %#", (text) => {
+    expect(() => bootSelection(text)).toThrow();
+  });
+  test("runtime command requires only an alias", () => {
+    expect(parseArgs(["runtime", "fixture-node"])).toEqual({
+      command: "runtime",
+      host: "fixture-node",
+    });
+    expect(parseArgs(["runtime", "--all"])).toEqual({ command: "runtime-all" });
+    for (const args of [
+      ["runtime", "fixture-node", "extra"],
+      ["runtime", "--all", "fixture-node"],
+      ["runtime", "fixture-node", "--json"],
+    ])
+      expect(() => parseArgs(args)).toThrow();
   });
 });

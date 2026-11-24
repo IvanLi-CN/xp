@@ -12,6 +12,8 @@
 | `port preflight ALIAS`           | 保留已验证的托管入口端口；新节点执行确定性有界端口选择。 |
 | `audit ALIAS`                    | 所有必要检查通过才输出 `audit: OK`。                     |
 | `status ALIAS` / `version ALIAS` | 有界系统诊断；诊断完成不等于部署成功。                   |
+| `runtime ALIAS`                  | 只读比对本地 runtime 选择与开机自启项；不一致返回非零。  |
+| `runtime --all`                  | 对清单内所有节点执行同一比对。                           |
 | `logs ALIAS --tail N`            | 读取日志，N 为 1–10000，默认 200。                       |
 | `tunnel ALIAS [OPTIONS]`         | 前台 SSH 转发，不自动换端口。                            |
 | `help`                           | 无需配置或网络的帮助。                                   |
@@ -26,6 +28,11 @@ SSH 操作员必须为已登记的非 root、非 xp 用户。
 观测前后必须保留同一 runtime、PID/start-time 或容器身份，不得凭进程存在猜测选择。
 入口检查使用统一的 `ingress_*` 名称，所选服务及真实公网监听必须一致。
 辅助 Xray loopback API 的存在不改变 xp-proxy 入口归属。
+
+`runtime ALIAS` 额外比对开机自启项：systemd 用 `systemctl is-enabled`，OpenRC 用
+`rc-update show default`（无需 root）。只有“所选 runtime 已启用且另一个未启用”才算一致，
+其余组合返回非零。`/etc/xp` 可能是 `0750 root:xp`，探针改用 `sudo -n xp-ops runtime status --json`
+读取，不再直接读 `/etc/xp/runtime.json`。
 
 端口预检要求托管状态、所选进程、服务和监听匹配。
 Xray 使用 inbound inventory 校验；xp-proxy 使用持久快照的单一监听和 generation 校验。

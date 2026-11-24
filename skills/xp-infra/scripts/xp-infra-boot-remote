@@ -1,0 +1,98 @@
+#!/bin/sh
+# Bounded read-only observation of node-local ingress runtime boot selection.
+# Local interpretation lives in cli.ts; this probe never writes node state.
+set -eu
+
+IMAGE_PREFIX="${XP_CONTAINER_IMAGE_PREFIX:-ghcr.io/ivanli-cn/xp}"
+
+emit() {
+  key="$1"
+  value="$2"
+  case "$value" in
+    *'
+'*) exit 1 ;;
+  esac
+  [ "$(printf '%s' "$value" | wc -c | tr -d '[:space:]')" -le 4096 ] || exit 1
+  printf '%s=%s\n' "$key" "$value"
+}
+
+select_runtime() {
+  case "$1" in
+    *'"runtime":"xp-proxy"'*) printf xp-proxy ;;
+    *'"runtime":"xray"'*) printf xray ;;
+    *) return 1 ;;
+  esac
+}
+
+# Container-managed nodes (approved private Docker exception) have no host init
+# boot selection: the single container owns the runtime. Report it as such
+# instead of guessing a host service name.
+container=""
+if command -v docker >/dev/null 2>&1; then
+  for name in $(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null |
+    awk -v prefix="$IMAGE_PREFIX" 'index($2, prefix ":") == 1 || index($2, prefix "@") == 1 { print $1 }'); do
+    [ -n "$container" ] && exit 1
+    container="$name"
+  done
+fi
+
+if [ -n "$container" ]; then
+  runtime_json="$(docker exec "$container" xp-ops runtime status --json 2>/dev/null)" || exit 1
+  runtime="$(select_runtime "$runtime_json")" || exit 1
+  running="$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null)" || exit 1
+  [ "$running" = true ] || exit 1
+  emit runtime "$runtime"
+  emit runtime_json "$runtime_json"
+  emit boot_manager container
+  # Boot selection is host-managed only; a container's runtime is fixed by its
+  # own entrypoint, so there is no second runtime to compare.
+  emit boot_consistent not_applicable
+  exit 0
+fi
+
+# `/etc/xp` may be 0750 root:xp, so a non-xp operator needs the bounded sudo read.
+runtime_json="$(sudo -n xp-ops runtime status --json 2>/dev/null)" || exit 1
+runtime="$(select_runtime "$runtime_json")" || exit 1
+emit runtime "$runtime"
+emit runtime_json "$runtime_json"
+
+if command -v systemctl >/dev/null 2>&1; then
+  boot_manager=systemd
+elif command -v rc-update >/dev/null 2>&1; then
+  boot_manager=openrc
+else
+  exit 1
+fi
+emit boot_manager "$boot_manager"
+
+boot_enabled() {
+  case "$boot_manager" in
+    systemd) systemctl is-enabled --quiet "$1.service" 2>/dev/null ;;
+    openrc)
+      # `rc-update show default` is readable without root on supported hosts.
+      rc-update show default 2>/dev/null |
+        awk -v service="$1" '$1 == service { found = 1 } END { exit found ? 0 : 1 }'
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+xray_boot=false
+proxy_boot=false
+boot_enabled xray && xray_boot=true
+boot_enabled xp-proxy && proxy_boot=true
+emit boot_xray "$xray_boot"
+emit boot_xp_proxy "$proxy_boot"
+
+case "$runtime" in
+  xray) selected_boot="$xray_boot"; other_boot="$proxy_boot" ;;
+  xp-proxy) selected_boot="$proxy_boot"; other_boot="$xray_boot" ;;
+  *) exit 1 ;;
+esac
+emit boot_selected "$selected_boot"
+emit boot_other "$other_boot"
+
+case "$selected_boot:$other_boot" in
+  true:false) emit boot_consistent true ;;
+  *) emit boot_consistent false ;;
+esac

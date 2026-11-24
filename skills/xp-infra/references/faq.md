@@ -187,6 +187,40 @@ operation 完成后节点与其 endpoint 从 DesiredState 消失。
 
 所以顺序很重要：**先确认全部 voter 可达且能力完整，再签发 token**，否则 token 先过期。
 
+### 退役一台节点前，集群侧要做什么？
+
+节点退役分两层，顺序不能反过来：
+
+1. **集群侧删除**：在 leader 的 Admin Web（Node details → Danger zone → Delete node）或
+   `DELETE /api/admin/nodes/<node_id>?delete_endpoints=true&expected_endpoint_ids=<id>`
+   删除节点；先调 `GET /api/admin/nodes/<node_id>/delete-preview` 拿到要清理的 endpoint 集。
+   返回 `202` 时按 `status_url` 每 2.5 秒轮询 `phase`，只有 `completed` 才算成功。
+2. **节点侧停用**：确认 operation `completed` 后，再停并禁用本地服务，避免它在被移除前
+   继续持有公网端口或 Tunnel。
+
+删除受护栏限制：不能删本机节点、不能删当前 leader；目标必须是 mapped current voter。
+不可达 voter 只能走签名的 `xp-ops xp evict-unreachable-voter`，不要用 Admin 删除代替。
+
+### 节点退役后哪些云端资源需要手工清理？
+
+`DELETE /api/admin/nodes` 只清集群状态（Raft/DesiredState/endpoint），**不会**删除
+Cloudflare Tunnel、`<node>-xp` CNAME 或 `<node>-ep` A/AAAA 记录。保留它们会让下一次
+同名部署撞上旧的“非托管/歧义 DNS”，或复用一条已 down 的 Tunnel。
+
+顺序建议：
+
+1. 记下 `/etc/xp-ops/cloudflare_tunnel/settings.json` 的 `tunnel_id`、`dns_record_id`、
+   `zone_id`、`account_id`（清理前必须能证明这些资源属于该节点）。
+2. 删 `<node>-xp` CNAME 与 `<node>-ep` A/AAAA 记录（DDNS 记录 ID 也可从
+   `/var/lib/xp/data/ddns_state.json` 的 `ipv4.record_id`/`ipv6.record_id` 取）。
+3. 删除 `xp-<node>` Tunnel，确认 `connections` 为空后再删。
+4. 用权威 NS 复核：`dig @<zone-ns> <name>` 返回无答案才算清理完成，不要只看本地缓存解析。
+
+### 退役节点后，历史仓库里的旧来源数据会挂掉吗？
+
+不会。已退役节点的保留修复段按原签名校验，live 投递只限当前 pinned 成员；
+不要为了追平历史而重建已退役节点或删除保留行（见 `docs/ops/README.md`）。
+
 ## Runtime 与升级
 
 ### 切到 `xp-proxy` 报 `capability_missing` 或服务起不来？
@@ -240,6 +274,40 @@ sudo xp-ops runtime status --json
 - `xray` 服务为 stopped，`xp`/`xp-proxy`/`cloudflared` 为 started；
 - 本地 canary 返回 204：
   `curl --resolve <access_host>:39043:127.0.0.1 https://<access_host>:39043/generate_204`
+
+### 重启后启动的是错的 runtime？
+
+`xp-ops runtime switch` 只切换当前进程，**不会**改变 init system 的开机自启项。
+历史上在旧版本上切到 `xp-proxy` 的节点可能仍然 `rc-update` / `systemctl` 启用着 `xray`，
+重启后入口 owner 就变了。判定方法是同时看两边：
+
+```sh
+xp-infra runtime ALIAS     # 只读，比对“当前 runtime”与“开机自启项”
+sudo rc-update show default | awk '$1=="xray"||$1=="xp-proxy"'
+sudo systemctl is-enabled xray.service xp-proxy.service
+```
+
+`runtime` 只在“所选 runtime 已启用且另一个未启用”时通过；其余组合都是 `MISMATCH`。
+修复必须走官方路径（重新部署或升级到包含自启对账的版本），不要手工 `rc-update add/del`
+长期维持，否则下一次升级又会漂移。
+
+### 非 root 操作员读 `xp-ops runtime status` 报 `runtime_state_read_failed`？
+
+部分节点把 `/etc/xp` 设为 `0750 root:xp`，非 `xp` 操作员即使有 passwordless sudo，
+直接读 `/etc/xp/runtime.json` 也会 `Permission denied`。使用 `xp-ops runtime status --json`
+并让它经 `sudo -n` 执行即可；`xp-infra runtime` 探针已经这样实现。不要放宽 `/etc/xp` 权限。
+
+### 同一个 SSH 别名被定义了两次会怎样？
+
+OpenSSH 对每个关键字**取第一次出现的值**，但同名 `Host` 块会按顺序合并，只有先出现的
+`HostName`/`Port`/`User` 生效。重复块不会报错，只会静默使用旧值，导致“改了配置却还是连旧地址”。
+改别名后用生效值复核，而不是只看文件：
+
+```sh
+ssh -G ALIAS | grep -E '^(hostname|port|user|hostkeyalias) '
+```
+
+编辑前先 `grep -n '^Host ' ~/.ssh/config` 确认别名是否已存在，避免追加出第二个同名块。
 
 ## 验收与记录
 

@@ -134,12 +134,95 @@ const versionProbe = `set -eu
 if [ -x /usr/local/bin/xp ]; then /usr/local/bin/xp --version
 elif command -v xp >/dev/null 2>&1; then xp --version
 else exit 1; fi`;
+export type BootSelection =
+  | {
+      kind: "host";
+      runtime: "xray" | "xp-proxy";
+      manager: "systemd" | "openrc";
+      selectedBoot: boolean;
+      otherBoot: boolean;
+      consistent: boolean;
+    }
+  | { kind: "container"; runtime: "xray" | "xp-proxy" };
+export function bootSelection(text: string): BootSelection {
+  const r = records(text, ["runtime", "boot_manager", "boot_consistent"]);
+  ensure(["xray", "xp-proxy"].includes(r.runtime), "unknown selected runtime");
+  const runtime = r.runtime as "xray" | "xp-proxy";
+  if (r.boot_manager === "container") {
+    ensure(r.boot_consistent === "not_applicable", "invalid container boot evidence");
+    const extra = ["boot_xray", "boot_xp_proxy", "boot_selected", "boot_other"];
+    ensure(extra.every((key) => !Object.hasOwn(r, key)), "contradictory container boot evidence");
+    return { kind: "container", runtime };
+  }
+  ensure(["systemd", "openrc"].includes(r.boot_manager), "unknown boot service manager");
+  const full = records(text, [
+    "runtime",
+    "boot_manager",
+    "boot_xray",
+    "boot_xp_proxy",
+    "boot_selected",
+    "boot_other",
+    "boot_consistent",
+  ]);
+  for (const key of [
+    "boot_xray",
+    "boot_xp_proxy",
+    "boot_selected",
+    "boot_other",
+    "boot_consistent",
+  ])
+    ensure(["true", "false"].includes(full[key]), `invalid ${key}`);
+  const xray = full.boot_xray === "true",
+    proxy = full.boot_xp_proxy === "true";
+  // The selected runtime must be the only one enabled at boot; every other
+  // shape, including "both" or "neither", is a mismatch.
+  const expectedSelected = runtime === "xray" ? xray : proxy,
+    expectedOther = runtime === "xray" ? proxy : xray;
+  ensure(
+    (full.boot_selected === "true") === expectedSelected &&
+      (full.boot_other === "true") === expectedOther,
+    "boot selection does not match the selected runtime",
+  );
+  const consistent = full.boot_consistent === "true";
+  ensure(
+    consistent === (expectedSelected && !expectedOther),
+    "inconsistent boot selection evidence",
+  );
+  return {
+    kind: "host",
+    runtime,
+    manager: full.boot_manager as "systemd" | "openrc",
+    selectedBoot: expectedSelected,
+    otherBoot: expectedOther,
+    consistent,
+  };
+}
+async function runtime(host: string): Promise<string> {
+  const boot = bootSelection(await remote(host, "xp-infra-boot-remote"));
+  if (boot.kind === "container")
+    return [`runtime: ${boot.runtime}`, "boot: container-managed (no host init selection)"].join(
+      "\n",
+    );
+  const evidence = [
+    `runtime: ${boot.runtime}`,
+    `boot: ${boot.manager} selected=${boot.selectedBoot} other=${boot.otherBoot}`,
+    `boot_selection: ${boot.consistent ? "OK" : "MISMATCH"}`,
+  ].join("\n");
+  ensure(
+    boot.consistent,
+    `${evidence}\nerror: boot selection mismatch on ${host}: ` +
+      "the selected runtime is not the only one enabled at boot",
+  );
+  return evidence;
+}
 export type Request =
   | { command: "help" | "inventory" | "policy" }
   | { command: "port"; host: string }
   | { command: "audit"; host: string }
   | { command: "status"; host: string }
   | { command: "version"; host: string }
+  | { command: "runtime"; host: string }
+  | { command: "runtime-all" }
   | { command: "logs"; host: string; tail: number }
   | { command: "tunnel"; host: string; localPort: number; remotePort: number };
 export function parseArgs(args: string[]): Request {
@@ -160,13 +243,21 @@ export function parseArgs(args: string[]): Request {
     ensure(rest.length === 2 && rest[0] === "preflight", "usage: xp-infra port preflight <host>");
     return { command: cmd, host: rest[1] };
   }
+  if (cmd === "runtime" && rest.length === 1 && rest[0] === "--all") {
+    return { command: "runtime-all" };
+  }
   ensure(
-    cmd === "audit" || cmd === "status" || cmd === "logs" || cmd === "version" || cmd === "tunnel",
+    cmd === "audit" ||
+      cmd === "status" ||
+      cmd === "logs" ||
+      cmd === "version" ||
+      cmd === "runtime" ||
+      cmd === "tunnel",
     "unknown command",
   );
   const host = rest.shift();
   ensure(host && /^[a-z0-9][a-z0-9-]*$/.test(host), "missing or invalid host alias");
-  if (cmd === "audit" || cmd === "status" || cmd === "version") {
+  if (cmd === "audit" || cmd === "status" || cmd === "version" || cmd === "runtime") {
     ensure(rest.length === 0, "unexpected command arguments");
     return { command: cmd, host };
   }
@@ -210,6 +301,8 @@ Usage:
   xp-infra status <host>
   xp-infra logs <host> [--tail N]
   xp-infra version <host>
+  xp-infra runtime <host>
+  xp-infra runtime --all
   xp-infra tunnel <host> [--ui|--metrics] [--local-port PORT]
 Private configuration: XP_INFRA_CONFIG_DIR, XP_HOSTS_FILE, XP_POLICY_FILE.
 Transport and public probes require OpenSSH and curl. No Ruby/Python runtime.`);
@@ -249,6 +342,26 @@ Transport and public probes require OpenSSH and curl. No Ruby/Python runtime.`);
     ensure(!failed, "inventory contains failed probes");
     return;
   }
+  if (request.command === "runtime-all") {
+    let failed = false;
+    for (const host of config.hosts) {
+      try {
+        await operator(host, config.hosts);
+        const boot = bootSelection(await remote(host, "xp-infra-boot-remote"));
+        if (boot.kind === "container") {
+          console.log(`${host}: ${boot.runtime} container-managed`);
+          continue;
+        }
+        console.log(`${host}: ${boot.runtime} ${boot.consistent ? "OK" : "MISMATCH"}`);
+        if (!boot.consistent) failed = true;
+      } catch {
+        console.log(`${host}: probe FAILED`);
+        failed = true;
+      }
+    }
+    ensure(!failed, "runtime boot selection is inconsistent or unverifiable");
+    return;
+  }
   ensure("host" in request, "missing selected alias");
   const host = request.host;
   const p = ["audit", "port"].includes(request.command)
@@ -260,7 +373,13 @@ Transport and public probes require OpenSSH and curl. No Ruby/Python runtime.`);
     return;
   }
   if (request.command === "port") {
-    console.log(preflight(await remote(host, "xp-infra-port-remote"), host));
+    console.log(
+      preflight(await remote(host, "xp-infra-port-remote", [String(p!.direct_docker)]), host),
+    );
+    return;
+  }
+  if (request.command === "runtime") {
+    console.log(await runtime(host));
     return;
   }
   if (request.command === "tunnel") {
