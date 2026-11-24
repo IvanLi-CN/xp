@@ -93,8 +93,9 @@ Across the three runs, every throughput median stayed within 0.977..1.008 of mai
 largest single-round deviation was `0.9002` (-10.0%) in run `45426029831`, and that run's median
 still passed at `1.012`; the worst round in the other runs was 0.958. This is the noise the old
 every-round rule turned into merge failures. The largest median latency
-delta was -0.047ms p95 against Xray, far inside the +5ms bound. All 27 scenario/baseline
-decisions passed in all three runs, and no run reported a budget warning at 240s.
+delta was -0.049ms p95 against Xray, far inside the +5ms bound. All 16 decisions (four
+throughput scenarios and p50/p95 for two latency workloads, each against main and Xray)
+passed in all three runs, and no run reported a budget warning at 240s.
 Consumer wall clock was 146.5s to 152.2s against the 240s design budget. Another run on the
 final head is produced by the pull request itself and exercises the same decision path with
 different build identities.
