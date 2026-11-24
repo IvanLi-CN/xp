@@ -12,6 +12,8 @@
 | `port preflight ALIAS`           | 保留已验证的托管入口端口；新节点执行确定性有界端口选择。 |
 | `audit ALIAS`                    | 所有必要检查通过才输出 `audit: OK`。                     |
 | `status ALIAS` / `version ALIAS` | 有界系统诊断；诊断完成不等于部署成功。                   |
+| `runtime ALIAS`                  | 只读比对本地 runtime 选择与开机自启项；不一致返回非零。  |
+| `runtime --all`                  | 对清单内所有节点执行同一比对。                           |
 | `logs ALIAS --tail N`            | 读取日志，N 为 1–10000，默认 200。                       |
 | `tunnel ALIAS [OPTIONS]`         | 前台 SSH 转发，不自动换端口。                            |
 | `help`                           | 无需配置或网络的帮助。                                   |
