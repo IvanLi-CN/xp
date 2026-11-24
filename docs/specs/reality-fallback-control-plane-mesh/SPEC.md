@@ -134,8 +134,9 @@
 - Mesh client 固定使用 HTTP/2 prior knowledge 与自适应 H2 flow-control window；后者仅在活动大流量时
   扩张，避免为每个 peer 常驻预留大快照缓冲。每个 origin 最多保留一条 idle connection，pool idle timeout
   固定为 120 秒，不发送 HTTP/2 PING。60 秒 probe 是连接活跃性的唯一周期流量。
-- 公网 direct 使用独立、长期共享的兼容 client；严格 HTTP/2 policy 不得污染公网
-  direct。Mesh H2 协商或 transport 失败按既有 breaker/fallback 规则处理；Native Reverse
+- 公网 direct 使用独立、长期共享的兼容 client；每 origin 最多保留一条 idle connection，
+  idle timeout 为 90 秒，并保留 ALPN 到 HTTP/1.1 的自动回退。严格 HTTP/2 prior-knowledge
+  policy 不得污染公网 direct。Mesh H2 协商或 transport 失败按既有 breaker/fallback 规则处理；Native Reverse
   不属于通用请求回退路径。
 - Public signed health probes use a fixed 30-second request budget aligned with the production
   Raft RPC TTL, including Mesh-disabled and public standby probes. Direct Mesh probes retain

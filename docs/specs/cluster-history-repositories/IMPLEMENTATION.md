@@ -328,6 +328,9 @@
   repository request budget as a deadline. A failed or timed-out maintenance write is logged and
   retried on the next cycle; it never blocks source delivery, advances a source cursor, or removes
   an unacknowledged journal row.
+  Direct repository requests are limited to four in flight per repository peer. Queue wait counts
+  against the same repository request budget; the shared public HTTP/2 pool then multiplexes
+  admitted requests over one connection per origin, while an HTTP/1.1 fallback remains bounded.
   When a bounded source page has pending segments, the gap page first includes any permanent gap
   whose end sequence immediately precedes a segment on that page, then fills the remaining slots
   from the persisted rotating gap cursor. This preserves the 64-gap bound and cursor ordering while
