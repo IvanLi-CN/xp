@@ -3,7 +3,7 @@
 # Local interpretation lives in cli.ts; this probe never writes node state.
 set -eu
 
-IMAGE_PREFIX="${XP_CONTAINER_IMAGE_PREFIX:-ghcr.io/example/xp}"
+IMAGE_PREFIX="${XP_CONTAINER_IMAGE_PREFIX:-ghcr.io/ivanli-cn/xp}"
 
 emit() {
   key="$1"
