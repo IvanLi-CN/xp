@@ -636,6 +636,9 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         if !is_test_root(paths.root()) {
             let distro = detect_distro(&paths).map_err(|e| ExitError::new(2, e))?;
             let init_system = detect_init_system(distro, None);
+            // XP publishes a native snapshot only while the local state is switching/active, so
+            // open the activation window before any service starts.
+            crate::ops::runtime::record_switching_runtime(&paths, plan.runtime_selection.target)?;
             if let Err(error) = activation::enable_and_start_services(
                 &paths,
                 init_system,

@@ -9,9 +9,9 @@
 - 新建 host-managed systemd 和 OpenRC 部署默认选择 `xp-proxy`；已选择运行时的节点
   （包括缺省状态下的 legacy Xray）在 deploy 和 upgrade 中保留原选择。安装 xp-proxy
   二进制或 service asset 本身不改变流量归属。
-- 新建部署在服务真正激活前只在 `/etc/xp-ops/deploy/runtime-selection.json` 记录选择，
-  `/etc/xp/runtime.json` 仍只在所选 runtime 真正 active 后写入为 `active`；激活失败记录
-  `failed`，不伪造 `active`。
+- 新建部署的首次选择写入 `/etc/xp-ops/deploy/runtime-selection.json`；激活窗口在启动服务前把
+  `/etc/xp/runtime.json` 记为 `switching`（XP 只在 `switching`/`active` 下发布 native
+  snapshot），真正 ready 后才写 `active`，失败写 `failed`，不伪造 `active`。
 - 每个节点只能选择一个入口运行时：Xray runtime 或 xp-proxy runtime。
   两个运行时同时运行属于部署失败。
 - 运行时选择由本地 `xp-ops runtime switch --to xray|xp-proxy --yes` 管理，并持久化在

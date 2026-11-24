@@ -155,6 +155,15 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
         let runtime_rollback =
             rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults, target)
                 .await;
+        // A failed enable step after a successful disable leaves neither runtime boot-enabled.
+        if runtime_rollback.is_ok()
+            && let Err(boot_error) = reconcile_runtime_boot(paths, target)
+        {
+            eprintln!(
+                "boot enablement not restored after rollback: {}",
+                boot_error.message
+            );
+        }
         let restart_xp = runtime_rollback.is_ok();
         let err = retain_original_error(err, runtime_rollback);
         return Err(finish_runtime_failure(

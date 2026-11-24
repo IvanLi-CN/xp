@@ -4,6 +4,7 @@ use crate::ops::platform::{InitSystem, detect_distro, detect_init_system};
 use crate::ops::runtime::RuntimeTarget;
 use crate::ops::runtime_activation::{command_succeeds, service_commands_are_disabled};
 use crate::ops::util::Mode;
+use std::path::Path;
 use std::process::Command;
 
 pub(crate) const XRAY_SERVICE: &str = "xray";
@@ -109,8 +110,15 @@ pub(crate) fn reconcile_runtime_boot(
     reconcile_runtime_boot_with(paths, init_system, target)
 }
 
-/// Distro detection wins; an unknown distro falls back to the installed service assets.
+/// The manager that actually booted the node wins over distro and asset heuristics, so a
+/// documented `xp-ops init --init-system` override is never reconciled against the other manager.
 fn detect_boot_init_system(paths: &Paths) -> Option<InitSystem> {
+    if paths.map_abs(Path::new("/run/systemd/system")).is_dir() {
+        return Some(InitSystem::Systemd);
+    }
+    if paths.map_abs(Path::new("/run/openrc")).exists() {
+        return Some(InitSystem::OpenRc);
+    }
     if let Ok(distro) = detect_distro(paths) {
         return Some(detect_init_system(distro, None));
     }
@@ -396,5 +404,16 @@ mod tests {
         let paths = Paths::new(dir.path().to_path_buf());
         reconcile_runtime_boot(&paths, RuntimeTarget::XpProxy).unwrap();
         reconcile_runtime_boot(&paths, RuntimeTarget::Xray).unwrap();
+    }
+
+    #[test]
+    fn boot_init_detection_falls_back_to_installed_assets() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().to_path_buf());
+        assert_eq!(detect_boot_init_system(&paths), None);
+
+        std::fs::create_dir_all(paths.openrc_initd_dir()).unwrap();
+        std::fs::write(paths.openrc_initd_dir().join("xp"), "#!/sbin/openrc-run\n").unwrap();
+        assert_eq!(detect_boot_init_system(&paths), Some(InitSystem::OpenRc));
     }
 }

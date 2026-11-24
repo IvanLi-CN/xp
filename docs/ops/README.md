@@ -371,11 +371,16 @@ Notes:
   legacy Xray on an existing deployment without runtime state, and selects `xp-proxy` for a fresh
   node. `--runtime xray` / `--runtime xp-proxy` are accepted on a fresh node; on an existing node
   a conflicting choice fails and requires `xp-ops runtime switch --to <target> --yes`.
+  A node that only has the deploy selection (no `/etc/xp/runtime.json`) was never activated:
+  `xp-ops runtime status` reports `not_activated` and `xp-ops upgrade` refuses until the node is
+  activated by a deploy or an explicit `xp-ops runtime switch`.
 - With `--enable-services`, deploy enables the selected ingress runtime and `xp` at boot,
-  disables the other ingress runtime, starts the selected runtime, starts `xp`, and waits for the xp-proxy
-  snapshot/managed HTTPS fallback readiness before reporting success. A failed activation stops
-  `xp` and both ingress runtimes, disables both ingress boot entries, records a failed runtime
-  state and exits non-zero; deploy never falls back to the other runtime.
+  disables the other ingress runtime, starts the selected runtime, starts `xp`, and waits
+  for the xp-proxy snapshot/managed HTTPS fallback readiness before reporting success.
+  The runtime state is `switching` during that window and only becomes `active` after
+  readiness. A failed activation stops `xp` and both ingress runtimes, disables both
+  ingress boot entries, records a failed runtime state and exits non-zero; deploy never
+  falls back to the other runtime.
 - For a host-managed join, deploy provisions Tunnel/DNS without starting `cloudflared`, runs
   `xp join`, writes `/etc/xp/xp.env`, then enables, starts or restarts, and confirms the selected
   ingress runtime (`xray` or `xp-proxy`), `xp`, and optional `cloudflared` in that order. With

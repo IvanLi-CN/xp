@@ -29,6 +29,8 @@ SSH 操作员必须为已登记的非 root、非 xp 用户。
 `xp-ops runtime switch --to <xray|xp-proxy> --yes`，不得用 deploy 隐式切换。
 deploy、runtime switch 和 upgrade 必须保持 systemd/OpenRC boot enablement 只启用所选 runtime。
 仅支持 active 的 `xray` 或 `xp-proxy`，未知、失败、切换中及错误状态均失败。
+仅有 deploy 选择记录、尚无 `/etc/xp/runtime.json` 的节点报告 `not_activated`：不可当成 Xray，
+`xp-ops upgrade` 也拒绝执行，必须先用 deploy 激活或显式 runtime switch。
 观测前后必须保留同一 runtime、PID/start-time 或容器身份，不得凭进程存在猜测选择。
 入口检查使用统一的 `ingress_*` 名称，所选服务及真实公网监听必须一致。
 辅助 Xray loopback API 的存在不改变 xp-proxy 入口归属。

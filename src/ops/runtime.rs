@@ -94,10 +94,6 @@ fn read_state_file(paths: &Paths) -> Result<Option<RuntimeState>, ExitError> {
     }
 }
 
-fn load_state(paths: &Paths) -> Result<RuntimeState, ExitError> {
-    Ok(read_state_file(paths)?.unwrap_or_default())
-}
-
 pub(super) fn persisted_state_runtime(paths: &Paths) -> Result<Option<RuntimeTarget>, ExitError> {
     Ok(read_state_file(paths)?.map(|state| state.runtime))
 }
@@ -118,10 +114,7 @@ pub(super) fn expects_native_snapshot(paths: &Paths) -> bool {
         Ok(Some(state)) => {
             state.runtime == RuntimeTarget::XpProxy && state.state != RuntimeStateKind::Failed
         }
-        Ok(None) => matches!(
-            crate::ops::runtime_selection::load_deploy_selection(paths),
-            Ok(Some(RuntimeTarget::XpProxy))
-        ),
+        Ok(None) => false,
         Err(_) => false,
     }
 }
@@ -137,7 +130,23 @@ pub(super) fn upgrade_runtime_target(paths: &Paths) -> Result<RuntimeTarget, Exi
             }
             Ok(state.runtime)
         }
-        None => legacy_or_persisted_runtime(paths),
+        None => match crate::ops::runtime_selection::load_deploy_selection(paths)? {
+            // A marker without a state file means services were never activated; upgrade must
+            // not start an ingress runtime that deploy never brought up.
+            Some(target) => Err(ExitError::new(
+                7,
+                format!(
+                    concat!(
+                        "service_error: ingress runtime {} was never activated; run ",
+                        "`xp-ops deploy --enable-services` or ",
+                        "`xp-ops runtime switch --to {} --yes` before upgrade"
+                    ),
+                    target.as_str(),
+                    target.as_str()
+                ),
+            )),
+            None => Ok(RuntimeTarget::Xray),
+        },
     }
 }
 
@@ -156,6 +165,24 @@ pub(super) fn record_active_runtime(paths: &Paths, target: RuntimeTarget) -> Res
         &RuntimeState {
             runtime: target,
             state: RuntimeStateKind::Active,
+            error: None,
+        },
+    )
+}
+
+/// Marks the activation window before services start.
+///
+/// XP only publishes a native snapshot while the local state is `switching` or `active`, so a
+/// fresh deploy must record this before starting `xp-proxy`; readiness later writes `active`.
+pub(super) fn record_switching_runtime(
+    paths: &Paths,
+    target: RuntimeTarget,
+) -> Result<(), ExitError> {
+    save_state(
+        paths,
+        &RuntimeState {
+            runtime: target,
+            state: RuntimeStateKind::Switching,
             error: None,
         },
     )
@@ -219,21 +246,58 @@ fn target_from_arg(target: RuntimeTargetArg) -> RuntimeTarget {
 }
 
 pub fn cmd_runtime_status(paths: Paths, args: RuntimeStatusArgs) -> Result<(), ExitError> {
-    let state = load_state(&paths)?;
+    let view = runtime_status_view(&paths)?;
     if args.json {
         println!(
             "{}",
-            serde_json::to_string(&state).unwrap_or_else(|_| "{}".into())
+            serde_json::to_string(&view).unwrap_or_else(|_| "{}".into())
         );
     } else {
         println!(
-            "runtime={} state={:?} error={}",
-            state.runtime.as_str(),
-            state.state,
-            state.error.as_deref().unwrap_or("")
+            "runtime={} state={} error={}",
+            view.runtime.as_str(),
+            view.state,
+            view.error.as_deref().unwrap_or("")
         );
     }
     Ok(())
+}
+
+#[derive(Serialize)]
+struct RuntimeStatusView {
+    runtime: RuntimeTarget,
+    state: &'static str,
+    error: Option<String>,
+}
+
+/// Missing state keeps the legacy Xray default, but an unactivated deploy selection is reported
+/// as such instead of pretending the node is running Xray.
+fn runtime_status_view(paths: &Paths) -> Result<RuntimeStatusView, ExitError> {
+    if let Some(state) = read_state_file(paths)? {
+        return Ok(RuntimeStatusView {
+            runtime: state.runtime,
+            state: match state.state {
+                RuntimeStateKind::Active => "active",
+                RuntimeStateKind::Switching => "switching",
+                RuntimeStateKind::Failed => "failed",
+            },
+            error: state.error,
+        });
+    }
+    Ok(
+        match crate::ops::runtime_selection::load_deploy_selection(paths)? {
+            Some(runtime) => RuntimeStatusView {
+                runtime,
+                state: "not_activated",
+                error: None,
+            },
+            None => RuntimeStatusView {
+                runtime: RuntimeTarget::Xray,
+                state: "active",
+                error: None,
+            },
+        },
+    )
 }
 
 pub fn cmd_runtime_switch(paths: Paths, args: RuntimeSwitchArgs) -> Result<(), ExitError> {
@@ -367,7 +431,23 @@ mod tests {
     fn missing_state_defaults_to_xray() {
         let dir = tempdir().unwrap();
         let paths = Paths::new(dir.path().to_path_buf());
-        assert_eq!(load_state(&paths).unwrap().runtime, RuntimeTarget::Xray);
+        assert!(read_state_file(&paths).unwrap().is_none());
+        let view = runtime_status_view(&paths).unwrap();
+        assert_eq!(view.runtime, RuntimeTarget::Xray);
+        assert_eq!(view.state, "active");
+    }
+
+    #[test]
+    fn marker_only_status_reports_not_activated() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().to_path_buf());
+        crate::ops::runtime_selection::persist_deploy_selection(&paths, RuntimeTarget::XpProxy)
+            .unwrap();
+
+        let view = runtime_status_view(&paths).unwrap();
+        assert_eq!(view.runtime, RuntimeTarget::XpProxy);
+        assert_eq!(view.state, "not_activated");
+        assert!(view.error.is_none());
     }
 
     #[test]
@@ -393,24 +473,38 @@ mod tests {
         assert_eq!(persisted_state_runtime(&paths).unwrap(), None);
         assert!(paths.etc_xp_runtime_state().exists() == false);
         assert_eq!(
-            upgrade_runtime_target(&paths).unwrap(),
-            RuntimeTarget::XpProxy
-        );
-        assert_eq!(
             legacy_or_persisted_runtime(&paths).unwrap(),
             RuntimeTarget::XpProxy
         );
-        assert!(expects_native_snapshot(&paths));
+        // A marker-only node never activated services, so upgrade must refuse instead of
+        // starting an ingress runtime that was never brought up.
+        let error = upgrade_runtime_target(&paths).expect_err("marker-only must block upgrade");
+        assert!(error.message.contains("was never activated"));
+        assert!(
+            error
+                .message
+                .contains("xp-ops runtime switch --to xp-proxy --yes")
+        );
+        assert!(!expects_native_snapshot(&paths));
     }
 
     #[test]
-    fn failed_and_switching_states_block_upgrade() {
+    fn non_active_states_block_upgrade() {
         let dir = tempdir().unwrap();
         let paths = Paths::new(dir.path().to_path_buf());
-        record_failed_activation(&paths, RuntimeTarget::XpProxy, "boom").unwrap();
 
-        let error = upgrade_runtime_target(&paths).expect_err("failed state must block upgrade");
-        assert!(error.message.contains("must be active before upgrade"));
+        record_switching_runtime(&paths, RuntimeTarget::XpProxy).unwrap();
+        let raw = fs::read_to_string(paths.etc_xp_runtime_state()).unwrap();
+        assert!(raw.contains("\"state\": \"switching\""));
+        let switching =
+            upgrade_runtime_target(&paths).expect_err("switching state must block upgrade");
+        assert!(switching.message.contains("must be active before upgrade"));
+        // `switching` still allows XP to publish its first native snapshot.
+        assert!(expects_native_snapshot(&paths));
+
+        record_failed_activation(&paths, RuntimeTarget::XpProxy, "boom").unwrap();
+        let failed = upgrade_runtime_target(&paths).expect_err("failed state must block upgrade");
+        assert!(failed.message.contains("must be active before upgrade"));
         assert!(!expects_native_snapshot(&paths));
     }
 

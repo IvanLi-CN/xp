@@ -20,9 +20,13 @@ XP 的控制面继续拥有 Raft、节点、endpoint、用户和成员关系的�
 其已选 runtime（含缺省状态下的 legacy Xray），deploy 和 upgrade 都不会隐式翻转。只有
 `xp-ops runtime switch --to xray|xp-proxy --yes` 可以改变既有节点的选择。
 本地 `/etc/xp/runtime.json` 缺失时，若存在 deploy 的 runtime-selection 记录则沿用该选择，
-否则仍按 Xray active 解释；legacy 节点没有该记录，因此不会被翻转。新建部署在服务真正激活前
-只在 `/etc/xp-ops/deploy/runtime-selection.json` 记录选择，不用伪造 active 状态。切换中或失败
-状态禁止 XP 继续提供入口流量。
+否则仍按 Xray active 解释；legacy 节点没有该记录，因此不会被翻转。新建部署先把选择写入
+`/etc/xp-ops/deploy/runtime-selection.json`，激活窗口在启动服务前将 `/etc/xp/runtime.json`
+记为 `switching`（XP 只在 `switching`/`active` 下发布 snapshot），ready 后才写 `active`，
+不用伪造 active 状态。切换中或失败状态禁止 XP 继续提供入口流量。
+仅有 deploy 选择记录而没有 `/etc/xp/runtime.json` 的节点视为未激活：
+`xp-ops runtime status` 报告 `not_activated`，`xp-ops upgrade` 拒绝执行，必须先完成部署激活
+或显式 runtime switch。
 节点启动引导（systemd/OpenRC）必须只启用所选 runtime 并禁用另一个；deploy、runtime switch
 和 upgrade 都按持久化选择收敛 boot enablement，失败时 fail closed，绝不回退到另一 runtime。
 
