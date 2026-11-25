@@ -47,6 +47,13 @@ A functional signed request that reaches its target through any permitted path; 
 of Direct Connectivity.
 _Avoid_: Direct success, Mesh success
 
+### Raft Leadership
+
+**Leader Election Handoff**:
+An explicit request for one current voter to campaign immediately and be observed as the Raft
+leader.
+_Avoid_: Target-directed transfer, forced election
+
 ### Subscription Nodes
 
 **Subscription Node**:

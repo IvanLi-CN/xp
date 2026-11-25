@@ -1874,6 +1874,23 @@ confirmed DesiredState Node/endpoints and queues the existing runtime/history cl
 fingerprint, endpoint set, role, or leader blocks the operation; do not edit Raft files or use
 `restore-stale-learner` for a server that is already gone.
 
+### Leader election handoff
+
+OpenRaft 0.9 has no target-directed leadership transfer. To hand leadership to a chosen voter,
+upgrade that target to a build with the signed `/_internal/raft/elect` route, then run the local
+signed CLI **on the target**:
+
+```bash
+sudo xp-ops xp transfer-leader --api-base-url http://127.0.0.1:62416
+```
+
+The command uses the target's local cluster CA identity; it does not require an administrator
+Bearer token. It accepts only a current voter with no joint consensus, no active membership
+operation, and no unapplied local log. It triggers one local election and waits up to 30 seconds
+for `/api/cluster/info` to report that node as leader. A timeout or an older target without the
+route fails closed; do not stop the current leader, force a different election, or edit Raft files
+to manufacture success. The command changes no membership, endpoint, user, or snapshot data.
+
 If quorum is permanently lost, the surviving healthy node cannot elect a leader by itself. In this
 case you can force a single-node Raft membership on the chosen surviving node to restore write
 availability. Failed or offline nodes are not kept as learners during this recovery; repair them

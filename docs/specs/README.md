@@ -49,6 +49,7 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 | Prerelease E2E        | active     | unverified     | [Spec][30] | -          |              |
 | Quota ratios          | active     | complete       | [Spec][31] | -          |              |
 | Raft membership       | active     | complete       | [Spec][32] | -          |              |
+| Leader transfer       | active     | complete       | [Spec][58] | -          | Target-local |
 | Single-node recovery  | active     | complete       | [Spec][33] | -          |              |
 | Reality fallback      | active     | in progress    | [Spec][34] | -          |              |
 | Mesh reverse relay    | active     | in progress    | [Spec][35] | -          |              |
@@ -132,5 +133,6 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 [55]: web-demo-runtime/SPEC.md
 [56]: mihomo-subscription-import/SPEC.md
 [57]: native-vless-xhttp-proxy/SPEC.md
+[58]: raft-leader-transfer/SPEC.md
 
 | XP 运维 Skill | active | 项目内维护与 runtime 审计 | [SPEC](xp-infra-skill/SPEC.md) | - |

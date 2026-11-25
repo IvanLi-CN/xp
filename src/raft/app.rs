@@ -20,6 +20,9 @@ pub use super::write_error::{RaftWriteDispatchState, RaftWriteError};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+mod election;
+use election::elect_local_raft;
+
 const CONDITIONAL_ENDPOINT_UPDATE_CAPABILITY: &str = "admin.endpoint-conditional-update";
 
 fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
@@ -65,6 +68,14 @@ pub trait RaftFacade: Send + Sync + 'static {
             }
             Ok(())
         })
+    }
+
+    /// Request a local election and wait until this node becomes the leader.
+    ///
+    /// OpenRaft 0.9 has no target-directed leadership transfer; the target node triggers its own
+    /// election. Facades that cannot drive a real election reject this operation.
+    fn elect(&self) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { anyhow::bail!("leader election is not supported by this raft facade") })
     }
 
     fn client_write(
@@ -147,6 +158,10 @@ impl PanicBoundaryRaft {
 impl RaftFacade for PanicBoundaryRaft {
     fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>> {
         self.inner.metrics()
+    }
+
+    fn elect(&self) -> BoxFuture<'_, anyhow::Result<()>> {
+        self.inner.elect()
     }
 
     fn ensure_linearizable(&self) -> BoxFuture<'_, anyhow::Result<()>> {
@@ -275,6 +290,12 @@ impl RaftFacade for RealRaft {
         })
     }
 
+    fn elect(&self) -> BoxFuture<'_, anyhow::Result<()>> {
+        let raft = self.raft.clone();
+        let metrics = self.metrics.clone();
+        Box::pin(async move { elect_local_raft(&raft, &metrics).await })
+    }
+
     fn client_write(
         &self,
         cmd: DesiredStateCommand,
@@ -382,6 +403,12 @@ impl RaftFacade for ForwardingRaftFacade {
                 .map_err(|e| anyhow::anyhow!("raft ensure_linearizable: {e}"))?;
             Ok(())
         })
+    }
+
+    fn elect(&self) -> BoxFuture<'_, anyhow::Result<()>> {
+        let raft = self.raft.clone();
+        let metrics = self.metrics.clone();
+        Box::pin(async move { elect_local_raft(&raft, &metrics).await })
     }
 
     fn client_write(

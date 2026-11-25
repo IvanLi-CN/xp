@@ -40,6 +40,7 @@ mod upgrade;
 pub(crate) mod upgrade_artifacts;
 mod util;
 mod xp;
+pub(crate) mod xp_elect;
 mod xp_env;
 
 pub(crate) use paths::Paths;
