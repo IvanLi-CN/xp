@@ -9,6 +9,7 @@ None
 - 现有节点详情里的 `IP usage` 面板回答的是“源 IP 占用情况”，不是系统级 TCP 连接数。
 - 节点运营侧需要直接观察“当前业务入站端口上到底有多少 TCP 连接”，而不是推断 IP 数或在线用户数。
 - 现有仓库没有本地分钟级 TCP 连接历史，也没有 node detail 维度的 endpoint 聚合过滤能力。
+- 出站连接、全站分类与分层 rollup 由 `../tcp-connection-history/SPEC.md` 接续；本规格的入站口径保持有效。
 
 ## 目标 / 非目标
 

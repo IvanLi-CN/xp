@@ -43,6 +43,7 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 | Runtime fan-out       | active     | complete       | [Spec][24] | -          |              |
 | Service observability | active     | complete       | [Spec][25] | -          |              |
 | TCP connections       | active     | complete       | [Spec][26] | -          |              |
+| TCP connection history | active     | not started    | [Spec][59] | -          | full-site    |
 | Inbound IP usage      | active     | complete       | [Spec][27] | -          |              |
 | Traffic analytics     | active     | complete       | [Spec][28] | -          |              |
 | OpenRC recovery       | active     | complete       | [Spec][29] | -          |              |
@@ -134,5 +135,6 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 [56]: mihomo-subscription-import/SPEC.md
 [57]: native-vless-xhttp-proxy/SPEC.md
 [58]: raft-leader-transfer/SPEC.md
+[59]: tcp-connection-history/SPEC.md
 
 | XP 运维 Skill | active | 项目内维护与 runtime 审计 | [SPEC](xp-infra-skill/SPEC.md) | - |
