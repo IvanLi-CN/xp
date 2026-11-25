@@ -388,8 +388,8 @@ detail is filtered.
 _Avoid_: Aggregate connection, session total
 
 **Connection Class**:
-One mutually exclusive attribution category of a sampled connection: inbound, control plane,
-runtime outbound, or other outbound.
+One mutually exclusive attribution category of a sampled connection: `inbound`, `control_plane`,
+`outbound_runtime`, or `outbound_other`.
 _Avoid_: Connection type, traffic direction
 
 **Inbound Connection**:
@@ -403,7 +403,9 @@ _Avoid_: Egress session, user connection
 
 **Control-plane Connection**:
 A connection whose matching local or remote side equals a configured XP API, Xray API, or Reverse
-listener; a wildcard listen address matches any local address.
+listener; an accepted socket matches its local side, an initiated socket its remote side, and a
+wildcard listen address matches any local address. Classes resolve by fixed precedence:
+inbound, control plane, ingress-runtime UID, remaining UID.
 _Avoid_: API call, internal session
 
 **Connection Rollup**:

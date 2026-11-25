@@ -22,7 +22,8 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 - 每分钟对当前网络命名空间内的 `ESTABLISHED` TCP 连接做一次有界瞬时采样，并分类记录。
 - total 与类别拆分均可查询、可 rollup；解析到的每一行都必须落入一个类别。
 - 1m / 5m / daily 分层聚合，local raw 7 天，daily 90 天。
-- 通过 Source Delivery Journal 与 History Repository 保存长期历史，不写 Raft。
+- 通过 Source Delivery Journal 与 History Repository 保存长期历史；连接样本不写 Raft，
+  endpoint 删除元数据使用 Raft registry。
 - 缺口、截断、平台不支持与部分失败有明确质量语义，绝不伪装成零值。
 - systemd、OpenRC 与单镜像 Docker/Compose 使用同一合同。
 
@@ -43,7 +44,7 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 - 分钟瞬时样本、本地二进制历史、5m / daily Rollup、专用 History Stream 与保留。
 - 现有 node TCP connection API 的类别、窗口、分辨率与质量扩展。
 - Node Details `TCP connections` tab 的总线与类别拆分展示。
-- endpoint tombstone、node 删除与 snapshot install 的可见视图清理。
+- endpoint registry/marker、node 删除与 snapshot install 的可见视图清理。
 
 ### Out of scope
 
@@ -89,7 +90,8 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
   `samples_actual` 为实际观测分钟数，缺口只体现在它和 gap 上。
 - 缺失分钟是 gap，不是 0。
 - 非 Linux 节点全部返回 `unsupported`，不产生零值记录。
-- 单个 `/proc` 文件或部分行解析失败时标记 `partial`，可读部分照常写入；两个文件都不可读时本分钟为 gap。
+- 单个 `/proc` 文件或部分行解析失败时标记 `partial`，可读部分照常写入，对应 `Point.partial=true`；
+  两个文件都不可读时本分钟为 gap。
 
 #### 数据模型与 Rollup
 
@@ -122,50 +124,87 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
   2 GiB 配额上限最多覆盖 102 个节点；超过时预检必须拒绝，不得自动降低单节点预留。
 - 本地 1m / 5m 存储预算为 96 MiB / 节点；达到 80% 停止新采集并形成 gap，不裁剪已确认的
   7 天数据。
-- 升级时必须把现有 `tcp_connection_usage.json` 的 7 天记录按 `(minute, endpoint_id)` 幂等导入为
-  `inbound`，不重采样、不丢失已观测分钟。
+- 升级导入由本地一次性 marker `connection_history_import_v1` 控制；只插入 binary store 中
+  不存在的分钟，禁止用 mirror 覆盖已确认的 full-class 记录。导入后 mirror 仅作旧版兼容，
+  不再作为数据源。
 - 导入分钟只观测了 `inbound`，必须标记 `classes_observed=["inbound"]`；这些分钟不得被当作
-  完整四类样本，查询按 `quality=partial`、`reasons=["legacy_inbound_only"]` 降级。
-- 继续写 7 天 `tcp_connection_usage.json` 兼容镜像；旧 XP 仍可读取，降级只损失超过 7 天的数据。
+  完整四类样本，查询按 `quality=partial`、`reasons=["legacy_inbound_only"]` 降级，total / classes
+  的 `Point.partial=true`；inbound subject 仍可保持精确。
+- 继续写 7 天 `tcp_connection_usage.json` 兼容镜像；旧 XP 只看到 inbound 7 天视图，
+  total / classes / outbound 与 30d/90d 在旧版本不可见；底层数据保留，重新升级后按保留期恢复。
 - 单条 payload 上限：1m 4 KiB、5m 6 KiB、daily 6 KiB；超出按 subject 排序分片，payload 带
   `shard_index` / `shard_count`。`record_key` 必须为
-  `node-history:node:{node_id}:{resolution}:{bucket_start}:{shard_index}`，不得只写序号。
-- total 与四类小计只出现在 shard 0；subject 明细可分布在其余分片。缺任一 shard 时该桶必须
-  标 `partial`，不得用已有分片求和伪装完整值。
+  `node-history:node:{node_id}:{resolution}:{bucket_start_unix}:{shard_index}`，不得只写序号；
+  `bucket_start_unix` 是 UTC Unix 秒（daily 为当日 00:00Z），`shard_index` 零基，确认后不可变。
+- total 与四类小计只出现在 shard 0；subject 明细可分布在其余分片。shard 0 缺失时 total / classes
+  的 `Point.partial=true`；仅 subject shard 缺失时 total / classes 保持精确，subject 侧标
+  `subjects_truncated=true` 与 `subjects_omitted=true`，cursor 为 null，不得用已有分片求和伪装
+  完整值。
 - daily subject 明细超过 4 个分片预算时按 subject 排序截断；total / 四类小计仍完整，响应带
   `subjects_truncated=true` 与 `subjects_omitted=true`，`subjects_next_cursor=null`。
-- 端点删除不改写已确认的 total / classes / subjects；写入 endpoint tombstone
-  `node-history:endpoint:{endpoint_id}:`，查询时把被覆盖的 subject 移出 `subjects`，并在
-  `deleted_subjects` 返回。total / classes 仍是节点历史事实，允许大于返回的 subject 之和。
+- endpoint 删除的持久化事实是 Raft-backed `deleted_endpoints` registry（endpoint_id、node_id、
+  generation）；删除入口必须把 registry 写入与 endpoint 删除作为同一 cluster operation 提交，
+  任一失败都不返回成功。该元数据不是连接样本，允许写 Raft。
+- 24h/7d 本地查询与 30d/90d 仓库查询都按 registry 过滤 subject；仓库历史本身不可变，不要求
+  重写 record。endpoint marker `node-history:endpoint:{endpoint_id}:` 由现有删除导出异步发布并
+  至少一次重试；marker 未发布前查询仍按 registry 过滤，不依赖 marker。
+- 查询把被覆盖的 subject 移出 `subjects`，并在 `deleted_subjects` 返回。total / classes 仍是
+  节点历史事实，允许大于返回的 subject 之和。
 - 节点删除使用 `node-history:node:{node_id}:` 前缀 tombstone，清理全部本地与仓库历史；
   snapshot install 按同一 tombstone 集重建可见视图。
 
 #### API
 
-- `GET /api/admin/nodes/{node_id}/tcp-connections` 保留：24h/7d 由目标节点本地或 internal local
-  返回；30d/90d 由接收请求的节点直接查询 ready Repository，不依赖目标节点在线。
-- `GET /api/admin/_internal/nodes/tcp-connections/local` 只接受 24h/7d；长期窗口返回 `400`。
+- `GET /api/admin/nodes/{node_id}/tcp-connections`：24h/7d 由目标节点本地或 internal local 返回；
+  30d/90d 由接收请求的节点直接查询广告 `history.node-tcp-connections.v1` 的 ready Repository，
+  不依赖目标节点在线。
+- 兼容窗口内响应保留旧字段 `warnings`、`endpoints`、`per_endpoint_series` 与完整 `node`；
+  新字段只增不改。24h/7d 的 `per_endpoint_series` 保持旧 inbound 形状，30d/90d 返回空数组。
+- `warnings` 保持旧代码 `unsupported_platform` / `socket_read_failed`；新原因写 `reasons`，
+  不替换 `warnings`。`endpoints` 保持 `{endpoint_id, endpoint_tag, port}` 元数据，供旧 Web 与
+  新 `subjects` 按 `endpoint_id` 关联；旧 `endpoints` / `per_endpoint_series` 也必须按 registry
+  过滤已删除 endpoint，不能只在 `subjects` 过滤。
+- 24h/7d 的目标节点是旧版本时不伪造 total / classes / subjects：返回旧字段 + 新字段空集，
+  `quality=unsupported`、`reasons=["target_node_unsupported"]`；capability 按目标节点判断，
+  接收节点不得用自己的版本代广告。30d/90d 只看 Repository capability，不受目标节点版本影响。
+- `GET /api/admin/_internal/nodes/tcp-connections/local` 只接受 24h/7d；长期窗口返回 `400`，
+  且必须同时返回旧形状字段，供旧版 admin 路由解析。
 - 长期仓库查询使用仓库历史预算，不复用 3 秒 peer 读超时。
 - 查询参数：`window=24h|7d|30d|90d`、`resolution=auto|1m|5m|daily`、可重复 `class`、
-  可重复 `endpoint_id`。
+  可重复 `endpoint_id`、`subjects_limit`（默认 20，最大 100）。
 - `auto` 映射：24h → 1m、7d → 5m、30d/90d → daily；显式分辨率不得细于保留层。
-- 查询参数另含 `subjects_limit`（默认 20，最大 100）；`subjects` 是分页视图，超出时返回
+- `subjects` 单页还受 64 KiB 序列化负载上限约束，与 `subjects_limit` 先到者为准；超出时返回
   `subjects_truncated=true` 与 `subjects_next_cursor`，total / classes 始终完整。
-  `subjects_omitted=true` 表示入库时已丢弃明细，不能通过 cursor 取回。
-- 响应恒含 `total`、按类别聚合的 `classes` 与按主体展开的 `subjects`；每个 series 独立带
-  `approximate`。`endpoint_id` 过滤只收窄 `inbound` 的 class/subject，total 与其他类别不变。
-- 响应必须包含 `quality=complete|partial|unsupported`、`reasons[]`、`watermark`、`gaps[]`、
-  `truncated`、`truncated_buckets[]`、`deleted_subjects[]`、`subjects_truncated`、
-  `subjects_omitted`、`subjects_next_cursor`、`resolution`。
-- `reasons` 至少包含 `repository_unavailable`、`runtime_identity_unresolved`、
-  `legacy_inbound_only`、`capture_suspended`；`gaps[].reason` 使用同名集合。
+  `subjects_omitted=true` 表示入库时已按分片预算丢弃明细，不能通过 cursor 取回。
+- `total` / `classes` 固定为 5 条 series（total + 四类），点数由窗口与分辨率决定；admin API
+  不复用仓库 256 KiB 查询预算，`subjects` 另有 64 KiB 页限。
+- 响应恒含 `total`、`classes`、`subjects`；每个 series 独立带 `approximate`。`endpoint_id` 过滤
+  只收窄 `inbound` 的 class/subject，total 与其他类别不变。
+- `quality` 只描述 total / classes 的完整性；subject 完整性由 `subjects_truncated` /
+  `subjects_omitted` / `deleted_subjects` 表达。响应必须包含 `quality=complete|partial|unsupported`、
+  `reasons[]`、`watermark`、`gaps[]`、`truncated`、`truncated_buckets[]`、`partial_buckets[]`、
+  `deleted_subjects[]`、`subjects_truncated`、`subjects_omitted`、`subjects_next_cursor`、
+  `resolution` 与旧字段。
+- 只有 total / classes 没有 gap、truncated、partial bucket，且没有 `repository_unavailable` /
+  `repository_unsupported` / `target_node_unsupported` 时 `quality=complete`；否则 `partial`
+  （或非 Linux / 旧目标的 `unsupported`）。
+- `reasons` 至少包含 `repository_unavailable`、`repository_unsupported`、`target_node_unsupported`、
+  `runtime_identity_unresolved`、`legacy_inbound_only`、`capture_suspended`、`partial_read`、
+  `shard_missing`。
+- `gaps[].reason` 只允许 `capture_suspended`、`socket_read_failed`、`capture_failed`；
+  `partial_buckets[].reason` 只描述 total / classes 下界，允许 `partial_read`、
+  `legacy_inbound_only`、`shard_missing`；subject shard 缺失只进 `subjects_truncated` /
+  `subjects_omitted`，不把 total / classes 标成下界。
+- 30d/90d 没有支持 schema 的 Repository 时返回 `partial` + `repository_unsupported`，不得把旧
+  Repository 的空结果伪装成 complete。
 - 类别或主体非法、分辨率越界、窗口非法返回 `400`；24h/7d 的目标节点不可达沿用现有 fan-out
-  错误语义；30d/90d 在 Repository 不可用时返回 `partial` + `repository_unavailable`，
-  而非节点不可达。
+  错误语义。
 
 #### UI
 
 - `TCP connections` tab 保留；默认画 `total`，类别拆分可切换并可堆叠。
+- 新 Web 必须同时解析旧响应形状（无 total / classes / subjects）；目标节点 capability 缺失时
+  降级到旧 inbound 视图，不能因新字段缺失而报错。
 - `outbound_other` 默认聚合展示，tooltip 给 UID；不展开任意进程列表。
 - gap 不连线，`partial`、`truncated`、`unsupported`、`capture_suspended` 显示明确状态。
 - 24h/7d 的端点多选只影响 `inbound`；total 与其他类别不受影响。
@@ -190,8 +229,8 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 2. 记录先写本地 SQLite raw，再由 Source Delivery Journal 投递。
 3. 节点本地生成 1m / 5m；Repository 幂等接收 1m，生成 daily，只保留 daily。
 4. Web 查询 total 与拆分；本地窗口读本地，长期窗口读 Repository。
-5. 端点删除写 endpoint tombstone 并在查询期过滤 subject；节点删除清理全部历史；
-   snapshot install 按 tombstone 集重建视图。
+5. 端点删除先持久化 `deleted_endpoints` registry，再发布 endpoint marker；查询按 registry 过滤
+   subject。节点删除清理全部历史；snapshot install 按 tombstone 集重建视图。
 
 ### Edge cases / errors
 
@@ -211,14 +250,25 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 - node TCP connection admin/local API：HTTP JSON，external/internal，Modify；使用方 Web/backend。
 - `node_tcp_connections.v1`：signed source history，internal，New；使用方 Repository。必须注册到
   `KNOWN_SCHEMAS`、source/receiver stream 映射、查询投影与删除 marker。
-- `connections.v1`：signed source history，internal，Keep；兼容旧 Repository 读者。
+- `connections.v1`：signed source history，internal，Keep；payload schema 保持旧 inbound-only
+  形状不变，兼容旧 Repository 读者；全站数据只走 `node_tcp_connections.v1`。
+- Repository capability：`history.node-tcp-connections.v1`，用于 30d/90d 选择支持新 schema 的
+  ready Repository。
 - category / resolution 参数：HTTP query，external/internal，New；使用方 Web。
 
 响应结构（示意）：
 
 ```text
 {
-  "node": { "node_id": "01J..." },
+  "node": {
+    "node_id": "01J...",
+    "node_name": "node-1",
+    "access_host": "example.com",
+    "api_base_url": "https://node-1.internal:8443"
+  },
+  "warnings": [],
+  "endpoints": [{ "endpoint_id": "01J...", "endpoint_tag": "vless-edge-a", "port": 443 }],
+  "per_endpoint_series": [],
   "window": "30d",
   "resolution": "daily",
   "window_start": "2026-10-26T00:00:00Z",
@@ -227,12 +277,13 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
   "reasons": [],
   "truncated": false,
   "truncated_buckets": [],
+  "partial_buckets": [],
   "deleted_subjects": [],
   "subjects_truncated": false,
   "subjects_omitted": false,
   "subjects_next_cursor": null,
   "watermark": "2026-11-24T23:59:00Z",
-  "gaps": [{ "start": "...", "end": "...", "reason": "capture_suspended" }],
+  "gaps": [],
   "total": { "approximate": false, "points": [Point] },
   "classes": [
     { "class": "inbound", "approximate": true, "points": [Point] }
@@ -253,23 +304,33 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
   "max": 14,
   "samples_expected": 5,
   "samples_actual": 5,
-  "truncated": false
+  "truncated": false,
+  "partial": false
 }
 ```
 
 `truncated_buckets` 按 `bucket_start` 列出至少一分钟截断的桶；对应 `Point.truncated=true`，
-该点的 total / 类别值是该桶下界。`approximate=true` 只表示聚合形状由逐 subject 极值重建，
-截断下界由 `truncated` 单独表达。
+该点的 total / 类别值是该桶下界。`partial_buckets` 列出 total / classes 的其它下界
+（partial `/proc` 读取、legacy 导入、shard 0 缺失）；对应 `Point.partial=true`。仅 subject shard
+缺失时只标 `subjects_truncated=true`，不把精确的 total / classes 标成下界。
+`approximate=true` 只表示聚合形状由逐 subject 极值重建，截断/下界由 `truncated` 与 `partial`
+单独表达。
+
+`warnings` 与 `endpoints` / `per_endpoint_series` 是旧兼容字段；`per_endpoint_series` 在 24h/7d
+保持旧 inbound 形状，30d/90d 为空数组。新 Web 通过 `endpoints` 关联 `subjects[].subject` 的
+endpoint_id 获取 tag/port；`node` 沿用现有 AdminNode 完整对象（示例省略字段）。
 
 `deleted_subjects` 为 `[{class, subject}]`；`inbound` 的 subject 即 `endpoint_id`。
 `subjects_next_cursor` 是不透明值，只在本响应窗口与过滤条件下有效。
 `subjects_truncated` 只表示明细分页，不降低 total / classes 的 quality；`deleted_subjects`
 也不改写 total / classes。
 `subjects_omitted=true` 表示入库时已按分片预算丢弃明细；此时 cursor 为 null。
+`watermark` 是最后成功聚合的 bucket_start；无数据或 `quality=unsupported` 时为 null。
 
 写路径容量拒绝返回 `409 node_tcp_connections_capacity_rejected` 与
 `required_bytes`/`allowed_bytes`；读路径返回 `400 invalid_request`、`404` 与既有 peer failure 合同。
-capability `admin.node-tcp-connections-history` 为 additive。
+capability `admin.node-tcp-connections-history` 为 additive，按目标节点判断；接收节点不得
+用自己的版本代广告。
 
 ## 验收标准（Acceptance Criteria）
 
@@ -279,39 +340,60 @@ capability `admin.node-tcp-connections-history` 为 additive。
 - Given A、B 峰值出现在不同分钟，When 查询 7d，Then `total.max < max(A) + max(B)`。
 - Given 5m 桶内只有 3 个观测分钟，When 聚合，Then `samples_expected=5`、`samples_actual=3`。
 - Given 超过 16,384 行，Then `truncated=true`、`quality=partial`，分类计数仍在。
-- Given 非 Linux，Then `unsupported`，无零值曲线。
+- Given 非 Linux，Then `quality=unsupported`，`warnings` 含旧 `unsupported_platform`，无零值曲线。
 - Given journal 达 80%，Then `capacity_suspended` / `journal_capacity_guard` 且停止新写入；
   降至 60% 以下恢复。
 - Given 24h 窗口选择 3 个 endpoint，Then 只有 `inbound` 拆分被过滤，total 不变。
 - Given 30d 查询并过滤 endpoint，Then daily 类别 series `approximate=true`，total 不变。
-- Given 目标节点离线且 Repository ready，When 查询 30d，Then 返回仓库历史而不是节点不可达。
+- Given 目标节点离线且支持 schema 的 Repository ready，When 查询 30d，Then 返回仓库历史而不是
+  节点不可达。
+- Given 24h/7d 查询，Then 响应同时包含旧 `warnings` / `endpoints` / `per_endpoint_series` 与
+  新 `total` / `classes` / `subjects`，旧 Web schema 仍可解析。
+- Given 24h/7d 目标节点是旧版本，Then `quality=unsupported` + `target_node_unsupported`，
+  不伪造 total。
+- Given 30d/90d 目标节点是旧版本但支持 schema 的 Repository 有数据，Then 仍返回仓库历史。
+- Given 新 Web 在 24h/7d 查询旧目标节点，Then 解析旧响应形状并降级到 inbound 视图，不因新
+  字段缺失报错。
+- Given 没有支持 `history.node-tcp-connections.v1` 的 Repository，Then `partial` +
+  `repository_unsupported`，不是空 complete。
 - Given 升级前存在 7 天 JSON 历史，When 启动完成，Then 导入为 `inbound`，查询标
   `partial` + `legacy_inbound_only`。
-- Given endpoint 删除，Then `subjects` 不再返回该 endpoint，`deleted_subjects` 列出它，
-  total / classes 不变。
+- Given endpoint 删除成功，Then registry 与删除在同一 operation 提交，marker 发布失败也按
+  registry 过滤；`subjects` 不再返回该 endpoint，`deleted_subjects` 列出它，total / classes 不变。
+- Given endpoint 删除操作部分失败，Then registry 与 endpoint 删除都不生效，subject 仍可见。
+- Given endpoint 删除后的 24h/7d，Then 旧 `endpoints` / `per_endpoint_series` 同样不再包含该
+  endpoint，旧 Web 不显示 stale endpoint。
+- Given 迁移 marker 已存在或已有 full-class 分钟，When 再次导入 mirror，Then 不覆盖、不降级
+  已确认记录。
+- Given partial `/proc` 读取或 legacy 导入，Then 对应 `Point.partial=true` 且 `partial_buckets[]`
+  带原因。
+- Given subject shard 缺失，Then 只标 `subjects_omitted`，total / classes 保持精确。
 - Given 90d 窗口内一分钟截断，Then 仅对应 `Point.truncated=true`，顶层 `truncated=true`。
-- Given `subjects` 超过 `subjects_limit`，Then 返回 `subjects_truncated=true` 与 cursor，
-  total / classes 完整。
+- Given `subjects` 超过 `subjects_limit` 或单页 64 KiB，Then 返回 `subjects_truncated=true` 与
+  cursor，total / classes 完整。
 - Given daily 明细超过 4 个分片预算，Then `subjects_omitted=true` 且 cursor 为 null，
   total / classes 完整。
 - Given 本地 1m / 5m 存储达 80%，Then 停止新采集并形成 gap，已确认的 7 天数据不裁剪。
+- Given 从新版本降级到旧 XP，Then 旧 XP 只显示 inbound 7 天 JSON 视图；total / classes /
+  30d/90d 不可见，底层数据保留。
 
 ## 质量门槛（Quality Gates）
 
 - Backend：`cargo fmt` / `cargo clippy -- -D warnings` / `cargo test`
 - Web：`cd web && bun run lint && bun run typecheck && bun run test`
 - Storybook：`cd web && bun run test-storybook`
-- 视觉证据：total 默认态、类别堆叠态、gap/partial/truncated/unsupported 态。
+- 视觉证据：total 默认态、类别堆叠态、gap/partial/truncated/unsupported/capture_suspended 态，
+  以及 `deleted_subjects` / `subjects_omitted` 的说明态。
 
 ## 文档更新（Docs to Update）
 
-- `docs/desgin/api.md`：窗口、分辨率、类别、质量、分页与 endpoint 删除后可见语义。
+- `docs/desgin/api.md`：窗口、分辨率、类别、质量、分页、兼容字段与 endpoint 删除后可见语义。
 - `docs/ops/README.md`：全站 socket 采样范围、容器网络命名空间边界、容量预检。
 - `docs/specs/node-tcp-connection-count/SPEC.md`：扩展并取代其端点求和展示语义。
 
 ## 计划资产（Plan assets）
 
-- Directory: `docs/specs/tcp-connection-history/assets/`
+- Directory: `docs/specs/tcp-connection-history/assets/`（待创建，本 PR 不提交资产）
 - In-plan references: None.
 
 ## Visual Evidence

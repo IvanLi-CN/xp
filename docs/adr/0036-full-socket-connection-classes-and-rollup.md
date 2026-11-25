@@ -18,5 +18,8 @@ already observed data. Nodes keep 1m/5m locally; repositories keep only daily. D
 extrema are approximate by design, while node-level totals stay exact for fully observed samples;
 legacy inbound-only minutes remain partial lower bounds.
 Endpoint deletion filters subject detail at query time and leaves total/classes immutable.
+The durable deletion fact is a Raft-backed endpoint registry; connection samples stay outside Raft.
+The admin API keeps the legacy response fields additive while adding total/classes/subjects;
+mixed-version nodes degrade with partial/unsupported rather than fabricating new series.
 Control-plane sockets are classified rather than excluded because excluding them would silently
 change `total` when ports move.

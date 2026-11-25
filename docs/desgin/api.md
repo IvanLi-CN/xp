@@ -964,10 +964,16 @@ Traffic storage 由节点本地 `${XP_DATA_DIR}/node_history_cache.json` 提供�
 
 ### 7.1 节点视角：查询节点 TCP 连接数详情（管理员）
 
-`GET /api/admin/nodes/{node_id}/tcp-connections?window=24h|7d`
+`GET /api/admin/nodes/{node_id}/tcp-connections?window=24h|7d|30d|90d`
 
-24h/7d 走目标节点本地；30d/90d、total、类别、质量与分页字段由
-[`tcp-connection-history`](../specs/tcp-connection-history/SPEC.md) 扩展。
+可选参数：`resolution=auto|1m|5m|daily`、可重复 `class`、可重复 `endpoint_id`、
+`subjects_limit`。24h/7d 走目标节点本地；30d/90d 查询支持
+`history.node-tcp-connections.v1` 的 ready Repository。
+
+下方 JSON 仅为 24h/7d 旧兼容子集。响应同时保留 `warnings`、`endpoints`、
+`per_endpoint_series` 与完整 `node`，并新增 `total`、`classes`、`subjects`、`quality`、
+`reasons`、`watermark`、`gaps`、`truncated*`、`partial*`、`deleted_subjects`、`subjects_*`；
+30d/90d 的 `per_endpoint_series` 为空数组。
 
 返回：
 
@@ -1018,7 +1024,19 @@ Traffic storage 由节点本地 `${XP_DATA_DIR}/node_history_cache.json` 提供�
 说明：
 
 - `per_endpoint_series` 为每个 endpoint 的逐分钟 TCP 连接数，不做跨 endpoint 去重。
+- `endpoints` 为 `{endpoint_id, endpoint_tag, port}` 元数据；新 `subjects` 通过 `endpoint_id`
+  关联标签与端口。
+- `warnings` 保持旧代码 `unsupported_platform` / `socket_read_failed`；新原因写 `reasons`。
 - 端点筛选只影响 `inbound` 拆分；total 与其它类别保持节点级口径，不随筛选变化。
+- endpoint 删除后，旧 `endpoints` / `per_endpoint_series` 与新 `subjects` 都按 deletion registry
+  过滤，不能返回 stale endpoint。
+- `quality` 只描述 total / classes；subject 完整性由 `subjects_truncated` / `subjects_omitted` /
+  `deleted_subjects` 表达；只有 total / classes 无 gap、truncated、partial bucket，且没有
+  repository/target unsupported reason 时才为 `complete`。`subjects` 单页受 `subjects_limit` 与
+  64 KiB 负载上限约束。
+- 24h/7d 目标节点旧版本返回 `quality=unsupported` + `target_node_unsupported`；30d/90d 只看
+  Repository capability，没有支持 `history.node-tcp-connections.v1` 的 Repository 时返回
+  `partial` + `repository_unsupported`。
 - 统计口径固定为节点本机 socket 视角；全站四类分类、total 与分层历史见
   [`tcp-connection-history`](../specs/tcp-connection-history/SPEC.md)。
 - `warnings` 可能包含：
