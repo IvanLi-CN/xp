@@ -32,6 +32,7 @@ mod mesh;
 mod mihomo_import_api;
 mod mihomo_resource_route;
 mod node_delete;
+mod raft_admin;
 mod raft_write_error;
 mod resource_alerts;
 mod resource_history_capacity;
@@ -126,6 +127,9 @@ use mesh::{
 };
 use mihomo_import_api::admin_preview_user_mihomo_import;
 use node_delete::AdminNodeDeletePreviewEndpoint;
+pub(super) use raft_admin::{
+    ClusterInfoResponse, admin_internal_raft_elect, build_cluster_info_response, cluster_info,
+};
 use raft_write_error::map_raft_write_error;
 use resource_alerts::admin_get_alerts_response;
 use resource_monitoring::{
@@ -554,16 +558,6 @@ struct AdminEndpointProbeRunSseLagged {
 struct AdminEndpointProbeRunSseNotFound {
     node_id: String,
     run_id: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ClusterInfoResponse {
-    cluster_id: String,
-    node_id: String,
-    role: &'static str,
-    leader_api_base_url: String,
-    term: u64,
-    xp_version: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1075,6 +1069,7 @@ pub fn build_router_with_mesh_telemetry(
             "/_internal/raft/client-write",
             post(admin_internal_raft_client_write),
         )
+        .route("/_internal/raft/elect", post(admin_internal_raft_elect))
         .route(
             "/_internal/endpoints/mutation",
             post(admin_internal_endpoint_mutation),
@@ -1675,7 +1670,7 @@ async fn admin_auth(
 }
 
 #[derive(Clone)]
-struct InternalSignatureAuth {
+pub(crate) struct InternalSignatureAuth {
     verified: Option<internal_auth::VerifiedRequest>,
 }
 
@@ -1851,30 +1846,6 @@ async fn redirect_follower_writes(req: Request<Body>, next: Next) -> Response {
         .unwrap_or(path);
     let location = format!("{}{}", leader_base_url.trim_end_matches('/'), suffix);
     Redirect::temporary(&location).into_response()
-}
-
-fn build_cluster_info_response(state: &AppState) -> ClusterInfoResponse {
-    let metrics = raft_metrics(state);
-    let leader_api_base_url = leader_api_base_url(&metrics).unwrap_or_default();
-    let role = if is_leader(&metrics) {
-        "leader"
-    } else {
-        "follower"
-    };
-    ClusterInfoResponse {
-        cluster_id: state.cluster.cluster_id.clone(),
-        node_id: state.cluster.node_id.clone(),
-        role,
-        leader_api_base_url,
-        term: metrics.current_term,
-        xp_version: crate::version::VERSION.to_string(),
-    }
-}
-
-async fn cluster_info(
-    Extension(state): Extension<AppState>,
-) -> Result<Json<ClusterInfoResponse>, ApiError> {
-    Ok(Json(build_cluster_info_response(&state)))
 }
 
 const CLUSTER_RUNTIME_FANOUT_TIMEOUT: Duration = Duration::from_secs(8);

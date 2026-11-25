@@ -93,6 +93,7 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
         | Command::Xp(XpCommand::EvictUnreachableVoter(_))
         | Command::Xp(XpCommand::RetireStaleLearner(_))
         | Command::Xp(XpCommand::RestoreStaleLearner(_))
+        | Command::Xp(XpCommand::TransferLeader(_))
         | Command::Xp(XpCommand::MembershipOperation(_)) => {
             // Runtime commands: they authenticate to the local xp API and do not write local
             // filesystem state.

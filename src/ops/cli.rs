@@ -16,6 +16,8 @@ use crate::ops::status;
 use crate::ops::tui;
 use crate::ops::upgrade;
 use crate::ops::xp;
+use crate::ops::xp_elect;
+use crate::ops::xp_elect::XpTransferLeaderArgs;
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -208,6 +210,8 @@ pub enum XpCommand {
     EvictUnreachableVoter(XpEvictUnreachableVoterArgs),
     RetireStaleLearner(XpRetireStaleLearnerArgs),
     RestoreStaleLearner(XpRestoreStaleLearnerArgs),
+    /// Request this local voter to become the Raft leader.
+    TransferLeader(XpTransferLeaderArgs),
     #[command(subcommand)]
     MembershipOperation(MembershipOperationCommand),
     HistoryRepositoryRecover(XpHistoryRepositoryRecoverArgs),
@@ -930,6 +934,7 @@ pub async fn run() -> i32 {
             XpCommand::RestoreStaleLearner(args) => {
                 membership_lifecycle::cmd_xp_restore_stale_learner(paths, args).await
             }
+            XpCommand::TransferLeader(args) => xp_elect::cmd_xp_transfer_leader(paths, args).await,
             XpCommand::MembershipOperation(MembershipOperationCommand::Status(args)) => {
                 membership_lifecycle::cmd_xp_membership_operation_status(paths, args).await
             }
