@@ -378,8 +378,12 @@ _Avoid_: Any recent client, version range without fixtures
 ## Node Connections
 
 **Connection Count**:
-The number of sockets in one Connection Class at one sampling instant.
+The number of TCP sockets in one Connection Class at one sampling instant.
 _Avoid_: Active connection, session count
+
+**Connection Total**:
+The same-instant sum of all Connection Classes for one node.
+_Avoid_: Aggregate connection, session total
 
 **Connection Class**:
 One mutually exclusive attribution category of a sampled connection: inbound, control plane,
@@ -391,11 +395,11 @@ An `ESTABLISHED` TCP socket whose local port is a business endpoint listen port.
 _Avoid_: Accepted session, online connection
 
 **Outbound Connection**:
-An `ESTABLISHED` TCP socket without a business listener, attributed to the creating runtime or UID.
+An `ESTABLISHED` TCP socket without a business listener, attributed by its Connection Class.
 _Avoid_: Egress session, user connection
 
 **Control-plane Connection**:
-An outbound connection whose local or remote port belongs to the XP/Xray control surface.
+A connection whose matching side equals a configured XP/Xray control listener address and port.
 _Avoid_: API call, internal session
 
 **Connection Rollup**:

@@ -19,8 +19,8 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 
 ### Goals
 
-- 每分钟对当前网络命名空间内所有 `ESTABLISHED` TCP 连接做一次瞬时采样，并分类记录。
-- total 与类别拆分均可查询、可 rollup；任何行都必须落入一个类别。
+- 每分钟对当前网络命名空间内的 `ESTABLISHED` TCP 连接做一次有界瞬时采样，并分类记录。
+- total 与类别拆分均可查询、可 rollup；解析到的每一行都必须落入一个类别。
 - 1m / 5m / daily 分层聚合，local raw 7 天，daily 90 天。
 - 通过 Source Delivery Journal 与 History Repository 保存长期历史，不写 Raft。
 - 缺口、截断、平台不支持与部分失败有明确质量语义，绝不伪装成零值。
@@ -55,15 +55,15 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 | 优先级 | 条件                                    | 类别               |
 | -----: | --------------------------------------- | ------------------ |
 |      1 | `local_port` 属于业务 endpoint 监听端口 | `inbound`          |
-|      2 | 任一侧端口属于控制面端口                | `control_plane`    |
+|      2 | 匹配控制面监听地址与端口                | `control_plane`    |
 |      3 | socket UID 属于当前 ingress runtime     | `outbound_runtime` |
 |      4 | 其余                                    | `outbound_other`   |
 
 - 主体：`inbound` 为 `endpoint_id`；`control_plane` 为 `xp_api` / `xray_api` / `reverse`；
   `outbound_runtime` 为 runtime；`outbound_other` 为 socket UID。
-- 控制面端口集合来自当前配置：XP API 绑定端口、Xray API 端口、Reverse `10086`。
+- 控制面集合来自当前配置的完整监听地址与端口：XP API、Xray API、Reverse `10086`。
 - 分类按优先级命中即止；四类互斥，没有丢弃分支。
-- `total(t)` 恒等于同一时刻四类计数之和。
+- 未截断时 `total(t)` 恒等于同一时刻四类计数之和；`truncated` 时它是解析窗口内的下界。
 - 同一转发会话产生的入站与出站是两个 socket，各计一次。
 - 范围是当前网络命名空间；容器节点只看到容器内的 socket，这是部署边界，不是过滤。
 - runtime 身份：host-managed 取固定服务 UID；容器取入口固定身份文件中的 PID 集合与
@@ -75,10 +75,14 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 
 #### 采样
 
-- 以 UTC 分钟为桶，每分钟只采样一次；命中同一分钟的重复 tick 直接跳过。
+- 以 UTC 分钟为桶，每分钟最多持久化一次；写入失败可在同一分钟重试并覆盖，成功后跳过该分钟。
 - 顺序读取 `/proc/net/tcp` 与 `/proc/net/tcp6`，只接受状态 `01`，解析 UID 与两侧地址端口。
-- 单节点总量上限 16,384 行；达到上限后停止解析并持久化 `truncated=true`，已计数部分保留。
-- 记录 `samples_expected=1` 与 `samples_actual`；缺失分钟是 gap，不是 0。
+- 两个文件按固定顺序读取，单次采样跨度有界；`total` 是该次解析过程的观测值，不宣称跨文件原子。
+- 单节点总量上限 16,384 行；达到上限后停止解析并持久化 `truncated=true`，已计数部分保留，
+  此时 `total` 是下界而非全量。
+- raw 记录 `samples_expected=1` 与 `samples_actual`；聚合点的 `samples_expected` 为桶内应采样的
+  分钟数（5m=5、daily=1440，窗口首尾与缺口按实际覆盖分钟计），`samples_actual` 为实际观测分钟数。
+- 缺失分钟是 gap，不是 0。
 - 非 Linux 节点全部返回 `unsupported`，不产生零值记录。
 - 单个 `/proc` 文件或部分行解析失败时标记 `partial`，可读部分照常写入；两个文件都不可读时本分钟为 gap。
 
@@ -90,8 +94,8 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 - 每个桶保存逐 subject 的 `min/avg/max/samples`；5m 桶另存逐分钟 subject 值与四类小计，
   daily 桶另存逐分钟 `total`，保证 `total` 的极值由「同刻先求和、再统计」得出。
 - 禁止用 `sum(per-subject max)` 代替 `total.max`。
-- daily 层的 endpoint 子集 total 允许由逐 subject 极值求和近似，响应必须带 `approximate=true`；
-  节点级 total 仍然精确。
+- daily 层的 endpoint 子集 total 允许由逐 subject 极值求和近似，该 series 必须带
+  `approximate=true`；节点级 total 与类别 series 为 `false`。
 
 #### 保留与投递
 
@@ -102,21 +106,30 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
   `connection_capture_suspended` 并停止新采集，低于 60% 恢复。
 - History Repository 配额为 `min(2 GiB, repository quota 的 25%)`；新增节点、启用仓库或恢复历史前
   按 20 MiB × 可采集节点数预检，失败返回容量拒绝，不缩短保留或丢弃旧数据。
+- 2 GiB 配额上限最多覆盖 102 个节点；超过时预检必须拒绝，不得自动降低单节点预留。
+- 升级时必须把现有 `tcp_connection_usage.json` 的 7 天记录按 `(minute, endpoint_id)` 幂等导入为
+  `inbound`，不重采样、不丢失已观测分钟。
+- 继续写 7 天 `tcp_connection_usage.json` 兼容镜像；旧 XP 仍可读取，降级只损失超过 7 天的数据。
 - 单条 payload 上限：1m 4 KiB、5m 6 KiB、daily 6 KiB；超出按 subject 排序分片，
   `record_key` 为分片序号。
 - 端点、节点删除与 snapshot install 必须同时清理本地记录和写入仓库 tombstone。
 
 #### API
 
-- 沿用 `GET /api/admin/nodes/{node_id}/tcp-connections` 与
-  `GET /api/admin/_internal/nodes/tcp-connections/local`。
+- `GET /api/admin/nodes/{node_id}/tcp-connections` 保留：24h/7d 由目标节点本地或 internal local
+  返回；30d/90d 由接收请求的节点直接查询 ready Repository，不依赖目标节点在线。
+- `GET /api/admin/_internal/nodes/tcp-connections/local` 只接受 24h/7d；长期窗口返回 `400`。
+- 长期仓库查询使用仓库历史预算，不复用 3 秒 peer 读超时。
 - 查询参数：`window=24h|7d|30d|90d`、`resolution=auto|1m|5m|daily`、可重复 `class`、
   可重复 `endpoint_id`。
 - `auto` 映射：24h → 1m、7d → 5m、30d/90d → daily；显式分辨率不得细于保留层。
-- 响应恒含 `total` 系列，另按类别返回拆分；`endpoint_id` 过滤只收窄 `inbound`。
+- 响应恒含 `total`、按类别聚合的 `classes` 与按主体展开的 `subjects`；每个 series 独立带
+  `approximate`。`endpoint_id` 过滤只收窄 `inbound` 的 class/subject，total 与其他类别不变。
 - 响应必须包含 `quality=complete|partial|local_only|unsupported`、`watermark`、`gaps[]`、
-  `truncated`、`resolution`、`approximate`。
-- 类别或主体非法、分辨率越界、窗口非法返回 `400`；远端节点不可达沿用现有 fan-out 错误语义。
+  `truncated`、`resolution`。
+- 类别或主体非法、分辨率越界、窗口非法返回 `400`；24h/7d 的目标节点不可达沿用现有 fan-out
+  错误语义；30d/90d 在 Repository 不可用时返回 `partial` 并附 reason `repository_unavailable`，
+  而非节点不可达。
 
 #### UI
 
@@ -129,8 +142,9 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 ### SHOULD
 
 - 采样器复用 resource monitoring 已解析的固定 runtime 身份，不新增提权路径。
+- 采样节拍必须有独立的每分钟机会，不因 quota 轮询间隔被放宽到 60 秒以上而丢分钟。
 - 分类与编码保持在单次顺序扫描内，单分钟采样耗时有固定上限。
-- 本地读取路径与当前值查询不经过仓库；30d/90d 必须查询最完整健康的 ready Repository。
+- 本地读取路径与当前值查询不经过仓库；30d/90d 由接收请求的节点查询最完整健康的 ready Repository。
 
 ### COULD
 
@@ -149,11 +163,12 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 ### Edge cases / errors
 
 - 无连接是成功样本，值为 0；无样本分钟才是 gap。
-- 单侧端口属于控制面即归 `control_plane`，双侧都命中不重复计数。
+- 只有地址与端口同时匹配配置的控制面监听项才归 `control_plane`，双侧命中不重复计数。
 - runtime 未运行：`outbound_runtime` 自然为 0，不返回 unsupported。
 - UID 不可解析或容器身份文件缺失：保持全量计数，runtime 部分降级为 `outbound_other`，
   返回 `partial` 与 `runtime_identity_unresolved`。
-- 超过 16,384 行：`truncated=true`，`quality=partial`；不得返回假总数。
+- 超过 16,384 行：`truncated=true`，`quality=partial`，`total` 明确为下界。
+- 目标节点离线但 Repository ready：30d/90d 仍返回仓库历史；24h/7d 仍返回节点不可达。
 - SQLite 不可写、journal 满或仓库拒绝容量：进入 suspension，raw 缺失区间成为 gap。
 - 24h 内节点重启：重启后首分钟重新采样，不补跑，不伪造旧窗口。
 - 旧节点不认识新 schema 时继续读 `connections.v1`；新 Web 按 capability 降级窗口与类别。
@@ -165,7 +180,30 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 - `connections.v1`：signed source history，internal，Keep；兼容旧 Repository 读者。
 - category / resolution 参数：HTTP query，external/internal，New；使用方 Web。
 
-响应点结构：
+响应结构（示意）：
+
+```text
+{
+  "node": { "node_id": "01J..." },
+  "window": "30d",
+  "resolution": "daily",
+  "window_start": "2026-10-26T00:00:00Z",
+  "window_end": "2026-11-25T00:00:00Z",
+  "quality": "complete",
+  "truncated": false,
+  "watermark": "2026-11-24T23:59:00Z",
+  "gaps": [{ "start": "...", "end": "...", "reason": "capture_suspended" }],
+  "total": { "approximate": false, "points": [Point] },
+  "classes": [
+    { "class": "inbound", "approximate": false, "points": [Point] }
+  ],
+  "subjects": [
+    { "class": "inbound", "subject": "01J...", "approximate": false, "points": [Point] }
+  ]
+}
+```
+
+`Point`：
 
 ```json
 {
@@ -178,7 +216,8 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 }
 ```
 
-错误码沿用 `400 invalid_request`、现有 peer failure 合同与 `409 capacity_rejected`。
+写路径容量拒绝返回 `409 node_tcp_connections_capacity_rejected` 与
+`required_bytes`/`allowed_bytes`；读路径返回 `400 invalid_request`、`404` 与既有 peer failure 合同。
 capability `admin.node-tcp-connections-history` 为 additive。
 
 ## 验收标准（Acceptance Criteria）
@@ -187,12 +226,14 @@ capability `admin.node-tcp-connections-history` 为 additive。
 - Given 浏览器到 XP API 的 loopback 连接，When 采样，Then 计入 `control_plane` 与 total。
 - Given 无关系统进程的连接，When 采样，Then 计入 `outbound_other`，UID 可查。
 - Given A、B 峰值出现在不同分钟，When 查询 7d，Then `total.max < max(A) + max(B)`。
-- Given 一个桶内 5 个样本都存在，When 聚合，Then `samples_actual=5` 且 `avg` 为算术平均。
+- Given 5m 桶内只有 3 个观测分钟，When 聚合，Then `samples_expected=5`、`samples_actual=3`。
 - Given 超过 16,384 行，Then `truncated=true`、`quality=partial`，分类计数仍在。
 - Given 非 Linux，Then `unsupported`，无零值曲线。
 - Given journal 达 80%，Then suspension 且停止新写入；降至 60% 以下恢复。
 - Given 24h 窗口选择 3 个 endpoint，Then 只有 `inbound` 拆分被过滤，total 不变。
-- Given 30d 查询，Then 分辨率为 daily，`approximate=true` 仅出现在 endpoint 子集 total。
+- Given 30d 查询并过滤 endpoint，Then 只有 inbound 子集 total 的 series `approximate=true`。
+- Given 目标节点离线且 Repository ready，When 查询 30d，Then 返回仓库历史而不是节点不可达。
+- Given 升级前存在 7 天 JSON 历史，When 启动完成，Then 记录已导入为 `inbound` 且可查询。
 - Given endpoint 删除，Then 本地与该 endpoint 相关的历史不再返回。
 
 ## 质量门槛（Quality Gates）
@@ -206,7 +247,7 @@ capability `admin.node-tcp-connections-history` 为 additive。
 
 - `docs/desgin/api.md`：窗口、分辨率、类别与质量字段。
 - `docs/ops/README.md`：全站 socket 采样范围、容器网络命名空间边界、容量预检。
-- `docs/specs/node-tcp-connection-count/SPEC.md`：出站与全站分类的 successor 关系。
+- `docs/specs/node-tcp-connection-count/SPEC.md`：出站与全站分类对其入站范围的扩展关系。
 
 ## 计划资产（Plan assets）
 
