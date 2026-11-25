@@ -42,7 +42,7 @@ Each topic uses a stable lowercase-kebab-case directory and contains:
 | Node panel            | superseded | complete       | [Spec][23] | [Spec][22] |              |
 | Runtime fan-out       | active     | complete       | [Spec][24] | -          |              |
 | Service observability | active     | complete       | [Spec][25] | -          |              |
-| TCP connections       | active     | complete       | [Spec][26] | -          |              |
+| TCP connections       | superseded | complete       | [Spec][26] | [Spec][59] |              |
 | TCP connection history | active     | not started    | [Spec][59] | -          | full-site    |
 | Inbound IP usage      | active     | complete       | [Spec][27] | -          |              |
 | Traffic analytics     | active     | complete       | [Spec][28] | -          |              |

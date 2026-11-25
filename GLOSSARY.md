@@ -378,11 +378,13 @@ _Avoid_: Any recent client, version range without fixtures
 ## Node Connections
 
 **Connection Count**:
-The number of TCP sockets in one Connection Class at one sampling instant.
+The number of TCP sockets in one Connection Class from one sampling pass.
 _Avoid_: Active connection, session count
 
 **Connection Total**:
-The same-instant sum of all Connection Classes for one node.
+The same-pass sum of all Connection Classes for one node; a lower bound when the sample is
+`truncated` or a class was not observed. It stays a node-level historical fact when endpoint
+detail is filtered.
 _Avoid_: Aggregate connection, session total
 
 **Connection Class**:
@@ -395,13 +397,15 @@ An `ESTABLISHED` TCP socket whose local port is a business endpoint listen port.
 _Avoid_: Accepted session, online connection
 
 **Outbound Connection**:
-An `ESTABLISHED` TCP socket without a business listener, attributed by its Connection Class.
+An `ESTABLISHED` TCP socket that is neither an Inbound Connection nor a Control-plane
+Connection; it is attributed to `outbound_runtime` or `outbound_other`.
 _Avoid_: Egress session, user connection
 
 **Control-plane Connection**:
-A connection whose matching side equals a configured XP/Xray control listener address and port.
+A connection whose matching local or remote side equals a configured XP API, Xray API, or Reverse
+listener; a wildcard listen address matches any local address.
 _Avoid_: API call, internal session
 
 **Connection Rollup**:
-The min/avg/max/sample-count aggregate of instantaneous connection samples inside a time bucket.
+The min/avg/max/sample-count aggregate of connection samples inside a time bucket.
 _Avoid_: Average session, connection total

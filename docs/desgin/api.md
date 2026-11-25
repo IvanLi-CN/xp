@@ -966,6 +966,9 @@ Traffic storage 由节点本地 `${XP_DATA_DIR}/node_history_cache.json` 提供�
 
 `GET /api/admin/nodes/{node_id}/tcp-connections?window=24h|7d`
 
+24h/7d 走目标节点本地；30d/90d、total、类别、质量与分页字段由
+[`tcp-connection-history`](../specs/tcp-connection-history/SPEC.md) 扩展。
+
 返回：
 
 ```json
@@ -1015,8 +1018,9 @@ Traffic storage 由节点本地 `${XP_DATA_DIR}/node_history_cache.json` 提供�
 说明：
 
 - `per_endpoint_series` 为每个 endpoint 的逐分钟 TCP 连接数，不做跨 endpoint 去重。
-- 前端默认全选全部 `endpoints`，并将已选 endpoints 的同一分钟 `count` 直接求和后画图。
-- 统计口径固定为节点本机 socket 视角，只统计业务 endpoint 监听端口上的 `ESTABLISHED` 入站 TCP 连接。
+- 端点筛选只影响 `inbound` 拆分；total 与其它类别保持节点级口径，不随筛选变化。
+- 统计口径固定为节点本机 socket 视角；全站四类分类、total 与分层历史见
+  [`tcp-connection-history`](../specs/tcp-connection-history/SPEC.md)。
 - `warnings` 可能包含：
   - `unsupported_platform`：当前节点不是 Linux，无法读取 `/proc/net/tcp*`。
   - `socket_read_failed`：节点读取本机 socket 视图失败，历史可能不完整。
