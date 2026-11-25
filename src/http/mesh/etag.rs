@@ -48,6 +48,8 @@ mod tests {
                     stale: false,
                     breaker: BreakerState::Closed,
                     direct_validation: "verified".to_string(),
+                    direct_connectivity: "verified".to_string(),
+                    public_fallback_health: "available".to_string(),
                     public_circuit: BreakerState::Closed,
                     last_sample_at: None,
                     last_transition_at: None,

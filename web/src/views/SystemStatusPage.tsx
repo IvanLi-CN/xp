@@ -34,6 +34,10 @@ import {
 import { useQueryWithOfflineFallback } from "@/offline/useQueryWithOfflineFallback";
 import { formatBackendError } from "@/utils/backendErrorMessage";
 import { useApiCapability } from "../api/useApiCompatibility";
+import {
+	directValidationLabel,
+	peerConnectivityLabels,
+} from "./systemStatusLabels";
 
 export type SystemStatusSurfaceProps = {
 	status: AdminMeshStatus;
@@ -115,15 +119,6 @@ function endpointTransportLabel(peer: AdminMeshPeer) {
 		return "XHTTP · Reality fallback";
 	}
 	return "Endpoint transport unavailable";
-}
-
-function directValidationLabel(peer: AdminMeshPeer) {
-	return {
-		configured_unverified: "Direct not verified",
-		verified: "Direct verified",
-		transport_failed: "Direct transport failed",
-		protocol_rejected: "Direct protocol rejected",
-	}[peer.direct_validation ?? "configured_unverified"];
 }
 
 function meshTransportLabel(peer: AdminMeshPeer) {
@@ -408,6 +403,7 @@ function PeerRows({
 	rendezvousRoles: ReadonlyMap<string, ReadonlySet<RendezvousRole>>;
 }) {
 	const route = routeSummary(peer, peerNames, rendezvousRoles);
+	const connectivity = peerConnectivityLabels(peer);
 	const secondaryRoute = showMeshTransportReuse
 		? route.secondary
 		: reasonLabel(peer);
@@ -433,6 +429,9 @@ function PeerRows({
 					{peer.reverse_relay_state === "disabled_pending_rework"
 						? " · Native Reverse disabled pending rework"
 						: ""}
+				</p>
+				<p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">
+					{connectivity.direct} · {connectivity.public}
 				</p>
 				<p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">
 					{directValidationLabel(peer)} · Public circuit{" "}

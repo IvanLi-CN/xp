@@ -10,6 +10,43 @@ This glossary defines XP cluster terms and Mihomo subscription vocabulary.
 A node recorded in the current XP cluster's node directory.
 _Avoid_: Available backend, subscription node
 
+### Control-Plane Mesh
+
+**Direct Mesh**:
+A signed control-plane path from one XP node to another over that peer's managed-default
+VLESS/Reality endpoint.
+_Avoid_: Public Mesh, tunnel Mesh
+
+**Public Fallback**:
+The peer's registered public HTTPS `api_base_url` path, used by functional control-plane requests
+when Direct Mesh is not selected or unavailable.
+_Avoid_: Mesh path, direct peer link
+
+**Direct Connectivity**:
+Whether one node can reach another over Direct Mesh, independent of Public Fallback.
+_Avoid_: End-to-end reachability, peer availability
+
+**Direct Connectivity Probe**:
+A periodic or manual signed health observation that is valid only when it traverses Direct Mesh
+and never falls back to Public Fallback. The explicit Direct Mesh enablement preflight is a
+separate mechanism; it may use Public Fallback for an owner-approved no-endpoint voter.
+_Avoid_: Mesh probe with fallback, public probe
+
+**Public Fallback Probe**:
+A separate signed health observation over Public Fallback that measures fallback reachability
+without claiming Direct Connectivity.
+_Avoid_: Direct probe, Mesh probe
+
+**Active Path**:
+The control-plane route XP currently attributes to a peer for functional requests, derived from
+functional routing evidence rather than a diagnostic probe.
+_Avoid_: Last probe path, public fallback success
+
+**End-to-End Control-Plane Success**:
+A functional signed request that reaches its target through any permitted path; it is not evidence
+of Direct Connectivity.
+_Avoid_: Direct success, Mesh success
+
 ### Subscription Nodes
 
 **Subscription Node**:

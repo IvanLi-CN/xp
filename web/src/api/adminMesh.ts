@@ -28,6 +28,17 @@ export const MeshQualitySchema = z.enum([
 	"down",
 	"unknown",
 ]);
+export const MeshDirectConnectivitySchema = z.enum([
+	"verified",
+	"unavailable",
+	"not_applicable",
+	"unknown",
+]);
+export const MeshPublicFallbackHealthSchema = z.enum([
+	"available",
+	"unavailable",
+	"unknown",
+]);
 export const MeshBreakerStateSchema = z.enum([
 	"closed",
 	"open",
@@ -150,6 +161,8 @@ export const AdminMeshPeerSchema = z.object({
 	quality: MeshQualitySchema,
 	stale: z.boolean(),
 	breaker: MeshBreakerStateSchema,
+	direct_connectivity: MeshDirectConnectivitySchema.default("unknown"),
+	public_fallback_health: MeshPublicFallbackHealthSchema.default("unknown"),
 	direct_validation: z
 		.enum([
 			"configured_unverified",
@@ -207,6 +220,12 @@ export type AdminMeshStatus = z.infer<typeof AdminMeshStatusSchema>;
 export type AdminMeshPeer = z.infer<typeof AdminMeshPeerSchema>;
 export type AdminMeshBucket = z.infer<typeof AdminMeshBucketSchema>;
 export type MeshPreflightFailure = z.infer<typeof MeshPreflightFailureSchema>;
+export const AdminMeshProbeResultSchema = z.object({
+	accepted_node_ids: z.array(z.string()),
+	not_applicable_node_ids: z.array(z.string()).default([]),
+	revision: z.number(),
+});
+export type AdminMeshProbeResult = z.infer<typeof AdminMeshProbeResultSchema>;
 
 export function parseMeshPreflightFailures(
 	error: unknown,
@@ -255,7 +274,7 @@ export async function fetchAdminMeshStatus(
 export async function runAdminMeshProbes(
 	adminToken: string,
 	nodeIds: string[] = [],
-): Promise<{ accepted_node_ids: string[]; revision: number }> {
+): Promise<AdminMeshProbeResult> {
 	const response = await fetch("/api/admin/mesh/probes", {
 		method: "POST",
 		headers: {
@@ -266,9 +285,7 @@ export async function runAdminMeshProbes(
 		body: JSON.stringify({ node_ids: nodeIds }),
 	});
 	await throwIfNotOk(response);
-	return z
-		.object({ accepted_node_ids: z.array(z.string()), revision: z.number() })
-		.parse(await response.json());
+	return AdminMeshProbeResultSchema.parse(await response.json());
 }
 
 export async function updateAdminMeshConfig(

@@ -4,6 +4,7 @@ import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	AdminMeshConnectionUsageSchema,
 	AdminMeshPeerSchema,
+	AdminMeshProbeResultSchema,
 	parseMeshPreflightFailures,
 } from "./adminMesh";
 import { BackendApiError } from "./backendError";
@@ -20,6 +21,8 @@ function peerFixture() {
 		quality: "good",
 		stale: false,
 		breaker: "closed",
+		direct_connectivity: "unavailable",
+		public_fallback_health: "available",
 		direct_validation: "verified",
 		public_circuit: "closed",
 		last_sample_at: fixtureCatalog.timestamp.recent(),
@@ -105,6 +108,36 @@ describe("AdminMeshPeerSchema", () => {
 		expect(parsed.buckets[0]?.mesh_connection_starts).toBe(0);
 		expect(parsed.direct_validation).toBe("verified");
 		expect(parsed.public_circuit).toBe("closed");
+		expect(parsed.direct_connectivity).toBe("unavailable");
+		expect(parsed.public_fallback_health).toBe("available");
+	});
+
+	it("defaults missing direct and public probe facts to unknown", () => {
+		const legacy = AdminMeshPeerSchema.parse({
+			...peerFixture(),
+			direct_connectivity: undefined,
+			public_fallback_health: undefined,
+		});
+
+		expect(legacy.direct_connectivity).toBe("unknown");
+		expect(legacy.public_fallback_health).toBe("unknown");
+	});
+
+	it("parses old and new manual probe responses", () => {
+		expect(
+			AdminMeshProbeResultSchema.parse({
+				accepted_node_ids: ["node-a"],
+				revision: 2,
+			}).not_applicable_node_ids,
+		).toEqual([]);
+
+		const parsed = AdminMeshProbeResultSchema.parse({
+			accepted_node_ids: ["node-a"],
+			not_applicable_node_ids: ["node-b"],
+			revision: 3,
+		});
+		expect(parsed.accepted_node_ids).toEqual(["node-a"]);
+		expect(parsed.not_applicable_node_ids).toEqual(["node-b"]);
 	});
 
 	it("accepts a persisted reverse route without new assignment fields", () => {

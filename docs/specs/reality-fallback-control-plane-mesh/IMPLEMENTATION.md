@@ -8,6 +8,8 @@
   membership-bound validation receipts, and Native Reverse quarantine are implemented.
 - Lifecycle: active.
 - Catalog: supersedes `nbs5f`.
+- Catalog note: direct-only probe boundary is implemented; full cluster/resource e2e remains
+  pending.
 - Cluster Mesh Web control: implemented in Service config with a single cluster-wide Reality
   Direct Mesh switch, read-only Public/Native Reverse status, observer path summary,
   compatibility and freshness gates, confirmation for both directions, structured preflight
@@ -40,6 +42,28 @@ For the current release, Native Reverse is a retained diagnostic schema only: it
 assignment, probe, and runtime notes below are not active. The production path does not select,
 probe, reconcile, or dynamically install Native Reverse; existing topology is reported as
 `disabled_pending_rework`.
+
+## Direct-only Probe Boundary
+
+- Requirements: `REQ-DIRECT-PROBE`, `REQ-PUBLIC-PROBE`, `REQ-PROBE-TOPO`, `REQ-END-TO-END`,
+  `REQ-STATUS-SPLIT`, and `REQ-CONNECTION-BUDGET` are defined in `./SPEC.md`.
+- Implementation: complete for the node boundary. `probe_mesh_peer` is Direct-only, records no
+  `direct_validation` or active path, and marks ineligible peers `not_applicable`. A separate
+  five-minute public worker uses a side-effect-free signed public probe and writes only
+  `public_fallback_health`. Status exposes `direct_connectivity` and `public_fallback_health`;
+  manual probes return `accepted_node_ids` plus `not_applicable_node_ids`; the Web schema and
+  System Status render the two facts separately.
+- Verification: targeted Rust and Web tests pass. Full resource e2e, live cluster connection-count
+  verification, and a production rollout remain pending; no runtime connection count is claimed.
+- Expected steady topology after the direct-only probe cutover: leader `us` keeps 4 established
+  outbound Raft connections to `101`/`us2`/`us3`/`hk2`; a fifth attempt to `kr`'s CDN edge may
+  appear as an outbound socket but has no XP peer inbound and is not counted as established peer
+  connectivity. `101` keeps 0 steady outbound as repository (temporary 1–5 during initial
+  backfill/repair); `us2`/`us3`/`hk2` keep 0–1 outbound history deliveries each; `kr` is offline.
+  Established totals are 4–7 outbound and 4–7 logical inbound; with all three history deliveries
+  steady they are 7/7. Raw sockets differ because public ingress terminates at local
+  `cloudflared`/Traefik.
+- Verification: pending. No implementation or connection-count check for this cutover has run.
 
 ## Delivered
 

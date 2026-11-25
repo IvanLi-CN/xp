@@ -82,6 +82,25 @@ pub enum MeshQuality {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DirectConnectivity {
+    Verified,
+    Unavailable,
+    NotApplicable,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicFallbackHealth {
+    Available,
+    Unavailable,
+    #[default]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BreakerState {
@@ -136,6 +155,8 @@ pub struct MeshPeerTelemetry {
     pub peer_id: String,
     pub peer_name: String,
     pub last_path: Option<TelemetryPath>,
+    pub direct_connectivity: DirectConnectivity,
+    pub public_fallback_health: PublicFallbackHealth,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_route: Option<MeshActiveRoute>,
     pub last_sample_at: Option<String>,
@@ -712,6 +733,8 @@ fn history_source_peer(peer: &MeshPeerTelemetry, max_buckets: usize) -> MeshPeer
         peer_id: history_source_string(&peer.peer_id),
         peer_name: history_source_string(&peer.peer_name),
         last_path: peer.last_path,
+        direct_connectivity: peer.direct_connectivity,
+        public_fallback_health: peer.public_fallback_health,
         active_route: peer.active_route.as_ref().map(history_source_active_route),
         last_sample_at: history_source_option(&peer.last_sample_at),
         last_mesh_target: history_source_option(&peer.last_mesh_target),

@@ -90,10 +90,10 @@ export const Healthy: Story = {
 			(await canvas.findAllByText(/Direct verified/)).length,
 		).toBeGreaterThan(0);
 		await expect(
-			(await canvas.findAllByText(/Direct transport failed/)).length,
+			(await canvas.findAllByText(/Direct unavailable/)).length,
 		).toBeGreaterThan(0);
 		await expect(
-			(await canvas.findAllByText(/Direct not verified/)).length,
+			(await canvas.findAllByText(/Direct not applicable/)).length,
 		).toBeGreaterThan(0);
 		await expect(
 			(await canvas.findAllByText(/Public circuit closed/)).length,
@@ -146,6 +146,8 @@ export const CircuitIsolation: Story = {
 					? {
 							...peer,
 							current_path: "public" as const,
+							direct_connectivity: "unavailable" as const,
+							public_fallback_health: "available" as const,
 							direct_validation: "protocol_rejected" as const,
 							public_circuit: "open" as const,
 						}
@@ -156,7 +158,10 @@ export const CircuitIsolation: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			(await canvas.findAllByText(/Direct protocol rejected/)).length,
+			(await canvas.findAllByText(/Direct unavailable/)).length,
+		).toBeGreaterThan(0);
+		await expect(
+			(await canvas.findAllByText(/Admission protocol rejected/)).length,
 		).toBeGreaterThan(0);
 		await expect(
 			(await canvas.findAllByText(/Public circuit open/)).length,
@@ -268,10 +273,10 @@ export const DormantReverseTopology: Story = {
 				canvasElement.querySelector(
 					`[data-peer-row="${nodeId}"] [data-peer-cell="identity"]`,
 				)?.children.length,
-			).toBe(4);
+			).toBe(5);
 		}
 		for (const cell of canvasElement.querySelectorAll("[data-peer-cell]")) {
-			await expect(cell.children.length).toBeLessThanOrEqual(4);
+			await expect(cell.children.length).toBeLessThanOrEqual(5);
 			for (const line of cell.querySelectorAll(":scope > p")) {
 				await expect(getComputedStyle(line).whiteSpace).toBe("nowrap");
 			}

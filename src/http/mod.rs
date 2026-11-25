@@ -121,8 +121,8 @@ use mesh::{
     admin_internal_mesh_preflight, admin_internal_raft_client_write, admin_internal_reverse_probe,
     admin_internal_reverse_relay, admin_run_mesh_probes, admin_update_mesh_config,
     send_mesh_internal_capability_read, send_mesh_internal_read, send_mesh_internal_request,
-    send_mesh_internal_stream_read, spawn_mesh_probe_worker, spawn_reverse_assignment_worker,
-    spawn_reverse_link_probe_worker,
+    send_mesh_internal_stream_read, spawn_mesh_probe_worker, spawn_mesh_public_probe_worker,
+    spawn_reverse_assignment_worker, spawn_reverse_link_probe_worker,
 };
 use mihomo_import_api::admin_preview_user_mihomo_import;
 use node_delete::AdminNodeDeletePreviewEndpoint;
@@ -1064,6 +1064,7 @@ pub fn build_router_with_mesh_telemetry(
         admin_token_verifier: auth_state.verifier.clone(),
     };
     spawn_mesh_probe_worker(app_state.clone());
+    spawn_mesh_public_probe_worker(app_state.clone());
     spawn_reverse_assignment_worker(app_state.clone());
     spawn_reverse_link_probe_worker(app_state.clone());
     history_repository::spawn_repository_replica_worker(app_state.clone());

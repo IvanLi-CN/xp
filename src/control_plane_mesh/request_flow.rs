@@ -1,6 +1,29 @@
 use super::*;
 
 impl MeshAwareHttpClient {
+    /// Sends a signed public health probe without functional telemetry, breaker, active-path or
+    /// direct-validation side effects.
+    pub(crate) async fn send_public_probe(
+        &self,
+        peer: &MeshPeerTarget,
+        request: &MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+    ) -> Result<reqwest::Response, MeshRequestError> {
+        let url = join_url(&peer.public_base_url, &request.path_and_query, false)?;
+        let deadline = Instant::now() + request.total_budget;
+        self.send_public_signed(
+            &url,
+            request,
+            &peer.node_id,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            deadline,
+            false,
+        )
+        .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn send_public_signed(
         &self,

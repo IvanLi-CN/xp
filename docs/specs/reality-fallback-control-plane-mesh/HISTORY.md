@@ -4,6 +4,13 @@
 
 ## Decisions
 
+- Direct connectivity observation is direct-only. Functional Public Fallback remains a transport
+  and can still produce functional active-path evidence. The five-minute Public Fallback Probe
+  cannot produce Direct Connectivity, Direct validation, or active-path evidence. The 60-second
+  Direct probe runs only for eligible Direct Mesh peers; when no direct path exists, non-leader
+  peer connections idle out while leader Raft heartbeats remain. See
+  [ADR 0036](../../adr/0036-direct-only-mesh-observation.md).
+
 - The Web control now treats the Mesh write route as an independent compatibility contract,
   serializes the shared local lock map with Web Locks before persisting the local unknown result
   lock, rechecks the selected backend after lock acquisition, and cancels stale confirmation
