@@ -120,7 +120,7 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 - 单节点 20 MiB 预留覆盖 daily 90 天与 SQLite / WAL / 索引余量；daily 每节点每天最多 4 个
   6 KiB 分片（total 与四类小计在 shard 0，subject 明细分片），daily payload 上界约 2.2 MiB。
   2 GiB 配额上限最多覆盖 102 个节点；超过时预检必须拒绝，不得自动降低单节点预留。
-- 本地 1m / 5m 存储预算为 64 MiB / 节点；达到 80% 停止新采集并形成 gap，不裁剪已确认的
+- 本地 1m / 5m 存储预算为 96 MiB / 节点；达到 80% 停止新采集并形成 gap，不裁剪已确认的
   7 天数据。
 - 升级时必须把现有 `tcp_connection_usage.json` 的 7 天记录按 `(minute, endpoint_id)` 幂等导入为
   `inbound`，不重采样、不丢失已观测分钟。
