@@ -8,6 +8,7 @@
 - [0014-xhttp-endpoint-direct-mesh](../../adr/0014-xhttp-endpoint-direct-mesh.md)
 - [ADR 0015](../../adr/0015-directed-mesh-admission-and-peer-isolation.md)
 - [ADR 0017](../../adr/0017-bounded-raft-snapshot-admission.md)
+- [ADR 0036](../../adr/0036-direct-only-mesh-observation.md)
 
 ## Context and Scope
 
@@ -20,7 +21,10 @@
 ## 目标
 
 - 从唯一 managed-default VLESS-REALITY endpoint 派生 HTTPS Mesh 路径。
-- 先尝试 Mesh；路径不可用时再访问 peer 的公网地址。
+- 功能请求先尝试 Mesh；路径不可用时再访问 peer 的公网地址。
+- 声称测量 Direct Connectivity 的 probe 只走 Direct Mesh，不得回退到公网路径。
+- 没有合格 Direct Mesh 的 peer 不参与周期直连 probe；Raft heartbeat 只要求 leader→followers，
+  非 leader 的 peer 连接按需释放。
 - Mesh 请求在共享读准入边界内并发执行；集群 gate 切换取得独占写屏障，等待已准入请求完成后才改变状态，避免关闭后的新请求越过公网-only 边界。
 - 普通 state-machine apply 在 gate 已具备权威状态后只走原子 fast path；只有首次认证初始化和显式 Mesh 开关切换取得写屏障，不得让每条普通日志排队写锁。
 - 用 internal-auth v2、稳定 request ID 和 durable dedupe 保护内部调用。
@@ -57,7 +61,9 @@
   acknowledgement 的 HTTP 503，使发送方得到可重试的 unreachable，而不是把 admission contention
   作为 state-machine storage error 交给 OpenRaft。客户端取消不能提前释放已准入 snapshot 的
   reservation；真实存储错误与 snapshot fail-closed marker 语义保持不变。
-- 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
+- 所有功能性 Mesh 调用复用进程级 HTTP/2 传输；每个有资格 Direct Mesh 的 peer 在活跃时最多一条
+  稳态外部连接。没有 Direct Mesh 资格时，不得为了 public/direct probe 维持每 peer 常驻连接；
+  leader Raft heartbeat 仍按协议保持到 follower 的连接。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。
 
@@ -65,6 +71,8 @@
 
 - 不实现 VLESS protocol overlay、L3 VPN、mTLS 或每节点身份体系。
 - 不改变 join、bootstrap、浏览器管理入口或用户代理流量。
+- 不提供以 Public Fallback 成功冒充 Direct Connectivity 的节点间指标。
+- 不为没有 Direct Mesh 资格的 peer 维持周期全 peer probe。
 - 不为响应 body 或 SSE event 单独增加 MAC。
 - 不实现 nonce replay cache、强制选路、breaker reset 或自动修复。
 - 不保证 50 个以上 peer 的性能。
@@ -103,8 +111,10 @@
 - Mesh URL 只能由唯一 managed-default VLESS/Reality endpoint 与有效 `access_host` 推导；
   Vision/TCP 标记为 `vision_tcp`，XHTTP 标记为 `xhttp_reality_fallback`。XHTTP Direct Mesh
   发送既有签名 HTTP/2 控制面流量，不复用用户 XHTTP session。
-- 无端点、多个 endpoint、不可用的 `access_host` 或不支持控制面 Mesh 的 transport 时，使用
-  `Node.api_base_url`；已选择 Mesh 路径后，health ack 的认证或协议无效必须拒绝，不能降级到公网。
+- 无端点、多个 endpoint、不可用的 `access_host` 或不支持控制面 Mesh 的 transport 时，功能请求
+  使用 `Node.api_base_url`；Direct Connectivity Probe 对这类 peer 设置
+  `direct_connectivity=not_applicable`，不得回退 public。已选择 Mesh 路径后，health ack 的认证
+  或协议无效必须拒绝，不能降级到公网。
 - owner-approved private Docker voter 可以合法无 endpoint；它仍参与完整 voter 预检，但只通过
   注册的 `api_base_url` 验证和承载控制面请求。该例外不允许跳过 voter，也不改变其他已有
   managed endpoint 的 Direct-only 认证和协议失败边界。
@@ -126,6 +136,39 @@
 - 普通 `/api/admin/*` 始终要求管理员 Bearer token。
 - 普通内部 body 上限为 1 MiB；Raft/snapshot 上限为 8 MiB。
 
+### 直连观测与回退边界
+
+- **REQ-DIRECT-PROBE**: 宣称测量 Direct Connectivity 的 probe MUST 只通过 Direct Mesh 发送，
+  MUST NOT 使用 Public Fallback。无合格 Direct Mesh 资格（无 endpoint、歧义、不可用
+  `access_host`、transport 不支持或 Mesh gate 关闭）时，`direct_connectivity` MUST 为
+  `not_applicable`；有资格但 Direct 认证、协议或 transport 失败时为 `unavailable`；尚无样本时为
+  `unknown`。这些值是独立于 peer quality enum 的 Direct probe outcome，不得记为 Mesh 成功，
+  也不得更新 active path 或 `direct_validation`。`direct_validation` 属于显式
+  enablement/admission validation；`direct_connectivity` 是当前 Direct health 的权威信号。
+  手动 probe 的 `not_applicable_node_ids` MUST 列出未 dispatch 的 target；
+  它们不得出现在 `accepted_node_ids`。
+  Direct Mesh enablement 的显式有向预检不属于此 probe；它仍可按既有例外对无 endpoint 的
+  owner-approved private Docker voter 使用其注册 `api_base_url`。
+- **REQ-PUBLIC-PROBE**: Public Fallback probe MUST 独立于 Direct probe，只使用注册的 public
+  `api_base_url`，固定 5 分钟一次，结果只记录 `public_fallback_health`
+  （`available|unavailable|unknown`）；MUST NOT 写入 functional `fallback_success`、Direct
+  Connectivity、Direct validation 或 active path。
+- **REQ-PROBE-TOPO**: 没有合格 Direct Mesh 的 peer MUST NOT 参与 60 秒 Direct probe。
+  非 leader 且目标没有合格 Direct Mesh 的 outbound peer 连接 MUST 在没有 functional 请求时按
+  既有 idle timeout 释放；leader→followers 的 Raft heartbeat 保留；选举与 follower forwarding
+  按需建连。
+- **REQ-END-TO-END**: “Mesh 失败但 public 成功 = end-to-end 成功” MUST 只适用于 functional
+  signed control-plane request；MUST NOT 用于任何 Direct Connectivity probe、direct availability
+  bucket 或 `current_path`。
+- **REQ-STATUS-SPLIT**: API 与 System Status MUST 分别呈现 Direct Connectivity 和 Public
+  Fallback health，使用独立的 `direct_connectivity`
+  （`verified|unavailable|not_applicable|unknown`）与 `public_fallback_health`
+  （`available|unavailable|unknown`）字段；`direct_connectivity` 是当前 Direct health 的权威信号，
+  `direct_validation` 仅为 admission 诊断且 MUST NOT 覆盖它；public fallback probe 成功 MUST NOT
+  使 Direct 路径显示为 healthy，也 MUST NOT 覆盖 active path。
+- **REQ-CONNECTION-BUDGET**: 无 Direct Mesh 资格时，稳态控制面连接 MUST 只包含 leader Raft
+  outbound 和必要的 history source→repository；不得为 public probe 维持每 peer 常驻连接。
+
 ## 传输与幂等
 
 - 进程启动时只构造一份 Mesh transport bundle，并注入 Raft、leader forwarding、node
@@ -133,13 +176,14 @@
   endpoint probes 和 SSE fan-out；请求 handler 不得读取证书或创建短生命周期 client。
 - Mesh client 固定使用 HTTP/2 prior knowledge 与自适应 H2 flow-control window；后者仅在活动大流量时
   扩张，避免为每个 peer 常驻预留大快照缓冲。每个 origin 最多保留一条 idle connection，pool idle timeout
-  固定为 120 秒，不发送 HTTP/2 PING。60 秒 probe 是连接活跃性的唯一周期流量。
+  固定为 120 秒，不发送 HTTP/2 PING。60 秒 Direct probe 只对合格 Direct Mesh peer 运行；
+  没有 Direct Mesh 资格时不发送周期 peer probe，连接按既有 idle timeout 释放。
 - 公网 direct 使用独立、长期共享的兼容 client；每 origin 最多保留一条 idle connection，
   idle timeout 为 90 秒，并保留 ALPN 到 HTTP/1.1 的自动回退。严格 HTTP/2 prior-knowledge
   policy 不得污染公网 direct。Mesh H2 协商或 transport 失败按既有 breaker/fallback 规则处理；Native Reverse
   不属于通用请求回退路径。
 - Public signed health probes use a fixed 30-second request budget aligned with the production
-  Raft RPC TTL, including Mesh-disabled and public standby probes. Direct Mesh probes retain
+  Raft RPC TTL, including Mesh-disabled and public fallback probes. Direct Mesh probes retain
   five seconds. Expired public circuits admit only the existing health probe and close only on
   a verified signed response; timeout, missing ACK or invalid identity preserves the existing
   failure/backoff rules. All deployment modes share these bounds without a local override.
@@ -186,11 +230,15 @@
   `history_snapshots.mesh_telemetry` BLOB，验证 schema 后原子创建 JSON。迁移不删除或修改旧 BLOB，
   无效 legacy 数据必须使启动失败而不是重置遥测；通用 history storage 不得清理该 JSON 文件。
 - 每个 peer 保存 24 小时的 1 分钟 buckets；本机另外保存最近 200 个全局事件。
-- Mesh probe 每 60 秒；public standby 每 5 分钟。
-- public standby 记录可用性样本，但不得覆盖 peer 的当前 active path 或最近切换时间。
+- Direct Connectivity probe 每 60 秒，只对合格 Direct Mesh peer 运行；public fallback probe 独立，
+  每 5 分钟一次。两者不得共用成功或可用性样本。
+- public fallback probe 记录独立的 public 可用性样本，但不得覆盖 peer 的当前 active path、
+  Direct validation 或最近切换时间。
 - probe 有 jitter，最多并发四个 peer；三分钟无样本标记 stale。
 - `GET /api/admin/mesh/status` 对完整状态表示计算 ETag。
 - `POST /api/admin/mesh/probes` 只接受当前成员 node ID。
+- 手动 probe 只 dispatch 有合格 Direct Mesh 的 target；`accepted_node_ids` 只包含实际 dispatch
+  的 target，`not_applicable_node_ids` 列出未 dispatch 的成员。
 - `PUT /api/admin/mesh/config` 通过 Raft 写入 `{ "enabled": boolean }`；状态响应的
   `cluster_mesh_enabled` 表示当前集群值。关闭后既有公网请求继续工作，开启后新请求恢复
   Mesh 尝试。写入前必须确认当前 Raft membership 的 voter 与 learner 都支持该命令；旧
@@ -212,8 +260,10 @@
   `snapshot_error` 后的下一条成功快照不得被去重抑制；发生 broadcast lag 的订阅者重建 receiver 并
   重放当前更新，避免持续陈旧。最后一个订阅者离开后停止并要求下一次订阅重新采样。鉴权、路径和
   Mesh 状态 API 保持不变。
-- 质量枚举固定为 good、slow、unstable、down 与 unknown。
-- Mesh 失败但公网成功代表端到端成功，并单独记录 fallback。
+- 质量枚举固定为 good、slow、unstable、down 与 unknown；`direct_connectivity` 与
+  `public_fallback_health` 是独立 additive 字段，不得作为 quality enum 的成员。
+- 功能请求的 Mesh 失败但公网成功代表端到端成功，并单独记录 fallback；该结果不得作为 Direct
+  Connectivity probe、Direct availability bucket 或 active path 的依据。
 - 成功 Mesh response 的 HTTP version 与 socket tuple 只用于进程内识别连接；原始地址、源 IP、
   本地端口、远端端口和证书信息不得进入 telemetry、API、日志或 UI。
 - 每分钟 bucket 追加 `mesh_h2_requests` 与 `mesh_connection_starts`；peer 保存连接 generation、
@@ -223,9 +273,11 @@
   `current_connection_requests`、5m/1h 请求数与建连数、`last_connection_started_at`。
 - `health` 固定为：无传输样本时 unknown；HTTP/2 且最近 5 分钟建连不超过两次时 healthy；
   协议异常或最近 5 分钟建连超过两次时 churning。public fallback 保留最近一次 Mesh 复用证据。
-- status peer additive 返回 `direct_validation`、`public_circuit`。
-  `direct_validation` 的值为 `configured_unverified`、`verified`、`transport_failed` 或
-  `protocol_rejected`；旧客户端缺失字段按 unknown/closed 兼容解析。
+- status peer additive 返回 `direct_validation`、`public_circuit`、`direct_connectivity`、
+  `public_fallback_health`。`direct_validation` 的值为 `configured_unverified`、`verified`、
+  `transport_failed` 或 `protocol_rejected`；`direct_connectivity` 为
+  `verified`、`unavailable`、`not_applicable` 或 `unknown`；`public_fallback_health` 为
+  `available`、`unavailable` 或 `unknown`。旧客户端缺失这些字段时按 unknown/closed 兼容解析。
 - `PUT /api/admin/mesh/config` 的 `enabled=true` 在 Raft 写入前执行有向预检。失败返回
   `409 mesh_preflight_failed`，仅返回 sender、target 和 `invalid_target|transport|protocol`，
   不返回 socket、IP、证书或 endpoint URL 细节。整个预检由服务端 30 秒截止时间约束，
@@ -346,12 +398,29 @@ capability 与离线状态、源节点路径统计及 stale/unknown、私有 vot
 - **VER-OPS** covers: REQ-OPS. auth epoch 升级回归与隔离 host-managed fresh-join workload
   验证维护边界和服务身份保持。
 
+- **VER-DIRECT-PROBE** covers: REQ-DIRECT-PROBE. 新 eligible peer 无样本得到
+  `direct_connectivity=unknown`；成功得到 `verified`；Direct 失败、public 成功的 fixture 必须证明
+  没有 public probe 请求并得到 `unavailable`；无资格得到 `not_applicable`；`accepted_node_ids`
+  不含未 dispatch 的 target，且 active path 与 `direct_validation` 不变。
+- **VER-PUBLIC-PROBE** covers: REQ-PUBLIC-PROBE. public-only probe 必须只写入
+  `public_fallback_health`，functional `fallback_success`、Direct validation、active path 与
+  Direct connectivity 不变。
+- **VER-PROBE-TOPO** covers: REQ-PROBE-TOPO, REQ-CONNECTION-BUDGET. 无 Direct path 时不得启动
+  60 秒全 peer probe；非 leader 且目标没有合格 Direct Mesh 的 peer outbound 连接在 idle timeout
+  后消失，leader Raft heartbeat 保持，选举按需建连。
+- **VER-END-TO-END** covers: REQ-END-TO-END. 功能请求的 Mesh 失败 + public 成功仍为端到端成功；
+  同一 fixture 下的 Direct probe 不得成功。
+- **VER-STATUS-SPLIT** covers: REQ-STATUS-SPLIT. API/UI 同时呈现 `direct_connectivity=unavailable`
+  与 `public_fallback_health=available` 时，必须分别为不同状态，且不得把 public 结果写成
+  Direct `verified`；旧的 `direct_validation=verified` 不得覆盖当前的 `direct_connectivity`。
+
 ### 验收
 
 - body、method、URI、member、target、时间窗、v1 与未认证 Raft 均被拒绝。
 - 已执行但响应丢失的 mutation 复用 request ID，只返回第一次结果。
 - breaker、预算、ack、降级规则、header 清洗、SSRF/self-loop 与 body limit 有测试。
-- 真实流量和主动 probe 均更新本地 telemetry。
+- 真实功能流量、Direct probe 与 public fallback probe 均更新本地 telemetry，但必须写入各自独立的
+  路径/可用性字段；public 结果不得提升 Direct 样本。
 - 真实 TLS counting proxy 下，32 次顺序请求和 16 次并发 signed Mesh 请求仅产生一次 TCP
   accept，且所有 response 为 HTTP/2；主动断链后下一请求成功并将总 accept 增至两次。
 - 缩短的测试 policy 证明 idle timeout 会丢弃旧连接；H2 不可用只触发 transport fallback，
@@ -384,7 +453,9 @@ capability 与离线状态、源节点路径统计及 stale/unknown、私有 vot
   该 workload 若未暴露 committed、`last_applied` 或选举超时计数，不得把这些未测量指标写成
   运行证据；它们由 state-machine、admission 和 response-body 的确定性回归覆盖，直到有专门
   的多节点指标采集器为止。
-- Web 覆盖 healthy、fallback、slow、down、stale、empty、partial 与 50 peers。
+- Web 覆盖 Direct `verified`、Direct `unavailable`、Direct `not_applicable`、public fallback
+  `available`/`unavailable`、slow、down、stale、empty、partial 与 50 peers，并断言两类路径
+  不互相覆盖。
 - 后端通过 fmt、clippy 和 test；前端通过 lint、typecheck、Vitest、
   Storybook、Playwright 与 style budget。
 

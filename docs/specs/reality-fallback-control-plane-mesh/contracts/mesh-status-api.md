@@ -13,8 +13,20 @@
   `configured_unverified`, `verified`, `transport_failed`, or `protocol_rejected`; the latter
   uses the existing `closed`, `open`, `half_open`, or `disabled` breaker states. They are path
   facts from the current node, not cluster membership or user-inbound state.
+- `direct_connectivity` is the latest Direct Connectivity Probe outcome: `verified`, `unavailable`,
+  `not_applicable`, or `unknown`. It is the authoritative current Direct health signal; status and
+  Web MUST use it rather than stale `direct_validation`. It is separate from the peer quality enum.
+- A Direct or Public probe MUST NOT update `direct_validation`; only explicit enablement/admission
+  validation may do so. `direct_validation` remains diagnostic and must not mask
+  `direct_connectivity`.
+- `public_fallback_health` is the latest Public Fallback Probe outcome: `available`, `unavailable`,
+  or `unknown`. It is probe-only; functional public fallback remains `fallback_success`.
 - Peer quality is good, slow, unstable, down or unknown.
-- `current_path` and bucket `fallback_success` distinguish public fallback.
+- `current_path` reflects functional routing evidence only; a public fallback probe cannot update
+  it. A functional public fallback updates `current_path` and is recorded in bucket
+  `fallback_success`, which is not Direct Connectivity evidence.
+- Direct Connectivity and Public Fallback health are separate facts. A public fallback probe success
+  must never make a peer's Direct path appear healthy or overwrite its active path.
 - Computes ETag from the complete stable response representation (without its generated-at time)
   and returns `304 Not Modified` for a matching `If-None-Match`.
 - Public health does not expose URL, signatures or fallback diagnostics.
@@ -35,7 +47,13 @@
 - Optional `node_ids` selects remote current members; omission probes all peers.
 - Rejects local, unknown, duplicate and more than 50 node IDs.
 - All remote targets are derived from replicated member and endpoint state.
-- Returns accepted peer IDs and the telemetry revision.
+- Probes are Direct-only. A member without an eligible Direct Mesh path is not dispatched: it is
+  listed in `not_applicable_node_ids`, is absent from `accepted_node_ids`, and causes no public
+  request. `accepted_node_ids` contains only targets for which a Direct probe was dispatched.
+- The scheduled public fallback probe is separate, public-only, and runs every five minutes; it
+  writes `public_fallback_health`, not `fallback_success`, and does not update `current_path` or
+  `direct_validation`.
+- Returns `accepted_node_ids`, `not_applicable_node_ids` and the telemetry revision.
 
 ## Web consumer
 
@@ -46,6 +64,8 @@
 - New Web clients hide reuse details when the capability or optional object is absent. When
   present but unsampled, the peer row displays `Reuse data unavailable`; otherwise it displays
   `H2 · N req / M starts · gen G` inline with the current path.
+- New Web clients render `direct_connectivity` and `public_fallback_health` as separate status
+  facts; a public `available` state must never render the Direct path as `verified`.
 
 ## `PUT /api/admin/mesh/config`
 

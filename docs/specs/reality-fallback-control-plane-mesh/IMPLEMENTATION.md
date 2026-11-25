@@ -8,6 +8,8 @@
   membership-bound validation receipts, and Native Reverse quarantine are implemented.
 - Lifecycle: active.
 - Catalog: supersedes `nbs5f`.
+- Catalog note: direct-only probe boundary is specified and partially implemented; the remaining
+  gaps are tracked below.
 - Cluster Mesh Web control: implemented in Service config with a single cluster-wide Reality
   Direct Mesh switch, read-only Public/Native Reverse status, observer path summary,
   compatibility and freshness gates, confirmation for both directions, structured preflight
@@ -40,6 +42,31 @@ For the current release, Native Reverse is a retained diagnostic schema only: it
 assignment, probe, and runtime notes below are not active. The production path does not select,
 probe, reconcile, or dynamically install Native Reverse; existing topology is reported as
 `disabled_pending_rework`.
+
+## Direct-only Probe Boundary
+
+- Requirements: `REQ-DIRECT-PROBE`, `REQ-PUBLIC-PROBE`, `REQ-PROBE-TOPO`, `REQ-END-TO-END`,
+  `REQ-STATUS-SPLIT`, and `REQ-CONNECTION-BUDGET` are defined in `./SPEC.md`.
+- Implementation: partially implemented. The normal `probe_mesh_peer` already uses
+  `send_peer_direct_preflight`, which is Direct-only and does not update active path.
+  `probe_mesh_public_standby` already runs public-only with `updates_active_path=false`.
+- Remaining mismatch: `health_probe_public_only` forces the 60-second probe to public-only when
+  the Mesh gate is disabled; the worker still invokes it for every peer; `not_applicable` is not
+  represented in the probe response; and the separate `direct_connectivity` /
+  `public_fallback_health` telemetry, API and UI fields are not implemented. The normal probe also
+  currently records `direct_validation` through `send_peer_direct_preflight`; the cutover must stop
+  probe-driven validation writes. The scheduled public standby currently contributes to
+  `public_success` / `end_to_end_success` and the Public breaker, while `fallback_success` stays
+  false; those functional buckets must be isolated from `public_fallback_health`.
+- Expected steady topology after the direct-only probe cutover: leader `us` keeps 4 established
+  outbound Raft connections to `101`/`us2`/`us3`/`hk2`; a fifth attempt to `kr`'s CDN edge may
+  appear as an outbound socket but has no XP peer inbound and is not counted as established peer
+  connectivity. `101` keeps 0 steady outbound as repository (temporary 1–5 during initial
+  backfill/repair); `us2`/`us3`/`hk2` keep 0–1 outbound history deliveries each; `kr` is offline.
+  Established totals are 4–7 outbound and 4–7 logical inbound; with all three history deliveries
+  steady they are 7/7. Raw sockets differ because public ingress terminates at local
+  `cloudflared`/Traefik.
+- Verification: pending. No implementation or connection-count check for this cutover has run.
 
 ## Delivered
 
