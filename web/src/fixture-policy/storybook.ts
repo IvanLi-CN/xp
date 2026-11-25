@@ -246,6 +246,8 @@ function fiftyMeshPeers(): AdminMeshPeer[] {
 		quality: "good",
 		stale: false,
 		breaker: "closed",
+		direct_connectivity: "verified",
+		public_fallback_health: "available",
 		last_sample_at: fixtureCatalog.timestamp.recent(),
 		last_transition_at: fixtureCatalog.timestamp.baseline(),
 		availability_1h: fixtureCatalog.metric.availabilityFull(),

@@ -146,6 +146,8 @@ export const CircuitIsolation: Story = {
 					? {
 							...peer,
 							current_path: "public" as const,
+							direct_connectivity: "unavailable" as const,
+							public_fallback_health: "available" as const,
 							direct_validation: "protocol_rejected" as const,
 							public_circuit: "open" as const,
 						}

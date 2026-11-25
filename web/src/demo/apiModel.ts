@@ -160,6 +160,7 @@ export function createDemoApi(controls: DemoControls) {
 				mesh = { ...mesh, revision: mesh.revision + 1 };
 				return jsonResponse({
 					accepted_node_ids: mesh.peers.map((peer) => peer.node_id),
+					not_applicable_node_ids: [],
 					revision: mesh.revision,
 				});
 			}

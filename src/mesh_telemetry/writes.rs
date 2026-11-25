@@ -9,6 +9,69 @@ pub(super) struct SampleWriteOptions {
 }
 
 impl MeshTelemetryHandle {
+    pub async fn set_direct_connectivity(
+        &self,
+        peer_id: impl Into<String>,
+        peer_name: impl Into<String>,
+        outcome: DirectConnectivity,
+    ) -> anyhow::Result<()> {
+        self.set_probe_health(peer_id, peer_name, Some(outcome), None)
+            .await
+    }
+
+    pub async fn set_public_fallback_health(
+        &self,
+        peer_id: impl Into<String>,
+        peer_name: impl Into<String>,
+        outcome: PublicFallbackHealth,
+    ) -> anyhow::Result<()> {
+        self.set_probe_health(peer_id, peer_name, None, Some(outcome))
+            .await
+    }
+
+    async fn set_probe_health(
+        &self,
+        peer_id: impl Into<String>,
+        peer_name: impl Into<String>,
+        direct: Option<DirectConnectivity>,
+        public: Option<PublicFallbackHealth>,
+    ) -> anyhow::Result<()> {
+        let peer_id = peer_id.into();
+        let peer_name = peer_name.into();
+        let mut state = self.state.lock().await;
+        let peer = state
+            .persisted
+            .peers
+            .entry(peer_id.clone())
+            .or_insert_with(|| MeshPeerTelemetry {
+                peer_id,
+                ..MeshPeerTelemetry::default()
+            });
+        let mut changed = false;
+        if let Some(direct) = direct
+            && peer.direct_connectivity != direct
+        {
+            peer.direct_connectivity = direct;
+            changed = true;
+        }
+        if let Some(public) = public
+            && peer.public_fallback_health != public
+        {
+            peer.public_fallback_health = public;
+            changed = true;
+        }
+        if peer.peer_name != peer_name {
+            peer.peer_name = peer_name;
+            changed = true;
+        }
+        if !changed {
+            return Ok(());
+        }
+        state.persisted.revision += 1;
+        self.persist_immediately(&mut state, Instant::now())?;
+        Ok(())
+    }
+
     pub async fn record_sample(
         &self,
         peer_id: impl Into<String>,

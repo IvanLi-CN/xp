@@ -2,6 +2,7 @@ use super::resource_mesh_error::resource_mesh_error;
 use super::*;
 use crate::control_plane_mesh::{MeshRequestError, PeerDirectPath};
 use crate::http::join_capability::require_reverse_assignment_on_voters;
+use crate::mesh_telemetry::{DirectConnectivity, PublicFallbackHealth};
 use sha2::{Digest, Sha256};
 #[path = "mesh/bootstrap.rs"]
 mod bootstrap;
@@ -11,6 +12,7 @@ mod etag;
 mod liveness;
 #[path = "mesh/preflight.rs"]
 mod preflight;
+mod probes;
 #[path = "mesh/status.rs"]
 mod status;
 #[path = "mesh/stream_request.rs"]
@@ -23,6 +25,9 @@ pub(super) use liveness::{
     admin_internal_mesh_health, admin_internal_reverse_probe, spawn_reverse_link_probe_worker,
 };
 pub(super) use preflight::{admin_internal_mesh_preflight, run_mesh_enable_preflight};
+pub(super) use probes::{
+    admin_run_mesh_probes, spawn_mesh_probe_worker, spawn_mesh_public_probe_worker,
+};
 pub(super) use stream_request::{send_mesh_internal_request_raw, send_mesh_internal_stream_read};
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
@@ -66,6 +71,8 @@ struct AdminMeshPeerStatus {
     stale: bool,
     breaker: BreakerState,
     direct_validation: String,
+    direct_connectivity: String,
+    public_fallback_health: String,
     public_circuit: BreakerState,
     last_sample_at: Option<String>,
     last_transition_at: Option<String>,
@@ -466,71 +473,6 @@ pub(super) async fn admin_internal_reverse_relay(
         _mesh_gate_read,
         relay_deadline,
     )
-}
-#[derive(Debug, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub(super) struct AdminMeshProbeRequest {
-    #[serde(default)]
-    node_ids: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub(super) struct AdminMeshProbeResponse {
-    accepted_node_ids: Vec<String>,
-    revision: u64,
-}
-pub(super) fn spawn_mesh_probe_worker(state: AppState) {
-    tokio::spawn(async move {
-        // Probe evidence is local operational telemetry, not replicated cluster state.
-        let jitter_secs = u64::from(rand::random::<u8>() % 10);
-        tokio::time::sleep(Duration::from_secs(jitter_secs)).await;
-        let mut interval = tokio::time::interval(Duration::from_secs(60));
-        let mut probe_round = 0_u64;
-        loop {
-            interval.tick().await;
-            probe_round = probe_round.wrapping_add(1);
-            let probe_public_standby = probe_round % 5 == 1;
-            let node_ids = {
-                let store = state.store.lock().await;
-                store
-                    .list_nodes()
-                    .into_iter()
-                    .filter(|node| node.node_id != state.cluster.node_id)
-                    .map(|node| node.node_id)
-                    .collect::<Vec<_>>()
-            };
-            let probe_gate = state.mesh_telemetry.probe_gate();
-            stream::iter(node_ids)
-                .map(|node_id| {
-                    let state = state.clone();
-                    let probe_gate = probe_gate.clone();
-                    async move {
-                        let Ok(_permit) = probe_gate.acquire_owned().await else {
-                            return;
-                        };
-                        if let Err(error) = probe_mesh_peer(&state, &node_id).await {
-                            tracing::debug!(
-                                peer_id = %node_id,
-                                ?error,
-                                "scheduled mesh probe failed"
-                            );
-                        }
-                        if probe_public_standby
-                            && let Err(error) = probe_mesh_public_standby(&state, &node_id).await
-                        {
-                            tracing::debug!(
-                                peer_id = %node_id,
-                                ?error,
-                                "scheduled public standby probe failed"
-                            );
-                        }
-                    }
-                })
-                .buffer_unordered(4)
-                .collect::<Vec<_>>()
-                .await;
-        }
-    });
 }
 #[derive(Debug, Deserialize)]
 struct ReverseCapabilityResponse {
@@ -1077,6 +1019,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         let mesh_url = target.mesh_base_url.clone();
         let local_mesh_enabled = cluster_mesh_enabled && local_mesh_gate_enabled;
         let mesh_enabled = mesh_url.is_some() && local_mesh_enabled;
+        let direct_probe_configured = mesh_url.is_some() && local_mesh_enabled;
         let peer = telemetry_by_peer.get(node.node_id.as_str()).copied();
         let direct_validation = state.mesh_client.direct_validation_state_for(&target).await;
         let mesh_reason = if !local_mesh_enabled {
@@ -1138,6 +1081,18 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
             stale: status::is_mesh_peer_stale(peer, now),
             breaker: breaker_for_mesh_target(mesh_enabled, peer.and_then(|peer| peer.breaker)),
             direct_validation: direct_validation_label(direct_validation).to_string(),
+            direct_connectivity: direct_connectivity_label(if direct_probe_configured {
+                peer.map_or(DirectConnectivity::Unknown, |peer| peer.direct_connectivity)
+            } else {
+                DirectConnectivity::NotApplicable
+            })
+            .to_string(),
+            public_fallback_health: public_fallback_health_label(
+                peer.map_or(PublicFallbackHealth::Unknown, |peer| {
+                    peer.public_fallback_health
+                }),
+            )
+            .to_string(),
             public_circuit: peer
                 .and_then(|peer| peer.public_breaker)
                 .unwrap_or(BreakerState::Closed),
@@ -1205,8 +1160,21 @@ fn direct_validation_label(
     }
 }
 
-fn health_probe_public_only(requested_public_only: bool, mesh_enabled: bool) -> bool {
-    requested_public_only || !mesh_enabled
+fn direct_connectivity_label(state: DirectConnectivity) -> &'static str {
+    match state {
+        DirectConnectivity::Verified => "verified",
+        DirectConnectivity::Unavailable => "unavailable",
+        DirectConnectivity::NotApplicable => "not_applicable",
+        DirectConnectivity::Unknown => "unknown",
+    }
+}
+
+fn public_fallback_health_label(state: PublicFallbackHealth) -> &'static str {
+    match state {
+        PublicFallbackHealth::Available => "available",
+        PublicFallbackHealth::Unavailable => "unavailable",
+        PublicFallbackHealth::Unknown => "unknown",
+    }
 }
 
 #[cfg(test)]
@@ -1224,12 +1192,6 @@ mod tests {
         assert_eq!(breaker_for_mesh_target(true, None), BreakerState::Closed);
     }
 
-    #[test]
-    fn health_probe_follows_the_mesh_gate() {
-        assert!(health_probe_public_only(false, false));
-        assert!(!health_probe_public_only(false, true));
-        assert!(health_probe_public_only(true, true));
-    }
     #[test]
     fn mesh_availability_uses_only_the_last_24_hours() {
         let now = xp_test_fixtures::baseline_timestamp()
@@ -1316,89 +1278,6 @@ pub(super) async fn admin_get_mesh_status(
         return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response();
     }
     (StatusCode::OK, [(header::ETAG, etag)], Json(snapshot)).into_response()
-}
-pub(super) async fn admin_run_mesh_probes(
-    Extension(state): Extension<AppState>,
-    ApiJson(request): ApiJson<AdminMeshProbeRequest>,
-) -> Result<Json<AdminMeshProbeResponse>, ApiError> {
-    let nodes = {
-        let store = state.store.lock().await;
-        store.list_nodes()
-    };
-    let operator_probe_permit = state
-        .mesh_telemetry
-        .try_acquire_operator_probe_batch()
-        .ok_or_else(|| ApiError::conflict("a mesh probe batch is already running"))?;
-    let accepted_node_ids = if request.node_ids.is_empty() {
-        nodes
-            .into_iter()
-            .filter(|node| node.node_id != state.cluster.node_id)
-            .map(|node| node.node_id)
-            .collect::<Vec<_>>()
-    } else {
-        if request.node_ids.len() > 50 {
-            return Err(ApiError::invalid_request(
-                "at most 50 mesh probe targets are allowed",
-            ));
-        }
-        let known = nodes
-            .into_iter()
-            .map(|node| node.node_id)
-            .collect::<BTreeSet<_>>();
-        if request.node_ids.iter().collect::<BTreeSet<_>>().len() != request.node_ids.len()
-            || request
-                .node_ids
-                .iter()
-                .any(|id| !known.contains(id) || id == &state.cluster.node_id)
-        {
-            return Err(ApiError::invalid_request(
-                "mesh probe contains an unknown or local node",
-            ));
-        }
-        request.node_ids
-    };
-    for node_id in &accepted_node_ids {
-        state
-            .mesh_telemetry
-            .record_event(
-                node_id,
-                "probe_requested",
-                "operator requested an immediate mesh probe",
-            )
-            .await
-            .map_err(|error| ApiError::internal(format!("persist mesh probe request: {error}")))?;
-    }
-    let state_for_probes = state.clone();
-    let probe_node_ids = accepted_node_ids.clone();
-    let probe_gate = state.mesh_telemetry.probe_gate();
-    tokio::spawn(async move {
-        let _operator_probe_permit = operator_probe_permit;
-        stream::iter(probe_node_ids)
-            .map(|node_id| {
-                let state = state_for_probes.clone();
-                let probe_gate = probe_gate.clone();
-                async move {
-                    let Ok(_permit) = probe_gate.acquire_owned().await else {
-                        return;
-                    };
-                    if let Err(error) = probe_mesh_peer(&state, &node_id).await {
-                        tracing::debug!(
-                            peer_id = %node_id,
-                            ?error,
-                            "immediate mesh probe did not complete"
-                        );
-                    }
-                }
-            })
-            .buffer_unordered(4)
-            .collect::<Vec<_>>()
-            .await;
-    });
-    let revision = state.mesh_telemetry.snapshot().await.revision;
-    Ok(Json(AdminMeshProbeResponse {
-        accepted_node_ids,
-        revision,
-    }))
 }
 async fn mesh_peer_target(state: &AppState, node_id: &str) -> Result<MeshPeerTarget, ApiError> {
     let (node, endpoints) = {
@@ -1560,79 +1439,4 @@ pub(super) async fn send_mesh_internal_request(
     )
     .await?;
     response.map_err(|error| ApiError::gateway_timeout(error.to_string()))
-}
-
-pub(super) async fn probe_mesh_peer(state: &AppState, node_id: &str) -> Result<(), ApiError> {
-    run_mesh_health_probe(state, node_id, false).await
-}
-pub(super) async fn probe_mesh_public_standby(
-    state: &AppState,
-    node_id: &str,
-) -> Result<(), ApiError> {
-    run_mesh_health_probe(state, node_id, true).await
-}
-async fn run_mesh_health_probe(
-    state: &AppState,
-    node_id: &str,
-    public_only: bool,
-) -> Result<(), ApiError> {
-    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_deref() else {
-        return Err(ApiError::internal("cluster CA key is not available"));
-    };
-    let public_only = health_probe_public_only(
-        public_only,
-        state.reconcile.mesh_gate().load(Ordering::Acquire),
-    );
-    let mut peer = mesh_peer_target(state, node_id).await?;
-    let client = state.mesh_client.clone();
-    let request = MeshRequest {
-        method: Method::GET,
-        path_and_query: "/api/admin/_internal/mesh/health".to_string(),
-        content_type: None,
-        body: Vec::new(),
-        total_budget: if public_only {
-            crate::control_plane_mesh::PUBLIC_HEALTH_PROBE_BUDGET
-        } else {
-            Duration::from_secs(5)
-        },
-        allow_ambiguous_fallback: false,
-        request_id: crate::id::new_ulid_string(),
-        route: internal_auth::InternalRoute::HealthV2,
-        cluster_id: state.cluster.cluster_id.clone(),
-        sender_id: state.cluster.node_id.clone(),
-        updates_active_path: !public_only,
-    };
-    if public_only {
-        peer.mesh_base_url = None;
-        let response = client
-            .send_peer_request(&peer, request, ca_key_pem, &state.cluster_ca_pem)
-            .await
-            .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
-        preflight::consume_bounded_preflight_body(response)
-            .await
-            .map_err(|error| match error {
-                preflight::MeshPreflightBodyError::Transport(message) => {
-                    ApiError::gateway_timeout(message)
-                }
-                preflight::MeshPreflightBodyError::Oversized => {
-                    ApiError::gateway_timeout("mesh preflight response body is oversized")
-                }
-            })?;
-    } else {
-        let result = client
-            .send_peer_direct_preflight(&peer, request, ca_key_pem, &state.cluster_ca_pem)
-            .await;
-        let response = result.map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
-        preflight::consume_bounded_preflight_body(response)
-            .await
-            .map_err(|error| match error {
-                preflight::MeshPreflightBodyError::Transport(message) => {
-                    ApiError::gateway_timeout(message)
-                }
-                preflight::MeshPreflightBodyError::Oversized => {
-                    ApiError::gateway_timeout("mesh preflight response body is oversized")
-                }
-            })?;
-    }
-    Ok(())
 }

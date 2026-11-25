@@ -5,8 +5,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::sync::{Mutex, RwLock};
-
 use crate::{
     domain::{Endpoint, Node},
     internal_auth::{self, InternalRoute, RequestContext},
@@ -18,6 +16,7 @@ use crate::{
     protocol::validate_reality_server_name,
     reverse_mesh::{ReverseMeshAssignment, ReverseRelayEnvelope, ReverseRole, route_budget},
 };
+use tokio::sync::{Mutex, RwLock};
 
 mod admission;
 mod circuit;
@@ -307,6 +306,7 @@ impl MeshAwareHttpClient {
         )
         .await
     }
+    #[cfg(test)]
     pub(crate) async fn send_peer_direct_preflight(
         &self,
         peer: &MeshPeerTarget,
