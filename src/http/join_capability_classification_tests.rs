@@ -9,7 +9,7 @@ use super::{VoterClassification, check_classification};
 fn entry(raft_node_id: u64, state: VoterCapabilityState) -> VoterClassification {
     VoterClassification {
         raft_node_id,
-        node_id: format!("node-{raft_node_id}"),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
         state,
     }
 }

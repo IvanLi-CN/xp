@@ -87,48 +87,84 @@ async fn signed_preview_and_rejection_leave_unreachable_voter_state_unchanged() 
             },
         ),
     ]);
-    for spare_id in [
+    let identifier_ulid_a_spare =
+        raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_a()).unwrap();
+    store
+        .lock()
+        .await
+        .upsert_node(Node {
+            node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+            node_name: xp_test_fixtures::label_extra_node().to_owned(),
+            access_host: xp_test_fixtures::secondary_host().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        })
+        .unwrap();
+    voters.insert(identifier_ulid_a_spare);
+    nodes.insert(
+        identifier_ulid_a_spare,
+        RaftNodeMeta {
+            name: xp_test_fixtures::label_extra_node().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
+        },
+    );
+    let identifier_ulid_b_spare =
+        raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_b()).unwrap();
+    store
+        .lock()
+        .await
+        .upsert_node(Node {
+            node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+            node_name: xp_test_fixtures::label_node1().to_owned(),
+            access_host: xp_test_fixtures::secondary_host().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        })
+        .unwrap();
+    voters.insert(identifier_ulid_b_spare);
+    nodes.insert(
+        identifier_ulid_b_spare,
+        RaftNodeMeta {
+            name: xp_test_fixtures::label_node1().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
+        },
+    );
+    // Persisted evidence keeps an unanswering spare from blocking the barrier.
+    let report = crate::capability_evidence::NodeCapabilityReport::new(
+        crate::version::VERSION,
+        vec![crate::http::join_capability::MEMBERSHIP_LIFECYCLE_CAPABILITY.to_string()],
+        chrono::Utc::now().to_rfc3339(),
+    );
+    let note = crate::capability_evidence::encode_capability_report_note(
         xp_test_fixtures::identifier_ulid_a(),
+        &report,
+    )
+    .unwrap();
+    store
+        .lock()
+        .await
+        .apply_command_and_save(DesiredStateCommand::CompatNoop { note })
+        .unwrap();
+    // Same for the second spare.
+    let report = crate::capability_evidence::NodeCapabilityReport::new(
+        crate::version::VERSION,
+        vec![crate::http::join_capability::MEMBERSHIP_LIFECYCLE_CAPABILITY.to_string()],
+        chrono::Utc::now().to_rfc3339(),
+    );
+    let note = crate::capability_evidence::encode_capability_report_note(
         xp_test_fixtures::identifier_ulid_b(),
-    ] {
-        let spare = raft_node_id_from_ulid(spare_id).unwrap();
-        store
-            .lock()
-            .await
-            .upsert_node(Node {
-                node_id: spare_id.to_owned(),
-                node_name: format!("spare-{spare}"),
-                access_host: xp_test_fixtures::secondary_host().to_owned(),
-                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
-                quota_limit_bytes: 0,
-                quota_reset: NodeQuotaReset::default(),
-            })
-            .unwrap();
-        voters.insert(spare);
-        nodes.insert(
-            spare,
-            RaftNodeMeta {
-                name: format!("spare-{spare}"),
-                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
-                raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
-            },
-        );
-        // These spares cannot answer a probe. Fresh signed persisted evidence is what keeps them
-        // from blocking the barrier, and this fixture is the end-to-end proof of that path.
-        let report = crate::capability_evidence::NodeCapabilityReport::new(
-            crate::version::VERSION,
-            vec![crate::http::join_capability::MEMBERSHIP_LIFECYCLE_CAPABILITY.to_string()],
-            chrono::Utc::now().to_rfc3339(),
-        );
-        let note =
-            crate::capability_evidence::encode_capability_report_note(spare_id, &report).unwrap();
-        // The store helper persists the command like a committed Raft write would.
-        store
-            .lock()
-            .await
-            .apply_command_and_save(DesiredStateCommand::CompatNoop { note })
-            .unwrap();
-    }
+        &report,
+    )
+    .unwrap();
+    store
+        .lock()
+        .await
+        .apply_command_and_save(DesiredStateCommand::CompatNoop { note })
+        .unwrap();
     metrics.membership_config = Arc::new(openraft::StoredMembership::new(
         None,
         openraft::Membership::new(vec![voters], nodes),
@@ -367,45 +403,84 @@ async fn confirmed_unreachable_voter_unblocks_eviction_of_the_other_gone_voter()
             },
         ),
     ]);
-    for spare_id in [
+    let identifier_ulid_a_spare =
+        raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_a()).unwrap();
+    store
+        .lock()
+        .await
+        .upsert_node(Node {
+            node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+            node_name: xp_test_fixtures::label_extra_node().to_owned(),
+            access_host: xp_test_fixtures::secondary_host().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        })
+        .unwrap();
+    voters.insert(identifier_ulid_a_spare);
+    nodes.insert(
+        identifier_ulid_a_spare,
+        RaftNodeMeta {
+            name: xp_test_fixtures::label_extra_node().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
+        },
+    );
+    let identifier_ulid_b_spare =
+        raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_b()).unwrap();
+    store
+        .lock()
+        .await
+        .upsert_node(Node {
+            node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+            node_name: xp_test_fixtures::label_node1().to_owned(),
+            access_host: xp_test_fixtures::secondary_host().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        })
+        .unwrap();
+    voters.insert(identifier_ulid_b_spare);
+    nodes.insert(
+        identifier_ulid_b_spare,
+        RaftNodeMeta {
+            name: xp_test_fixtures::label_node1().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
+        },
+    );
+    // Persisted evidence keeps an unanswering spare from blocking the barrier.
+    let report = crate::capability_evidence::NodeCapabilityReport::new(
+        crate::version::VERSION,
+        vec![crate::http::join_capability::MEMBERSHIP_LIFECYCLE_CAPABILITY.to_string()],
+        chrono::Utc::now().to_rfc3339(),
+    );
+    let note = crate::capability_evidence::encode_capability_report_note(
         xp_test_fixtures::identifier_ulid_a(),
+        &report,
+    )
+    .unwrap();
+    store
+        .lock()
+        .await
+        .apply_command_and_save(DesiredStateCommand::CompatNoop { note })
+        .unwrap();
+    // Same for the second spare.
+    let report = crate::capability_evidence::NodeCapabilityReport::new(
+        crate::version::VERSION,
+        vec![crate::http::join_capability::MEMBERSHIP_LIFECYCLE_CAPABILITY.to_string()],
+        chrono::Utc::now().to_rfc3339(),
+    );
+    let note = crate::capability_evidence::encode_capability_report_note(
         xp_test_fixtures::identifier_ulid_b(),
-    ] {
-        let spare = raft_node_id_from_ulid(spare_id).unwrap();
-        store
-            .lock()
-            .await
-            .upsert_node(Node {
-                node_id: spare_id.to_owned(),
-                node_name: format!("spare-{spare}"),
-                access_host: xp_test_fixtures::secondary_host().to_owned(),
-                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
-                quota_limit_bytes: 0,
-                quota_reset: NodeQuotaReset::default(),
-            })
-            .unwrap();
-        voters.insert(spare);
-        nodes.insert(
-            spare,
-            RaftNodeMeta {
-                name: format!("spare-{spare}"),
-                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
-                raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
-            },
-        );
-        let report = crate::capability_evidence::NodeCapabilityReport::new(
-            crate::version::VERSION,
-            vec![crate::http::join_capability::MEMBERSHIP_LIFECYCLE_CAPABILITY.to_string()],
-            chrono::Utc::now().to_rfc3339(),
-        );
-        let note =
-            crate::capability_evidence::encode_capability_report_note(spare_id, &report).unwrap();
-        store
-            .lock()
-            .await
-            .apply_command_and_save(DesiredStateCommand::CompatNoop { note })
-            .unwrap();
-    }
+        &report,
+    )
+    .unwrap();
+    store
+        .lock()
+        .await
+        .apply_command_and_save(DesiredStateCommand::CompatNoop { note })
+        .unwrap();
 
     let mut metrics = openraft::RaftMetrics::new_initial(local_raft_node_id);
     metrics.current_term = 1;

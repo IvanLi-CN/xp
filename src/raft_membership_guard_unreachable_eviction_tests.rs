@@ -10,7 +10,7 @@ async fn unreachable_voter_eviction_requires_a_previewed_mapped_voter_and_endpoi
     let store = Arc::new(Mutex::new(
         JsonSnapshotStore::load_or_init(StoreInit {
             data_dir: temp.path().to_path_buf(),
-            bootstrap_node_id: Some(local_node_id),
+            bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_d().to_owned()),
             bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
             bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
             bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
@@ -21,7 +21,7 @@ async fn unreachable_voter_eviction_requires_a_previewed_mapped_voter_and_endpoi
         .lock()
         .await
         .upsert_node(Node {
-            node_id: target_node_id.clone(),
+            node_id: xp_test_fixtures::identifier_ulid_e().to_owned(),
             node_name: xp_test_fixtures::secondary_node_name().to_owned(),
             access_host: xp_test_fixtures::secondary_host().to_owned(),
             api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
@@ -40,26 +40,33 @@ async fn unreachable_voter_eviction_requires_a_previewed_mapped_voter_and_endpoi
         )
         .unwrap();
     // Two healthy spare voters keep the fixture above the post-eviction voter floor.
-    let spares = [
-        xp_test_fixtures::identifier_ulid_a(),
-        xp_test_fixtures::identifier_ulid_b(),
-    ];
-    let mut spare_voters = Vec::new();
-    for spare_id in spares {
-        store
-            .lock()
-            .await
-            .upsert_node(Node {
-                node_id: spare_id.to_owned(),
-                node_name: format!("spare-{}", &spare_id[spare_id.len() - 4..]),
-                access_host: xp_test_fixtures::secondary_host().to_owned(),
-                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
-                quota_limit_bytes: 0,
-                quota_reset: NodeQuotaReset::default(),
-            })
-            .unwrap();
-        spare_voters.push(raft_node_id_from_ulid(spare_id).unwrap());
-    }
+    let first_spare = raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_a()).unwrap();
+    let second_spare = raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_b()).unwrap();
+    let spare_voters = [first_spare, second_spare];
+    store
+        .lock()
+        .await
+        .upsert_node(Node {
+            node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+            node_name: xp_test_fixtures::label_extra_node().to_owned(),
+            access_host: xp_test_fixtures::secondary_host().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        })
+        .unwrap();
+    store
+        .lock()
+        .await
+        .upsert_node(Node {
+            node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+            node_name: xp_test_fixtures::label_node1().to_owned(),
+            access_host: xp_test_fixtures::secondary_host().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        })
+        .unwrap();
 
     let mut metrics = openraft::RaftMetrics::new_initial(local_raft_node_id);
     metrics.state = openraft::ServerState::Leader;
@@ -88,7 +95,7 @@ async fn unreachable_voter_eviction_requires_a_previewed_mapped_voter_and_endpoi
         nodes.insert(
             *spare,
             NodeMeta {
-                name: format!("spare-{spare}"),
+                name: xp_test_fixtures::label_extra_node().to_owned(),
                 api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
                 raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
             },
@@ -174,7 +181,7 @@ async fn unreachable_voter_eviction_rejects_a_confirmed_set_below_the_voter_floo
     let store = Arc::new(Mutex::new(
         JsonSnapshotStore::load_or_init(StoreInit {
             data_dir: temp.path().to_path_buf(),
-            bootstrap_node_id: Some(local_node_id),
+            bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_d().to_owned()),
             bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
             bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
             bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
@@ -185,7 +192,7 @@ async fn unreachable_voter_eviction_rejects_a_confirmed_set_below_the_voter_floo
         .lock()
         .await
         .upsert_node(Node {
-            node_id: target_node_id.clone(),
+            node_id: xp_test_fixtures::identifier_ulid_e().to_owned(),
             node_name: xp_test_fixtures::secondary_node_name().to_owned(),
             access_host: xp_test_fixtures::secondary_host().to_owned(),
             api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
@@ -243,7 +250,7 @@ async fn unreachable_voter_eviction_rejects_the_target_in_the_confirmed_set() {
     let store = Arc::new(Mutex::new(
         JsonSnapshotStore::load_or_init(StoreInit {
             data_dir: temp.path().to_path_buf(),
-            bootstrap_node_id: Some(local_node_id),
+            bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_d().to_owned()),
             bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
             bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
             bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
@@ -254,7 +261,7 @@ async fn unreachable_voter_eviction_rejects_the_target_in_the_confirmed_set() {
         .lock()
         .await
         .upsert_node(Node {
-            node_id: target_node_id.clone(),
+            node_id: xp_test_fixtures::identifier_ulid_e().to_owned(),
             node_name: xp_test_fixtures::secondary_node_name().to_owned(),
             access_host: xp_test_fixtures::secondary_host().to_owned(),
             api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
@@ -282,33 +289,52 @@ async fn unreachable_voter_eviction_rejects_the_target_in_the_confirmed_set() {
             },
         ),
     ]);
-    for spare_id in [
-        xp_test_fixtures::identifier_ulid_a(),
-        xp_test_fixtures::identifier_ulid_b(),
-    ] {
-        let spare = raft_node_id_from_ulid(spare_id).unwrap();
-        store
-            .lock()
-            .await
-            .upsert_node(Node {
-                node_id: spare_id.to_owned(),
-                node_name: format!("spare-{spare}"),
-                access_host: xp_test_fixtures::secondary_host().to_owned(),
-                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
-                quota_limit_bytes: 0,
-                quota_reset: NodeQuotaReset::default(),
-            })
-            .unwrap();
-        voters.insert(spare);
-        nodes.insert(
-            spare,
-            NodeMeta {
-                name: format!("spare-{spare}"),
-                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
-                raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
-            },
-        );
-    }
+    let identifier_ulid_a_spare =
+        raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_a()).unwrap();
+    store
+        .lock()
+        .await
+        .upsert_node(Node {
+            node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+            node_name: xp_test_fixtures::label_extra_node().to_owned(),
+            access_host: xp_test_fixtures::secondary_host().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        })
+        .unwrap();
+    voters.insert(identifier_ulid_a_spare);
+    nodes.insert(
+        identifier_ulid_a_spare,
+        NodeMeta {
+            name: xp_test_fixtures::label_extra_node().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
+        },
+    );
+    let identifier_ulid_b_spare =
+        raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_b()).unwrap();
+    store
+        .lock()
+        .await
+        .upsert_node(Node {
+            node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+            node_name: xp_test_fixtures::label_node1().to_owned(),
+            access_host: xp_test_fixtures::secondary_host().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        })
+        .unwrap();
+    voters.insert(identifier_ulid_b_spare);
+    nodes.insert(
+        identifier_ulid_b_spare,
+        NodeMeta {
+            name: xp_test_fixtures::label_node1().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
+        },
+    );
 
     let mut metrics = openraft::RaftMetrics::new_initial(local_raft_node_id);
     metrics.state = openraft::ServerState::Leader;
