@@ -298,7 +298,15 @@ pub(crate) async fn probe_mesh_public_standby(
         .await
     {
         Ok(response) => match preflight::consume_bounded_preflight_body(response).await {
-            Ok(()) => PublicFallbackHealth::Available,
+            Ok(()) => {
+                // Keep the probe out of functional telemetry, but let its verified signed body
+                // recover an expired public circuit as documented by the transport contract.
+                state
+                    .mesh_client
+                    .record_public_health_success(&target.node_id)
+                    .await;
+                PublicFallbackHealth::Available
+            }
             Err(preflight::MeshPreflightBodyError::Transport(message)) => {
                 tracing::debug!(
                     peer_id = %target.node_id,
