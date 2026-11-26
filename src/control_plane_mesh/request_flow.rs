@@ -24,6 +24,33 @@ impl MeshAwareHttpClient {
         .await
     }
 
+    /// Marks a verified signed public health response as authoritative recovery evidence for an
+    /// expired public circuit. The probe itself remains isolated from functional telemetry, active
+    /// path selection, and direct validation.
+    pub(crate) async fn record_public_health_success(&self, peer_id: &str) -> bool {
+        let previous = self.circuits.public_state(peer_id).await;
+        let operation_id = self.circuits.next_operation();
+        let Some(breaker) = self
+            .circuits
+            .record_public_success_at(peer_id, operation_id)
+            .await
+        else {
+            return false;
+        };
+        if let Some(telemetry) = &self.telemetry {
+            let _ = telemetry
+                .set_public_breaker(
+                    peer_id.to_owned(),
+                    breaker,
+                    (previous != breaker).then(|| {
+                        "Public circuit closed: verified signed health response".to_owned()
+                    }),
+                )
+                .await;
+        }
+        true
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn send_public_signed(
         &self,
