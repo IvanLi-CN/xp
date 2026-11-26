@@ -630,8 +630,8 @@ export function TcpConnectionUsageView({
 						<h2 className="xp-card-title">TCP connection count</h2>
 					) : null}
 					<p className="text-sm text-muted-foreground">
-						Per-minute ESTABLISHED inbound TCP connections on this node&apos;s
-						business endpoint ports.
+						All established TCP sockets on this node, split into inbound,
+						control plane, runtime, and other outbound.
 					</p>
 					<p className="text-sm text-muted-foreground">
 						Window: {formatDateTime(report.window_start)} {"->"}{" "}

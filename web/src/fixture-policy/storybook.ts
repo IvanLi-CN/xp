@@ -101,23 +101,19 @@ function fullSiteFields(
 	| "subjects"
 > {
 	const resolution = window === "24h" ? "1m" : window === "7d" ? "5m" : "daily";
-	const stepMinutes =
-		resolution === "1m" ? 1 : resolution === "5m" ? 5 : 24 * 60;
+	const stepMinutes = resolution === "1m" ? 1 : resolution === "5m" ? 5 : 60;
 	const stepMs = stepMinutes * ONE_MINUTE_MS;
+	const windowMinutes = totalMinutesFor(window);
+	const bucketCount = Math.max(2, Math.floor(windowMinutes / stepMinutes));
 	const startMs = new Date(windowStart).getTime();
-	const buckets = new Map<number, number>();
-	for (const series of perEndpointSeries) {
-		for (const point of series.series) {
-			if (point.count === 0) continue;
-			const ms = new Date(point.minute).getTime();
-			if (Number.isNaN(ms)) continue;
-			const bucket = startMs + Math.floor((ms - startMs) / stepMs) * stepMs;
-			buckets.set(bucket, (buckets.get(bucket) ?? 0) + point.count);
-		}
-	}
-	const entries = [...buckets.entries()].sort(
-		(left, right) => left[0] - right[0],
-	);
+	// Broad daily rhythm: four wide waves across the window, not a per-minute comb.
+	const wave = (index: number) => {
+		const phase = (index / bucketCount) * Math.PI * 4;
+		return Math.max(
+			0,
+			Math.round(8 + 5 * Math.sin(phase) + 2 * Math.sin(phase / 3)),
+		);
+	};
 	const bucketPoint = (bucket: number, value: number) => ({
 		bucket_start: new Date(bucket).toISOString(),
 		min: value,
@@ -128,9 +124,16 @@ function fullSiteFields(
 		truncated: false,
 		partial: false,
 	});
-	const totalPoints = entries.map(([bucket, value]) =>
-		bucketPoint(bucket, value),
+	const totalPoints = Array.from({ length: bucketCount }, (_, index) =>
+		bucketPoint(startMs + index * stepMs, wave(index)),
 	);
+	const scale = (factor: number) =>
+		totalPoints.map((point) => ({
+			...point,
+			min: Math.round(point.min * factor),
+			avg: Math.round(point.avg * factor),
+			max: Math.round(point.max * factor),
+		}));
 	return {
 		quality: "complete",
 		reasons: [],
@@ -149,17 +152,22 @@ function fullSiteFields(
 			{
 				class: "inbound",
 				approximate: resolution === "daily",
-				points: totalPoints,
+				points: scale(0.55),
 			},
 			{
 				class: "control_plane",
 				approximate: resolution === "daily",
-				points: totalPoints.map((point) => ({
-					...point,
-					min: 1,
-					avg: 1,
-					max: 1,
-				})),
+				points: scale(0.25),
+			},
+			{
+				class: "outbound_runtime",
+				approximate: resolution === "daily",
+				points: scale(0.15),
+			},
+			{
+				class: "outbound_other",
+				approximate: resolution === "daily",
+				points: scale(0.05),
 			},
 		],
 		subjects: perEndpointSeries.map((series) => ({

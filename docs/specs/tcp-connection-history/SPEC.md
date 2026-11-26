@@ -393,11 +393,15 @@ capability `admin.node-tcp-connections-history` 为 additive，按目标节点�
 
 ## 计划资产（Plan assets）
 
-- Directory: `docs/specs/tcp-connection-history/assets/`（含 `connections-default.png` 组件证据）
+- Directory: `docs/specs/tcp-connection-history/assets/`（`connections-default.png` 组件证据、
+  `demo-node-details.png` demo 页面证据）
 - In-plan references: None.
 
 ## Visual Evidence
 
 `storybook_canvas`(`components-tcpconnectionusageview--default`)：total 主线、类别堆叠、
 24h/7d/30d/90d 窗口与 quality/current/peak 徽标。partial/truncated 与 unsupported 由同一组件
-按响应字段渲染（见 `assets`）。
+按响应字段渲染（见 `assets/connections-default.png`）。
+
+`ui_demo`(`/demo/nodes/node-fixture-32?demo=normal&tab=tcpConnections`)：Node Details 中
+`TCP connections` tab 的真实页面组合，见 `assets/demo-node-details.png`。

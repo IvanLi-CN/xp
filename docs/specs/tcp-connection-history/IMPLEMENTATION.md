@@ -35,8 +35,10 @@
   daily payload 绑定、subject 分页上限与 registry subject 过滤。
 - 已覆盖：旧 Web schema 仍可解析 additive 响应；旧 target 降级；registry 过滤 24h/7d 与 30d/90d；
   mirror 重跑不降级 full-class 分钟。
-- 已覆盖：full-site 图表渲染、legacy 回退解析、窗口对齐含 total/classes/subjects。
-- 已覆盖：30d/90d 窗口按钮、Storybook 全站 story；视觉证据见 `assets/connections-default.png`。
+- 已覆盖：full-site 图表渲染、legacy 回退解析、窗口对齐含 total/classes/subjects；
+  demo mock 已提供 total/四类/subjects 与 24h/7d/30d/90d。
+- 已覆盖：30d/90d 窗口按钮、Storybook 全站 story；视觉证据见
+  `assets/connections-default.png` 与 `assets/demo-node-details.png`。
 
 ## Validation
 
