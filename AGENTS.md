@@ -163,6 +163,19 @@
   startup. Status requests do not traverse retained history tables and run off Tokio workers.
   Capacity synchronization checks configured repository membership before locking the replica or
   querying SQLite; ordinary sources and former repositories do not advertise archive capacity.
+  Request windows and stored metadata are separate contracts: a query window is bounded to two
+  years, while stored Coverage, gaps and watermarks only require an ordered range. An
+  operator-confirmed permanent gap may start at the Unix epoch and keeps affected queries
+  `partial`; it never rejects the query itself. Record pages keep the published
+  `(observed_start, source_node_id, source_epoch, stream, sequence)` continuation order and are
+  served by a `subject_node_id`-leading page index. Query SQL must stay sargable: no
+  `(?N IS NULL OR column ...)` forms, and every time filter also supplies an `observed_start`
+  lower bound widened by `MAX_OBSERVED_SPAN_SECONDS`, which ingestion enforces. Whole-repository
+  Coverage uses independent index boundary seeks rather than a full index aggregate. The
+  response body and the `complete`/`partial` decision share one predicate. Intersecting gaps are
+  reported and counted, and a prefix gap starting at the Unix epoch is always reported and counted:
+  its lower bound is unprovable, so filtering it by intersection would let a narrow window claim
+  `complete` while records are still missing.
   A `history_truncated=true` initial-backfill repair page may cross an existing source watermark
   once per stream over an expired retained prefix. One page may require multiple wire-bounded
   responses; each response has its own content digest, while the per-stream allowance remains until

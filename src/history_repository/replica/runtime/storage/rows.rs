@@ -61,6 +61,12 @@ impl StoredRecord {
         let (observed_start_unix_seconds, observed_end_unix_seconds) =
             retention::record_time_range(self);
         let aggregate_metadata = retention::aggregate_metadata(self);
+        enforce_observation_span(
+            &self.stream,
+            &self.source_node_id,
+            observed_start_unix_seconds,
+            observed_end_unix_seconds,
+        )?;
         Ok(RepositoryHistoryRecordRow {
             source_node_id: self.source_node_id.clone(),
             source_epoch: self.source_epoch,
@@ -143,4 +149,28 @@ impl From<StoredRecord> for RepositoryHistoryRecord {
             tombstone: record.tombstone,
         }
     }
+}
+
+/// Reject one record whose Observation Span exceeds what the query planner is told to assume.
+///
+/// The record query widens its indexed `observed_start` lower bound by
+/// `MAX_OBSERVED_SPAN_SECONDS` because `observed_end` cannot lead an index seek. That widening is
+/// only correct while no stored row is wider, so the bound is enforced here — at the single point
+/// where an in-memory record becomes a durable row — rather than trusted from today's data shape.
+fn enforce_observation_span(
+    stream: &str,
+    source_node_id: &str,
+    observed_start_unix_seconds: u64,
+    observed_end_unix_seconds: u64,
+) -> Result<(), RepositoryRuntimeError> {
+    let span = observed_end_unix_seconds.saturating_sub(observed_start_unix_seconds);
+    if span <= crate::state::history_storage::MAX_OBSERVED_SPAN_SECONDS {
+        return Ok(());
+    }
+    Err(RepositoryRuntimeError::Storage(format!(
+        "history record observation span {span}s exceeds the {} s bound \
+         (source {source_node_id}, stream {stream}, \
+         observed {observed_start_unix_seconds}..{observed_end_unix_seconds})",
+        crate::state::history_storage::MAX_OBSERVED_SPAN_SECONDS
+    )))
 }

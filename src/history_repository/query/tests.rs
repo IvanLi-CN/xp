@@ -241,3 +241,53 @@ fn candidate(repository_id: &str, skew: i64, gaps: Vec<QueryGap>) -> QueryCandid
     )
     .expect("candidate")
 }
+
+#[test]
+fn an_epoch_zero_permanent_gap_never_rejects_the_query_window() {
+    // This is the production shape: explicit prefix loss records a permanent gap from the Unix
+    // epoch. The gap is a stored fact, so it must not be validated against the request range
+    // limit, and a normal one-day window must still be answered as `partial`.
+    let epoch_zero_gap = QueryGap::new_with_reason(
+        0,
+        1_794_067_329,
+        true,
+        Some("operator_confirmed_unrecoverable_prefix".into()),
+    )
+    .expect("a stored epoch-0 permanent gap is a valid metadata range");
+    assert_eq!(epoch_zero_gap.range().start_unix_seconds(), 0);
+
+    let coverage = QueryCoverage::new(
+        QueryRange::metadata(1_785_787_200, 1_795_661_000).unwrap(),
+        QueryRange::metadata(1_791_614_457, 1_795_661_000).unwrap(),
+    );
+    let ready = QueryCandidate::ready("repo", coverage, [], [epoch_zero_gap.clone()], 0)
+        .expect("candidate accepts the stored gap");
+    let request = HistoryQuery::new(1_795_574_400, 1_795_660_800, 100).expect("one-day window");
+    // The stored prefix gap is still reported: its lower bound is unprovable, so its end cannot
+    // prove the missing records were observed before this window.
+    let plan = QuerySelector::select(&request, [ready]).expect("query must not be rejected");
+    assert!(
+        plan.gaps()
+            .iter()
+            .any(|gap| gap.range().start_unix_seconds() == 0)
+    );
+    assert_eq!(plan.completeness(), Completeness::Partial);
+}
+
+#[test]
+fn only_gaps_intersecting_the_request_window_are_reported() {
+    let inside = QueryGap::new(120, 130, true).unwrap();
+    let before = QueryGap::new(10, 20, true).unwrap();
+    let after = QueryGap::new(500, 600, true).unwrap();
+    let coverage = QueryCoverage::new(
+        QueryRange::metadata(0, 1_000).unwrap(),
+        QueryRange::metadata(0, 1_000).unwrap(),
+    );
+    let ready =
+        QueryCandidate::ready("repo", coverage, [], [inside.clone(), before, after], 0).unwrap();
+    let request = HistoryQuery::new(100, 200, 100).expect("bounded query");
+    let plan = QuerySelector::select(&request, [ready]).expect("selection");
+    assert_eq!(plan.gaps(), std::slice::from_ref(&inside));
+    // Intersecting gaps still drive completeness; the dropped ones never did.
+    assert_eq!(plan.completeness(), Completeness::Partial);
+}

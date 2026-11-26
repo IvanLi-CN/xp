@@ -40,9 +40,10 @@ pub(crate) use metrics::{RepositoryDeliveryMetrics, SourceDeliveryAttempt};
 use repository::segment_phase_sql;
 #[allow(unused_imports)]
 pub(crate) use repository::{
-    RepositoryExpiredTombstone, RepositoryHistoryCompactionCursor, RepositoryHistoryCoverage,
-    RepositoryHistoryRecordRow, RepositoryHistorySegmentMetadataRow, RepositoryHistorySegmentRow,
-    RepositoryHistorySequenceSummaryBlock, RepositoryHistoryTombstone, RepositoryReplicaMutation,
+    MAX_OBSERVED_SPAN_SECONDS, RepositoryExpiredTombstone, RepositoryHistoryCompactionCursor,
+    RepositoryHistoryCoverage, RepositoryHistoryRecordRow, RepositoryHistorySegmentMetadataRow,
+    RepositoryHistorySegmentRow, RepositoryHistorySequenceSummaryBlock, RepositoryHistoryTombstone,
+    RepositoryReplicaMutation,
 };
 #[allow(unused_imports)]
 pub(crate) use source_journal::{
@@ -521,7 +522,12 @@ fn ensure_schema(connection: &mut Connection) -> Result<()> {
                    source_epoch, stream, sequence);
              CREATE INDEX IF NOT EXISTS repository_history_records_coverage
                ON repository_history_records
-                  (subject_node_id, is_tombstone, observed_start, observed_end, received_at);",
+                  (subject_node_id, is_tombstone, observed_start, observed_end, received_at);
+             CREATE INDEX IF NOT EXISTS repository_history_records_page
+               ON repository_history_records (subject_node_id, observed_start, source_node_id,
+                                              source_epoch, stream, sequence);
+             CREATE INDEX IF NOT EXISTS repository_history_records_received
+               ON repository_history_records (is_tombstone, received_at);",
         )
         .map_err(sqlite_error)?;
     connection

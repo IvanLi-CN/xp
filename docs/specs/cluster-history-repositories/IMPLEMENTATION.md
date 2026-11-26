@@ -6,6 +6,21 @@
 
 - 查询候选按完整的时间区间、永久性和原因去重后计算 256 条 gap 上限；有界插入不累积重复恢复证据，仓库与本地候选共享此规则。不同原因仍分别报告，超过 256 条独立 gap 继续拒绝查询。
 
+### Query window and stored metadata (ADR 0037)
+
+- Design: accepted in ADR 0037 and locked in `SPEC.md` as `REQ-QUERY-WINDOW`,
+  `REQ-QUERY-PUSHDOWN`, `REQ-QUERY-PAGE-ORDER`, `REQ-QUERY-COVERAGE-SEEK`,
+  `REQ-QUERY-GAP-SCOPE` and `REQ-OBSERVATION-SPAN`.
+- Implementation: not yet started. No behavior in this section is active.
+- Observed defect: repository `101`, the only Ready member, rejected every query window with
+  `invalid_request: RangeTooLarge` because a stored epoch-0 permanent gap was validated against the
+  request range limit. Callers discarded the peer response and reported `local_only`.
+- Measured baseline before the fix, on a synthetic 400k-row store shaped like production:
+  subject page 878 ms, global Coverage 1140 ms, record query with a released cache 71.6 s.
+- Planned verification: `EXPLAIN QUERY PLAN` assertions for each predicate branch, a zero-length
+  query window against a store holding an epoch-0 gap, an intersecting-gap scope test, and an
+  ingest rejection test for observations exceeding the span bound.
+
 - Implementation: Repository runtime, administration and rollout integration are active
 - Lifecycle: active
 - Catalog note: Initiative #248

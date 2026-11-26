@@ -8,9 +8,13 @@ mod expired_tombstone_tests;
 mod original_backfill;
 mod payload_migration;
 mod prefix_recovery;
+pub(super) mod query_sql;
 mod segments;
 mod stale_recovery_storage;
 mod summary;
+use query_sql::{
+    coverage_row, repository_history_coverage_boundaries, repository_history_records_sql,
+};
 #[cfg(test)]
 pub(crate) use segments::segment_phase_sql;
 pub(crate) use summary::RepositoryHistorySequenceSummaryBlock;
@@ -218,6 +222,24 @@ pub(crate) struct RepositoryHistoryCoverage {
     pub(crate) observed_end_unix_seconds: u64,
     pub(crate) received_start_unix_seconds: u64,
     pub(crate) received_end_unix_seconds: u64,
+}
+
+/// The bounded upper bound of one record's Observation Span. `observed_end` decides whether a
+/// record intersects a query window, but `observed_end` is not an index prefix, so the storage
+/// query widens the indexed `observed_start` lower bound by this value and lets the exact
+/// `observed_end` predicate keep the result correct. Ingest rejects anything wider, which is what
+/// makes the widened bound provably safe rather than merely true of today's data.
+pub(crate) const MAX_OBSERVED_SPAN_SECONDS: u64 = 7 * 24 * 60 * 60;
+
+/// One bounded page request against the retained record table.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RepositoryHistoryRecordFilter<'a> {
+    pub(crate) subject_node_id: Option<&'a str>,
+    pub(crate) schema_id: Option<&'a str>,
+    pub(crate) start_unix_seconds: Option<u64>,
+    pub(crate) end_unix_seconds: Option<u64>,
+    pub(crate) offset: usize,
+    pub(crate) limit: usize,
 }
 
 impl HistoryStorage {
@@ -668,37 +690,55 @@ impl HistoryStorage {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<RepositoryHistoryRecordRow>> {
+        self.query_repository_history_records(RepositoryHistoryRecordFilter {
+            subject_node_id,
+            schema_id,
+            start_unix_seconds,
+            end_unix_seconds,
+            offset,
+            limit,
+        })
+    }
+
+    fn query_repository_history_records(
+        &self,
+        filter: RepositoryHistoryRecordFilter<'_>,
+    ) -> Result<Vec<RepositoryHistoryRecordRow>> {
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(Vec::new());
         };
-        let mut statement = connection
-            .prepare(
-                "
-                SELECT source_node_id, source_epoch, stream, sequence, subject_node_id,
-                       observer_node_id, schema_id, schema_version, record_key, is_tombstone,
-                       observed_start, observed_end, received_at, payload
-                FROM repository_history_records
-                WHERE is_tombstone = 0
-                  AND (?1 IS NULL OR subject_node_id = ?1)
-                  AND (?2 IS NULL OR schema_id = ?2)
-                  AND (?3 IS NULL OR observed_end >= ?3)
-                  AND (?4 IS NULL OR observed_start <= ?4)
-                ORDER BY observed_start, source_node_id, source_epoch, stream, sequence
-                LIMIT ?5 OFFSET ?6
-                ",
-            )
-            .map_err(sqlite_error)?;
+        let sql = repository_history_records_sql(
+            filter.subject_node_id,
+            filter.schema_id,
+            filter.start_unix_seconds,
+        );
+        let mut statement = connection.prepare(sql).map_err(sqlite_error)?;
+        // Every branch binds ?1..?6; a time window adds the span-widened bound as ?7.
+        let mut bound: Vec<rusqlite::types::Value> = vec![
+            rusqlite::types::Value::from(filter.subject_node_id.map(str::to_owned)),
+            rusqlite::types::Value::from(filter.schema_id.map(str::to_owned)),
+            rusqlite::types::Value::from(
+                filter
+                    .start_unix_seconds
+                    .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+            ),
+            rusqlite::types::Value::from(
+                filter
+                    .end_unix_seconds
+                    .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+            ),
+            rusqlite::types::Value::from(i64::try_from(filter.limit).unwrap_or(i64::MAX)),
+            rusqlite::types::Value::from(i64::try_from(filter.offset).unwrap_or(i64::MAX)),
+        ];
+        if filter.start_unix_seconds.is_some() {
+            bound.push(rusqlite::types::Value::from(
+                i64::try_from(MAX_OBSERVED_SPAN_SECONDS).unwrap_or(i64::MAX),
+            ));
+        }
         let rows = statement
             .query_map(
-                params![
-                    subject_node_id,
-                    schema_id,
-                    start_unix_seconds.map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
-                    end_unix_seconds.map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
-                    i64::try_from(limit).unwrap_or(i64::MAX),
-                    i64::try_from(offset).unwrap_or(i64::MAX),
-                ],
+                rusqlite::params_from_iter(bound),
                 repository_history_record_row,
             )
             .map_err(sqlite_error)?;
@@ -719,32 +759,17 @@ impl HistoryStorage {
             diagnostic.finish();
             return Ok(None);
         };
-        let sql = if subject_node_id.is_some() {
-            COVERAGE_SUBJECT_SQL
-        } else {
-            "
-                SELECT MIN(observed_start), MAX(observed_end), MIN(received_at), MAX(received_at)
-                FROM repository_history_records INDEXED BY repository_history_records_coverage
-                WHERE is_tombstone = 0 AND ?1 IS NULL
-            "
+        // A subject-scoped request is a single covering-index seek. A whole-repository request
+        // cannot be one aggregate without scanning the entire index, so it asks each column's own
+        // index for its boundary value instead; four boundaries cost four seeks, not one scan.
+        let result = match subject_node_id {
+            Some(subject_node_id) => connection
+                .query_row(COVERAGE_SUBJECT_SQL, params![subject_node_id], |row| {
+                    coverage_row(row, 0)
+                })
+                .map_err(sqlite_error),
+            None => repository_history_coverage_boundaries(connection),
         };
-        let result = connection
-            .query_row(sql, params![subject_node_id], |row| {
-                let observed_start = row.get::<_, Option<i64>>(0)?;
-                let Some(observed_start) = observed_start else {
-                    return Ok(None);
-                };
-                Ok(Some(RepositoryHistoryCoverage {
-                    observed_start_unix_seconds: u64::try_from(observed_start).unwrap_or(u64::MAX),
-                    observed_end_unix_seconds: u64::try_from(row.get::<_, i64>(1)?)
-                        .unwrap_or(u64::MAX),
-                    received_start_unix_seconds: u64::try_from(row.get::<_, i64>(2)?)
-                        .unwrap_or(u64::MAX),
-                    received_end_unix_seconds: u64::try_from(row.get::<_, i64>(3)?)
-                        .unwrap_or(u64::MAX),
-                }))
-            })
-            .map_err(sqlite_error);
         if result.is_ok() {
             diagnostic.finish();
         }

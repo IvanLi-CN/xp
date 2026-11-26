@@ -8,11 +8,11 @@ impl RepositoryReplicaRuntime {
         local: LocalQueryMetadata,
     ) -> Result<RepositoryHistoryQueryResponse, RepositoryRuntimeError> {
         let local_coverage = QueryCoverage::new(
-            QueryRange::new(
+            QueryRange::metadata(
                 local.observed_start_unix_seconds,
                 local.observed_end_unix_seconds,
             )?,
-            QueryRange::new(
+            QueryRange::metadata(
                 local.observed_start_unix_seconds,
                 local.observed_end_unix_seconds,
             )?,
@@ -92,11 +92,11 @@ impl RepositoryReplicaRuntime {
         local: LocalQueryMetadata,
     ) -> Result<RepositoryHistoryQueryResponse, RepositoryRuntimeError> {
         let coverage = QueryCoverage::new(
-            QueryRange::new(
+            QueryRange::metadata(
                 local.observed_start_unix_seconds,
                 local.observed_end_unix_seconds,
             )?,
-            QueryRange::new(
+            QueryRange::metadata(
                 local.observed_start_unix_seconds,
                 local.observed_end_unix_seconds,
             )?,

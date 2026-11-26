@@ -4,6 +4,7 @@ use super::*;
 
 mod node_history_latency_tests;
 mod payload_encoding_tests;
+mod query_plan_tests;
 #[path = "segment_index_tests.rs"]
 mod segment_index_tests;
 #[path = "source_scoped_summary_tests.rs"]

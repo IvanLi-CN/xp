@@ -120,10 +120,13 @@ impl HistoryStorageDiagnosticOperation {
                 "history.sqlite3-wal"
             ),
             Self::RepositoryHistoryCoverage => concat!(
-                "SELECT MIN(observed_start), MAX(observed_end), MIN(received_at), ",
+                "subject: SELECT MIN(observed_start), MAX(observed_end), MIN(received_at), ",
                 "MAX(received_at) FROM repository_history_records INDEXED BY ",
                 "repository_history_records_coverage WHERE is_tombstone = 0 ",
-                "AND optional subject_node_id = ?1"
+                "AND optional subject_node_id = ?1; whole repository: four independent ",
+                "index-boundary seeks over repository_history_records_keyset, ",
+                "repository_history_records_export_filter and ",
+                "repository_history_records_received"
             ),
             Self::RepositoryHistoryIncompleteAggregate => concat!(
                 "SELECT MIN(aggregate_start), MAX(aggregate_end) FROM ",
