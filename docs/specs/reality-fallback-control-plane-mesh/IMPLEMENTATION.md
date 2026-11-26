@@ -53,6 +53,10 @@ probe, reconcile, or dynamically install Native Reverse; existing topology is re
   `public_fallback_health`. Status exposes `direct_connectivity` and `public_fallback_health`;
   manual probes return `accepted_node_ids` plus `not_applicable_node_ids`; the Web schema and
   System Status render the two facts separately.
+- Public recovery: the same five-minute signed public probe does not write functional telemetry,
+  active-path, or direct-validation state, but a verified signed response body closes an expired
+  public circuit. A failed probe leaves the existing circuit/backoff state unchanged and only
+  reports `public_fallback_health=unavailable`.
 - Verification: targeted Rust and Web tests pass. Full resource e2e, live cluster connection-count
   verification, and a production rollout remain pending; no runtime connection count is claimed.
 - Expected steady topology after the direct-only probe cutover: leader `us` keeps 4 established
