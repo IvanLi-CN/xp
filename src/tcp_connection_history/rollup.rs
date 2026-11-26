@@ -167,6 +167,40 @@ pub fn aggregate_points(
     series
 }
 
+/// Per-minute series used by the 24h window. Each minute is already an instantaneous sample,
+/// so the point carries min = avg = max = total with one observed sample.
+pub fn minute_series(minutes: &[StoredMinute]) -> PointSeries {
+    let mut series = PointSeries::default();
+    for minute in minutes {
+        let mut point = empty_point(minute.minute, 1);
+        accumulate(&mut point, minute.total);
+        point.truncated = minute.truncated;
+        point.partial = minute.partial;
+        series.total.push(point);
+
+        let mut class_totals = BTreeMap::<ConnectionClass, u32>::new();
+        for ((class, subject), count) in &minute.counts {
+            class_totals
+                .entry(*class)
+                .and_modify(|value| *value = value.saturating_add(*count))
+                .or_insert(*count);
+            let mut subject_point = empty_point(minute.minute, 1);
+            accumulate(&mut subject_point, *count);
+            series
+                .subjects
+                .entry((*class, subject.clone()))
+                .or_default()
+                .push(subject_point);
+        }
+        for (class, value) in class_totals {
+            let mut class_point = empty_point(minute.minute, 1);
+            accumulate(&mut class_point, value);
+            series.classes.entry(class).or_default().push(class_point);
+        }
+    }
+    series
+}
+
 pub fn load_rollups(
     conn: &rusqlite::Connection,
     node_id: &str,

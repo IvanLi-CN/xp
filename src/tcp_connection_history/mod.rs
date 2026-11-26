@@ -19,7 +19,9 @@ mod wire;
 pub use collector::{
     ControlListener, ProcTcpRow, collect_full_site_minute, control_listeners, resolve_runtime_uids,
 };
-pub use rollup::{Point, PointSeries, Resolution, aggregate_points, floor_bucket, load_rollups};
+pub use rollup::{
+    Point, PointSeries, Resolution, aggregate_points, floor_bucket, load_rollups, minute_series,
+};
 pub use wire::{
     DailyBucketPayload, REPOSITORY_CAPABILITY, REPOSITORY_RETENTION_DAYS,
     TCP_CONNECTION_HISTORY_SCHEMA, TCP_CONNECTION_HISTORY_STREAM, daily_payload_from_series,
@@ -741,6 +743,26 @@ pub fn filter_deleted_subjects(
             .get(class)
             .is_some_and(|subjects| subjects.iter().any(|item| item == subject))
     });
+}
+
+/// Local series for one node and window. Returns the raw-minute series for 24h, the stored
+/// rollup for 5m, and the stored rollup for daily.
+pub fn local_series(
+    data_dir: &Path,
+    node_id: &str,
+    window: Duration,
+    resolution: Option<Resolution>,
+) -> Result<PointSeries, TcpConnectionHistoryError> {
+    let store = TcpConnectionHistoryStore::open(data_dir)?;
+    let now = Utc::now();
+    let start = floor_minute(now) - window + Duration::minutes(1);
+    match resolution {
+        None => Ok(minute_series(&store.load_minutes(node_id, start, now)?)),
+        Some(resolution) => {
+            let bucket_start = floor_bucket(start, resolution);
+            store.load_rollup_series(node_id, resolution, bucket_start, floor_minute(now))
+        }
+    }
 }
 
 pub fn persist_connections_minute(

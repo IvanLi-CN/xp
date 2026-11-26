@@ -11,11 +11,15 @@
   `history.node-tcp-connections.v1` capability 与 node 删除 marker。
 - 已实现：Raft-backed `deleted_endpoints` registry，与 endpoint 删除同 operation 提交；
   查询期按 registry 过滤 subject，total / classes 不变。
-- 待实现：repository 查询投影（30d/90d API 读取 daily payload）与 endpoint marker 发布。
-- 待实现：API 的类别、窗口、分辨率、质量、`Point.partial` / `partial_buckets`、64 KiB subject
-  分页、`deleted_subjects`，以及旧 `warnings` / `endpoints` / `per_endpoint_series` 兼容字段。
-- 待实现：24h/7d 旧目标节点归一化为 `quality=unsupported` + `target_node_unsupported`；
-  30d/90d 旧 Repository 返回 `partial` + `repository_unsupported`。
+- 已实现：30d/90d API 从 ready Repository 读取 daily payload；24h/7d 走本地 raw/5m。
+- 已实现：响应为 additive：保留 `node`/`warnings`/`endpoints`/`per_endpoint_series`；
+  新增 `total`/`classes`/`subjects`/`quality`/`reasons`，以及 `truncated*`、`partial*`、
+  `deleted_subjects`、`subjects_*`。
+- 待实现：endpoint marker 异步发布（查询已按 registry 过滤）与 Web 新视图。
+- 已实现：API 的类别/窗口/分辨率/质量/`Point.partial`/`partial_buckets`/subject 分页/
+  `deleted_subjects` 与旧字段兼容；旧目标节点降级为 `unsupported` + `target_node_unsupported`。
+- 已实现：24h/7d 旧目标节点归一化为 `quality=unsupported` + `target_node_unsupported`；
+  30d/90d 无可用 Repository 时返回 `partial` + `repository_unsupported`。
 
 ## Frontend
 
@@ -28,8 +32,9 @@
 - 已覆盖：full-site 分类、截断、runtime UID、SQLite record/load、legacy 一次性导入与不降级；
   5m/daily 同刻求和极值、`samples_expected`/`samples_actual` 缺口语义与 bucket 持久化；
   daily payload 绑定、subject 分页上限与 registry subject 过滤。
-- 待实现：旧 Web schema 解析 24h/7d 新响应；旧 target/repository 降级；endpoint registry
-  过滤 24h/7d 与 30d/90d；mirror 重跑不降级 full-class 分钟。
+- 已覆盖：旧 Web schema 仍可解析 additive 响应；旧 target 降级；registry 过滤 24h/7d 与 30d/90d；
+  mirror 重跑不降级 full-class 分钟。
+- 待实现：Web 新视图（total/类别堆叠/30d/90d）与视觉证据。
 
 ## Validation
 
@@ -42,7 +47,7 @@
 
 ## Recorded Delivery State
 
-- Status: in progress (M1-M2 complete)
+- Status: in progress (M1-M4 backend complete)
 - Created: 2026-11-25
 - Last: 2026-11-26
 
