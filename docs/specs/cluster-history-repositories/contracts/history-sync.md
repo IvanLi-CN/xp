@@ -318,6 +318,25 @@ node, but only when its identity exactly matches the deterministic cluster-deriv
 runtime, traffic, connection, and IP views. `page_size` and `page_cursor` remain
 bounded by the repository query limit; a response supplies `next_page_cursor`
 only when another bounded page is available.
+The request range and the reported metadata are different contracts. The
+request range is bounded by the query limit; Coverage, gaps and watermarks are
+database facts and only require a well-ordered range. A permanent gap whose
+start is the Unix epoch therefore reports `partial` instead of rejecting the
+query.
+
+Record pages continue in `(observed_start, source_node_id, source_epoch, stream, sequence)`
+order. Serving that order must use an index whose leading column is the filter
+column, so pagination never sorts retained history and never scans rows outside
+the requested range.
+
+The response body and the `complete`/`partial` decision use one predicate and
+can never disagree. A gap intersecting the requested range is reported and
+counted. A prefix gap starting at the Unix epoch is always reported and counted:
+its lower bound is unprovable and its end is the first retained observation, so
+filtering it by intersection would let a narrow window claim `complete` while
+records are still missing. Dropping a non-prefix gap outside the window never
+changes completeness, because it never participated in that decision.
+
 Binary `record_key` and `payload` fields are unpadded base64url so actual JSON
 response bytes remain within the query response budget.
 

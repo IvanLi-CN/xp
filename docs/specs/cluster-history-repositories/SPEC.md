@@ -119,6 +119,27 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   segment 的连续性校验。
 - 每个 ready 仓库都保存完整并集；查询选择最完整健康 ready 仓库，响应必须带
   `complete|partial|local_only`、coverage、watermark、gap 和 skew。
+- `REQ-QUERY-WINDOW`: 请求的 query window 是唯一受请求上限约束的时间区间。它不得超过两年，
+  且 `start <= end`。该上限只拒绝管理员的过大查询，不适用于仓库自己持有的 Coverage、Gap
+  或 watermark 等库内事实。库内区间只要求 `start <= end`；一条早期永久 Gap 允许从纪元 0 开始，
+  使受影响查询保持 `partial`，不得让任何经管理员确认的 Gap 使查询本身失败。
+- `REQ-QUERY-PUSHDOWN`: 记录分页与 Coverage 聚合的 SQL 谓词必须能被 SQLite 下推到索引 seek。
+  禁止 `(?N IS NULL OR column ...)` 形式；必须按实际存在的过滤维度选择字面谓词分支。
+  时间段过滤必须同时给出 `observed_start` 的下界，使排序键的首列可用于 seek；
+  该下界可由 Observation Span 上界安全放宽，但精确的 `observed_end` 条件仍必须保留。
+- `REQ-QUERY-PAGE-ORDER`: 记录分页的对外续页顺序固定为
+  `(observed_start, source_node_id, source_epoch, stream, sequence)`，不因内部索引选择而改变。
+  为保持该顺序又不排序整段历史，必须存在以 `subject_node_id` 前缀开头的分页索引。
+- `REQ-QUERY-COVERAGE-SEEK`: 全仓库 Coverage 必须由独立的索引边界 seek 得到，不得对历史表做
+  全索引聚合。分仓库（带 `subject_node_id`）的 Coverage 保持单次 subject seek。
+- `REQ-QUERY-GAP-SCOPE`: 响应中的 gap 与完整性判定必须使用同一谓词，两者永不背离。
+  与 query window 相交的 gap 上报并计入完整性。起点为纪元 0 的前缀 gap 无论是否相交都必须
+  上报并计入完整性：它的起点无法证明，end 只是首个保留记录的观测时间，并非缺失记录的边界；
+  若按相交将其过滤，窄窗口查询会在记录仍然缺失时被报成 `complete`。
+  去掉不相交的非前缀 gap 不改变完整性，因为它本就不参与 `complete`/`partial` 判定。
+- `REQ-OBSERVATION-SPAN`: 每条 History Record 的 Observation Span 不得超过
+  `MAX_OBSERVED_SPAN_SECONDS`。摄入必须拒绝超限记录，使查询可证明地使用有界放宽下界。
+  已存在的超限记录在查询中仍按精确 `observed_end` 条件过滤，不改变返回结果。
 - ready peer 的每个 5 秒生命周期同步 tick 最多连续处理 16 个 summary、repair 或 tiered export page，
   并共享 15 秒维护预算；多个 peer 按稳定顺序分配剩余时间片，慢 peer 不得阻塞后续 peer。
   达到页数或时间边界时必须返回 `InProgress`，从持久 checkpoint 在下一 tick 继续，不能重置
@@ -391,6 +412,16 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 
 ### Edge cases / errors
 
+- 一条经管理员确认的永久 Gap 可以从纪元 0 开始（例如显式前缀缺失恢复的 1970 起缺口）。
+  该 Gap 是持久签名事实，不是传输错误：它不得使 query window 本身失败，只在与其相交时
+  作用为 `partial` 原因。若查询层把库内区间当作请求区间校验，完全正常的 24 小时查询会被
+  报成 `invalid_request`，仓库切换也随之中断，最终只剩 `local_only`。
+- 查询的 URL、状态码和完整性语义不因存储层索引选择而改变。当历史库很大且缓存已释放时，
+  可下推的谓词只需读取实际覆盖 query window 的索引页；全表或全索引聚合在任何仓库容量下
+  都不可接受，因为管理员面板的超时与仓库物理体积无关。
+- 首次为既有库创建分页或 received-time 索引是启动期的一次同步 schema 步骤。构建期间不推进
+  repository worker，其耗时不计入节点 readiness 失败；索引缺失时的行为是查询变慢，
+  而不是降级到搜索结果或跳过索引。
 - source 重建数据库或序号丢失时生成新 epoch；cursor 过期返回 earliest available 和 gap。临时
   传输失败、重试耗尽或有界 outbox 满载只形成可恢复积压；仅当 source 与全部 ready 仓库均无法
   提供已过期的 cursor 范围时，才报告 permanent gap。
@@ -615,6 +646,7 @@ sequence，不能改变已经排队的历史页。tombstone 使用对应的 back
 - [ADR 0019](../../adr/0019-history-handoff-completion-and-recovery-preflight.md)
 - [ADR 0030](../../adr/0030-recoverable-history-deletion-fanout.md)
 - [ADR 0034](../../adr/0034-explicit-source-prefix-loss-recovery.md)
+- [ADR 0037](../../adr/0037-separate-query-window-from-stored-metadata.md)
 
 ## Recovery cluster preflight
 

@@ -56,6 +56,22 @@ impl QueryRange {
         })
     }
 
+    /// A stored range (coverage, gap, watermark) is a durable repository fact, not an
+    /// administrator request. It only has to be well ordered: an operator-confirmed permanent
+    /// gap may start at the Unix epoch, and that fact must never reject the query reporting it.
+    pub(crate) fn metadata(
+        start_unix_seconds: u64,
+        end_unix_seconds: u64,
+    ) -> Result<Self, QueryError> {
+        if start_unix_seconds > end_unix_seconds {
+            return Err(QueryError::InvalidRange);
+        }
+        Ok(Self {
+            start_unix_seconds,
+            end_unix_seconds,
+        })
+    }
+
     fn covers(self, requested: Self) -> bool {
         self.start_unix_seconds <= requested.start_unix_seconds
             && self.end_unix_seconds >= requested.end_unix_seconds
@@ -260,7 +276,7 @@ impl QueryGap {
         permanent: bool,
     ) -> Result<Self, QueryError> {
         Ok(Self {
-            range: QueryRange::new(start_unix_seconds, end_unix_seconds)?,
+            range: QueryRange::metadata(start_unix_seconds, end_unix_seconds)?,
             permanent,
             reason: None,
         })
@@ -273,7 +289,7 @@ impl QueryGap {
         reason: Option<String>,
     ) -> Result<Self, QueryError> {
         Ok(Self {
-            range: QueryRange::new(start_unix_seconds, end_unix_seconds)?,
+            range: QueryRange::metadata(start_unix_seconds, end_unix_seconds)?,
             permanent,
             reason,
         })
@@ -295,6 +311,25 @@ impl QueryGap {
         self.range.start_unix_seconds <= requested.end_unix_seconds
             && requested.start_unix_seconds <= self.range.end_unix_seconds
     }
+}
+
+/// Whether a stored gap can affect an answer for `requested`.
+///
+/// A gap starting at the Unix epoch records missing data from an unprovable lower bound; its end is
+/// where the first retained record was observed, not a boundary for the missing records. Such a
+/// prefix gap always affects the answer, because narrowing it away would let a narrow query claim
+/// `complete` while records are still missing. Every other gap matters only when it intersects the
+/// requested window.
+fn gap_affects_answer(gap: &QueryGap, requested: QueryRange) -> bool {
+    gap.range().start_unix_seconds() == 0 || gap.intersects(requested)
+}
+
+/// Report exactly the gaps `gap_affects_answer` counted, so the body and `complete`/`partial`
+/// can never disagree.
+fn scoped_gaps(gaps: Vec<QueryGap>, requested: QueryRange) -> Vec<QueryGap> {
+    gaps.into_iter()
+        .filter(|gap| gap_affects_answer(gap, requested))
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -389,7 +424,10 @@ impl QueryCandidate {
     }
 
     fn relevant_gap_count(&self, range: QueryRange) -> usize {
-        self.gaps.iter().filter(|gap| gap.intersects(range)).count()
+        self.gaps
+            .iter()
+            .filter(|gap| gap_affects_answer(gap, range))
+            .count()
     }
 }
 
@@ -480,7 +518,7 @@ impl QuerySelector {
                 },
                 coverage: candidate.coverage,
                 watermarks: candidate.watermarks,
-                gaps: candidate.gaps,
+                gaps: scoped_gaps(candidate.gaps, request.range()),
                 clock_skew_seconds: candidate.clock_skew_seconds,
                 page_size: request.page_size,
             });
@@ -491,7 +529,7 @@ impl QuerySelector {
                 completeness: Completeness::LocalOnly,
                 coverage: candidate.coverage,
                 watermarks: candidate.watermarks,
-                gaps: candidate.gaps,
+                gaps: scoped_gaps(candidate.gaps, request.range()),
                 clock_skew_seconds: candidate.clock_skew_seconds,
                 page_size: request.page_size,
             });

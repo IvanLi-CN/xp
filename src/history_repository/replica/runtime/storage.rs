@@ -815,11 +815,11 @@ impl RepositoryReplicaRuntime {
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
                 .map(|coverage| {
                     Ok(QueryCoverage::new(
-                        QueryRange::new(
+                        QueryRange::metadata(
                             coverage.observed_start_unix_seconds,
                             coverage.observed_end_unix_seconds,
                         )?,
-                        QueryRange::new(
+                        QueryRange::metadata(
                             coverage.received_start_unix_seconds,
                             coverage.received_end_unix_seconds,
                         )?,
@@ -874,8 +874,10 @@ impl RepositoryReplicaRuntime {
             .max()
             .expect("repository coverage had a first record");
         Ok(Some(QueryCoverage::new(
-            QueryRange::new(observed_start, observed_end).expect("record timestamps are ordered"),
-            QueryRange::new(received_start, received_end).expect("record timestamps are ordered"),
+            QueryRange::metadata(observed_start, observed_end)
+                .expect("record timestamps are ordered"),
+            QueryRange::metadata(received_start, received_end)
+                .expect("record timestamps are ordered"),
         )))
     }
 

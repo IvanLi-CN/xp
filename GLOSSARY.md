@@ -54,6 +54,43 @@ An explicit request for one current voter to campaign immediately and be observe
 leader.
 _Avoid_: Target-directed transfer, forced election
 
+### Cluster History
+
+**Repository**:
+A node whose Raft membership records it as holding the cluster's long-term history union, together
+with the retained records and segments that back that history.
+_Avoid_: Database, archive server
+
+**History Record**:
+One retained observation of a subject, identified by source, epoch, stream and sequence, and
+carrying the observation time range it actually covers.
+_Avoid_: Row, sample, event
+
+**Observation Span**:
+The time range one History Record covers, from its observation start to its observation end. It is
+bounded by the ingestion schedule of its stream and never equal to the query window that returned
+it.
+_Avoid_: Retention window, sampling period
+
+**Coverage**:
+The observed and received time ranges a Repository actually holds. Coverage describes what exists;
+it is not a promise about what was measured.
+
+**Gap**:
+A time range inside a source stream for which no History Record exists. A Gap is recoverable,
+permanent or unclassified, and it is a durable signed fact rather than a transport error.
+_Avoid_: Missing data, failure, error
+
+**Completeness** (`complete` / `partial` / `local_only`):
+Whether a query result was answered from a completeness-verified Repository, from a Repository with
+a relevant permanent Gap, or only from a node's local history window.
+_Avoid_: Success, freshness
+
+**Query Window**:
+The administrator-chosen time range a history query asks about. It is bounded by the request
+contract and is distinct from any Coverage or Gap that the answer reports.
+_Avoid_: Range, selection, span
+
 ### Subscription Nodes
 
 **Subscription Node**:
