@@ -149,6 +149,7 @@ mod history_repository;
 mod join_capability;
 mod join_protocol;
 mod membership_restore;
+mod node_capability_report;
 mod node_metadata;
 mod node_versions;
 mod service_monitors;
@@ -1063,6 +1064,7 @@ pub fn build_router_with_mesh_telemetry(
     spawn_reverse_link_probe_worker(app_state.clone());
     history_repository::spawn_repository_replica_worker(app_state.clone());
     crate::uptime_runtime::spawn_uptime_worker(app_state.clone());
+    node_capability_report::spawn_capability_report_worker(app_state.clone());
 
     let admin = Router::new()
         .route(
@@ -1091,6 +1093,10 @@ pub fn build_router_with_mesh_telemetry(
         .route(
             "/_internal/raft/node-metadata",
             post(node_metadata::admin_internal_update_node_metadata),
+        )
+        .route(
+            "/_internal/report-node-state",
+            post(node_capability_report::admin_internal_report_node_state),
         )
         .route("/_internal/mesh/health", get(admin_internal_mesh_health))
         .route(

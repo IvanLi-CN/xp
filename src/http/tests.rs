@@ -2325,13 +2325,11 @@ async fn delete_node_stops_before_membership_when_voter_capability_is_unavailabl
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
     let body = body_json(res).await;
     assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
+    let message = body["error"]["message"].as_str().unwrap();
+    assert!(message.contains("retained voter"), "unexpected: {message}");
     assert!(
-        body["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("cannot verify staged join support"),
-        "unexpected error: {}",
-        body["error"]["message"].as_str().unwrap()
+        message.contains("--confirmed-unreachable"),
+        "must point at its only escape hatch: {message}"
     );
 
     let store = store.lock().await;

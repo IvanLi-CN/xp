@@ -22,6 +22,9 @@ metadata into an orphan voter without a DesiredState Node mapping.
 - Permit one exact, leader-local orphan voter repair after dry-run fingerprint confirmation.
 - Permit one exact, leader-local eviction of an unreachable DesiredState-mapped voter after
   dry-run fingerprint and endpoint-cleanup confirmation.
+- Classify each retained voter's lifecycle capability as `Supported`, `Unsupported`, or
+  `Unreachable`, and use persisted signed capability evidence only for `Unreachable` while it is
+  fresh.
 - Permit one exact, leader-local recovery of a DesiredState-mapped stale learner through the
   ordinary durable Restore lifecycle.
 - Permit one exact, leader-local retirement of a permanently decommissioned DesiredState-mapped
@@ -33,6 +36,7 @@ metadata into an orphan voter without a DesiredState Node mapping.
 - [0006-stale-learner-recovery](../../adr/0006-stale-learner-recovery.md)
 - [0010-fresh-join-admission](../../adr/0010-fresh-join-admission.md)
 - [0011-stale-learner-retirement](../../adr/0011-stale-learner-retirement.md)
+- [0037 capability evidence](../../adr/0037-voter-capability-evidence-and-unreachable-eviction.md)
 
 ## Roles and invariants
 
@@ -185,6 +189,21 @@ sudo xp-ops xp evict-unreachable-voter --api-base-url http://127.0.0.1:62416 --n
   retained DesiredState-mapped voter must still verify `cluster.membership-lifecycle-v1` through
   its required signed control-plane path. A retained-voter failure remains terminal; raw Raft
   edits, bulk repair, and `recover-single-node` are not fallback paths.
+  A retained voter is evaluated into exactly one of three states:
+  - `Supported`: a verified signed probe response advertises the capability, or the node's
+    persisted signed capability report is at most 24 hours old and advertises it.
+  - `Unsupported`: a verified signed response omits the capability, or an unsigned predecessor
+    `404` proves the voter predates the signed route. Terminal; never overridable.
+  - `Unreachable`: no verified signed XP response arrived (transport failure, timeout, TLS error,
+    Cloudflare edge error, or a response without a signed acknowledgement).
+    Only `Unreachable` may consult persisted evidence. A voter whose evidence is missing, stale, or
+    lacking the capability stays `Unreachable` and blocks the operation.
+- `--confirmed-unreachable <raft-node-id>` may name additional retained voters that the leader must
+  itself re-classify as `Unreachable` at both preview and apply. Any `Unsupported` classification
+  rejects the whole request, so a reachable but downgraded voter still blocks the lifecycle write.
+  An additional confirmed target is excluded from the capability barrier only; the operation still
+  removes exactly the single previewed `--node-id`, and the resulting voter count must remain at
+  least three.
 - Apply records the ordinary durable `RemoveNode` operation. The existing recovery sequence uses
   `RemoveVoters(..., false)`, proves absence, atomically deletes the confirmed node/endpoints, and
   queues inbound, history, and full-reconcile cleanup. It does not re-add the target after an
@@ -225,6 +244,9 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
   Dry-run returns `{ dry_run, node_id, raft_node_id, expected_membership, endpoints }`; apply also
   requires `delete_endpoints=true`, the exact `expected_endpoint_ids`, and returns the durable
   RemoveNode operation.
+  An optional `confirmed_unreachable` list of raft node ids may accompany either mode; the leader
+  re-classifies each entry and rejects the request unless every entry is `Unreachable`.
+  Both modes report the per-voter classification used for the decision.
 - `POST /api/admin/_internal/raft/restore-stale-learner` accepts signed internal-auth requests.
   Dry-run returns `{ dry_run, node_id, raft_node_id, expected_membership }`; apply requires
   `expected_membership` and returns the durable Restore operation.
@@ -253,6 +275,11 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
 - An unreachable mapped voter is evicted only after a zero-write preview; a leader, learner,
   unmapped target, stale fingerprint, changed endpoint set, joint configuration, active operation,
   or unavailable retained voter leaves membership and DesiredState unchanged.
+- Two unreachable retained voters do not block each other: with both classified `Unreachable`, an
+  eviction of either one proceeds and leaves the other as a voter.
+- A retained voter classified `Unsupported` rejects the request even when the operator named it in
+  `confirmed_unreachable`, and the resulting voter count never drops below three.
+- A voter with stale or missing persisted capability evidence is never treated as `Supported`.
 - A stale learner is recovered only after a zero-write preview proves it is the one unexpected
   learner. A stale fingerprint, voter or absent target, metadata mismatch, joint membership,
   active operation, another abnormal membership shape, or unresolved voter capability leaves
