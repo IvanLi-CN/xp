@@ -9,6 +9,7 @@ mod query_plan_tests;
 mod segment_index_tests;
 #[path = "source_scoped_summary_tests.rs"]
 mod source_scoped_summary_tests;
+mod startup_lock_tests;
 mod summary_blocks_tests;
 mod wal_retention_tests;
 

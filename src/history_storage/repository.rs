@@ -13,7 +13,7 @@ mod segments;
 mod stale_recovery_storage;
 mod summary;
 use query_sql::{
-    coverage_row, repository_history_coverage_boundaries, repository_history_records_sql,
+    coverage_row, repository_history_coverage_boundaries, repository_history_records_sql_with,
 };
 #[cfg(test)]
 pub(crate) use segments::segment_phase_sql;
@@ -285,6 +285,33 @@ impl HistoryStorage {
         let transaction = connection.transaction().map_err(sqlite_error)?;
         write_meta_i64(&transaction, &key, stored_epoch)?;
         transaction.commit().map_err(sqlite_error)
+    }
+
+    /// Whether the record page index is already built.
+    #[cfg(test)]
+    pub(crate) fn repository_page_index_present(&self) -> Result<bool> {
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Ok(false);
+        };
+        query_sql::page_index_present(connection)
+    }
+
+    /// Build the record page index, or report that it is already present.
+    ///
+    /// Returns `true` when this call created it. Startup never calls this: on a multi-gigabyte
+    /// repository the build outlives the container readiness budget, so a background worker owns
+    /// it and queries stay correct, if slower, until it finishes.
+    pub(crate) fn build_repository_page_index(&self) -> Result<bool> {
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Ok(false);
+        };
+        if query_sql::page_index_present(connection)? {
+            return Ok(false);
+        }
+        query_sql::build_page_index(connection)?;
+        Ok(true)
     }
 
     pub(crate) fn repository_history_used_bytes_with_caller(
@@ -708,10 +735,19 @@ impl HistoryStorage {
         let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(Vec::new());
         };
-        let sql = repository_history_records_sql(
+        // `INDEXED BY` is a hard constraint: if the background worker has not finished building
+        // the page index yet, the statement fails outright instead of merely running slower. Fall
+        // back to the unhinted form for that window so a missing index costs latency, never
+        // correctness.
+        let page_index_ready = match filter.subject_node_id {
+            Some(_) => query_sql::page_index_present(connection)?,
+            None => false,
+        };
+        let sql = repository_history_records_sql_with(
             filter.subject_node_id,
             filter.schema_id,
             filter.start_unix_seconds,
+            page_index_ready,
         );
         let mut statement = connection.prepare(sql).map_err(sqlite_error)?;
         // Every branch binds ?1..?6; a time window adds the span-widened bound as ?7.
@@ -731,6 +767,7 @@ impl HistoryStorage {
             rusqlite::types::Value::from(i64::try_from(filter.limit).unwrap_or(i64::MAX)),
             rusqlite::types::Value::from(i64::try_from(filter.offset).unwrap_or(i64::MAX)),
         ];
+        // Only the windowed statements reference ?7, so the span bound is bound only for them.
         if filter.start_unix_seconds.is_some() {
             bound.push(rusqlite::types::Value::from(
                 i64::try_from(MAX_OBSERVED_SPAN_SECONDS).unwrap_or(i64::MAX),

@@ -632,6 +632,13 @@ impl RepositoryReplicaRuntime {
         Ok(status)
     }
 
+    /// Build the record page index if it is missing, returning whether this call built it.
+    pub(crate) fn build_repository_page_index(&mut self) -> Result<bool, RepositoryRuntimeError> {
+        self.storage
+            .build_repository_page_index()
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+    }
+
     pub(crate) fn runtime_capacity(
         &mut self,
     ) -> Result<RepositoryCapacity, RepositoryRuntimeError> {

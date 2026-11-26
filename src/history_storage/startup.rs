@@ -1,10 +1,20 @@
 use super::*;
 use std::os::fd::AsRawFd;
 
+/// How long startup waits for a concurrent writer before giving up on schema preparation.
+const STARTUP_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub(super) const EXTERNAL_REPOSITORY_STARTUP_FAILURE: &str =
     "external repository history startup preparation failed: ";
 
 fn configure_runtime(connection: &Connection) -> Result<()> {
+    // Startup runs schema preparation, which may have to build an index on a large retained
+    // history. Without a busy timeout every concurrent writer makes preparation fail outright
+    // instead of waiting, and a failed preparation leaves storage unavailable on an otherwise
+    // healthy database.
+    connection
+        .busy_timeout(STARTUP_BUSY_TIMEOUT)
+        .map_err(sqlite_error)?;
     connection
         .pragma_update(None, "journal_mode", "WAL")
         .map_err(sqlite_error)?;

@@ -52,6 +52,7 @@ mod convergence;
 mod deep_repair;
 mod direct;
 mod legacy_segment_index;
+mod page_index;
 mod ready_peers;
 mod repair;
 mod sequence_summary;
@@ -95,6 +96,7 @@ use source_records::source_records_with_deletions;
 use source_records::{SourceRecordBatch, source_records};
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
     legacy_segment_index::spawn(state.clone());
+    page_index::spawn(state.clone());
     sequence_summary::spawn(state.clone());
     source::spawn_local_source_worker(state.clone());
     tokio::spawn(async move {
