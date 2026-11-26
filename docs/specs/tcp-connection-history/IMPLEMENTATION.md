@@ -36,7 +36,7 @@
 - 已覆盖：旧 Web schema 仍可解析 additive 响应；旧 target 降级；registry 过滤 24h/7d 与 30d/90d；
   mirror 重跑不降级 full-class 分钟。
 - 已覆盖：full-site 图表渲染、legacy 回退解析、窗口对齐含 total/classes/subjects。
-- 待实现：30d/90d 窗口按钮、Storybook 全站 story 与视觉证据。
+- 已覆盖：30d/90d 窗口按钮、Storybook 全站 story；视觉证据见 `assets/connections-default.png`。
 
 ## Validation
 
@@ -49,7 +49,7 @@
 
 ## Recorded Delivery State
 
-- Status: in progress (M1-M4 complete; UI chart landed)
+- Status: in progress (M5 evidence pending endpoint marker)
 - Created: 2026-11-25
 - Last: 2026-11-26
 

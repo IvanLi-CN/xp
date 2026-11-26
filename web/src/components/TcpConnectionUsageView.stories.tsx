@@ -37,6 +37,13 @@ export const Default: Story = {
 		window: "24h",
 		report: reports["24h"],
 	},
+	render: (args) => (
+		<div data-visual-evidence-surface className="bg-background p-4">
+			<div data-visual-evidence-target>
+				<TcpConnectionUsageView {...args} />
+			</div>
+		</div>
+	),
 };
 
 export const Dense7d: Story = {

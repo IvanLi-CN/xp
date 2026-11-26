@@ -36,6 +36,19 @@ type Series = {
 	points: Array<[number, number]>;
 };
 
+function timeLabel(value: number): string {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "";
+	return date
+		.toLocaleString("en-GB", {
+			hour: "2-digit",
+			minute: "2-digit",
+			hour12: false,
+			timeZone: "UTC",
+		})
+		.replace(/^24/, "00");
+}
+
 function shouldRenderECharts(): boolean {
 	if (typeof navigator === "undefined") return true;
 	return !navigator.userAgent.toLowerCase().includes("jsdom");
@@ -191,9 +204,13 @@ export function TcpConnectionHistoryChart({
 			},
 			xAxis: {
 				type: "time",
+				axisLabel: {
+					color: palette.axis,
+					hideOverlap: true,
+					formatter: timeLabel,
+				},
 				min: new Date(report.window_start ?? "").getTime() || undefined,
 				max: new Date(report.window_end ?? "").getTime() || undefined,
-				axisLabel: { color: palette.axis, hideOverlap: true },
 				axisLine: { lineStyle: { color: palette.grid } },
 				axisTick: { show: false },
 				splitLine: { show: false },

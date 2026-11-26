@@ -393,9 +393,11 @@ capability `admin.node-tcp-connections-history` 为 additive，按目标节点�
 
 ## 计划资产（Plan assets）
 
-- Directory: `docs/specs/tcp-connection-history/assets/`（待创建，本 PR 不提交资产）
+- Directory: `docs/specs/tcp-connection-history/assets/`（含 `connections-default.png` 组件证据）
 - In-plan references: None.
 
 ## Visual Evidence
 
-待实现；证据要求见「质量门槛」。
+`storybook_canvas`(`components-tcpconnectionusageview--default`)：total 主线、类别堆叠、
+24h/7d/30d/90d 窗口与 quality/current/peak 徽标。partial/truncated 与 unsupported 由同一组件
+按响应字段渲染（见 `assets`）。
