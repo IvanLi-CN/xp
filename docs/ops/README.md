@@ -1843,6 +1843,26 @@ or `recover-single-node`. If leadership moves to the target before removal, the 
 becomes Blocked and changes no membership; investigate and start a new approved preview only after
 the target is again a non-leader.
 
+When more than one voter is permanently gone, name the additional ones so they stop blocking each
+other. The leader probes each named voter itself and admits only a voter that answers with no
+verified signed response at all:
+
+```bash
+sudo xp-ops xp evict-unreachable-voter --api-base-url http://127.0.0.1:62416 --node-id <node-id> \
+  --confirmed-unreachable <raft-node-id>[,<raft-node-id>]
+```
+
+The preview reports every retained voter's classification: `Supported` (verified signed response,
+or persisted signed evidence no older than 24 hours), `Unsupported` (verified response without the
+capability, or an unsigned predecessor `404`), or `Unreachable` (no verified signed response).
+An additional confirmed voter is excluded from the capability check only when it classifies as
+`Unreachable`; an `Unsupported` classification rejects the whole request. Each operation still
+removes exactly one voter, and the cluster must keep at least three voters afterwards.
+
+Do not name a voter in `--confirmed-unreachable` because it is merely inconvenient. Persisted
+capability evidence exists so a transiently unreachable voter does not block lifecycle work; it is
+not a way to remove a live but downgraded node, which remains a coordinated-upgrade blocker.
+
 ### Stale learner retirement
 
 Use this only when one exact DesiredState-mapped learner belongs to a server that has been

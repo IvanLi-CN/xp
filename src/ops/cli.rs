@@ -434,6 +434,16 @@ pub struct XpEvictUnreachableVoterArgs {
     /// Exact comma-separated endpoint ids returned by the preview; empty when none exist.
     #[arg(long, value_delimiter = ',', value_name = "ID[,ID]")]
     pub expected_endpoint_ids: Vec<String>,
+
+    /// Additional retained raft node ids that are also permanently gone. The leader re-probes
+    /// each one and refuses the request unless every entry answers with no verified signed
+    /// response.
+    #[arg(
+        long,
+        value_delimiter = ',',
+        value_name = "RAFT_NODE_ID[,RAFT_NODE_ID]"
+    )]
+    pub confirmed_unreachable: Vec<u64>,
 }
 
 #[derive(Args, Debug, Clone)]

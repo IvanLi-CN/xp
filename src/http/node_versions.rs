@@ -17,6 +17,10 @@ pub(super) struct AdminNodeVersionItem {
     node_id: String,
     xp_version: Option<String>,
     error: Option<String>,
+    /// True when the version came from the node's persisted signed self-report because a live
+    /// query did not answer. It is evidence, not a live observation.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    reported: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -36,8 +40,10 @@ pub(super) async fn admin_list_node_versions(
     let client = state.mesh_client.clone();
     let fanout_deadline = Instant::now() + CLUSTER_RUNTIME_FANOUT_TIMEOUT;
 
+    let store_for_items = state.store.clone();
     let items = stream::iter(nodes.into_iter().map(|node| {
         let client = client.clone();
+        let store = store_for_items.clone();
         let cluster_id = cluster_id.clone();
         let local_node_id = local_node_id.clone();
         async move {
@@ -46,16 +52,13 @@ pub(super) async fn admin_list_node_versions(
                     node_id: node.node_id,
                     xp_version: Some(crate::version::VERSION.to_string()),
                     error: None,
+                    reported: false,
                 };
             }
 
             let remaining = fanout_deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                return AdminNodeVersionItem {
-                    node_id: node.node_id,
-                    xp_version: None,
-                    error: Some("timeout".to_string()),
-                };
+                return with_reported_fallback(node.node_id, "timeout", store.clone()).await;
             }
 
             let (response, deadline) = match client
@@ -64,20 +67,18 @@ pub(super) async fn admin_list_node_versions(
             {
                 Ok(response) => response,
                 Err(_) => {
-                    return AdminNodeVersionItem {
-                        node_id: node.node_id,
-                        xp_version: None,
-                        error: Some("unreachable".to_string()),
-                    };
+                    return with_reported_fallback(node.node_id, "unreachable", store.clone())
+                        .await;
                 }
             };
 
             if !response.status().is_success() {
-                return AdminNodeVersionItem {
-                    node_id: node.node_id,
-                    xp_version: None,
-                    error: Some(format!("http_{}", response.status().as_u16())),
-                };
+                return with_reported_fallback(
+                    node.node_id,
+                    &format!("http_{}", response.status().as_u16()),
+                    store.clone(),
+                )
+                .await;
             }
 
             let body = match bounded_json::read_bounded_internal_json::<ClusterInfoVersionResponse>(
@@ -88,26 +89,21 @@ pub(super) async fn admin_list_node_versions(
             {
                 Ok(body) => body,
                 Err(_) => {
-                    return AdminNodeVersionItem {
-                        node_id: node.node_id,
-                        xp_version: None,
-                        error: Some("invalid_response".to_string()),
-                    };
+                    return with_reported_fallback(node.node_id, "invalid_response", store.clone())
+                        .await;
                 }
             };
 
             if body.cluster_id != cluster_id || body.node_id != node.node_id {
-                return AdminNodeVersionItem {
-                    node_id: node.node_id,
-                    xp_version: None,
-                    error: Some("cluster_mismatch".to_string()),
-                };
+                return with_reported_fallback(node.node_id, "cluster_mismatch", store.clone())
+                    .await;
             }
 
             AdminNodeVersionItem {
                 node_id: node.node_id,
                 xp_version: Some(body.xp_version),
                 error: None,
+                reported: false,
             }
         }
     }))
@@ -119,4 +115,28 @@ pub(super) async fn admin_list_node_versions(
     items.sort_by(|left, right| left.node_id.cmp(&right.node_id));
 
     Ok(Json(AdminNodeVersionsResponse { items }))
+}
+
+/// Fall back to the node's persisted signed self-report when a live query did not answer. The
+/// answer stays explicitly marked as reported so callers never mistake it for a live observation.
+async fn with_reported_fallback(
+    node_id: String,
+    error: &str,
+    store: std::sync::Arc<tokio::sync::Mutex<crate::state::JsonSnapshotStore>>,
+) -> AdminNodeVersionItem {
+    let report = store.lock().await.get_node_capability_report(&node_id);
+    match report {
+        Some(report) => AdminNodeVersionItem {
+            node_id,
+            xp_version: Some(report.xp_version),
+            error: Some(error.to_string()),
+            reported: true,
+        },
+        None => AdminNodeVersionItem {
+            node_id,
+            xp_version: None,
+            error: Some(error.to_string()),
+            reported: false,
+        },
+    }
 }
