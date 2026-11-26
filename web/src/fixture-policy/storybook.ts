@@ -7,7 +7,7 @@ import type { AdminMeshPeer } from "../api/adminMesh";
 import type { AdminNode } from "../api/adminNodes";
 import type {
 	AdminNodeTcpConnectionsResponse,
-	AdminTcpConnectionUsageWindow,
+	AdminTcpConnectionHistoryWindow,
 } from "../api/adminTcpConnections";
 
 import { fixtureCatalog } from "./catalog";
@@ -40,12 +40,25 @@ function minuteFromOffset(
 	return new Date(baseMs + offsetMinutes * ONE_MINUTE_MS).toISOString();
 }
 
+function totalMinutesFor(window: AdminTcpConnectionHistoryWindow): number {
+	switch (window) {
+		case "24h":
+			return 24 * 60;
+		case "7d":
+			return 7 * 24 * 60;
+		case "30d":
+			return 30 * 24 * 60;
+		case "90d":
+			return 90 * 24 * 60;
+	}
+}
+
 function buildSeries(
-	window: AdminTcpConnectionUsageWindow,
+	window: AdminTcpConnectionHistoryWindow,
 	windowStart: string,
 	seeds: EndpointSeed[],
 ) {
-	const totalMinutes = window === "24h" ? 24 * 60 : 7 * 24 * 60;
+	const totalMinutes = totalMinutesFor(window);
 	return seeds.map((seed) => {
 		const perMinute = new Array<number>(totalMinutes).fill(0);
 		for (const [startMinute, endMinute, count] of seed.ranges) {
@@ -65,12 +78,115 @@ function buildSeries(
 	});
 }
 
+function fullSiteFields(
+	window: AdminTcpConnectionHistoryWindow,
+	windowStart: string,
+	perEndpointSeries: AdminNodeTcpConnectionsResponse["per_endpoint_series"],
+): Pick<
+	AdminNodeTcpConnectionsResponse,
+	| "quality"
+	| "reasons"
+	| "truncated"
+	| "truncated_buckets"
+	| "partial_buckets"
+	| "deleted_subjects"
+	| "subjects_truncated"
+	| "subjects_omitted"
+	| "subjects_next_cursor"
+	| "resolution"
+	| "watermark"
+	| "gaps"
+	| "total"
+	| "classes"
+	| "subjects"
+> {
+	const resolution = window === "24h" ? "1m" : window === "7d" ? "5m" : "daily";
+	const stepMinutes =
+		resolution === "1m" ? 1 : resolution === "5m" ? 5 : 24 * 60;
+	const stepMs = stepMinutes * ONE_MINUTE_MS;
+	const startMs = new Date(windowStart).getTime();
+	const buckets = new Map<number, number>();
+	for (const series of perEndpointSeries) {
+		for (const point of series.series) {
+			if (point.count === 0) continue;
+			const ms = new Date(point.minute).getTime();
+			if (Number.isNaN(ms)) continue;
+			const bucket = startMs + Math.floor((ms - startMs) / stepMs) * stepMs;
+			buckets.set(bucket, (buckets.get(bucket) ?? 0) + point.count);
+		}
+	}
+	const entries = [...buckets.entries()].sort(
+		(left, right) => left[0] - right[0],
+	);
+	const bucketPoint = (bucket: number, value: number) => ({
+		bucket_start: new Date(bucket).toISOString(),
+		min: value,
+		avg: value,
+		max: value,
+		samples_expected: stepMinutes,
+		samples_actual: stepMinutes,
+		truncated: false,
+		partial: false,
+	});
+	const totalPoints = entries.map(([bucket, value]) =>
+		bucketPoint(bucket, value),
+	);
+	return {
+		quality: "complete",
+		reasons: [],
+		truncated: false,
+		truncated_buckets: [],
+		partial_buckets: [],
+		deleted_subjects: [],
+		subjects_truncated: false,
+		subjects_omitted: false,
+		subjects_next_cursor: null,
+		resolution,
+		watermark: totalPoints.at(-1)?.bucket_start ?? null,
+		gaps: [],
+		total: { approximate: false, points: totalPoints },
+		classes: [
+			{
+				class: "inbound",
+				approximate: resolution === "daily",
+				points: totalPoints,
+			},
+			{
+				class: "control_plane",
+				approximate: resolution === "daily",
+				points: totalPoints.map((point) => ({
+					...point,
+					min: 1,
+					avg: 1,
+					max: 1,
+				})),
+			},
+		],
+		subjects: perEndpointSeries.map((series) => ({
+			class: "inbound",
+			subject: series.endpoint_id,
+			approximate: false,
+			points: series.series
+				.filter((item) => item.count > 0)
+				.map((item) =>
+					bucketPoint(new Date(item.minute).getTime(), item.count),
+				),
+		})),
+	};
+}
+
 function report(
-	window: AdminTcpConnectionUsageWindow,
+	window: AdminTcpConnectionHistoryWindow,
 	windowStart: string,
 	seeds: EndpointSeed[],
 ): AdminNodeTcpConnectionsResponse {
-	const totalMinutes = window === "24h" ? 24 * 60 : 7 * 24 * 60;
+	const totalMinutes = totalMinutesFor(window);
+	// Long-term windows are served from repository daily payloads; the legacy per-endpoint
+	// series is intentionally empty there, matching the backend contract.
+	const perEndpointSeries =
+		window === "24h" || window === "7d"
+			? buildSeries(window, windowStart, seeds)
+			: [];
 	return {
 		node: structuredClone(storyNode),
 		window,
@@ -82,7 +198,8 @@ function report(
 			endpoint_tag: seed.endpointTag,
 			port: seed.port,
 		})),
-		per_endpoint_series: buildSeries(window, windowStart, seeds),
+		per_endpoint_series: perEndpointSeries,
+		...fullSiteFields(window, windowStart, perEndpointSeries),
 	};
 }
 
@@ -264,6 +381,8 @@ export const fixtureStoryData = {
 	nodeTcpConnections: () => ({
 		"24h": report("24h", fixtureCatalog.timestamp.recent(), seeds24h),
 		"7d": report("7d", fixtureCatalog.timestamp.baseline(), seeds7d),
+		"30d": report("30d", fixtureCatalog.timestamp.baseline(), seeds7d),
+		"90d": report("90d", fixtureCatalog.timestamp.baseline(), seeds7d),
 	}),
 	nodeIpUsage: () => ({
 		"24h": nodeIpUsage("24h"),

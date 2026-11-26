@@ -46,6 +46,20 @@ export const Dense7d: Story = {
 	},
 };
 
+export const LongTerm30d: Story = {
+	args: {
+		window: "30d",
+		report: reports["30d"],
+	},
+};
+
+export const LongTerm90d: Story = {
+	args: {
+		window: "90d",
+		report: reports["90d"],
+	},
+};
+
 export const LoadingLatest: Story = {
 	args: { isWindowPending: true },
 };

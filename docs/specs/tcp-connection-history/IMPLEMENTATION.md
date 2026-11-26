@@ -23,9 +23,10 @@
 
 ## Frontend
 
-- 待实现：total 默认线、类别堆叠、outbound_other UID tooltip、30d/90d 窗口。
-- 待实现：旧 Web/旧响应形状兼容读取，新字段按 capability 降级；endpoint 元数据关联。
-- 待实现：gap / partial / truncated / unsupported / capture_suspended 状态。
+- 已实现：`All connections` 全站 total + 类别堆叠图，展示 current/peak/quality/resolution。
+- 已实现：旧 Web/旧响应形状兼容读取（full-site 字段 optional，缺失时回退旧 inbound 视图）。
+- 已实现：truncated / partial / deleted_subjects / subjects_omitted / subjects_truncated 状态提示。
+- 待实现：30d/90d 窗口按钮与 outbound_other UID tooltip 细分。
 
 ## Coverage
 
@@ -34,7 +35,8 @@
   daily payload 绑定、subject 分页上限与 registry subject 过滤。
 - 已覆盖：旧 Web schema 仍可解析 additive 响应；旧 target 降级；registry 过滤 24h/7d 与 30d/90d；
   mirror 重跑不降级 full-class 分钟。
-- 待实现：Web 新视图（total/类别堆叠/30d/90d）与视觉证据。
+- 已覆盖：full-site 图表渲染、legacy 回退解析、窗口对齐含 total/classes/subjects。
+- 待实现：30d/90d 窗口按钮、Storybook 全站 story 与视觉证据。
 
 ## Validation
 
@@ -47,7 +49,7 @@
 
 ## Recorded Delivery State
 
-- Status: in progress (M1-M4 backend complete)
+- Status: in progress (M1-M4 complete; UI chart landed)
 - Created: 2026-11-25
 - Last: 2026-11-26
 

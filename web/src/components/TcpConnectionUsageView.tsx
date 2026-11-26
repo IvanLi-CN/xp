@@ -9,14 +9,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
-import type {
-	AdminNodeTcpConnectionsResponse,
-	AdminTcpConnectionEndpointOption,
-	AdminTcpConnectionUsageWindow,
+import {
+	type AdminNodeTcpConnectionsResponse,
+	type AdminTcpConnectionEndpointOption,
+	type AdminTcpConnectionUsageWindow,
+	hasFullSiteHistory,
 } from "../api/adminTcpConnections";
 import { Button } from "./Button";
 import { ChartLoadingOverlay } from "./ChartLoadingOverlay";
 import { PageState } from "./PageState";
+import { TcpConnectionHistoryChart } from "./TcpConnectionHistoryChart";
 import {
 	type EChartsTooltipPalette,
 	STATIC_LINE_SERIES_EMPHASIS,
@@ -42,7 +44,8 @@ type TcpConnectionUsageViewProps = {
 		| "warnings"
 		| "endpoints"
 		| "per_endpoint_series"
-	>;
+	> &
+		Partial<AdminNodeTcpConnectionsResponse>;
 	isFetching?: boolean;
 	isWindowPending?: boolean;
 	showTitle?: boolean;
@@ -422,9 +425,9 @@ export function TcpConnectionUsageView({
 	const hasEndpoints = report.endpoints.length > 0;
 	const hasSelection = selectedEndpointIds.length > 0;
 	const currentCount = aggregatedSeries.at(-1)?.count ?? 0;
-	const peakCount = Math.max(
+	const peakCount = aggregatedSeries.reduce(
+		(maximum, point) => Math.max(maximum, point.count),
 		0,
-		...aggregatedSeries.map((point) => point.count),
 	);
 	const chartLineColor = palette.primary;
 	const tooltipPalette = palette.tooltip;
@@ -485,7 +488,10 @@ export function TcpConnectionUsageView({
 		const points = chartPoints.map((point) => [point.minuteMs, point.count]);
 		const maxCount = Math.max(
 			1,
-			...aggregatedSeries.map((point) => point.count),
+			aggregatedSeries.reduce(
+				(maximum, point) => Math.max(maximum, point.count),
+				0,
+			),
 		);
 		return {
 			animationDuration: 220,
@@ -633,7 +639,7 @@ export function TcpConnectionUsageView({
 					</p>
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
-					{(["24h", "7d"] as const).map((option) => (
+					{(["24h", "7d", "30d", "90d"] as const).map((option) => (
 						<Button
 							key={option}
 							type="button"
@@ -652,6 +658,19 @@ export function TcpConnectionUsageView({
 					<span>{warning.message}</span>
 				</Alert>
 			))}
+
+			{hasFullSiteHistory(report) ? (
+				<div className="space-y-3 border-t border-border/70 pt-4">
+					<div className="space-y-1">
+						<p className="text-lg font-semibold">All connections</p>
+						<p className="text-sm text-muted-foreground">
+							Total established TCP sockets by class. Endpoint selection below
+							only narrows the inbound breakdown.
+						</p>
+					</div>
+					<TcpConnectionHistoryChart report={report} window={window} />
+				</div>
+			) : null}
 
 			<div className="space-y-4 border-t border-border/70 pt-4">
 				<div className="flex flex-wrap items-start justify-between gap-3">
