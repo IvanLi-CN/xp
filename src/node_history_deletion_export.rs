@@ -33,7 +33,8 @@ pub(super) fn deletion_state_digest(state: &PersistedNodeHistoryCache) -> anyhow
 
 impl NodeHistoryHandle {
     /// Return a bounded prefix of complete deletion intents. A node intent is indivisible:
-    /// clearing it after only some of its five schemas have been acknowledged loses data.
+    /// clearing it after only some of its schemas have been acknowledged loses data. The final
+    /// schema in the per-node list must stay `ip_usage.v1`, which closes a complete group.
     pub(crate) async fn repository_deletion_capture_page(
         &self,
         destination_node_id: &str,
@@ -175,6 +176,7 @@ impl NodeHistoryHandle {
                 "path_health.v1",
                 "traffic.v1",
                 "connections.v1",
+                crate::tcp_connection_history::TCP_CONNECTION_HISTORY_SCHEMA,
                 "ip_usage.v1",
             ] {
                 visit(RepositoryHistoryDeletionMarker {

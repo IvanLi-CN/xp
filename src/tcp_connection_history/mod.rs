@@ -14,11 +14,17 @@ use crate::{
 
 mod collector;
 mod rollup;
+mod wire;
 
 pub use collector::{
     ControlListener, ProcTcpRow, collect_full_site_minute, control_listeners, resolve_runtime_uids,
 };
 pub use rollup::{Point, PointSeries, Resolution, aggregate_points, floor_bucket, load_rollups};
+pub use wire::{
+    DailyBucketPayload, REPOSITORY_CAPABILITY, REPOSITORY_RETENTION_DAYS,
+    TCP_CONNECTION_HISTORY_SCHEMA, TCP_CONNECTION_HISTORY_STREAM, daily_payload_from_series,
+    daily_record_key, parse_daily_payload, series_from_daily_payloads,
+};
 
 pub const MINUTES_WINDOW: usize = 7 * 24 * 60;
 pub const MAX_ESTABLISHED_TCP_CONNECTIONS: usize = 16_384;
@@ -176,6 +182,7 @@ impl TcpConnectionHistoryStore {
                  samples_actual INTEGER NOT NULL,
                  truncated INTEGER NOT NULL,
                  partial INTEGER NOT NULL,
+                 delivered INTEGER NOT NULL DEFAULT 0,
                  PRIMARY KEY (node_id, resolution, bucket_unix, class, subject)
              );
              CREATE INDEX IF NOT EXISTS rollup_lookup
@@ -455,8 +462,8 @@ impl TcpConnectionHistoryStore {
                 let mut insert = tx.prepare(
                     "INSERT INTO rollup_bucket
                      (node_id, resolution, bucket_unix, class, subject, min, avg, max,
-                      samples_expected, samples_actual, truncated, partial)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                      samples_expected, samples_actual, truncated, partial, delivered)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0)",
                 )?;
                 let mut write_points =
                     |class: &str, subject: &str, points: &[Point]| -> Result<(), rusqlite::Error> {
@@ -518,6 +525,35 @@ impl TcpConnectionHistoryStore {
             .conn
             .query_row("PRAGMA page_size", [], |row| row.get(0))?;
         Ok(pages.max(0) as u64 * page_size.max(0) as u64)
+    }
+
+    pub fn pending_daily_buckets(
+        &self,
+        node_id: &str,
+        limit: usize,
+    ) -> Result<Vec<i64>, TcpConnectionHistoryError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT bucket_unix FROM rollup_bucket
+             WHERE node_id = ?1 AND resolution = 'daily' AND delivered = 0
+             ORDER BY bucket_unix LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![node_id, limit as i64], |row| row.get::<_, i64>(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn mark_daily_buckets_delivered(
+        &self,
+        node_id: &str,
+        buckets: &[i64],
+    ) -> Result<(), TcpConnectionHistoryError> {
+        let mut stmt = self.conn.prepare(
+            "UPDATE rollup_bucket SET delivered = 1
+             WHERE node_id = ?1 AND resolution = 'daily' AND bucket_unix = ?2",
+        )?;
+        for bucket in buckets {
+            stmt.execute(params![node_id, bucket])?;
+        }
+        Ok(())
     }
 
     pub fn has_minute(
@@ -638,6 +674,73 @@ pub fn sample_connections_minute(
             }),
         },
     }
+}
+
+/// Reads at most `limit` undelivered daily buckets and renders their repository payloads.
+pub fn pending_daily_payloads(
+    data_dir: &Path,
+    node_id: &str,
+    limit: usize,
+) -> Result<Vec<(i64, serde_json::Value)>, TcpConnectionHistoryError> {
+    let store = TcpConnectionHistoryStore::open(data_dir)?;
+    let buckets = store.pending_daily_buckets(node_id, limit)?;
+    let mut payloads = Vec::with_capacity(buckets.len());
+    for bucket in buckets {
+        let Some(start) = DateTime::from_timestamp(bucket, 0) else {
+            continue;
+        };
+        let end = start + Duration::days(1) - Duration::minutes(1);
+        let series = store.load_rollup_series(node_id, Resolution::Daily, start, end)?;
+        let Some(payload) = daily_payload_from_series(&series, start) else {
+            continue;
+        };
+        payloads.push((
+            bucket,
+            serde_json::to_value(payload)
+                .map_err(|err| TcpConnectionHistoryError::Unsupported(err.to_string()))?,
+        ));
+    }
+    Ok(payloads)
+}
+
+pub fn mark_daily_payloads_delivered(
+    data_dir: &Path,
+    node_id: &str,
+    buckets: &[i64],
+) -> Result<(), TcpConnectionHistoryError> {
+    if buckets.is_empty() {
+        return Ok(());
+    }
+    TcpConnectionHistoryStore::open(data_dir)?.mark_daily_buckets_delivered(node_id, buckets)
+}
+
+/// Query-time subject filter built from the Raft-backed deleted-endpoints registry.
+pub fn deleted_subjects(
+    deleted_endpoints: &std::collections::BTreeMap<String, crate::state::DeletedEndpointRecord>,
+    node_id: &str,
+) -> BTreeMap<ConnectionClass, Vec<String>> {
+    let mut deleted = BTreeMap::<ConnectionClass, Vec<String>>::new();
+    for (endpoint_id, record) in deleted_endpoints {
+        if record.node_id == node_id {
+            deleted
+                .entry(ConnectionClass::Inbound)
+                .or_default()
+                .push(endpoint_id.clone());
+        }
+    }
+    deleted
+}
+
+/// Removes registry-covered subjects from a series while leaving total and classes untouched.
+pub fn filter_deleted_subjects(
+    series: &mut PointSeries,
+    deleted: &BTreeMap<ConnectionClass, Vec<String>>,
+) {
+    series.subjects.retain(|(class, subject), _| {
+        !deleted
+            .get(class)
+            .is_some_and(|subjects| subjects.iter().any(|item| item == subject))
+    });
 }
 
 pub fn persist_connections_minute(
@@ -777,5 +880,67 @@ mod tests {
         assert_eq!(16_384_usize * 6, 98_304);
         let ceiling = 96_u64 * 1024 * 1024;
         assert!(ceiling / 100 * 80 > 76 * 1024 * 1024);
+    }
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+
+    #[test]
+    fn deleted_endpoint_subjects_are_removed_without_touching_total() {
+        let mut series = PointSeries::default();
+        let start = DateTime::from_timestamp(1_790_000_000, 0).unwrap();
+        series.total.push(Point {
+            bucket_start: start,
+            min: 2,
+            avg: 2.0,
+            max: 2,
+            samples_expected: 1,
+            samples_actual: 1,
+            truncated: false,
+            partial: false,
+        });
+        series
+            .subjects
+            .insert((ConnectionClass::Inbound, "ep-a".to_string()), Vec::new());
+        series
+            .subjects
+            .insert((ConnectionClass::Inbound, "ep-b".to_string()), Vec::new());
+        let deleted = BTreeMap::from([(ConnectionClass::Inbound, vec!["ep-a".to_string()])]);
+        filter_deleted_subjects(&mut series, &deleted);
+        assert!(
+            !series
+                .subjects
+                .contains_key(&(ConnectionClass::Inbound, "ep-a".to_string()))
+        );
+        assert!(
+            series
+                .subjects
+                .contains_key(&(ConnectionClass::Inbound, "ep-b".to_string()))
+        );
+        assert_eq!(series.total[0].max, 2);
+    }
+
+    #[test]
+    fn registry_filter_is_scoped_to_the_node() {
+        let registry = BTreeMap::from([
+            (
+                "ep-a".to_string(),
+                crate::state::DeletedEndpointRecord {
+                    node_id: "node-a".to_string(),
+                    generation: 1,
+                },
+            ),
+            (
+                "ep-b".to_string(),
+                crate::state::DeletedEndpointRecord {
+                    node_id: "node-b".to_string(),
+                    generation: 1,
+                },
+            ),
+        ]);
+        let deleted = deleted_subjects(&registry, "node-a");
+        assert_eq!(deleted[&ConnectionClass::Inbound], vec!["ep-a".to_string()]);
     }
 }

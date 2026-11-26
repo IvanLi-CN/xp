@@ -824,6 +824,9 @@ pub(crate) fn source_stream_for_schema(schema_id: &str) -> Option<&'static str> 
         crate::resource_monitoring::RESOURCE_HISTORY_SCHEMA => {
             crate::resource_monitoring::RESOURCE_HISTORY_STREAM
         }
+        crate::tcp_connection_history::TCP_CONNECTION_HISTORY_SCHEMA => {
+            crate::tcp_connection_history::TCP_CONNECTION_HISTORY_STREAM
+        }
         _ => return None,
     })
 }

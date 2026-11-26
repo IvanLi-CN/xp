@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, Timelike as _, Utc};
+use serde::{Deserialize, Serialize};
 
 use super::{ConnectionClass, StoredMinute, TcpConnectionHistoryError};
 
@@ -26,7 +27,7 @@ impl Resolution {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Point {
     pub bucket_start: DateTime<Utc>,
     pub min: u32,

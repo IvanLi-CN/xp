@@ -413,7 +413,7 @@ async fn large_deletion_backlog_is_captured_in_bounded_pages() {
                     .iter()
                     .filter(|candidate| candidate.target_node_id() == Some(node))
                     .count(),
-                5
+                6
             );
         }
     }
@@ -489,7 +489,7 @@ async fn large_deletion_backlog_is_captured_in_bounded_pages() {
             .await
             .unwrap()
             .len(),
-        1132,
+        1158,
         "unacknowledged intent survives restart"
     );
     for tick in 0..20 {
@@ -559,7 +559,7 @@ async fn large_node_deletion_splits_signed_segments_without_losing_schemas() {
         assert!(segment.canonical().canonical_bytes().unwrap().len() <= 192 * 1024);
         record_count += segment.canonical().records().len();
     }
-    assert_eq!(record_count, 5);
+    assert_eq!(record_count, 6);
     drop(state);
     let state = fixture::app_state(directory.path());
     crate::http::history_repository::worker::publish_local_history_segment(

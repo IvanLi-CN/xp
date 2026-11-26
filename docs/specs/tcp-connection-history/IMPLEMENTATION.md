@@ -7,10 +7,11 @@
 - 已实现：`tcp_connections.sqlite3` 1m raw、带 `connection_history_import_v1` marker 的旧 JSON
   一次性导入与 inbound-only 兼容镜像。
 - 已实现：5m / daily Rollup（逐桶增量重建，禁止跨源累加）、按保留期裁剪与 96 MiB 本地预算门禁。
-- 待实现：`node_tcp_connections.v1` 投递、专用 reducer、schema 注册、source/receiver 映射、
-  查询投影、`history.node-tcp-connections.v1` repository capability 与 endpoint/node 删除 marker。
-- 待实现：Raft-backed `deleted_endpoints` registry，与 endpoint 删除同 operation 提交；查询按
-  registry 过滤 subject，marker 发布失败不阻断查询过滤。
+- 已实现：`node_tcp_connections.v1` daily 投递、`KNOWN_SCHEMAS`/source/receiver/backfill 映射、
+  `history.node-tcp-connections.v1` capability 与 node 删除 marker。
+- 已实现：Raft-backed `deleted_endpoints` registry，与 endpoint 删除同 operation 提交；
+  查询期按 registry 过滤 subject，total / classes 不变。
+- 待实现：repository 查询投影（30d/90d API 读取 daily payload）与 endpoint marker 发布。
 - 待实现：API 的类别、窗口、分辨率、质量、`Point.partial` / `partial_buckets`、64 KiB subject
   分页、`deleted_subjects`，以及旧 `warnings` / `endpoints` / `per_endpoint_series` 兼容字段。
 - 待实现：24h/7d 旧目标节点归一化为 `quality=unsupported` + `target_node_unsupported`；
@@ -25,7 +26,8 @@
 ## Coverage
 
 - 已覆盖：full-site 分类、截断、runtime UID、SQLite record/load、legacy 一次性导入与不降级；
-  5m/daily 同刻求和极值、`samples_expected`/`samples_actual` 缺口语义与 bucket 持久化。
+  5m/daily 同刻求和极值、`samples_expected`/`samples_actual` 缺口语义与 bucket 持久化；
+  daily payload 绑定、subject 分页上限与 registry subject 过滤。
 - 待实现：旧 Web schema 解析 24h/7d 新响应；旧 target/repository 降级；endpoint registry
   过滤 24h/7d 与 30d/90d；mirror 重跑不降级 full-class 分钟。
 
@@ -49,5 +51,6 @@
 - [x] M1: 有界分类采样、本地二进制 raw、旧 JSON 一次性导入与兼容镜像
 - [x] M2: 5m / daily Rollup、保留、gap 与容量护栏
 - [ ] M3: `node_tcp_connections.v1`、reducer、schema/capability 注册、endpoint registry/node 清理
+      （投递、注册与 node 清理已完成；endpoint registry 与查询投影未完成）
 - [ ] M4: API/UI 的类别、窗口、质量、分页、partial buckets 与旧字段兼容
 - [ ] M5: 文档、视觉证据、旧 Web/旧 Repository 兼容收口

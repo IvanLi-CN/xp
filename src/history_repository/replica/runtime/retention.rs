@@ -5,6 +5,9 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{
     resource_monitoring::{RESOURCE_HISTORY_SCHEMA, ResourceHistoryPayload, ResourceRollup},
+    tcp_connection_history::{
+        DailyBucketPayload, TCP_CONNECTION_HISTORY_SCHEMA, parse_daily_payload,
+    },
     uptime_monitor::{UPTIME_HISTORY_SCHEMA, UptimeHistoryPayload},
 };
 
@@ -13,6 +16,7 @@ use super::{StoredGap, StoredRecord};
 const RESOURCE_MINUTE_RETENTION_SECONDS: u64 = 14 * 24 * 60 * 60;
 const RESOURCE_15_MINUTE_RETENTION_SECONDS: u64 = 90 * 24 * 60 * 60;
 const RESOURCE_HOUR_RETENTION_SECONDS: u64 = 365 * 24 * 60 * 60;
+const TCP_CONNECTION_RETENTION_SECONDS: u64 = 90 * 24 * 60 * 60;
 
 pub(super) fn prune_records(
     records: &mut Vec<StoredRecord>,
@@ -31,15 +35,22 @@ pub(super) fn prune_records(
             continue;
         }
         let age = now_unix_seconds.saturating_sub(record.observed_at_unix_seconds);
+        let is_tcp_daily = record.schema_id == TCP_CONNECTION_HISTORY_SCHEMA;
         let resolution = if record.schema_id == RESOURCE_HISTORY_SCHEMA {
             resource_resolution_for_age(age)
+        } else if is_tcp_daily {
+            (age <= TCP_CONNECTION_RETENTION_SECONDS)
+                .then_some(super::super::RetentionResolution::Hour)
         } else {
             policy.resolution_for_age(age)
         };
         let Some(resolution) = resolution else {
             continue;
         };
-        let preserves_minute_detail = if record.schema_id == RESOURCE_HISTORY_SCHEMA {
+        // Daily payloads are already aggregated, so they must stay raw rather than be merged.
+        let preserves_minute_detail = if is_tcp_daily {
+            true
+        } else if record.schema_id == RESOURCE_HISTORY_SCHEMA {
             age <= RESOURCE_MINUTE_RETENTION_SECONDS
         } else {
             policy.keeps_minute_detail(age)
@@ -136,6 +147,14 @@ pub(crate) fn backfill_record_time_range(
     payload: &[u8],
     observed_at: u64,
 ) -> (u64, u64) {
+    if schema_id == TCP_CONNECTION_HISTORY_SCHEMA
+        && let Some(payload) = parse_daily_payload(payload)
+    {
+        return (
+            payload.bucket_start_unix_seconds,
+            payload.bucket_end_unix_seconds,
+        );
+    }
     if schema_id == RESOURCE_HISTORY_SCHEMA
         && let Ok(payload) = serde_json::from_slice::<ResourceHistoryPayload>(payload)
     {
@@ -173,6 +192,9 @@ pub(super) fn compaction_bucket_end(record: &StoredRecord, now_unix_seconds: u64
         return None;
     }
     let policy = super::super::RepositoryRetentionPolicy::default();
+    if record.schema_id == TCP_CONNECTION_HISTORY_SCHEMA {
+        return tcp_daily_payload(record).map(|payload| payload.bucket_end_unix_seconds);
+    }
     let resolution = if record.schema_id == RESOURCE_HISTORY_SCHEMA {
         resource_resolution_for_age(
             now_unix_seconds.saturating_sub(record.observed_at_unix_seconds),
@@ -548,6 +570,12 @@ fn resource_resolution_for_age(age_seconds: u64) -> Option<super::super::Retenti
     }
 }
 
+fn tcp_daily_payload(record: &StoredRecord) -> Option<DailyBucketPayload> {
+    (record.schema_id == TCP_CONNECTION_HISTORY_SCHEMA)
+        .then(|| parse_daily_payload(&record.payload))
+        .flatten()
+}
+
 fn resource_bucket_seconds(
     record: &StoredRecord,
     resolution: super::super::RetentionResolution,
@@ -571,6 +599,14 @@ fn bucket_time_range_for_record(
     record: &StoredRecord,
     resolution: super::super::RetentionResolution,
 ) -> (u64, u64) {
+    if record.schema_id == TCP_CONNECTION_HISTORY_SCHEMA
+        && let Some(payload) = tcp_daily_payload(record)
+    {
+        return (
+            payload.bucket_start_unix_seconds,
+            payload.bucket_end_unix_seconds,
+        );
+    }
     if record.schema_id == RESOURCE_HISTORY_SCHEMA
         && let Some(payload) = resource_payload(record)
     {
