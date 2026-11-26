@@ -3,6 +3,8 @@ use super::*;
 fn record_page_predicates_seek_instead_of_scanning_the_index() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
+    // The page index is built by a background worker, not by startup preparation.
+    assert!(storage.build_repository_page_index().unwrap());
     let backend = storage.lock_backend();
     let Backend::Sqlite(connection) = &*backend else {
         panic!("test storage should use SQLite");
@@ -44,6 +46,26 @@ fn record_page_predicates_seek_instead_of_scanning_the_index() {
                 .any(|detail| detail.contains("SCAN repository_history_records")),
             "predicate not pushed down for subject={subject:?} schema={schema:?}: {plan:?}"
         );
+        // A subject page must be answered by the index alone. When `observed_end` or
+        // `is_tombstone` is missing from the index, every candidate row needs a table lookup
+        // before the filter can discard it, and one page of a 24-hour window then reads tens of
+        // thousands of payload pages. Sub-second bounds depend on this staying a covering scan.
+        if subject.is_some() {
+            // `payload` forces a table read for the rows that survive, which is unavoidable and
+            // cheap for one page. What must never happen is reading the table for rows the filter
+            // will discard: `observed_end` and `is_tombstone` therefore have to live in the index
+            // so the seek range is decided without touching the table.
+            let seek = plan
+                .iter()
+                .find(|detail| detail.contains("repository_history_records_page_v2"))
+                .unwrap_or_else(|| panic!("subject page must use the page index: {plan:?}"));
+            assert!(
+                seek.contains("is_tombstone=?")
+                    && seek.contains("subject_node_id=?")
+                    && seek.contains("observed_start"),
+                "page index must decide the whole filter range, got: {seek}"
+            );
+        }
         let _ = span;
     }
 }
@@ -52,6 +74,8 @@ fn record_page_predicates_seek_instead_of_scanning_the_index() {
 fn whole_repository_coverage_seeks_each_boundary_without_scanning() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
+    // The page index is built by a background worker, not by startup preparation.
+    assert!(storage.build_repository_page_index().unwrap());
     let backend = storage.lock_backend();
     let Backend::Sqlite(connection) = &*backend else {
         panic!("test storage should use SQLite");
@@ -94,6 +118,8 @@ fn whole_repository_coverage_seeks_each_boundary_without_scanning() {
 fn page_and_received_indexes_exist_for_existing_databases() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
+    // The page index is built by a background worker, not by startup preparation.
+    assert!(storage.build_repository_page_index().unwrap());
     let backend = storage.lock_backend();
     let Backend::Sqlite(connection) = &*backend else {
         panic!("test storage should use SQLite");
@@ -110,7 +136,7 @@ fn page_and_received_indexes_exist_for_existing_databases() {
         .collect::<std::result::Result<Vec<_>, _>>()
         .unwrap();
     for expected in [
-        "repository_history_records_page",
+        "repository_history_records_page_v2",
         "repository_history_records_received",
     ] {
         assert!(

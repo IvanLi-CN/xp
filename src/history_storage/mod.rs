@@ -523,9 +523,6 @@ fn ensure_schema(connection: &mut Connection) -> Result<()> {
              CREATE INDEX IF NOT EXISTS repository_history_records_coverage
                ON repository_history_records
                   (subject_node_id, is_tombstone, observed_start, observed_end, received_at);
-             CREATE INDEX IF NOT EXISTS repository_history_records_page
-               ON repository_history_records (subject_node_id, observed_start, source_node_id,
-                                              source_epoch, stream, sequence);
              CREATE INDEX IF NOT EXISTS repository_history_records_received
                ON repository_history_records (is_tombstone, received_at);",
         )
