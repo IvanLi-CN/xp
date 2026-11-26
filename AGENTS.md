@@ -400,6 +400,12 @@
   signed internal-auth v2
   Raft traffic, but any elected leader in the authenticated cluster may complete its initial
   replication after failover.
+  Each retained voter is classified `Supported`, `Unsupported`, or `Unreachable`. Only
+  `Unreachable` may fall back to that node's persisted signed capability report, and only while the
+  report is at most 24 hours old; `Unsupported` is terminal. `xp-ops xp evict-unreachable-voter`
+  accepts additional `--confirmed-unreachable` voters that the leader itself re-classifies as
+  `Unreachable`, so two permanently gone voters no longer block each other; each operation still
+  removes exactly one voter and must leave at least three.
 - A host-managed upgrade must complete the locked `xp` and managed runtime phase before
   replacing `xp-ops`; an `xp-ops` self-update must never be allowed to skip that service phase.
   The managed runtime activation window must confirm `xp` is stopped before restarting Xray or

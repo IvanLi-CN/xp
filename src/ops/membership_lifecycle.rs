@@ -93,6 +93,7 @@ pub(crate) async fn cmd_xp_evict_unreachable_voter(
         "expected_membership": args.expected_membership,
         "delete_endpoints": args.delete_endpoints,
         "expected_endpoint_ids": args.expected_endpoint_ids,
+        "confirmed_unreachable": args.confirmed_unreachable,
     }))
     .map_err(|error| ExitError::new(5, format!("encode eviction request: {error}")))?;
     let response: serde_json::Value = internal_json_request(

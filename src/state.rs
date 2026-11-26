@@ -38,6 +38,7 @@ use endpoint_meta::build_endpoint_meta;
 mod command_compat;
 mod mesh_gate;
 use mesh_gate::{apply_mesh_enabled, default_mesh_enabled};
+pub(crate) mod capability_reports;
 mod membership_operation;
 pub use membership_operation::{
     MembershipOperation, MembershipOperationKind, MembershipOperationPhase,
@@ -54,11 +55,11 @@ pub use config_types::{
     UserNodeQuotaConfig, UserNodeWeightConfig,
 };
 pub(crate) use probe_state::encode_node_egress_probe_compat_note;
+use probe_state::prune_endpoint_probe_hour_map;
 pub use probe_state::{
     EndpointProbeAppendSample, EndpointProbeHistory, EndpointProbeHour, EndpointProbeNodeSample,
     NodeEgressProbeState, NodeSubscriptionRegion,
 };
-use probe_state::{decode_node_egress_probe_compat_note, prune_endpoint_probe_hour_map};
 pub const SCHEMA_VERSION: u32 = 14;
 const SCHEMA_VERSION_V13: u32 = 13;
 const SCHEMA_VERSION_V12: u32 = 12;
@@ -350,6 +351,9 @@ pub struct PersistedState {
     pub endpoint_probe_participants_by_hour: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     pub node_egress_probes: BTreeMap<String, NodeEgressProbeState>,
+    /// Signed node self-reports; fallback evidence only when a voter does not answer at all.
+    #[serde(default)]
+    pub node_capability_reports: BTreeMap<String, crate::capability_evidence::NodeCapabilityReport>,
     #[serde(default)]
     pub users: BTreeMap<String, User>,
     #[serde(default)]
@@ -403,6 +407,7 @@ impl PersistedState {
             endpoint_probe_history: BTreeMap::new(),
             endpoint_probe_participants_by_hour: BTreeMap::new(),
             node_egress_probes: BTreeMap::new(),
+            node_capability_reports: BTreeMap::new(),
             users: BTreeMap::new(),
             reality_domains: Vec::new(),
             user_node_quotas: BTreeMap::new(),
@@ -2373,6 +2378,7 @@ impl DesiredStateCommand {
                     .endpoint_probe_participants_by_hour
                     .retain(|_hour, participants| !participants.is_empty());
                 state.node_egress_probes.remove(node_id);
+                capability_reports::remove_node_capability_report(state, node_id);
                 state
                     .reverse_mesh_assignments
                     .retain(|target_id, assignment| {
@@ -3172,15 +3178,7 @@ impl DesiredStateCommand {
                     credential_epoch: user.credential_epoch,
                 })
             }
-            Self::CompatNoop { note } => {
-                if let Some((node_id, probe)) = decode_node_egress_probe_compat_note(note) {
-                    if !state.nodes.contains_key(&node_id) {
-                        return Ok(DesiredStateApplyResult::Applied);
-                    }
-                    state.node_egress_probes.insert(node_id, probe);
-                }
-                Ok(DesiredStateApplyResult::Applied)
-            }
+            Self::CompatNoop { note } => Ok(capability_reports::apply_compat_noop(state, note)),
             Self::AppendEndpointProbeSamples {
                 hour,
                 from_node_id,

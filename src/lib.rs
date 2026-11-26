@@ -1,4 +1,5 @@
 pub mod admin_token;
+pub mod capability_evidence;
 pub mod cloudflared_supervisor;
 pub mod cluster_identity;
 pub mod cluster_metadata;

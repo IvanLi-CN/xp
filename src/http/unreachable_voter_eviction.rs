@@ -23,6 +23,10 @@ pub(super) struct InternalEvictUnreachableVoterRequest {
     delete_endpoints: bool,
     #[serde(default)]
     expected_endpoint_ids: Vec<String>,
+    /// Additional retained voters the operator declares permanently gone. The leader re-classifies
+    /// each one; any answer that proves a missing capability rejects the whole request.
+    #[serde(default)]
+    confirmed_unreachable: Vec<RaftNodeId>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +36,9 @@ pub(super) struct InternalEvictUnreachableVoterResponse {
     raft_node_id: RaftNodeId,
     expected_membership: String,
     endpoints: Vec<AdminNodeDeletePreviewEndpoint>,
+    /// Every retained voter's capability verdict, so the operator can see why a request was
+    /// rejected instead of only that it was.
+    voters: Vec<join_capability::VoterClassification>,
     #[serde(skip_serializing_if = "Option::is_none")]
     operation: Option<crate::state::MembershipOperation>,
 }
@@ -44,10 +51,12 @@ pub(super) async fn admin_internal_evict_unreachable_voter(
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
+    let confirmed = normalized_confirmed(&req.confirmed_unreachable)?;
     let preview = crate::raft_membership_guard::preview_unreachable_voter_eviction(
         state.raft.clone(),
         state.store.clone(),
         &req.node_id,
+        &confirmed,
     )
     .await
     .map_err(|error| ApiError::conflict(error.to_string()))?;
@@ -67,8 +76,11 @@ pub(super) async fn admin_internal_evict_unreachable_voter(
         endpoints.sort_by(|left, right| left.endpoint_id.cmp(&right.endpoint_id));
         endpoints
     };
-    join_capability::require_membership_lifecycle_on_retained_voters(&state, preview.raft_node_id)
-        .await?;
+    // The previewed target is excluded by design; every other retained voter in the confirmed set
+    // must classify as Unreachable or the request is refused here.
+    let mut excluded = BTreeSet::from([preview.raft_node_id]);
+    excluded.extend(confirmed.iter().copied());
+    let voters = join_capability::require_membership_lifecycle_excluding(&state, &excluded).await?;
 
     if !req.apply {
         return Ok(Json(InternalEvictUnreachableVoterResponse {
@@ -77,6 +89,7 @@ pub(super) async fn admin_internal_evict_unreachable_voter(
             raft_node_id: preview.raft_node_id,
             expected_membership: preview.expected_membership,
             endpoints,
+            voters,
             operation: None,
         }));
     }
@@ -112,6 +125,7 @@ pub(super) async fn admin_internal_evict_unreachable_voter(
         &expected_membership,
         req.delete_endpoints,
         expected_endpoint_ids,
+        &confirmed,
     )
     .await
     .map_err(|error| ApiError::conflict(error.to_string()))?;
@@ -122,6 +136,17 @@ pub(super) async fn admin_internal_evict_unreachable_voter(
         raft_node_id: preview.raft_node_id,
         expected_membership: operation.expected_membership.clone(),
         endpoints,
+        voters,
         operation: Some(operation),
     }))
+}
+
+fn normalized_confirmed(confirmed: &[RaftNodeId]) -> Result<Vec<RaftNodeId>, ApiError> {
+    let unique = confirmed.iter().copied().collect::<BTreeSet<_>>();
+    if unique.len() != confirmed.len() {
+        return Err(ApiError::invalid_request(
+            "confirmed_unreachable must not contain duplicates",
+        ));
+    }
+    Ok(unique.into_iter().collect())
 }

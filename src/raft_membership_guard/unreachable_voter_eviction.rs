@@ -25,6 +25,9 @@ pub struct UnreachableVoterEvictionPreview {
     pub expected_membership: String,
     pub endpoint_ids: Vec<String>,
     pub endpoint_tags: Vec<String>,
+    /// Retained voters the operator named as also permanently gone. The leader re-classifies each
+    /// one itself before they are excluded from the capability barrier.
+    pub confirmed_unreachable: Vec<NodeId>,
 }
 
 /// Preview a narrowly scoped operator eviction of a still-mapped voter. This is deliberately
@@ -34,11 +37,20 @@ pub async fn preview_unreachable_voter_eviction(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
     node_id: &str,
+    confirmed_unreachable: &[NodeId],
 ) -> anyhow::Result<UnreachableVoterEvictionPreview> {
     let raft_node_id = raft_node_id_from_ulid(node_id)?;
     require_clean_membership_for_remove_node(raft.clone(), store.clone()).await?;
     let metrics = raft.metrics().borrow().clone();
-    validate_unreachable_voter_eviction(&metrics, &store, node_id, raft_node_id, None).await?;
+    validate_unreachable_voter_eviction(
+        &metrics,
+        &store,
+        node_id,
+        raft_node_id,
+        None,
+        confirmed_unreachable,
+    )
+    .await?;
     let (endpoint_ids, endpoint_tags) = endpoint_snapshot_for_node(&store, node_id).await?;
     Ok(UnreachableVoterEvictionPreview {
         node_id: node_id.to_string(),
@@ -46,6 +58,7 @@ pub async fn preview_unreachable_voter_eviction(
         expected_membership: membership_revision(&metrics)?,
         endpoint_ids,
         endpoint_tags,
+        confirmed_unreachable: confirmed_unreachable.to_vec(),
     })
 }
 
@@ -59,6 +72,7 @@ pub async fn begin_unreachable_voter_eviction(
     expected_membership: &str,
     delete_endpoints: bool,
     expected_endpoint_ids: Vec<String>,
+    confirmed_unreachable: &[NodeId],
 ) -> anyhow::Result<MembershipOperation> {
     if !delete_endpoints {
         anyhow::bail!("unreachable voter eviction requires endpoint cleanup confirmation")
@@ -74,6 +88,7 @@ pub async fn begin_unreachable_voter_eviction(
         node_id,
         raft_node_id,
         Some(expected_membership),
+        confirmed_unreachable,
     )
     .await?;
     let (actual_endpoint_ids, expected_endpoint_tags) =
@@ -99,7 +114,7 @@ pub async fn begin_unreachable_voter_eviction(
         created_at: Utc::now().to_rfc3339(),
         next_retry_at: None,
         terminal_at: None,
-        evidence: Some("operator-approved unreachable voter eviction accepted".to_string()),
+        evidence: Some(eviction_evidence(confirmed_unreachable)),
     };
     write_operation(
         &raft,
@@ -111,6 +126,23 @@ pub async fn begin_unreachable_voter_eviction(
     )
     .await?;
     Ok(operation)
+}
+
+/// The authorization reason is free-form evidence, so the confirmed set travels there instead of
+/// widening the durable operation schema that every older voter must still decode.
+fn eviction_evidence(confirmed_unreachable: &[NodeId]) -> String {
+    let mut evidence = String::from("operator-approved unreachable voter eviction accepted");
+    if confirmed_unreachable.is_empty() {
+        return evidence;
+    }
+    let ids = confirmed_unreachable
+        .iter()
+        .map(u64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    evidence.push_str("; confirmed unreachable retained voters: ");
+    evidence.push_str(&ids);
+    evidence
 }
 
 async fn endpoint_snapshot_for_node(
@@ -131,12 +163,20 @@ async fn endpoint_snapshot_for_node(
     Ok(endpoints.into_iter().unzip())
 }
 
+/// A cluster that shrinks below this many voters has no spare availability for the next failure.
+const MINIMUM_VOTERS_AFTER_EVICTION: usize = 3;
+
+fn confirmed_conflicts(target: NodeId, confirmed_unreachable: &[NodeId]) -> bool {
+    confirmed_unreachable.contains(&target)
+}
+
 async fn validate_unreachable_voter_eviction(
     metrics: &openraft::RaftMetrics<NodeId, NodeMeta>,
     store: &Arc<Mutex<crate::state::JsonSnapshotStore>>,
     node_id: &str,
     raft_node_id: NodeId,
     expected_membership: Option<&str>,
+    confirmed_unreachable: &[NodeId],
 ) -> anyhow::Result<()> {
     if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
     {
@@ -164,6 +204,21 @@ async fn validate_unreachable_voter_eviction(
     let store = store.lock().await;
     if store.state().active_membership_operation().is_some() {
         anyhow::bail!("another membership operation is active")
+    }
+    if confirmed_conflicts(raft_node_id, confirmed_unreachable) {
+        anyhow::bail!("confirmed unreachable voters must exclude the eviction target and leader")
+    }
+    for confirmed in confirmed_unreachable {
+        if !membership.voter_ids().any(|voter| voter == *confirmed) {
+            anyhow::bail!("confirmed unreachable voter {confirmed} is not a current voter")
+        }
+    }
+    let remaining_voters = membership.voter_ids().count().saturating_sub(1);
+    if remaining_voters < MINIMUM_VOTERS_AFTER_EVICTION {
+        anyhow::bail!(
+            "evicting this voter would leave {remaining_voters} voters; at least \
+             {MINIMUM_VOTERS_AFTER_EVICTION} are required"
+        )
     }
     if store.get_node(node_id).is_none() {
         anyhow::bail!("unreachable voter eviction target is not represented by desired state")

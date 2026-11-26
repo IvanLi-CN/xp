@@ -37,21 +37,18 @@ pub(super) struct ReverseMeshReadiness {
 }
 
 pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
-    let mut fingerprint = BTreeMap::new();
-    fingerprint.insert("/api/health", vec!["status"]);
-    fingerprint.insert(
-        "/api/cluster/info",
-        vec![
-            "cluster_id",
-            "node_id",
-            "role",
-            "leader_api_base_url",
-            "term",
-        ],
-    );
-    fingerprint.insert("/api/admin/nodes", vec!["items"]);
-    fingerprint.insert("/api/admin/status/events", vec!["hello", "snapshot"]);
+    let capabilities = base_capabilities();
+    let fingerprint = capability_fingerprint();
+    Json(ApiCapabilitiesResponse {
+        release_tag: format!("v{}", crate::version::VERSION),
+        capabilities,
+        fingerprint,
+        reverse_mesh: None,
+    })
+}
 
+/// Every capability this build can advertise, independent of live cluster state.
+pub(super) fn base_capabilities() -> Vec<&'static str> {
     let mut capabilities = vec![
         STATIC_CONSOLE_CAPABILITY,
         "api.health",
@@ -90,6 +87,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         "cluster.membership-lifecycle-v1",
         "cluster.stale-learner-retirement-v1",
         "cluster.mesh-gate-v1",
+        crate::capability_evidence::VOTER_CAPABILITY_EVIDENCE_CAPABILITY,
     ];
     if crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
         capabilities.extend([
@@ -101,12 +99,25 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         capabilities.push("admin.service-monitor-icmp-v1");
     }
 
-    Json(ApiCapabilitiesResponse {
-        release_tag: format!("v{}", crate::version::VERSION),
-        capabilities,
-        fingerprint,
-        reverse_mesh: None,
-    })
+    capabilities
+}
+
+fn capability_fingerprint() -> BTreeMap<&'static str, Vec<&'static str>> {
+    let mut fingerprint = BTreeMap::new();
+    fingerprint.insert("/api/health", vec!["status"]);
+    fingerprint.insert(
+        "/api/cluster/info",
+        vec![
+            "cluster_id",
+            "node_id",
+            "role",
+            "leader_api_base_url",
+            "term",
+        ],
+    );
+    fingerprint.insert("/api/admin/nodes", vec!["items"]);
+    fingerprint.insert("/api/admin/status/events", vec!["hello", "snapshot"]);
+    fingerprint
 }
 
 #[cfg(test)]
