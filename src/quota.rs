@@ -248,14 +248,20 @@ async fn run_quota_tick_at_with_geo(
         }
         if let Some(sample) = full_site_sample.as_ref() {
             let legacy_usage = store_guard.tcp_connection_usage().clone();
-            if let Err(err) = persist_connections_minute(
+            match persist_connections_minute(
                 &config.data_dir,
                 &local_node_id,
                 sample_minute,
                 &legacy_usage,
                 Some(sample),
             ) {
-                warn!(%err, "quota tick: failed to persist full-site tcp connection sample");
+                Ok(false) => {
+                    warn!("quota tick: tcp connection history reached its local budget");
+                }
+                Ok(true) => {}
+                Err(err) => {
+                    warn!(%err, "quota tick: failed to persist full-site tcp connection sample");
+                }
             }
         }
         drop(store_guard);
