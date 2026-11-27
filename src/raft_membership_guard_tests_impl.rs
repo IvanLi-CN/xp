@@ -23,6 +23,8 @@ use crate::{
 
 #[path = "raft_membership_guard_expired_join_tests.rs"]
 mod expired_join;
+#[path = "raft_membership_guard_node_rejoin_tests.rs"]
+mod node_rejoin;
 #[path = "raft_membership_guard_stale_learner_retirement_tests.rs"]
 mod stale_learner_retirement;
 #[path = "raft_membership_guard_unreachable_eviction_tests.rs"]

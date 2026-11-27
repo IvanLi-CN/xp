@@ -16,6 +16,12 @@
 - Fixing this by exempting `missing_desired_members` from fresh-join admission was rejected: ADR
   0010 and the voter-invariant spec deliberately restrict that exemption to `unexpected_learners`.
   The invariant is the safety contract for delete, restore and eviction, not a join obstacle.
-- The chosen fix keeps every guard unchanged and makes recovery self-consistent: the same explicit,
-  owner-confirmed command that shrinks Raft also prunes the DesiredState Nodes and Endpoints that
-  are no longer members, under the existing default backup.
+- Pruning those DesiredState records during recovery was implemented, reviewed and then rejected on
+  a live cluster: the retired nodes were still serving user traffic on their own ports, and the
+  xp-proxy data plane reads its snapshot locally rather than from Raft. Deleting their Node and
+  Endpoint records would have traded control-plane consistency for a data-plane outage, which the
+  owner ruled out.
+- The settled split keeps recovery non-destructive and gives each retired node an explicit next
+  step: a node that still runs rejoins under its existing identity and endpoints, while a node that
+  is permanently gone is removed through the eviction path with an explicit absence declaration.
+  Recovery itself never deletes DesiredState rows.

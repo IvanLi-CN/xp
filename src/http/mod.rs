@@ -32,6 +32,7 @@ mod mesh;
 mod mihomo_import_api;
 mod mihomo_resource_route;
 mod node_delete;
+mod node_rejoin;
 mod raft_admin;
 mod raft_write_error;
 mod resource_alerts;
@@ -1080,6 +1081,10 @@ pub fn build_router_with_mesh_telemetry(
         .route(
             "/_internal/raft/repair-orphan-voter",
             post(admin_internal_repair_orphan_voter),
+        )
+        .route(
+            "/_internal/raft/rejoin-node",
+            post(node_rejoin::admin_internal_rejoin_node),
         )
         .route(
             "/_internal/raft/evict-unreachable-voter",
@@ -2167,6 +2172,22 @@ async fn cluster_join(
         )
         .await
         .map_err(|error| ApiError::conflict(error.to_string()))?;
+        // A rejoin already owns the durable Restore that registers this learner and promotes it
+        // after catch-up. Minting a second Join operation here would violate the one-operation
+        // rule, so replay bootstrap material and let the Restore lifecycle advance the target.
+        if node_rejoin::owns_active_restore(&state, &node_id, raft_node_id).await {
+            return Ok(Json(ClusterJoinResponse {
+                node_id,
+                leader_node_id: state.cluster.node_id.clone(),
+                bootstrap_sender_ids,
+                reverse_mesh_bootstrap: None,
+                activation_deadline,
+                signed_cert_pem,
+                cluster_ca_pem: (*state.cluster_ca_pem).clone(),
+                cluster_ca_key_pem: ca_key_pem,
+                xp_admin_token_hash: state.config.admin_token_hash.clone(),
+            }));
+        }
     }
     if existing_session.as_ref().is_some_and(|session| {
         matches!(

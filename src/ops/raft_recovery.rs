@@ -42,27 +42,7 @@ pub(crate) fn read_persisted_state(
     })
 }
 
-pub(crate) fn write_persisted_state(
-    storage: &crate::state::history_storage::HistoryStorage,
-    state: &crate::state::PersistedState,
-) -> Result<(), ExitError> {
-    let bytes = serde_json::to_vec_pretty(state).map_err(|error| {
-        ExitError::new(
-            5,
-            format!("desired_state_error: serialize persistent state: {error}"),
-        )
-    })?;
-    storage
-        .write(crate::state::history_storage::STATE_KEY, &bytes)
-        .map_err(|error| {
-            ExitError::new(
-                5,
-                format!("desired_state_error: write persistent state: {error}"),
-            )
-        })
-}
-
-/// DesiredState entry that the single-node recovery would retire.
+/// DesiredState entry that sits outside a recovered single-node membership.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RetiredDesiredState {
     pub(super) node_id: String,
@@ -70,43 +50,31 @@ pub(crate) struct RetiredDesiredState {
     pub(super) endpoint_ids: Vec<String>,
 }
 
-/// Prune every DesiredState Node and Endpoint outside the recovered membership.
+/// DesiredState Nodes that sit outside the recovered membership.
 ///
-/// Shrinking Raft alone leaves each retired node as a `missing_desired_members` entry. That
-/// non-empty audit rejects both fresh join and remove-node, so a recovered cluster could never be
-/// repaired. Returning the pruned shape lets the caller report exactly what was removed.
-pub(crate) fn plan_desired_state_prune(
-    state: &mut crate::state::PersistedState,
+/// Recovery never deletes them: a retired node may still serve user traffic, and its endpoints must
+/// survive a later rejoin unchanged. Reporting the shape lets the operator decide, per node,
+/// between
+/// `xp-ops xp rejoin-node` and an explicitly confirmed absence removal.
+pub(crate) fn plan_retired_desired_state(
+    state: &crate::state::PersistedState,
     recovered_node_id: &str,
 ) -> Vec<RetiredDesiredState> {
-    let retired_node_ids = state
+    state
         .nodes
-        .keys()
-        .filter(|node_id| node_id.as_str() != recovered_node_id)
-        .cloned()
-        .collect::<BTreeSet<_>>();
-
-    let mut retired = Vec::new();
-    for node_id in retired_node_ids {
-        let Some(node) = state.nodes.remove(&node_id) else {
-            continue;
-        };
-        let endpoint_ids = state
-            .endpoints
-            .iter()
-            .filter(|(_, endpoint)| endpoint.node_id == node_id)
-            .map(|(endpoint_id, _)| endpoint_id.clone())
-            .collect::<Vec<_>>();
-        for endpoint_id in &endpoint_ids {
-            state.endpoints.remove(endpoint_id);
-        }
-        retired.push(RetiredDesiredState {
-            node_id,
-            node_name: node.node_name,
-            endpoint_ids,
-        });
-    }
-    retired
+        .iter()
+        .filter(|(node_id, _)| node_id.as_str() != recovered_node_id)
+        .map(|(node_id, node)| RetiredDesiredState {
+            node_id: node_id.clone(),
+            node_name: node.node_name.clone(),
+            endpoint_ids: state
+                .endpoints
+                .iter()
+                .filter(|(_, endpoint)| endpoint.node_id == *node_id)
+                .map(|(endpoint_id, _)| endpoint_id.clone())
+                .collect(),
+        })
+        .collect()
 }
 
 fn recover_single_node_membership(
@@ -206,11 +174,12 @@ pub async fn run(paths: Paths, args: XpRecoverSingleNodeArgs) -> Result<(), Exit
          do not run it unless quorum is permanently lost"
     );
 
-    // Read the durable DesiredState without starting the service so the prune can be reported and
-    // applied while `xp` is stopped.
+    // Read the durable DesiredState without starting the service so the retired nodes can be
+    // reported while `xp` is stopped. Recovery never rewrites it: these nodes may still serve user
+    // traffic, and their endpoints must survive a later rejoin unchanged.
     let desired_state_storage = crate::state::history_storage::HistoryStorage::open(&abs_data_dir);
-    let mut desired_state = read_persisted_state(&desired_state_storage)?;
-    let planned_prune = plan_desired_state_prune(&mut desired_state, &cluster_meta.node_id);
+    let desired_state = read_persisted_state(&desired_state_storage)?;
+    let retired_nodes = plan_retired_desired_state(&desired_state, &cluster_meta.node_id);
 
     if mode == Mode::DryRun {
         if args.no_backup {
@@ -219,15 +188,20 @@ pub async fn run(paths: Paths, args: XpRecoverSingleNodeArgs) -> Result<(), Exit
             eprintln!("dry-run: would back up raft dir: {}", raft_dir.display());
         }
         eprintln!(
-            "dry-run: would prune {} DesiredState node(s) outside the recovered membership:",
-            planned_prune.len()
+            "dry-run: {} DesiredState node(s) would sit outside the recovered membership:",
+            retired_nodes.len()
         );
-        for retired in &planned_prune {
+        for retired in &retired_nodes {
             eprintln!(
                 "dry-run:   node {} ({}) endpoints={:?}",
                 retired.node_id, retired.node_name, retired.endpoint_ids
             );
         }
+        eprintln!(
+            "dry-run: these are NOT pruned; rejoin each running node with \
+             `xp-ops xp rejoin-node` or remove it with `xp-ops xp evict-unreachable-voter \
+             --confirmed-absent`"
+        );
         eprintln!(
             "dry-run: would rewrite membership in: {}",
             store_paths.sm_meta_json.display()
@@ -354,18 +328,22 @@ pub async fn run(paths: Paths, args: XpRecoverSingleNodeArgs) -> Result<(), Exit
         })?;
     }
 
-    if !planned_prune.is_empty() {
-        write_persisted_state(&desired_state_storage, &desired_state)?;
+    if !retired_nodes.is_empty() {
         eprintln!(
-            "  pruned {} DesiredState node(s) outside the recovered membership",
-            planned_prune.len()
+            "  {} DesiredState node(s) sit outside the recovered membership and were kept:",
+            retired_nodes.len()
         );
-        for retired in &planned_prune {
+        for retired in &retired_nodes {
             eprintln!(
-                "    removed node {} ({}) endpoints={:?}",
+                "    node {} ({}) endpoints={:?}",
                 retired.node_id, retired.node_name, retired.endpoint_ids
             );
         }
+        eprintln!(
+            "  converge each one: `xp-ops xp rejoin-node --node-id <id>` for a node that is still \
+             running, or `xp-ops xp evict-unreachable-voter --node-id <id> --confirmed-absent \
+             --apply --delete-endpoints` for a node that is permanently gone"
+        );
     }
 
     eprintln!("  ok: membership rewritten to single-node voter; restart xp to take effect");

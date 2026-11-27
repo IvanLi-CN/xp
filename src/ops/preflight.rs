@@ -90,6 +90,7 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
             Ok(())
         }
         Command::Xp(XpCommand::RepairOrphanVoter(_))
+        | Command::Xp(XpCommand::RejoinNode(_))
         | Command::Xp(XpCommand::EvictUnreachableVoter(_))
         | Command::Xp(XpCommand::RetireStaleLearner(_))
         | Command::Xp(XpCommand::RestoreStaleLearner(_))

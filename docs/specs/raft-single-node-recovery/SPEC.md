@@ -63,16 +63,18 @@ None
   - 将 Raft membership voters 收缩为“仅当前节点”。
   - 当前节点在 membership 的 `NodeMeta` 必须被更新为 `XP_API_BASE_URL` 对应的值。
   - 若 snapshot meta 存在，必须同步更新其 `last_membership`，避免重启后回滚到旧 membership。
-  - 必须把不在新 membership 中的 DesiredState Node 及其 Endpoint 一并从持久状态移除。
-    Raft 收缩后每一个被淘汰节点都会成为 `missing_desired_members`，而该不变量非空会同时
-    拦住 fresh join 和 remove-node；只有收缩 DesiredState 才能让恢复后的集群重新可变更。
-  - 收缩 DesiredState 必须连同 `raft/` 一起纳入默认备份，且仅在本地持久状态中执行，
-    不调用 admin API、不改动证书或身份。
+  - **不得**删除任何 DesiredState Node 或 Endpoint。Raft 收缩后每个被淘汰节点都会成为
+    `missing_desired_members`，但其中可能包含仍在服务用户流量的机器。用控制面一致换取
+    数据面中断是不可接受的取舍。
+  - 恢复只改变 Raft 持久化；`--dry-run` 必须列出新 membership 之外、仍存在于 DesiredState
+    的节点，供操作者决定后续 rejoin 或删除。
+  - 恢复后集群不可写变更，直到操作者把每个 `missing_desired_members` 收敛：仍在运行的节点
+    走 rejoin 恢复既有身份与 endpoint，永久失联的节点走显式缺席删除。
 - 回归验证：
   - 在 docker compose 3 节点环境中，模拟停止 2 个节点后，运行恢复命令，然后验证存活节点最终成为 leader；
   - wipe 一个节点数据后，能通过 join token 重新加入集群并正确发现 leader；
-  - **保留 DesiredState 的场景**：被淘汰节点不 wipe、其 DesiredState 记录仍存在时，恢复后的
-    leader 必须能直接接受 fresh join，不得因 `missing_desired_members` 永久拒绝。
+  - **保留 DesiredState 的场景**：被淘汰节点不 wipe、其 DesiredState 记录仍存在时，恢复必须
+    保留该记录与其 Endpoint，且该节点随后能通过 rejoin 在不改端口的前提下恢复为 voter。
 
 ### SHOULD
 
@@ -90,16 +92,17 @@ None
   When 由恢复后的 leader 生成 join token 并对该节点执行 `xp join`
   Then 该节点可重新加入集群，且其 `/api/cluster/info.leader_api_base_url` 指向新的 leader
 
-- Given 幸存节点保留着完整的 DesiredState（被淘汰节点未被 wipe，其记录仍在）
+- Given 幸存节点保留着完整的 DesiredState（被淘汰节点未被 wipe，其记录仍在，且机器仍在服务流量）
   When 执行 `xp-ops xp recover-single-node -y`
-  Then 新 membership 之外的 DesiredState Node 与 Endpoint 被移除
-  And 恢复后的集群成员关系审计为干净（`missing_desired_members` 为空）
-  And 该 leader 可直接接受 fresh join，无需人工清理持久状态
+  Then 该命令不删除任何 DesiredState Node 或 Endpoint
+  And 被淘汰节点仍在原端口继续服务用户流量
+  And 操作者可用 `xp-ops xp rejoin-node` 把它们逐个恢复为 voter，端口不变
 
 ## 风险 / 开放问题
 
 - 风险：这是不安全的共识恢复；若被重置节点在丢失前存在仅它持有的已提交状态，将永久丢失。
 - 风险：误执行会破坏原集群 membership；必须通过 `-y/--yes` + 默认备份降低误用成本。
-- 风险：收缩 DesiredState 会删除被淘汰节点的 Node 与 Endpoint 记录。这些数据无法从本命令恢复，
-  只能从备份还原；因此命令必须在执行前明确列出将被删除的 Node 与 Endpoint。
-- 开放问题：恢复后是否要提供“恢复成多 voter”的正规流程（当前通过 join 重新入群即可）。
+- 风险：恢复完成后集群在有 `missing_desired_members` 的情况下不可写变更。操作者必须对每个
+  被淘汰节点作出选择——仍在运行的 rejoin，永久失联的显式删除——否则管理面一直不可用。
+  数据面不受影响。
+- 开放问题：恢复后是否要提供“恢复成多 voter”的正规流程（当前通过 rejoin 逐个入群即可）。

@@ -1943,29 +1943,40 @@ Notes:
 
 - By default, `xp-ops` creates a backup copy at `${XP_DATA_DIR}/raft.bak-<timestamp>`. You can skip
   it with `--no-backup` (not recommended).
-- The same backup also retains the DesiredState snapshot the command prunes, so a wrong recovery
-  is recoverable.
+- The backup covers `raft/`, so a wrong membership rewrite can be restored from it.
 - After restart, leader election may take up to ~6-12 seconds (WAN-tuned defaults).
 - Do not manually edit Raft membership files and do not try to preserve offline nodes as learners.
 
-Recovery prunes DesiredState. Shrinking Raft alone leaves every retired node as a
-`missing_desired_members` entry, and that non-empty invariant rejects both fresh join and
-remove-node — a recovered cluster could never be repaired.
+Recovery never deletes DesiredState. Shrinking Raft leaves every retired node as a
+`missing_desired_members` entry, which correctly tells you those nodes still need a decision. A node
+that is still running keeps serving traffic throughout recovery, because the data plane reads its
+snapshot locally instead of from Raft.
 
-- Before applying, the dry-run lists every DesiredState Node and Endpoint that the recovery would
-  remove. Confirm that list matches the nodes you have permanently lost.
-- Apply removes those Nodes and their Endpoints from local persistent state together with the Raft
-  membership rewrite. Node and Endpoint records cannot be restored from the running system; only
-  the backup holds them.
-- A retired node that still holds a Raft identity is never pruned; only nodes already excluded from
-  the new single-node membership are.
+The dry-run lists the DesiredState Nodes that sit outside the new membership. For each one, decide:
+
+- **Still running** — rejoin it under its existing identity and endpoints:
+  `sudo xp-ops xp rejoin-node --node-id <id>` on the leader, then `xp join` on that node with the
+  printed token. The Node, Endpoint and port are preserved, so user traffic keeps serving.
+  `xp join` clears that host's stale local Raft state (`raft/wal`, vote, committed, state machine
+  and snapshot meta) before the authenticated runtime starts: a node that survived the incident
+  still holds the old WAL and vote, and replaying them would let it campaign or log against a
+  cluster that moved on. `xp-ops xp rejoin-node` prints the exact token to use.
+- **Permanently gone** — remove it with the eviction path and an explicit absence declaration.
+  Run the preview first and pass the values it prints:
+  ```
+  sudo xp-ops xp evict-unreachable-voter --node-id <id> --confirmed-absent
+  sudo xp-ops xp evict-unreachable-voter --node-id <id> --confirmed-absent \
+    --apply --expected-membership <fingerprint> \
+    --expected-endpoint-ids <id[,id]> --delete-endpoints
+  ```
+  The target must hold no Raft identity. Its capability probe covers current voters only, so an
+  absent target never blocks its own removal.
 
 After recovery:
 
 - Start `xp` on the recovered node and wait until `/api/cluster/info` reports `"role": "leader"`.
-- Confirm the membership audit is clean: `/api/cluster/info` returns a leader and endpoint creation
-  succeeds through the admin UI/API. A remaining `missing_desired_members` means the prune did not
-  complete; restore the backup instead of deleting records by hand.
+- Work through every `missing_desired_members` entry until the audit is clean. Only then does endpoint
+  creation succeed through the admin UI/API. Never edit these records by hand; use rejoin or evict.
 - Re-join each repaired node using a join token issued by the recovered leader
   (`/api/admin/cluster/join-tokens`), then run `xp join` on the repaired node and restart its
   service.

@@ -47,6 +47,32 @@ A functional signed request that reaches its target through any permitted path; 
 of Direct Connectivity.
 _Avoid_: Direct success, Mesh success
 
+### Raft Membership
+
+**DesiredState Node**:
+A node recorded in the cluster's authoritative node directory. It describes what the cluster intends
+to manage, and it is distinct from whether that node currently holds a Raft identity.
+_Avoid_: Cluster member, registered node
+
+**Raft Voter**:
+A node that holds a voting identity in the current Raft membership and can therefore participate in
+quorum. Every voter maps to exactly one DesiredState Node.
+_Avoid_: Node, member
+
+**Orphan Voter**:
+A Raft voter with no matching DesiredState Node. It is an incident shape, never steady state.
+_Avoid_: Unexpected node
+
+**Absent DesiredState Node**:
+A DesiredState Node with no Raft identity. It is valid only as the target of a recorded removal, or
+transiently while a single-node quorum recovery has not yet pruned it.
+_Avoid_: Deleted node, missing node
+
+**Rejoin**:
+Bringing an Absent DesiredState Node back into the Raft membership under its existing identity and
+existing endpoints, rather than admitting it as a new node.
+_Avoid_: Fresh join, re-register
+
 ### Raft Leadership
 
 **Leader Election Handoff**:

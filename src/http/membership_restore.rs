@@ -134,41 +134,8 @@ pub(super) async fn admin_internal_restore_node(
             )
             .await
             .map_err(|error| ApiError::conflict(error.to_string()))?;
-            let operation = crate::state::MembershipOperation {
-                operation_id: uuid::Uuid::new_v4().to_string(),
-                kind: crate::state::MembershipOperationKind::Restore,
-                raft_node_id,
-                node_id: Some(node.node_id.clone()),
-                expected_membership: crate::raft_membership_guard::membership_revision(&metrics)
-                    .map_err(|error| ApiError::internal(error.to_string()))?,
-                phase: crate::state::MembershipOperationPhase::Prepared,
-                legacy: false,
-                remove_learner: false,
-                delete_endpoints: false,
-                expected_endpoint_ids: Vec::new(),
-                expected_endpoint_tags: Vec::new(),
-                created_at: Utc::now().to_rfc3339(),
-                next_retry_at: None,
-                terminal_at: None,
-                evidence: Some(if custom_xmux {
-                    format!(
-                        "restore requested; {}",
-                        crate::raft_membership_guard::restore_xmux_proof(&node)
-                    )
-                } else {
-                    "restore requested".to_string()
-                }),
-            };
-            let _ = raft_write(
-                &state,
-                crate::state::DesiredStateCommand::BeginMembershipOperation {
-                    operation: Box::new(operation.clone()),
-                    node: None,
-                    join_session: None,
-                },
-            )
-            .await?;
-            operation
+            begin_restore_operation(&state, &node, raft_node_id, &metrics, custom_xmux, None)
+                .await?
         }
     };
     drop(guard);
@@ -194,6 +161,166 @@ pub(super) async fn admin_internal_restore_node(
         "operation_id": resumed.operation_id,
         "phase": resumed.phase,
     })))
+}
+
+/// Persist the durable `Restore` operation for an absent DesiredState node.
+async fn begin_restore_operation(
+    state: &AppState,
+    node: &crate::domain::Node,
+    raft_node_id: RaftNodeId,
+    metrics: &openraft::RaftMetrics<RaftNodeId, crate::raft::types::NodeMeta>,
+    custom_xmux: bool,
+    extra_evidence: Option<&str>,
+) -> Result<crate::state::MembershipOperation, ApiError> {
+    let operation = crate::state::MembershipOperation {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        kind: crate::state::MembershipOperationKind::Restore,
+        raft_node_id,
+        node_id: Some(node.node_id.clone()),
+        expected_membership: crate::raft_membership_guard::membership_revision(metrics)
+            .map_err(|error| ApiError::internal(error.to_string()))?,
+        phase: crate::state::MembershipOperationPhase::Prepared,
+        legacy: false,
+        remove_learner: false,
+        delete_endpoints: false,
+        expected_endpoint_ids: Vec::new(),
+        expected_endpoint_tags: Vec::new(),
+        created_at: Utc::now().to_rfc3339(),
+        next_retry_at: None,
+        terminal_at: None,
+        evidence: Some({
+            let mut evidence = if custom_xmux {
+                format!(
+                    "restore requested; {}",
+                    crate::raft_membership_guard::restore_xmux_proof(node)
+                )
+            } else {
+                "restore requested".to_string()
+            };
+            if let Some(extra) = extra_evidence {
+                evidence.push_str("; ");
+                evidence.push_str(extra);
+            }
+            evidence
+        }),
+    };
+    let _ = raft_write(
+        state,
+        crate::state::DesiredStateCommand::BeginMembershipOperation {
+            operation: Box::new(operation.clone()),
+            node: None,
+            join_session: None,
+        },
+    )
+    .await?;
+    Ok(operation)
+}
+
+/// Begin (or resume) the durable restore that admits `node_id` while `absent_peers` stay absent.
+///
+/// Rejoin uses this instead of writing its own join operation: the absent-node restore lifecycle
+/// already owns learner registration, catch-up and promotion for a node with no Raft identity, and
+/// it already validates the exact `missing_desired_members` allowlist.
+pub(super) async fn begin_absent_node_restore(
+    state: &AppState,
+    node_id: &str,
+    absent_peers: &[String],
+    evidence: &str,
+) -> Result<(), ApiError> {
+    let raft_node_id = raft_node_id_from_ulid(node_id)
+        .map_err(|error| ApiError::invalid_request(error.to_string()))?;
+    let allowed_missing = absent_peers
+        .iter()
+        .map(|peer| raft_node_id_from_ulid(peer))
+        .collect::<Result<BTreeSet<_>, _>>()
+        .map_err(|error| ApiError::invalid_request(error.to_string()))?;
+    if allowed_missing.contains(&raft_node_id) {
+        return Err(ApiError::invalid_request(
+            "restore allowlist must not contain the target node",
+        ));
+    }
+
+    let guard = crate::raft_membership_guard::membership_operation_gate()
+        .lock_owned()
+        .await;
+    state
+        .raft
+        .ensure_linearizable()
+        .await
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
+    let metrics = raft_metrics(state);
+    if !is_leader(&metrics) {
+        return Err(ApiError::invalid_request("not leader"));
+    }
+    let node = state
+        .store
+        .lock()
+        .await
+        .get_node(node_id)
+        .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?;
+
+    let target_is_voter = metrics
+        .membership_config
+        .membership()
+        .voter_ids()
+        .any(|id| id == raft_node_id);
+    if target_is_voter {
+        return Err(ApiError::conflict(
+            "rejoin target already holds a Raft voter identity",
+        ));
+    }
+    let custom_xmux = crate::raft_membership_guard::has_custom_xmux(&*state.store.lock().await);
+    if custom_xmux {
+        join_capability::require_xmux_settings_on_node(state, &node).await?;
+    }
+    let active_operation = state
+        .store
+        .lock()
+        .await
+        .state()
+        .active_membership_operation()
+        .cloned();
+    match active_operation {
+        Some(operation)
+            if operation.kind == crate::state::MembershipOperationKind::Restore
+                && operation.raft_node_id == raft_node_id =>
+        {
+            operation
+        }
+        Some(_) => {
+            return Err(ApiError::conflict(
+                "another membership lifecycle operation is active",
+            ));
+        }
+        None => {
+            crate::raft_membership_guard::require_clean_membership_for_restore_node(
+                state.raft.clone(),
+                state.store.clone(),
+                raft_node_id,
+                &allowed_missing,
+            )
+            .await
+            .map_err(|error| ApiError::conflict(error.to_string()))?;
+            begin_restore_operation(
+                state,
+                &node,
+                raft_node_id,
+                &metrics,
+                custom_xmux,
+                Some(evidence),
+            )
+            .await?
+        }
+    };
+    drop(guard);
+
+    crate::raft_membership_guard::resume_membership_operations_once(
+        state.raft.clone(),
+        state.store.clone(),
+    )
+    .await
+    .map_err(|error| ApiError::internal(format!("restore resume failed: {error}")))?;
+    Ok(())
 }
 
 /// Adopt one exact stale learner into the existing durable Restore lifecycle. This is separate

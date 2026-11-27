@@ -360,6 +360,41 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
     };
     meta.save(&config.data_dir)?;
 
+    // A rejoin runs on a host that already holds Raft persistence from the identity it is
+    // restoring. OpenRaft loads that WAL, vote and snapshot verbatim, so a stale vote or a log
+    // prefix that diverged from the recovered cluster would let this node campaign or log an
+    // entry the cluster cannot accept. A fresh join never has these files; a rejoin must drop
+    // them before the authenticated runtime starts.
+    let store_paths = xp::raft::storage::StorePaths::new(&config.data_dir);
+    let had_raft_state = [
+        &store_paths.wal_json,
+        &store_paths.vote_json,
+        &store_paths.committed_json,
+        &store_paths.sm_meta_json,
+        &store_paths.snapshot_meta_json,
+        &store_paths.snapshot_data_json,
+    ]
+    .iter()
+    .any(|path| path.exists());
+    if had_raft_state {
+        let raft_dir = store_paths
+            .wal_json
+            .parent()
+            .and_then(std::path::Path::parent)
+            .ok_or_else(|| anyhow::anyhow!("invalid raft store path"))?;
+        if !raft_dir.ends_with("raft") {
+            anyhow::bail!(
+                "refusing to clear unexpected raft state directory: {}",
+                raft_dir.display()
+            );
+        }
+        std::fs::remove_dir_all(raft_dir)?;
+        eprintln!(
+            "cleared stale local Raft state for rejoin: {}",
+            raft_dir.display()
+        );
+    }
+
     let _store = xp::state::JsonSnapshotStore::load_or_init(xp::state::StoreInit {
         data_dir: config.data_dir.clone(),
         bootstrap_node_id: Some(node_id),

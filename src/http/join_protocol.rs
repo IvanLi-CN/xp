@@ -368,8 +368,34 @@ pub(super) async fn resolve_reservation(
         }
         session.signed_cert_pem.clone()
     } else {
+        // Rejoin issues a token bound to an existing node identity, so an existing DesiredState
+        // record is expected there. It is admissible only while that node owns the matching
+        // lifecycle operation; otherwise this is a replay of a consumed token.
         if state.store.lock().await.get_node(&token.token_id).is_some() {
-            return Err(ApiError::invalid_request("join token already used"));
+            let owns_rejoin = {
+                let store = state.store.lock().await;
+                store
+                    .state()
+                    .active_membership_operation()
+                    .is_some_and(|operation| {
+                        operation.node_id.as_deref() == Some(token.token_id.as_str())
+                            && match operation.kind {
+                                crate::state::MembershipOperationKind::Join => {
+                                    operation.phase
+                                        == crate::state::MembershipOperationPhase::Prepared
+                                }
+                                crate::state::MembershipOperationKind::Restore => {
+                                    !operation.phase.is_terminal()
+                                        && operation.phase
+                                            != crate::state::MembershipOperationPhase::Blocked
+                                }
+                                _ => false,
+                            }
+                    })
+            };
+            if !owns_rejoin {
+                return Err(ApiError::invalid_request("join token already used"));
+            }
         }
         crate::cluster_identity::sign_node_csr(&state.cluster.cluster_id, ca_key_pem, &req.csr_pem)
             .map_err(|e| ApiError::internal(e.to_string()))?
