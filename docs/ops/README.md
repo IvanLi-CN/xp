@@ -1943,13 +1943,29 @@ Notes:
 
 - By default, `xp-ops` creates a backup copy at `${XP_DATA_DIR}/raft.bak-<timestamp>`. You can skip
   it with `--no-backup` (not recommended).
+- The same backup also retains the DesiredState snapshot the command prunes, so a wrong recovery
+  is recoverable.
 - After restart, leader election may take up to ~6-12 seconds (WAN-tuned defaults).
 - Do not manually edit Raft membership files and do not try to preserve offline nodes as learners.
+
+Recovery prunes DesiredState. Shrinking Raft alone leaves every retired node as a
+`missing_desired_members` entry, and that non-empty invariant rejects both fresh join and
+remove-node — a recovered cluster could never be repaired.
+
+- Before applying, the dry-run lists every DesiredState Node and Endpoint that the recovery would
+  remove. Confirm that list matches the nodes you have permanently lost.
+- Apply removes those Nodes and their Endpoints from local persistent state together with the Raft
+  membership rewrite. Node and Endpoint records cannot be restored from the running system; only
+  the backup holds them.
+- A retired node that still holds a Raft identity is never pruned; only nodes already excluded from
+  the new single-node membership are.
 
 After recovery:
 
 - Start `xp` on the recovered node and wait until `/api/cluster/info` reports `"role": "leader"`.
-- Confirm an admin write works, for example by creating a temporary endpoint and then deleting it.
+- Confirm the membership audit is clean: `/api/cluster/info` returns a leader and endpoint creation
+  succeeds through the admin UI/API. A remaining `missing_desired_members` means the prune did not
+  complete; restore the backup instead of deleting records by hand.
 - Re-join each repaired node using a join token issued by the recovered leader
   (`/api/admin/cluster/join-tokens`), then run `xp join` on the repaired node and restart its
   service.

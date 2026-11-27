@@ -54,7 +54,12 @@ metadata into an orphan voter without a DesiredState Node mapping.
   state and is not a promotion or deletion signal. If its server is permanently decommissioned,
   an operator may explicitly retire that exact learner through the separate retirement lifecycle.
 - A DesiredState Node without a Raft member is valid only for the target of a recorded removal
-  after membership has become absent.
+  after membership has become absent, or transiently during an approved single-node quorum
+  recovery before that recovery has pruned the retired nodes. A DesiredState Node left behind by a
+  completed single-node recovery is a `missing_desired_members` incident: it blocks fresh join and
+  remove-node until the recovery records are cleaned. `xp-ops xp recover-single-node` therefore
+  removes every DesiredState Node and Endpoint outside its new membership as part of the same
+  recovery. This never applies to a live node that still holds a Raft identity.
 - Operations advance monotonically through `prepared`, learner/voter/removal phases, and a terminal
   `completed`, `blocked`, or `expired` state. Terminal records include evidence and are retained for
   24 hours. A second non-terminal operation is rejected.

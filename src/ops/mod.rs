@@ -24,6 +24,9 @@ mod mihomo;
 mod paths;
 mod platform;
 mod preflight;
+mod raft_recovery;
+#[cfg(test)]
+mod raft_recovery_prune_tests;
 mod runtime;
 mod runtime_activation;
 mod runtime_boot;

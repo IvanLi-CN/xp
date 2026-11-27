@@ -15,9 +15,9 @@ use crate::ops::runtime;
 use crate::ops::status;
 use crate::ops::tui;
 use crate::ops::upgrade;
-use crate::ops::xp;
 use crate::ops::xp_elect;
 use crate::ops::xp_elect::XpTransferLeaderArgs;
+use crate::ops::{raft_recovery, xp};
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -961,7 +961,7 @@ pub async fn run() -> i32 {
             XpCommand::HistoryRepositoryQuota(args) => {
                 history_quota::cmd_xp_history_repository_quota(paths, args).await
             }
-            XpCommand::RecoverSingleNode(args) => xp::cmd_xp_recover_single_node(paths, args).await,
+            XpCommand::RecoverSingleNode(args) => raft_recovery::run(paths, args).await,
         },
         Some(Command::Deploy(args)) => deploy::cmd_deploy(paths, args).await,
         Some(Command::AdminToken(cmd)) => match cmd {
