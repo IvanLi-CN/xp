@@ -2,47 +2,79 @@ use super::raft_recovery::{plan_desired_state_prune, read_persisted_state, write
 use crate::domain::{Endpoint, Node};
 use crate::state::PersistedState;
 
-fn node(node_id: &str, node_name: &str, api_base_url: &str) -> Node {
+fn survivor_node() -> Node {
     Node {
-        node_id: node_id.to_owned(),
-        node_name: node_name.to_owned(),
-        access_host: format!("{node_name}-ep.example.test"),
-        api_base_url: api_base_url.to_owned(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        access_host: xp_test_fixtures::primary_host().to_owned(),
+        api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: Default::default(),
     }
 }
 
-fn state_with(nodes: &[(&str, &str)], endpoints: &[(&str, &str)]) -> PersistedState {
-    let mut state: PersistedState = serde_json::from_value(serde_json::json!({
+fn retired_node() -> Node {
+    Node {
+        node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+        node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+        access_host: xp_test_fixtures::secondary_host().to_owned(),
+        api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+        quota_limit_bytes: 0,
+        quota_reset: Default::default(),
+    }
+}
+
+fn retired_endpoint() -> Endpoint {
+    Endpoint {
+        endpoint_id: xp_test_fixtures::secondary_endpoint_id().to_owned(),
+        node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+        tag: xp_test_fixtures::secondary_endpoint_tag().to_owned(),
+        kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
+        port: 443,
+        meta: serde_json::Value::Null,
+    }
+}
+
+fn survivor_endpoint() -> Endpoint {
+    Endpoint {
+        endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
+        kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
+        port: 443,
+        meta: serde_json::Value::Null,
+    }
+}
+
+fn survivor_id() -> String {
+    xp_test_fixtures::primary_node_id().to_owned()
+}
+
+fn empty_state() -> PersistedState {
+    serde_json::from_value(serde_json::json!({
         "schema_version": crate::state::SCHEMA_VERSION,
         "nodes": {},
         "endpoints": {},
     }))
-    .expect("minimal persisted state");
-    for (node_id, node_name) in nodes {
-        state.nodes.insert(
-            (*node_id).to_owned(),
-            node(
-                node_id,
-                node_name,
-                &format!("https://{node_name}.example.test"),
-            ),
-        );
-    }
-    for (endpoint_id, node_id) in endpoints {
-        state.endpoints.insert(
-            (*endpoint_id).to_owned(),
-            Endpoint {
-                endpoint_id: (*endpoint_id).to_owned(),
-                node_id: (*node_id).to_owned(),
-                tag: format!("{node_id}-tag"),
-                kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
-                port: 443,
-                meta: serde_json::Value::Null,
-            },
-        );
-    }
+    .expect("minimal persisted state")
+}
+
+/// A survivor plus one retired node, matching the incident shape: Raft shrunk to the survivor
+/// while DesiredState still lists the lost peer.
+fn survivor_and_retired_state() -> PersistedState {
+    let mut state = empty_state();
+    let survivor = survivor_node();
+    let retired = retired_node();
+    state.nodes.insert(survivor.node_id.clone(), survivor);
+    state.nodes.insert(retired.node_id.clone(), retired);
+    let survivor_endpoint = survivor_endpoint();
+    state
+        .endpoints
+        .insert(survivor_endpoint.endpoint_id.clone(), survivor_endpoint);
+    let retired_endpoint = retired_endpoint();
+    state
+        .endpoints
+        .insert(retired_endpoint.endpoint_id.clone(), retired_endpoint);
     state
 }
 
@@ -51,69 +83,70 @@ fn state_with(nodes: &[(&str, &str)], endpoints: &[(&str, &str)]) -> PersistedSt
 /// prune is what makes a recovered cluster repairable again.
 #[test]
 fn single_node_recovery_prunes_nodes_and_endpoints_outside_the_new_membership() {
-    let survivor = "01KV679BYW4DXAVWBM586W1QV3";
-    let mut state = state_with(
-        &[
-            (survivor, "101"),
-            ("01M7624MWVVMH7VZ2FARCB0HTD", "us"),
-            ("01M7Z2R0FNS864CYTMMWHJV120", "kr"),
-        ],
-        &[
-            ("ep-101", survivor),
-            ("ep-us", "01M7624MWVVMH7VZ2FARCB0HTD"),
-            ("ep-kr", "01M7Z2R0FNS864CYTMMWHJV120"),
-        ],
-    );
+    let survivor = survivor_id();
+    let mut state = survivor_and_retired_state();
 
-    let retired = plan_desired_state_prune(&mut state, survivor);
+    let retired = plan_desired_state_prune(&mut state, &survivor);
 
     assert_eq!(
         state.nodes.len(),
         1,
         "only the survivor keeps a Node record"
     );
-    assert!(state.nodes.contains_key(survivor));
+    assert!(state.nodes.contains_key(&survivor));
     assert_eq!(
         state.endpoints.len(),
         1,
         "retired endpoints are removed too"
     );
-    assert!(state.endpoints.contains_key("ep-101"));
+    assert!(
+        state
+            .endpoints
+            .contains_key(xp_test_fixtures::primary_endpoint_id())
+    );
 
-    assert_eq!(retired.len(), 2);
-    let retired_us = retired
-        .iter()
-        .find(|entry| entry.node_name == "us")
-        .expect("retired us is reported");
-    assert_eq!(retired_us.node_id, "01M7624MWVVMH7VZ2FARCB0HTD");
-    assert_eq!(retired_us.endpoint_ids, vec!["ep-us".to_owned()]);
+    assert_eq!(retired.len(), 1);
+    let pruned = retired.first().expect("the retired node is reported");
+    assert_eq!(pruned.node_id, xp_test_fixtures::secondary_node_id());
+    assert_eq!(pruned.node_name, xp_test_fixtures::secondary_node_name());
+    assert_eq!(
+        pruned.endpoint_ids,
+        vec![xp_test_fixtures::secondary_endpoint_id().to_owned()]
+    );
 }
 
 /// The recovered node must never be pruned, even when it is not a voter yet: the caller has
 /// already proven it is the target of this recovery.
 #[test]
 fn single_node_recovery_keeps_the_recovered_node() {
-    let survivor = "01KV679BYW4DXAVWBM586W1QV3";
-    let mut state = state_with(&[(survivor, "101")], &[("ep-101", survivor)]);
+    let survivor = survivor_id();
+    let mut state = empty_state();
+    let node = survivor_node();
+    state.nodes.insert(node.node_id.clone(), node);
+    let endpoint = survivor_endpoint();
+    state
+        .endpoints
+        .insert(endpoint.endpoint_id.clone(), endpoint);
 
-    let retired = plan_desired_state_prune(&mut state, survivor);
+    let retired = plan_desired_state_prune(&mut state, &survivor);
 
     assert!(retired.is_empty());
-    assert!(state.nodes.contains_key(survivor));
-    assert!(state.endpoints.contains_key("ep-101"));
+    assert!(state.nodes.contains_key(&survivor));
+    assert!(
+        state
+            .endpoints
+            .contains_key(xp_test_fixtures::primary_endpoint_id())
+    );
 }
 
 /// An already clean state must stay clean: re-running recovery is idempotent.
 #[test]
 fn single_node_recovery_prune_is_idempotent() {
-    let survivor = "01KV679BYW4DXAVWBM586W1QV3";
-    let mut state = state_with(
-        &[(survivor, "101"), ("01M7624MWVVMH7VZ2FARCB0HTD", "us")],
-        &[("ep-us", "01M7624MWVVMH7VZ2FARCB0HTD")],
-    );
+    let survivor = survivor_id();
+    let mut state = survivor_and_retired_state();
 
-    let first = plan_desired_state_prune(&mut state, survivor);
-    let second = plan_desired_state_prune(&mut state, survivor);
+    let first = plan_desired_state_prune(&mut state, &survivor);
+    let second = plan_desired_state_prune(&mut state, &survivor);
 
     assert_eq!(first.len(), 1);
     assert!(second.is_empty());
@@ -123,12 +156,9 @@ fn single_node_recovery_prune_is_idempotent() {
 /// The pruned snapshot must round-trip through the durable store the recovery writes.
 #[test]
 fn pruned_state_round_trips_through_history_storage() {
-    let survivor = "01KV679BYW4DXAVWBM586W1QV3";
-    let mut state = state_with(
-        &[(survivor, "101"), ("01M7624MWVVMH7VZ2FARCB0HTD", "us")],
-        &[("ep-us", "01M7624MWVVMH7VZ2FARCB0HTD")],
-    );
-    plan_desired_state_prune(&mut state, survivor);
+    let survivor = survivor_id();
+    let mut state = survivor_and_retired_state();
+    plan_desired_state_prune(&mut state, &survivor);
 
     let temporary = tempfile::tempdir().expect("temporary directory");
     let storage = crate::state::history_storage::HistoryStorage::open(temporary.path());
@@ -136,8 +166,19 @@ fn pruned_state_round_trips_through_history_storage() {
     let reloaded = read_persisted_state(&storage).expect("read pruned state");
 
     assert_eq!(reloaded.nodes.len(), 1);
-    assert!(reloaded.nodes.contains_key(survivor));
-    assert!(reloaded.endpoints.is_empty());
+    assert!(reloaded.nodes.contains_key(&survivor));
+    // Only the survivor's own endpoint survives the prune.
+    assert_eq!(reloaded.endpoints.len(), 1);
+    assert!(
+        reloaded
+            .endpoints
+            .contains_key(xp_test_fixtures::primary_endpoint_id())
+    );
+    assert!(
+        !reloaded
+            .endpoints
+            .contains_key(xp_test_fixtures::secondary_endpoint_id())
+    );
 }
 
 /// A missing snapshot is a hard error rather than a silent "nothing to prune": recovery must not
