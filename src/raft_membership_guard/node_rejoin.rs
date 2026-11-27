@@ -79,13 +79,31 @@ pub async fn absent_peers(
     store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
     raft_node_id: NodeId,
 ) -> anyhow::Result<Vec<String>> {
-    let audit = super::audit_membership(raft, store).await;
-    let mut peers = audit
+    let audit = super::audit_membership(raft, store.clone()).await;
+    let missing_ids = audit
         .missing_desired_members
         .into_iter()
         .filter(|candidate| *candidate != raft_node_id)
-        .map(|candidate| candidate.to_string())
         .collect::<Vec<_>>();
+    // A raft id is the low 64 bits of a ULID, so it cannot be reversed. Map each absent id back
+    // through DesiredState, which is the only place the full ULID still exists.
+    let store = store.lock().await;
+    let mut peers = missing_ids
+        .into_iter()
+        .map(|candidate| {
+            store
+                .state()
+                .nodes
+                .keys()
+                .find(|node_id| raft_node_id_from_ulid(node_id).ok() == Some(candidate))
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "absent desired state member {candidate} has no recoverable node id"
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     peers.sort_unstable();
     Ok(peers)
 }

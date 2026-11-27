@@ -169,12 +169,10 @@ async fn absent_peers_names_the_remaining_absent_member() {
     .await
     .expect("audit succeeds");
 
+    // Reported as the full ULID: a raft id is only the low 64 bits and cannot be reversed, so the
+    // caller needs the stable node id it can pass to `rejoin-node` or an eviction.
     assert_eq!(
         peers,
-        vec![
-            raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_e())
-                .unwrap()
-                .to_string()
-        ]
+        vec![xp_test_fixtures::identifier_ulid_e().to_owned()]
     );
 }
