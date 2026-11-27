@@ -5,24 +5,46 @@ mod diagnostics;
 #[cfg(test)]
 #[path = "tests/expired_tombstone_tests.rs"]
 mod expired_tombstone_tests;
+pub(super) mod indexes;
 mod original_backfill;
 mod payload_migration;
 mod prefix_recovery;
+pub(super) use indexes::REPOSITORY_HISTORY_RECORD_INDEXES;
 pub(super) mod query_sql;
 mod segments;
 mod stale_recovery_storage;
 mod summary;
 use query_sql::{
-    coverage_row, repository_history_coverage_boundaries, repository_history_records_sql_with,
+    repository_history_coverage_boundaries, repository_history_records_sql_with,
+    subject_coverage_boundaries,
 };
 #[cfg(test)]
 pub(crate) use segments::segment_phase_sql;
 pub(crate) use summary::RepositoryHistorySequenceSummaryBlock;
 pub(super) use summary::ensure_sequence_summary_digest_version;
 
-pub(super) const COVERAGE_SUBJECT_SQL: &str = "
-    SELECT MIN(observed_start), MAX(observed_end), MIN(received_at), MAX(received_at)
-    FROM repository_history_records INDEXED BY repository_history_records_coverage
+/// Four independent single-aggregate seeks, one per boundary column.
+///
+/// A combined `MIN(a), MAX(b), MIN(c), MAX(d)` cannot stop early even when the index covers every
+/// column: SQLite has to visit each matching row before it knows all four extremes. A subject with
+/// hundreds of thousands of records therefore scanned its whole slice on every panel load.
+/// Splitting the query lets each aggregate read only the first or last index entry, which is what
+/// the whole-repository boundary seek above already does.
+pub(super) const COVERAGE_SUBJECT_OBSERVED_START_SQL: &str = "
+    SELECT MIN(observed_start) FROM repository_history_records
+    INDEXED BY repository_history_records_subject_start
+    WHERE subject_node_id = ?1 AND is_tombstone = 0
+";
+
+pub(super) const COVERAGE_SUBJECT_OBSERVED_END_SQL: &str = "
+    SELECT MAX(observed_end) FROM repository_history_records
+    INDEXED BY repository_history_records_subject_end
+    WHERE subject_node_id = ?1 AND is_tombstone = 0
+";
+
+pub(super) const COVERAGE_SUBJECT_RECEIVED_SQL: &str = "
+    SELECT MIN(received_at), MAX(received_at) FROM repository_history_records
+    INDEXED BY repository_history_records_subject_received
     WHERE subject_node_id = ?1 AND is_tombstone = 0
 ";
 
@@ -796,15 +818,12 @@ impl HistoryStorage {
             diagnostic.finish();
             return Ok(None);
         };
-        // A subject-scoped request is a single covering-index seek. A whole-repository request
-        // cannot be one aggregate without scanning the entire index, so it asks each column's own
-        // index for its boundary value instead; four boundaries cost four seeks, not one scan.
+        // Neither shape can be one aggregate over the whole slice: SQLite must visit every
+        // matching row before it can report four extremes. Each column therefore asks its own
+        // index for a boundary value, so a subject-scoped request costs a handful of seeks instead
+        // of a scan proportional to that subject's record count.
         let result = match subject_node_id {
-            Some(subject_node_id) => connection
-                .query_row(COVERAGE_SUBJECT_SQL, params![subject_node_id], |row| {
-                    coverage_row(row, 0)
-                })
-                .map_err(sqlite_error),
+            Some(subject_node_id) => subject_coverage_boundaries(connection, subject_node_id),
             None => repository_history_coverage_boundaries(connection),
         };
         if result.is_ok() {

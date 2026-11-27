@@ -1,3 +1,5 @@
+#[path = "repository/coverage_plan_tests.rs"]
+mod coverage_plan;
 use std::{fs, time::Duration};
 
 use super::*;
@@ -496,31 +498,6 @@ fn repository_keyset_indexes_avoid_a_full_sort_for_compaction_and_export() {
             .iter()
             .any(|detail| detail.contains("USE TEMP B-TREE"))
     );
-}
-
-#[test]
-fn repository_coverage_query_uses_a_subject_seek_without_table_reads() {
-    let temporary = tempfile::tempdir().unwrap();
-    let storage = HistoryStorage::open(temporary.path());
-    let backend = storage.lock_backend();
-    let Backend::Sqlite(connection) = &*backend else {
-        panic!("test storage should use SQLite");
-    };
-    let coverage_plan =
-        query_plan_with_params(connection, repository::COVERAGE_SUBJECT_SQL, ["subject-a"]);
-    assert!(coverage_plan.iter().any(|detail| {
-        detail.contains("USING COVERING INDEX repository_history_records_coverage")
-            && detail.contains("subject_node_id=?")
-    }));
-    let incomplete_plan = query_plan_with_params(
-        connection,
-        repository::INCOMPLETE_AGGREGATE_SUBJECT_SQL,
-        rusqlite::params!["subject-a", "runtime.v1", 100_i64, 1_i64],
-    );
-    assert!(incomplete_plan.iter().any(|detail| {
-        detail.contains("repository_history_records_aggregate_completeness")
-            && detail.contains("subject_node_id=?")
-    }));
 }
 
 #[test]
