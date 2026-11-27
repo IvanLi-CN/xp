@@ -376,6 +376,12 @@
   promoted, deleted, rolled back, or repaired by periodic work. A permanently decommissioned,
   exactly mapped learner may be retired only through the signed leader-local `xp-ops xp retire-stale-learner` flow after every voter exposes `cluster.stale-learner-retirement-v1`;
   it uses `RemoveNodes(..., false)` and the existing durable cleanup operation.
+- Single-node quorum recovery keeps that invariant self-consistent instead of exempting it:
+  `xp-ops xp recover-single-node` prunes every DesiredState Node and Endpoint outside its new
+  membership, under the existing default backup. Shrinking Raft alone would leave each retired node
+  as a `missing_desired_members` entry, and that non-empty audit rejects both fresh join and
+  remove-node, so the recovered cluster could never be repaired. The fresh-join admission
+  exemption stays limited to `unexpected_learners`.
 - Fresh joins use a durable two-stage protocol: the leader records a Join membership operation and
   reservation, registers the learner, and returns bootstrap identity before catch-up. Fresh-join
   admission still requires a quorum-backed linearizable, non-joint membership view, an absent target
