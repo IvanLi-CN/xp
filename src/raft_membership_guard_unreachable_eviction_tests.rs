@@ -388,8 +388,7 @@ async fn absent_pair_fixture(
     tempfile::TempDir,
 ) {
     let temp = tempfile::tempdir().unwrap();
-    let local_node_id = xp_test_fixtures::identifier_ulid_d().to_owned();
-    let local_raft_node_id = raft_node_id_from_ulid(&local_node_id).unwrap();
+    let local_raft_node_id = raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_d()).unwrap();
     let absent_a = xp_test_fixtures::identifier_ulid_e().to_owned();
     let absent_b = xp_test_fixtures::identifier_ulid_a().to_owned();
     let absent_a_raft = raft_node_id_from_ulid(&absent_a).unwrap();
@@ -398,29 +397,32 @@ async fn absent_pair_fixture(
     let store = Arc::new(Mutex::new(
         JsonSnapshotStore::load_or_init(StoreInit {
             data_dir: temp.path().to_path_buf(),
-            bootstrap_node_id: Some(local_node_id.clone()),
+            bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_d().to_owned()),
             bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
             bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
             bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
         })
         .unwrap(),
     ));
-    for (node_id, node_name) in [
-        (&absent_a, xp_test_fixtures::label_extra_node()),
-        (&absent_b, xp_test_fixtures::label_node1()),
+    for node in [
+        Node {
+            node_id: xp_test_fixtures::identifier_ulid_e().to_owned(),
+            node_name: xp_test_fixtures::label_extra_node().to_owned(),
+            access_host: xp_test_fixtures::secondary_host().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
+        Node {
+            node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+            node_name: xp_test_fixtures::label_node1().to_owned(),
+            access_host: xp_test_fixtures::secondary_host().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
     ] {
-        store
-            .lock()
-            .await
-            .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: node_name.to_owned(),
-                access_host: xp_test_fixtures::secondary_host().to_owned(),
-                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
-                quota_limit_bytes: 0,
-                quota_reset: NodeQuotaReset::default(),
-            })
-            .unwrap();
+        store.lock().await.upsert_node(node).unwrap();
     }
 
     let mut voters = BTreeSet::from([local_raft_node_id]);
