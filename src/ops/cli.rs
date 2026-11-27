@@ -8,6 +8,7 @@ use crate::ops::ingress_guard;
 use crate::ops::init;
 use crate::ops::install;
 use crate::ops::membership_lifecycle;
+use crate::ops::membership_lifecycle::XpRejoinNodeArgs;
 use crate::ops::mihomo;
 use crate::ops::paths::Paths;
 use crate::ops::preflight;
@@ -15,6 +16,7 @@ use crate::ops::runtime;
 use crate::ops::status;
 use crate::ops::tui;
 use crate::ops::upgrade;
+pub use crate::ops::xp::{XpBootstrapArgs, XpRestartArgs, XpSyncNodeMetaArgs};
 use crate::ops::xp_elect;
 use crate::ops::xp_elect::XpTransferLeaderArgs;
 use crate::ops::{raft_recovery, xp};
@@ -207,6 +209,8 @@ pub enum XpCommand {
     Restart(XpRestartArgs),
     SyncNodeMeta(XpSyncNodeMetaArgs),
     RepairOrphanVoter(XpRepairOrphanVoterArgs),
+    /// Re-admit a DesiredState node that lost its Raft identity, keeping its endpoints.
+    RejoinNode(XpRejoinNodeArgs),
     EvictUnreachableVoter(XpEvictUnreachableVoterArgs),
     RetireStaleLearner(XpRetireStaleLearnerArgs),
     RestoreStaleLearner(XpRestoreStaleLearnerArgs),
@@ -351,46 +355,6 @@ pub struct UpgradeRunnerArgs {
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct XpBootstrapArgs {
-    #[arg(long, value_name = "NAME")]
-    pub node_name: String,
-
-    #[arg(long = "access-host", value_name = "HOST")]
-    pub access_host: String,
-
-    #[arg(long, value_name = "ORIGIN")]
-    pub api_base_url: String,
-
-    #[arg(long, value_name = "PATH", default_value = "/var/lib/xp/data")]
-    pub xp_data_dir: PathBuf,
-
-    #[arg(long)]
-    pub dry_run: bool,
-}
-
-#[derive(Args, Debug, Clone)]
-pub struct XpRestartArgs {
-    /// Service name to restart (OpenRC: `rc-service <name> restart`, systemd: `<name>.service`).
-    #[arg(long, value_name = "NAME", default_value = "xp")]
-    pub service_name: String,
-
-    #[arg(long)]
-    pub dry_run: bool,
-}
-
-#[derive(Args, Debug, Clone)]
-pub struct XpSyncNodeMetaArgs {
-    /// Local xp API base URL (scheme+host+port), used to talk to the running service.
-    ///
-    /// Recommended (typical): http://127.0.0.1:62416
-    #[arg(long, value_name = "ORIGIN", default_value = "http://127.0.0.1:62416")]
-    pub xp_base_url: String,
-
-    #[arg(long)]
-    pub dry_run: bool,
-}
-
-#[derive(Args, Debug, Clone)]
 pub struct XpRepairOrphanVoterArgs {
     /// Local xp API base URL. This command must be run on the current Raft leader.
     #[arg(long, value_name = "ORIGIN", default_value = "http://127.0.0.1:62416")]
@@ -434,6 +398,13 @@ pub struct XpEvictUnreachableVoterArgs {
     /// Exact comma-separated endpoint ids returned by the preview; empty when none exist.
     #[arg(long, value_delimiter = ',', value_name = "ID[,ID]")]
     pub expected_endpoint_ids: Vec<String>,
+
+    /// Declare the target permanently absent.
+    ///
+    /// The target must hold no Raft identity. Use this to clean up a DesiredState node left behind
+    /// by a single-node quorum recovery; a node that still holds a Raft identity is rejected.
+    #[arg(long)]
+    pub confirmed_absent: bool,
 
     /// Additional retained raft node ids that are also permanently gone. The leader re-probes
     /// each one and refuses the request unless every entry answers with no verified signed
@@ -934,6 +905,9 @@ pub async fn run() -> i32 {
             XpCommand::SyncNodeMeta(args) => xp::cmd_xp_sync_node_meta(paths, args).await,
             XpCommand::RepairOrphanVoter(args) => {
                 membership_lifecycle::cmd_xp_repair_orphan_voter(paths, args).await
+            }
+            XpCommand::RejoinNode(args) => {
+                membership_lifecycle::cmd_xp_rejoin_node(paths, args).await
             }
             XpCommand::EvictUnreachableVoter(args) => {
                 membership_lifecycle::cmd_xp_evict_unreachable_voter(paths, args).await

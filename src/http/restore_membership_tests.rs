@@ -534,3 +534,108 @@ async fn internal_restore_existing_node_starts_durable_lifecycle_operation() {
 
     assert!(calls.add_voters.lock().await.is_empty());
 }
+
+/// A rejoin must hand the operator a join token bound to the target's existing node id, and it
+/// must do that only after recording the durable `Restore` that owns the learner lifecycle.
+#[tokio::test]
+async fn internal_rejoin_node_previews_then_records_restore_and_returns_identity_token() {
+    let tmp = TempDir::new().unwrap();
+    let (app, calls, absent, ca_key_pem) = app_with_recording_raft(&tmp).await;
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let uri: Uri = "/api/admin/_internal/raft/rejoin-node".parse().unwrap();
+
+    // Preview writes nothing and reports the endpoint the rejoin preserves.
+    let body = json!({ "node_id": absent.node_id }).to_string();
+    let response = signed_internal_request(&app, &cluster, &ca_pem, &ca_key_pem, &uri, &body).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let preview = response_json(response).await;
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["node_id"], absent.node_id.as_str());
+    assert_eq!(preview["node_name"], absent.node_name.as_str());
+    assert!(preview["join_token"].is_null());
+    assert!(
+        calls.add_learners.lock().await.is_empty(),
+        "preview must not register a learner"
+    );
+
+    // Apply records the Restore and returns a token bound to the same node id.
+    let expected_membership = preview["expected_membership"].clone();
+    let body = json!({
+        "node_id": absent.node_id,
+        "apply": true,
+        "expected_membership": expected_membership,
+    })
+    .to_string();
+    let response = signed_internal_request(&app, &cluster, &ca_pem, &ca_key_pem, &uri, &body).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let applied = response_json(response).await;
+    assert_eq!(applied["dry_run"], false);
+    let token = applied["join_token"]
+        .as_str()
+        .expect("apply returns a join token");
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(token, chrono::Utc::now()).unwrap();
+    assert_eq!(
+        decoded.token_id, absent.node_id,
+        "the token must restore the existing identity, not mint a new node"
+    );
+}
+
+/// A rejoin only applies to a node that lost its Raft identity. Admitting a voter would let the
+/// command rewrite a healthy member's lifecycle.
+#[tokio::test]
+async fn internal_rejoin_node_rejects_a_node_that_still_holds_raft_identity() {
+    let tmp = TempDir::new().unwrap();
+    let (app, _calls, _absent, ca_key_pem) = app_with_recording_raft(&tmp).await;
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let uri: Uri = "/api/admin/_internal/raft/rejoin-node".parse().unwrap();
+    let body = json!({ "node_id": cluster.node_id }).to_string();
+
+    let response = signed_internal_request(&app, &cluster, &ca_pem, &ca_key_pem, &uri, &body).await;
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+async fn signed_internal_request(
+    app: &axum::Router,
+    cluster: &ClusterMetadata,
+    ca_pem: &str,
+    ca_key_pem: &str,
+    uri: &Uri,
+    body: &str,
+) -> axum::response::Response {
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        &cluster.cluster_id,
+        &cluster.node_id,
+        &cluster.node_id,
+        crate::id::new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        ca_key_pem,
+        ca_pem,
+        &Method::POST,
+        uri,
+        Some("application/json"),
+        body.as_bytes(),
+        &context,
+        &mut headers,
+    )
+    .unwrap();
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_owned()))
+        .unwrap();
+    request.headers_mut().extend(headers);
+    app.clone().oneshot(request).await.unwrap()
+}
+
+async fn response_json(response: axum::response::Response) -> serde_json::Value {
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&body).unwrap()
+}

@@ -20,6 +20,7 @@ use crate::{
 };
 
 mod expired_join_recovery;
+pub mod node_rejoin;
 mod remove_node_operation;
 pub(crate) mod stale_learner_recovery;
 mod stale_learner_retirement;
@@ -27,6 +28,9 @@ mod unreachable_voter_eviction;
 pub use stale_learner_retirement::{
     StaleLearnerRetirementPreview, begin_stale_learner_retirement, preview_stale_learner_retirement,
 };
+pub use unreachable_voter_eviction::EvictionConfirmation;
+#[cfg(test)]
+pub(crate) use unreachable_voter_eviction::require_clean_membership_except_absent;
 pub use unreachable_voter_eviction::{
     UnreachableVoterEvictionPreview, begin_unreachable_voter_eviction,
     preview_unreachable_voter_eviction,

@@ -54,12 +54,24 @@ metadata into an orphan voter without a DesiredState Node mapping.
   state and is not a promotion or deletion signal. If its server is permanently decommissioned,
   an operator may explicitly retire that exact learner through the separate retirement lifecycle.
 - A DesiredState Node without a Raft member is valid only for the target of a recorded removal
-  after membership has become absent, or transiently during an approved single-node quorum
-  recovery before that recovery has pruned the retired nodes. A DesiredState Node left behind by a
-  completed single-node recovery is a `missing_desired_members` incident: it blocks fresh join and
-  remove-node until the recovery records are cleaned. `xp-ops xp recover-single-node` therefore
-  removes every DesiredState Node and Endpoint outside its new membership as part of the same
-  recovery. This never applies to a live node that still holds a Raft identity.
+  after membership has become absent, for the target of a `Prepared` Join recorded by an explicit
+  rejoin, or transiently during an approved single-node quorum recovery. A DesiredState Node with
+  neither is a `missing_desired_members` incident: it blocks fresh join and remove-node until it is
+  either rejoined or removed.
+- Rejoin is the recovery path for a still-running node whose Raft identity was lost. It requires the
+  target to be an Absent DesiredState Node, records the durable `Restore` lifecycle for that exact
+  identity, and lets the node run the ordinary `xp join` flow with an identity-bound join token.
+  Rejoin preserves the target's Node, Endpoint and port, so the data plane keeps serving.
+  `xp-ops xp recover-single-node` never prunes a node that still serves traffic; retired nodes are
+  rejoin candidates until an operator declares them permanently gone.
+- A rejoin host clears its stale local Raft state before the authenticated runtime starts. Its old
+  WAL and vote belong to the pre-recovery cluster and would otherwise let it campaign or log against
+  a membership that moved on.
+- Removing an Absent DesiredState Node uses the eviction path with an explicit permanent-absence
+  declaration. Its capability probe covers current voters only, so an absent target never blocks its
+  own removal. Absence mode tolerates the entire absent set, which is the removal work queue, and
+  still rejects every unrelated incident shape including orphan voters, duplicate DesiredState
+  identities and unexpected learners.
 - Operations advance monotonically through `prepared`, learner/voter/removal phases, and a terminal
   `completed`, `blocked`, or `expired` state. Terminal records include evidence and are retained for
   24 hours. A second non-terminal operation is rejected.

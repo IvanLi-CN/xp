@@ -7,6 +7,7 @@ use axum::{
 };
 use base64::Engine as _;
 use hmac::{Hmac, Mac};
+use http_body_util::BodyExt as _;
 use serde_json::{Value, json};
 use sha2::Sha256;
 use tempfile::TempDir;
@@ -19,6 +20,7 @@ use crate::{
     cluster_metadata::ClusterMetadata,
     config::Config,
     ddns::{DdnsHealthHandle, DdnsStatus},
+    domain::{Node, NodeQuotaReset},
     raft::{
         app::{BoxFuture, LocalRaft, RaftFacade},
         types::{ClientResponse, NodeMeta as RaftNodeMeta, raft_node_id_from_ulid},
@@ -839,4 +841,124 @@ async fn cluster_join_allows_fresh_join_with_unrelated_stale_learner() {
         crate::state::MembershipOperationKind::Join
     );
     assert!(membership_changes.lock().await.is_empty());
+}
+
+/// After a rejoin records its durable `Restore`, the node still calls `xp join` to obtain
+/// bootstrap material. That call must replay bootstrap instead of minting a competing Join: the
+/// store allows only one active lifecycle operation, so a second one would be rejected and the
+/// node would never receive its certificate.
+#[tokio::test]
+async fn cluster_join_after_rejoin_replays_bootstrap_without_a_second_operation() {
+    let tmp = TempDir::new().unwrap();
+    let (app, store, _wait_calls, _promotion_calls) = app_with_blocking_catch_up(&tmp);
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .unwrap();
+
+    // The rejoin recorded a Restore for an absent DesiredState node.
+    let rejoined = Node {
+        node_id: xp_test_fixtures::identifier_ulid_e().to_owned(),
+        node_name: xp_test_fixtures::label_hinet().to_owned(),
+        access_host: xp_test_fixtures::host_fixture494().to_owned(),
+        api_base_url: xp_test_fixtures::service_fixture495().to_owned(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    store.lock().await.upsert_node(rejoined.clone()).unwrap();
+    let rejoined_raft_id = raft_node_id_from_ulid(&rejoined.node_id).unwrap();
+    store
+        .lock()
+        .await
+        .apply_command_and_save(
+            crate::state::DesiredStateCommand::BeginMembershipOperation {
+                operation: Box::new(crate::state::MembershipOperation {
+                    operation_id: crate::id::new_ulid_string(),
+                    kind: crate::state::MembershipOperationKind::Restore,
+                    raft_node_id: rejoined_raft_id,
+                    node_id: Some(xp_test_fixtures::identifier_ulid_e().to_owned()),
+                    expected_membership: "rejoin".to_string(),
+                    phase: crate::state::MembershipOperationPhase::Prepared,
+                    legacy: false,
+                    remove_learner: false,
+                    delete_endpoints: false,
+                    expected_endpoint_ids: Vec::new(),
+                    expected_endpoint_tags: Vec::new(),
+                    created_at: xp_test_fixtures::baseline_timestamp().to_owned(),
+                    next_retry_at: None,
+                    terminal_at: None,
+                    evidence: Some("operator-approved rejoin".to_string()),
+                }),
+                node: None,
+                join_session: None,
+            },
+        )
+        .expect("seed the rejoin Restore");
+
+    // Its join token is bound to that same identity.
+    let join_token = token_bound_to(&cluster, &ca_pem, &ca_key_pem, &rejoined.node_id);
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+            .unwrap();
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
+    let response = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/cluster/join",
+            json!({
+                "join_token": join_token,
+                "node_name": rejoined.node_name,
+                "access_host": rejoined.access_host,
+                "api_base_url": rejoined.api_base_url,
+                "csr_pem": csr.csr_pem,
+                "xmux_settings_v1": true,
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+    assert_eq!(body["node_id"], rejoined.node_id.as_str());
+    assert!(
+        body["signed_cert_pem"]
+            .as_str()
+            .is_some_and(|pem| !pem.is_empty()),
+        "the rejoin target must receive its signed certificate"
+    );
+    // Still exactly the Restore: no competing Join was created.
+    let active = store
+        .lock()
+        .await
+        .state()
+        .active_membership_operation()
+        .cloned()
+        .expect("the Restore remains active");
+    assert_eq!(
+        active.kind,
+        crate::state::MembershipOperationKind::Restore,
+        "join must not displace the rejoin's Restore"
+    );
+}
+
+fn token_bound_to(
+    cluster: &ClusterMetadata,
+    ca_pem: &str,
+    ca_key_pem: &str,
+    node_id: &str,
+) -> String {
+    crate::cluster_identity::JoinToken::issue_signed_for_identity(
+        cluster.cluster_id.clone(),
+        cluster.api_base_url.clone(),
+        ca_pem,
+        node_id,
+        900,
+        chrono::Utc::now(),
+        ca_key_pem,
+    )
+    .encode_base64url_json()
 }

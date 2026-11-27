@@ -29,14 +29,43 @@ pub async fn require_fresh_join_admission(
         )
     }
 
-    let has_target_node = {
+    let (has_target_node, owns_operation) = {
         let store = store.lock().await;
-        if store.state().active_membership_operation().is_some() {
+        // The gate admits only the operation that owns this exact target, while still rejecting
+        // an unrelated operation.
+        let owns_operation = store
+            .state()
+            .active_membership_operation()
+            .is_some_and(|operation| {
+                operation.raft_node_id == target_raft_node_id
+                    && operation.node_id.as_deref() == Some(target_node_id)
+                    && match operation.kind {
+                        // A fresh join records its own `Prepared` Join before the node calls
+                        // `xp join`, so the gate must admit that exact owner.
+                        crate::state::MembershipOperationKind::Join => {
+                            operation.phase == crate::state::MembershipOperationPhase::Prepared
+                        }
+                        // A rejoin records a `Restore` for an absent DesiredState node; the node
+                        // then runs the same `xp join` to obtain its bootstrap material.
+                        crate::state::MembershipOperationKind::Restore => {
+                            !operation.phase.is_terminal()
+                                && operation.phase
+                                    != crate::state::MembershipOperationPhase::Blocked
+                        }
+                        _ => false,
+                    }
+            });
+        if store.state().active_membership_operation().is_some() && !owns_operation {
             anyhow::bail!("fresh join is blocked by an active membership operation")
         }
-        store.state().nodes.contains_key(target_node_id)
+        (
+            store.state().nodes.contains_key(target_node_id),
+            owns_operation,
+        )
     };
-    if has_target_node {
+    // An existing DesiredState record is admitted only when the caller already recorded the
+    // matching Join or Restore for it. Otherwise this is a duplicate registration, not a rejoin.
+    if has_target_node && !owns_operation {
         anyhow::bail!("fresh join target already exists in DesiredState: node_id={target_node_id}")
     }
 

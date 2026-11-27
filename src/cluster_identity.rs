@@ -195,7 +195,45 @@ impl JoinToken {
         let cluster_ca_pem = cluster_ca_pem.into();
         let token_id = Ulid::new().to_string();
         let expires_at = now + chrono::Duration::seconds(ttl_seconds);
+        Self::issue_signed_for(
+            cluster_id,
+            leader_api_base_url,
+            cluster_ca_pem,
+            token_id,
+            expires_at,
+            cluster_ca_key_pem,
+        )
+    }
 
+    /// Issue a token bound to an existing node identity. Rejoin uses this: the target keeps its
+    /// DesiredState node id, so a freshly generated token id would mint a different node.
+    pub fn issue_signed_for_identity(
+        cluster_id: impl Into<String>,
+        leader_api_base_url: impl Into<String>,
+        cluster_ca_pem: impl Into<String>,
+        token_id: impl Into<String>,
+        ttl_seconds: i64,
+        now: DateTime<Utc>,
+        cluster_ca_key_pem: &str,
+    ) -> Self {
+        Self::issue_signed_for(
+            cluster_id.into(),
+            leader_api_base_url.into(),
+            cluster_ca_pem.into(),
+            token_id.into(),
+            now + chrono::Duration::seconds(ttl_seconds),
+            cluster_ca_key_pem,
+        )
+    }
+
+    fn issue_signed_for(
+        cluster_id: String,
+        leader_api_base_url: String,
+        cluster_ca_pem: String,
+        token_id: String,
+        expires_at: DateTime<Utc>,
+        cluster_ca_key_pem: &str,
+    ) -> Self {
         let payload = JoinTokenSignedPayload {
             cluster_id: &cluster_id,
             leader_api_base_url: &leader_api_base_url,

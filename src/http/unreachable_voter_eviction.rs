@@ -27,6 +27,10 @@ pub(super) struct InternalEvictUnreachableVoterRequest {
     /// each one; any answer that proves a missing capability rejects the whole request.
     #[serde(default)]
     confirmed_unreachable: Vec<RaftNodeId>,
+    /// Declare the target permanently absent. The target must hold no Raft identity; this is the
+    /// cleanup path for a DesiredState node left behind by a quorum recovery.
+    #[serde(default)]
+    confirmed_absent: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,6 +61,7 @@ pub(super) async fn admin_internal_evict_unreachable_voter(
         state.store.clone(),
         &req.node_id,
         &confirmed,
+        req.confirmed_absent,
     )
     .await
     .map_err(|error| ApiError::conflict(error.to_string()))?;
@@ -123,9 +128,12 @@ pub(super) async fn admin_internal_evict_unreachable_voter(
         state.store.clone(),
         &req.node_id,
         &expected_membership,
-        req.delete_endpoints,
-        expected_endpoint_ids,
-        &confirmed,
+        crate::raft_membership_guard::EvictionConfirmation {
+            delete_endpoints: req.delete_endpoints,
+            expected_endpoint_ids,
+            confirmed_unreachable: &confirmed,
+            confirmed_absent: req.confirmed_absent,
+        },
     )
     .await
     .map_err(|error| ApiError::conflict(error.to_string()))?;

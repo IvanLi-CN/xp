@@ -26,7 +26,7 @@ mod platform;
 mod preflight;
 mod raft_recovery;
 #[cfg(test)]
-mod raft_recovery_prune_tests;
+mod raft_recovery_retired_tests;
 mod runtime;
 mod runtime_activation;
 mod runtime_boot;

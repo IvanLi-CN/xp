@@ -1,9 +1,47 @@
+#[derive(clap::Args, Debug, Clone)]
+pub struct XpBootstrapArgs {
+    #[arg(long, value_name = "NAME")]
+    pub node_name: String,
+
+    #[arg(long = "access-host", value_name = "HOST")]
+    pub access_host: String,
+
+    #[arg(long, value_name = "ORIGIN")]
+    pub api_base_url: String,
+
+    #[arg(long, value_name = "PATH", default_value = "/var/lib/xp/data")]
+    pub xp_data_dir: std::path::PathBuf,
+
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct XpRestartArgs {
+    /// Service name to restart (OpenRC: `rc-service <name> restart`, systemd: `<name>.service`).
+    #[arg(long, value_name = "NAME", default_value = "xp")]
+    pub service_name: String,
+
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct XpSyncNodeMetaArgs {
+    /// Local xp API base URL (scheme+host+port), used to talk to the running service.
+    ///
+    /// Recommended (typical): http://127.0.0.1:62416
+    #[arg(long, value_name = "ORIGIN", default_value = "http://127.0.0.1:62416")]
+    pub xp_base_url: String,
+
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
 use crate::managed_default_endpoints::{
     ManagedDefaultEndpointsSpec, build_default_ss_endpoint_spec, build_default_vless_endpoint_spec,
 };
-use crate::ops::cli::{
-    ExitError, XpBootstrapArgs, XpInstallArgs, XpRestartArgs, XpSyncNodeMetaArgs,
-};
+use crate::ops::cli::{ExitError, XpInstallArgs};
 use crate::ops::cluster_info;
 use crate::ops::internal_auth::InternalOpsAuth;
 use crate::ops::membership_lifecycle::{InternalNodeMetadataArgs, internal_update_node_metadata};

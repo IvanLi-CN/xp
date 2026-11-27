@@ -376,12 +376,18 @@
   promoted, deleted, rolled back, or repaired by periodic work. A permanently decommissioned,
   exactly mapped learner may be retired only through the signed leader-local `xp-ops xp retire-stale-learner` flow after every voter exposes `cluster.stale-learner-retirement-v1`;
   it uses `RemoveNodes(..., false)` and the existing durable cleanup operation.
-- Single-node quorum recovery keeps that invariant self-consistent instead of exempting it:
-  `xp-ops xp recover-single-node` prunes every DesiredState Node and Endpoint outside its new
-  membership, under the existing default backup. Shrinking Raft alone would leave each retired node
-  as a `missing_desired_members` entry, and that non-empty audit rejects both fresh join and
-  remove-node, so the recovered cluster could never be repaired. The fresh-join admission
-  exemption stays limited to `unexpected_learners`.
+- Single-node quorum recovery is never destructive: `xp-ops xp recover-single-node` rewrites only
+  Raft membership and never deletes a DesiredState Node or Endpoint. Retired nodes may still serve
+  user traffic, and the xp-proxy data plane reads its snapshot locally rather than from Raft, so
+  pruning them would trade control-plane consistency for a data-plane outage. Each
+  `missing_desired_members` entry is resolved explicitly afterwards: a running node rejoins under
+  its existing identity and endpoints (`xp-ops xp rejoin-node`, which records the durable `Restore`
+  lifecycle and issues an identity-bound join token), and a permanently absent node is removed
+  through `xp-ops xp evict-unreachable-voter --confirmed-absent`. Absence mode tolerates the whole
+  absent set — the work queue — but rejects every other incident shape, including orphan voters. A
+  rejoin host's stale local Raft state is cleared by `xp join` before the runtime starts, because
+  its old WAL and vote would otherwise campaign against the recovered cluster. The fresh-join
+  admission exemption stays limited to `unexpected_learners`.
 - Fresh joins use a durable two-stage protocol: the leader records a Join membership operation and
   reservation, registers the learner, and returns bootstrap identity before catch-up. Fresh-join
   admission still requires a quorum-backed linearizable, non-joint membership view, an absent target
