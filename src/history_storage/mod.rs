@@ -500,32 +500,7 @@ fn ensure_schema(connection: &mut Connection) -> Result<()> {
     ensure_repository_history_segment_columns(connection)?;
     source_journal::ensure_source_delivery_journal_columns(connection)?;
     connection
-        .execute_batch(
-            "CREATE INDEX IF NOT EXISTS repository_history_records_tombstone
-              ON repository_history_records
-                 (source_node_id, source_epoch, stream, subject_node_id, observer_node_id,
-                  schema_id, schema_version, record_key, is_tombstone);
-             CREATE INDEX IF NOT EXISTS repository_history_records_tombstone_target
-               ON repository_history_records
-                  (subject_node_id, observer_node_id, schema_id, schema_version,
-                   is_tombstone, record_key);
-             CREATE INDEX IF NOT EXISTS repository_history_records_aggregate_completeness
-               ON repository_history_records
-                  (subject_node_id, aggregate_complete, aggregate_start, aggregate_end);
-             CREATE INDEX IF NOT EXISTS repository_history_records_keyset
-               ON repository_history_records
-                  (is_tombstone, observed_start, source_node_id, source_epoch, stream, sequence,
-                   observed_end, received_at);
-             CREATE INDEX IF NOT EXISTS repository_history_records_export_filter
-               ON repository_history_records
-                  (is_tombstone, observed_end, received_at, observed_start, source_node_id,
-                   source_epoch, stream, sequence);
-             CREATE INDEX IF NOT EXISTS repository_history_records_coverage
-               ON repository_history_records
-                  (subject_node_id, is_tombstone, observed_start, observed_end, received_at);
-             CREATE INDEX IF NOT EXISTS repository_history_records_received
-               ON repository_history_records (is_tombstone, received_at);",
-        )
+        .execute_batch(repository::REPOSITORY_HISTORY_RECORD_INDEXES)
         .map_err(sqlite_error)?;
     connection
         .execute_batch(SEQUENCE_SUMMARY_SCHEMA)

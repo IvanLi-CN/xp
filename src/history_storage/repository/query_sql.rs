@@ -1,31 +1,52 @@
 use super::*;
 
-/// Decode the four-column coverage projection shared by both coverage paths.
-pub(super) fn coverage_row(
-    row: &rusqlite::Row<'_>,
-    observed_index: usize,
-) -> rusqlite::Result<Option<RepositoryHistoryCoverage>> {
-    let observed_start = row.get::<_, Option<i64>>(observed_index)?;
-    let Some(observed_start) = observed_start else {
-        return Ok(None);
-    };
-    Ok(Some(RepositoryHistoryCoverage {
-        observed_start_unix_seconds: u64::try_from(observed_start).unwrap_or(u64::MAX),
-        observed_end_unix_seconds: u64::try_from(row.get::<_, i64>(observed_index + 1)?)
-            .unwrap_or(u64::MAX),
-        received_start_unix_seconds: u64::try_from(row.get::<_, i64>(observed_index + 2)?)
-            .unwrap_or(u64::MAX),
-        received_end_unix_seconds: u64::try_from(row.get::<_, i64>(observed_index + 3)?)
-            .unwrap_or(u64::MAX),
-    }))
-}
-
 /// Whole-repository coverage from four independent index boundary seeks.
 ///
 /// `MIN(observed_start)`, `MAX(observed_end)`, `MIN(received_at)` and `MAX(received_at)` each read
 /// one boundary of an index whose prefix is `is_tombstone`, so none of them touches retained
 /// payload or walks the table. A single four-column aggregate cannot do that: it must visit every
 /// index entry, and its cost grows with the repository instead of staying constant.
+/// Subject-scoped coverage from four independent boundary seeks.
+///
+/// Mirrors [`repository_history_coverage_boundaries`]: each column reads one index edge instead of
+/// the whole matching slice. Ordering the checks so an empty subject returns early keeps an unused
+/// node cheap.
+pub(super) fn subject_coverage_boundaries(
+    connection: &Connection,
+    subject_node_id: &str,
+) -> Result<Option<super::RepositoryHistoryCoverage>> {
+    let observed_start = connection
+        .query_row(
+            super::COVERAGE_SUBJECT_OBSERVED_START_SQL,
+            params![subject_node_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .map_err(sqlite_error)?;
+    let Some(observed_start) = observed_start else {
+        return Ok(None);
+    };
+    let observed_end = connection
+        .query_row(
+            super::COVERAGE_SUBJECT_OBSERVED_END_SQL,
+            params![subject_node_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(sqlite_error)?;
+    let (received_start, received_end) = connection
+        .query_row(
+            super::COVERAGE_SUBJECT_RECEIVED_SQL,
+            params![subject_node_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .map_err(sqlite_error)?;
+    Ok(Some(super::RepositoryHistoryCoverage {
+        observed_start_unix_seconds: u64::try_from(observed_start).unwrap_or(u64::MAX),
+        observed_end_unix_seconds: u64::try_from(observed_end).unwrap_or(u64::MAX),
+        received_start_unix_seconds: u64::try_from(received_start).unwrap_or(u64::MAX),
+        received_end_unix_seconds: u64::try_from(received_end).unwrap_or(u64::MAX),
+    }))
+}
+
 pub(super) fn repository_history_coverage_boundaries(
     connection: &Connection,
 ) -> Result<Option<super::RepositoryHistoryCoverage>> {
