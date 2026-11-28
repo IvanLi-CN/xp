@@ -467,6 +467,18 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(text.count("cache_scope: release-perf"), 1)
         self.assertEqual(text.count("--cache-scope release-perf"), 1)
 
+    def test_resource_evidence_restore_prefix_ignores_lockfile_hash(self):
+        # The restore prefix used to repeat hashFiles(Cargo.lock, web/bun.lock), so
+        # any dependency change made it point at a key that did not exist yet and
+        # the 30-minute job compiled from scratch. Seven of the last eight runs
+        # missed for this reason. A stable prefix lets Cargo revalidate a warmer
+        # starting point instead.
+        workflows = Path(__file__).parents[1] / "workflows"
+        text = (workflows / "resource-evidence.yml").read_text()
+        self.assertIn("${{ runner.os }}-resource-evidence-${{ hashFiles(", text)
+        restore = text.split("restore-keys:", 1)[1].split("\n      - name:", 1)[0]
+        self.assertNotIn("hashFiles", restore)
+
     def test_musl_cache_key_is_not_per_commit(self):
         # Keying by target_sha guarantees a cold build for every commit, because
         # the only run that writes the key is the run that would restore it.

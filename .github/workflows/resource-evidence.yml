@@ -95,8 +95,11 @@ jobs:
           key: >-
             ${{ runner.os }}-resource-evidence-${{ hashFiles('Cargo.lock', 'web/bun.lock') }}-${{
             env.CANDIDATE_TARGET }}
+          # The restore prefix must stay clear of the lockfile hash, or it changes
+          # whenever a dependency does and the build restores nothing. Cargo
+          # revalidates whatever comes back, so a warmer starting point is safe.
           restore-keys: >-
-            ${{ runner.os }}-resource-evidence-${{ hashFiles('Cargo.lock', 'web/bun.lock') }}
+            ${{ runner.os }}-resource-evidence-
       - name: build embedded web assets
         env:
           XP_WEB_BUILD_ID: ${{ env.TARGET_SHA }}
