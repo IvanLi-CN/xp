@@ -493,8 +493,8 @@ class WorkflowContractTests(unittest.TestCase):
         gate = manifest.split('[profile.resource-gate]', 1)[1].split('\n[', 1)[0]
         self.assertIn('inherits = "release"', gate)
         self.assertIn("lto = false", gate)
-        # Any further deviation from [profile.release] forces every dependency to
-        # rebuild under the second profile, which costs more than the LTO it saves.
+        # Every extra difference adds another dependency fingerprint set on top of
+        # the rebuild a separate profile already forces.
         self.assertNotIn("panic", gate)
         self.assertNotIn("opt-level", gate)
         release = manifest.split('[profile.release]', 1)[1].split('\n[', 1)[0]

@@ -93,10 +93,12 @@ strip = "symbols"
 # own optimization level cannot change what is measured, while fat LTO dominates
 # its build for no benefit.
 #
-# Only lto and codegen-units differ. Keeping every other setting identical is what
-# lets the two profiles share compiled dependencies: changing panic here made
-# all ~800 dependency units rebuild a second time, which cost more than the LTO
-# it saved.
+# Only lto and codegen-units differ, because every extra difference adds another
+# set of dependency fingerprints. Dependencies still rebuild once per profile:
+# `-C lto` is part of the codegen fingerprint, so a separate profile cannot share
+# them with [profile.release]. That duplicate build is still the cheaper trade --
+# measured on the gate, 1080s of compilation against 1388s when the harness used
+# [profile.release] and paid fat LTO on every test link.
 [profile.resource-gate]
 inherits = "release"
 lto = false
