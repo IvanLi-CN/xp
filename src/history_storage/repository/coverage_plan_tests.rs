@@ -36,7 +36,11 @@ fn repository_coverage_query_uses_a_subject_seek_without_table_reads() {
     }
     let incomplete_plan = query_plan_with_params(
         connection,
-        repository::INCOMPLETE_AGGREGATE_SUBJECT_SQL,
+        repository::query_sql::incomplete_aggregate_range_sql(
+            Some("subject-a"),
+            Some("runtime.v1"),
+            true,
+        ),
         rusqlite::params!["subject-a", "runtime.v1", 100_i64, 1_i64],
     );
     assert!(incomplete_plan.iter().any(|detail| {

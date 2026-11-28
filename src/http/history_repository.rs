@@ -1,4 +1,5 @@
 pub(super) mod batch;
+mod local_selection;
 mod summary;
 use super::resource_history_capacity;
 use crate::{
@@ -635,33 +636,32 @@ pub(super) async fn query_history_repository(
         .iter()
         .any(|repository_id| repository_id == &state.cluster.node_id);
     let local_response = local_repository_query(state, query.clone(), now, local_is_ready).await?;
-    let body = serde_json::to_vec(&RepositoryHistoryQuery {
-        start_unix_seconds: request.start_unix_seconds,
-        end_unix_seconds: request.end_unix_seconds,
-        page_size: request.page_size,
-        page_cursor: request.page_cursor.clone(),
-        subject_node_id: request.subject_node_id.clone(),
-        schema_id: request.schema_id.clone(),
-    })
-    .map_err(|error| ApiError::internal(error.to_string()))?;
-    let mut responses = vec![local_response];
-    for peer in peers
-        .iter()
-        .filter(|peer| peer.node_id != state.cluster.node_id)
-        .take(MAX_REPAIR_REQUEST_IDS)
-    {
-        if let Ok(response) = worker::repository_direct_request::<RepositoryHistoryQueryResponse>(
-            state,
-            peer,
-            axum::http::Method::POST,
-            "/api/admin/_internal/history-repository/query",
-            body.clone(),
-        )
-        .await
-        {
-            responses.push(response);
-        }
+    if local_selection::local_repository_covers(state, &local_response, &request, local_is_ready) {
+        return Ok(local_response);
     }
+    let body =
+        serde_json::to_vec(&request).map_err(|error| ApiError::internal(error.to_string()))?;
+
+    // Ask every ready peer at once. Serially awaiting up to 64 peers is what made this endpoint
+    // swing between one and fourteen seconds: one slow peer added its full latency to the request.
+    let peer_requests = futures_util::future::join_all(
+        peers
+            .iter()
+            .filter(|peer| peer.node_id != state.cluster.node_id)
+            .take(MAX_REPAIR_REQUEST_IDS)
+            .map(|peer| {
+                worker::repository_direct_request::<RepositoryHistoryQueryResponse>(
+                    state,
+                    peer,
+                    axum::http::Method::POST,
+                    "/api/admin/_internal/history-repository/query",
+                    body.clone(),
+                )
+            }),
+    )
+    .await;
+    let mut responses = vec![local_response];
+    responses.extend(peer_requests.into_iter().flatten());
     let mut candidates = Vec::with_capacity(responses.len());
     for response in &responses {
         let plan = response.plan();

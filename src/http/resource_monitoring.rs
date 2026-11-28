@@ -251,8 +251,13 @@ pub(super) async fn admin_get_node_resources_history(
     .await
         && first_repository.plan().repository_id().is_some()
     {
+        // Every repository page costs a full coverage+boundary read on the multi-gigabyte store,
+        // and the caller only ever asked for `limit` points. Bound the fan-out by the point
+        // budget instead of a fixed sixteen pages, which could spend a minute on one panel poll.
+        let page_size = limit.min(1_000);
+        let page_budget = limit.div_ceil(page_size.max(1)).saturating_add(2);
         let mut repositories = vec![first_repository];
-        for _ in 0..15 {
+        for _ in 1..page_budget {
             let Some(cursor) = repositories
                 .last()
                 .and_then(RepositoryHistoryQueryResponse::next_page_cursor)
@@ -265,7 +270,7 @@ pub(super) async fn admin_get_node_resources_history(
                 &node_id,
                 start,
                 end,
-                limit.min(1_000),
+                page_size,
                 Some(cursor),
             )
             .await?;
