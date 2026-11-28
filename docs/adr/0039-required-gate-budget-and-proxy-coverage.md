@@ -20,9 +20,11 @@
 
 ## 决定
 
-1. **只有 Required Gate 受墙钟预算约束**（≤10 分钟）。验收测量（`ci-performance`、
+1. **只有 Required Gate 受墙钟预算约束**（≤10 分钟，热路径）。验收测量（`ci-performance`、
    `release-performance`）与发布流程（`resource-evidence`、`release`）不受此约束，
    因为 300 秒采样窗口与 3×cold/warm 矩阵在数学上无法压入 10 分钟。
+   预算按热路径定义：缓存命中时每个 PR job 应 ≤10 分钟；缓存未命中的冷运行允许 30 分钟，
+   因为它只由 `Cargo.lock` 或 toolchain 变更触发。
 2. **`xray-e2e` 退出 required，降为手动 + 每周一次**。它验证的是已发布的
    `xray-linux-*` 运行时工件，不是每个 PR 的回归面。
 3. **代理覆盖改由独立的 `xp-proxy` job 承担**：`ci` 新增并行 job 运行
@@ -42,12 +44,17 @@
 
 ## 后果
 
-- Required Gate 的预算可执行：每个 PR job 写死 `timeout-minutes: 10`，超时即失败。
+- Required Gate 的预算可执行：常规 PR job 写死 `timeout-minutes: 10`；`rust` job 写死 30，
+  因为冷编译加 2160 个 lib 测试实测 10m24s，用 10 分钟会连依赖升级都判红。
 - 代理代码进入主干门禁；`xp-proxy-perf-gate` 不再对 XP 侧代理改动返回 not applicable。
 - 发布就绪改为等待 `xp-proxy-perf` 的 main push 成功；`xray-e2e` 不再阻塞发布。
 - `ci-performance` 的测量缓存必须在断言之后回收，否则会继续挤出 `resource-evidence`
   的构建缓存，使每次证据运行都退化为约 27 分钟的冷编译。
 - 缓存 key 不再包含 `TARGET_SHA`: 每次合并都产生一份永不命中的新条目是缓存驱逐的主因。
   Rust 缓存只绑定 `Cargo.lock` 与 toolchain，Web 源码变化不再重编译整个依赖图。
-- 冷路径（新 `Cargo.lock`）仍可能超过 10 分钟：该次运行失败但会保存缓存，重跑即热。
-  这是已知代价，不是遗漏。
+- 冷路径（新 `Cargo.lock` 或 toolchain 变更）不受 10 分钟预算约束，上限为 30 分钟；
+  缓存仍会在该次运行结束时保存，后续运行回到热路径。
+- 资源证据与发布二进制之间不做 digest 绑定。证据运行以 `--features resource-fixture`
+  构建被测候选，发布构建不带该 feature，两者结构上不可能字节相等；为绑定而额外构建一份
+  无 feature 候选会把证据运行推过其 45 分钟超时。证据因此只证明源级内存与吞吐，不证明
+  发布的这些字节被测过。
