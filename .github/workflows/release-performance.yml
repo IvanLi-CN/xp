@@ -67,7 +67,11 @@ jobs:
       target_sha: ${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}
       build_version: 0.0.0-perf.${{ github.run_id }}
       artifact_prefix: perf-${{ github.run_id }}
-      cache_scope: release-${{ github.run_id }}
+      # A per-run scope can only ever miss: restore-keys may only match keys the
+      # current run already wrote, so every measurement would pay a full cold
+      # build. A stable perf scope shares shards between measurements while
+      # staying isolated from the real release caches.
+      cache_scope: release-perf
 
   assemble:
     needs: build
@@ -136,7 +140,7 @@ jobs:
             --kind release --jobs jobs.json --run run.json \
             --target-sha "${target_sha}" \
             --artifacts artifacts.json --caches caches.json \
-            --cache-scope release-${{ github.run_id }} \
+            --cache-scope release-perf \
             --output release-performance.json
       - name: write summary
         run: cat release-performance.json >> "${GITHUB_STEP_SUMMARY}"
