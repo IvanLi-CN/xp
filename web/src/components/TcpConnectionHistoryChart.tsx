@@ -1,7 +1,11 @@
 import type { EChartsOption } from "echarts";
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import { LineChart } from "echarts/charts";
-import { GridComponent, TooltipComponent } from "echarts/components";
+import {
+	GridComponent,
+	LegendComponent,
+	TooltipComponent,
+} from "echarts/components";
 import * as echarts from "echarts/core";
 import { SVGRenderer } from "echarts/renderers";
 import { useMemo } from "react";
@@ -19,7 +23,13 @@ import {
 import { Alert } from "./ui/alert";
 import { Badge } from "./ui/badge";
 
-echarts.use([GridComponent, TooltipComponent, LineChart, SVGRenderer]);
+echarts.use([
+	GridComponent,
+	LegendComponent,
+	TooltipComponent,
+	LineChart,
+	SVGRenderer,
+]);
 
 const SVG_RENDERER = { renderer: "svg" } as const;
 const CHART_HEIGHT = 260;
@@ -29,6 +39,16 @@ const CLASS_LABELS: Record<string, string> = {
 	control_plane: "Control plane",
 	outbound_runtime: "Runtime outbound",
 	outbound_other: "Other outbound",
+};
+
+// Categorical palette: hues chosen far apart so stacked bands stay distinguishable in both
+// themes. Total is a decoupled envelope, so it keeps the primary accent.
+const CLASS_PALETTE: Record<string, { light: string; dark: string }> = {
+	Total: { light: "rgb(6, 182, 212)", dark: "rgb(34, 211, 238)" },
+	inbound: { light: "rgb(37, 99, 235)", dark: "rgb(96, 165, 250)" },
+	"Control plane": { light: "rgb(217, 119, 6)", dark: "rgb(251, 191, 36)" },
+	"Runtime outbound": { light: "rgb(22, 163, 74)", dark: "rgb(74, 222, 128)" },
+	"Other outbound": { light: "rgb(147, 51, 234)", dark: "rgb(192, 132, 252)" },
 };
 
 type Series = {
@@ -47,6 +67,11 @@ function timeLabel(value: number): string {
 			timeZone: "UTC",
 		})
 		.replace(/^24/, "00");
+}
+
+function isDarkTheme(): boolean {
+	if (typeof document === "undefined") return false;
+	return document.documentElement.classList.contains("dark");
 }
 
 function shouldRenderECharts(): boolean {
@@ -132,18 +157,26 @@ export function TcpConnectionHistoryChart({
 	);
 
 	const option = useMemo<EChartsOption>(() => {
-		const colors = [
-			palette.primary,
-			palette.reference,
-			palette.currentArea,
-			palette.currentDay,
-			palette.axis,
-		];
+		const dark = isDarkTheme();
+		const colorFor = (name: string) => {
+			const entry = CLASS_PALETTE[name];
+			return entry ? (dark ? entry.dark : entry.light) : palette.reference;
+		};
+		const colors = series.map((item) => colorFor(item.name));
 		return {
 			animationDuration: 220,
 			color: colors,
-			grid: { top: 32, right: 18, bottom: 36, left: 42 },
-			legend: { show: false },
+			grid: { top: 56, right: 18, bottom: 36, left: 42 },
+			legend: {
+				top: 0,
+				left: 0,
+				itemGap: 14,
+				itemWidth: 10,
+				itemHeight: 10,
+				icon: "roundRect",
+				textStyle: { color: palette.axis, fontSize: 12 },
+				data: series.map((item) => item.name),
+			},
 			tooltip: {
 				...createThemedTooltipSurface(palette),
 				trigger: "axis",
@@ -226,15 +259,18 @@ export function TcpConnectionHistoryChart({
 			series: series.map((item) => ({
 				name: item.name,
 				type: "line" as const,
+				// Total is the enveloping series, so it must not participate in the stack.
 				stack: item.name === "Total" ? undefined : "classes",
+				z: item.name === "Total" ? 3 : 1,
 				step: "end" as const,
 				smooth: false,
 				showSymbol: false,
 				emphasis: STATIC_LINE_SERIES_EMPHASIS,
 				data: item.points,
-				lineStyle: item.name === "Total" ? { width: 2 } : undefined,
+				lineStyle:
+					item.name === "Total" ? { width: 2.5 } : { width: 1.5, opacity: 0.9 },
 				areaStyle:
-					item.name === "Total" ? { opacity: 0.12 } : { opacity: 0.24 },
+					item.name === "Total" ? { opacity: 0.06 } : { opacity: 0.35 },
 			})),
 		};
 	}, [palette, report.window_end, report.window_start, series]);
