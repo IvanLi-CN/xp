@@ -1632,11 +1632,11 @@ Post-upgrade validation for nodes expected to expose a managed-default VLESS ing
 
 ### Release intent and corrective backfill
 
-Normal release intent is the merged pull request's type and channel labels as reconstructed from
+normal release intent is the merged pull request's type and channel labels as reconstructed from
 GitHub Issue events through the unique merge event. The current labels on an already merged PR are
 not authoritative, and historical PR labels must not be edited to trigger a release. A release is
-published only after the target SHA has successful `ci`, `fixture-policy`, and `xray-e2e` push runs
-on `main`.
+published only after the target SHA has successful `ci`, `fixture-policy`, and `xp-proxy-perf` push
+runs on `main`.
 
 For a corrective release, an owner first dispatches the `resource-evidence` workflow from the exact
 merged SHA, signs its downloaded two-file artifact as an evidence commit whose only parent is that

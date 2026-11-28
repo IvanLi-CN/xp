@@ -10,7 +10,7 @@
 ## Context and Scope
 
 发布 workflow 过去读取合并后 PR 的当前标签，并只等待 `ci`。
-标签在合并后可以变化，且 `fixture-policy` 与 `xray-e2e` 可能尚未完成，
+标签在合并后可以变化，且 `fixture-policy` 与 `xp-proxy-perf` 可能尚未完成，
 因此同一 Release Target 的发布结果不稳定或过早。
 该主题固定正常发布的意图来源，并为历史纠正提供可审计的人工入口。
 
@@ -19,7 +19,7 @@
 ### Goals
 
 - 以合并事件前的 GitHub Issue events 重建唯一 type/channel 意图。
-- 以精确 SHA 等待 `ci`、`fixture-policy`、`xray-e2e` 的 main push 成功。
+- 以精确 SHA 等待 `ci`、`fixture-policy`、`xp-proxy-perf` 的 main push 成功。
 - 允许带 expected version 和非敏感 reason 的 owner-approved Manual Backfill。
 
 ### Non-goals

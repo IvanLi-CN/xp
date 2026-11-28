@@ -126,7 +126,7 @@ class ReadinessTests(unittest.TestCase):
         payload = {"workflow_runs": [
             {"id": 1, "name": "ci", "head_sha": sha, "event": "push", "head_branch": "main", "status": "completed", "conclusion": "success"},
             {"id": 2, "name": "fixture-policy", "head_sha": sha, "event": "push", "head_branch": "main", "status": "completed", "conclusion": "success"},
-            {"id": 3, "name": "xray-e2e", "head_sha": sha, "event": "push", "head_branch": "main", "status": "completed", "conclusion": "success"},
+            {"id": 3, "name": "xp-proxy-perf", "head_sha": sha, "event": "push", "head_branch": "main", "status": "completed", "conclusion": "success"},
         ]}
         self.assertEqual(readiness.evaluate(payload, sha), ("ready", "all_required_workflows_success"))
 
@@ -229,7 +229,7 @@ class ReadinessTests(unittest.TestCase):
 
         pending, pending_detail = readiness.evaluate({"workflow_runs": []}, sha)
         self.assertEqual(pending, "pending")
-        self.assertIn("xray-e2e", pending_detail)
+        self.assertIn("xp-proxy-perf", pending_detail)
 
     def test_wrong_sha_or_event_does_not_satisfy_gate(self) -> None:
         sha = "d" * 40
@@ -264,7 +264,7 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual(status, "failed")
         self.assertIn("ci:completed/failure:1", detail)
         self.assertIn("fixture-policy:missing", detail)
-        self.assertIn("xray-e2e:missing", detail)
+        self.assertIn("xp-proxy-perf:missing", detail)
 
 
 class WorkflowIntegrationTests(unittest.TestCase):

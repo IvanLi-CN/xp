@@ -150,3 +150,34 @@ jobs:
           name: "ci-performance-${{ github.run_id }}"
           path: ci-performance.json
           if-no-files-found: ignore
+
+  release-caches:
+    # Performance caches are keyed by run+attempt+sample and are never reusable. Leaving them
+    # resident evicts the resource-evidence build cache, which turns every evidence run into a
+    # full cold compile. Deletion runs last so the assertion job can still read the entries.
+    needs: [assert]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: delete this run's performance caches
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          set -euo pipefail
+          scope="perf-${{ github.run_id }}-${{ github.run_attempt }}"
+          deleted=0
+          while read -r cache_id key; do
+            [[ -n "${cache_id}" ]] || continue
+            if gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${cache_id}"; then
+              deleted=$((deleted + 1))
+            else
+              echo "::warning::failed to delete cache ${key} (${cache_id})"
+            fi
+          done < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" \
+              | jq -r --arg scope "${scope}" \
+                '.actions_caches[] | select(.key | contains($scope)) | "\(.id) \(.key)"'
+          )
+          echo "deleted ${deleted} performance cache entries for ${scope}"

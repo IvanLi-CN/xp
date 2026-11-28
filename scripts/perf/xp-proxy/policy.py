@@ -21,6 +21,8 @@ def related(path):
             "rust-toolchain.toml",
             ".github/workflows/ci-performance.yml",
             "scripts/e2e/install-mihomo-v1.19.29.sh",
+            "src/native_proxy_supervisor.rs",
+            "src/reconcile.rs",
         }
         or path.startswith(".github/workflows/xp-proxy-perf")
         or path.startswith(".github/scripts/xp-proxy-perf")

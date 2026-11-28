@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
 
-REQUIRED_WORKFLOWS = ("ci", "fixture-policy", "xray-e2e")
+REQUIRED_WORKFLOWS = ("ci", "fixture-policy", "xp-proxy-perf")
 FAILURE_CONCLUSIONS = {
     "failure",
     "cancelled",
