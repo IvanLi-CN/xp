@@ -56,12 +56,12 @@ class CiPerformanceTests(unittest.TestCase):
             self.assertIn('.actions_caches | type == "array"', workflow)
             self.assertNotIn("--jq -s", workflow)
 
-    def test_cache_heavy_workflows_share_one_concurrency_group(self):
-        # All three write far more than the 10 GiB repository cache pool. GitHub
-        # matches concurrency groups exactly, so any per-run suffix lets a
-        # measurement overlap the SHA-bound resource gate and evict the cached
-        # build that gate needs; that gate then spends 30 minutes recompiling to
-        # run a 312-second workload.
+    def test_cache_heavy_workflows_share_a_per_ref_concurrency_group(self):
+        # All three write far more than the 10 GiB repository cache pool, so runs that
+        # can overlap must queue instead of evicting each other. The group is keyed by
+        # ref rather than shared globally: a pull_request sync carries
+        # cancel-in-progress=true, and a global group let it cancel the main-branch
+        # resource gate mid-measurement, which is what run 46157450319 recorded.
         workflows = SCRIPT_DIR.parent / "workflows"
         for name in (
             "ci-performance.yml",
@@ -70,7 +70,7 @@ class CiPerformanceTests(unittest.TestCase):
         ):
             workflow = (workflows / name).read_text()
             self.assertIn("concurrency:", workflow)
-            self.assertIn("group: heavy-cache-measurement", workflow)
+            self.assertIn("heavy-cache-measurement-${{ github.ref }}", workflow)
 
     def test_performance_concurrency_only_cancels_pull_request_runs(self):
         workflows = SCRIPT_DIR.parent / "workflows"
