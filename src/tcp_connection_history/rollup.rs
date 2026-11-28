@@ -279,25 +279,7 @@ pub fn load_rollups(
 mod tests {
     use super::*;
 
-    fn minute(at: &str, total: u32, inbound: u32, other: u32) -> StoredMinute {
-        let mut counts = BTreeMap::new();
-        if inbound > 0 {
-            counts.insert((ConnectionClass::Inbound, "ep-a".to_string()), inbound);
-        }
-        if other > 0 {
-            counts.insert((ConnectionClass::OutboundOther, "0".to_string()), other);
-        }
-        StoredMinute {
-            minute: DateTime::parse_from_rfc3339(at)
-                .unwrap()
-                .with_timezone(&Utc),
-            total,
-            truncated: false,
-            partial: false,
-            classes_observed: vec![ConnectionClass::Inbound, ConnectionClass::OutboundOther],
-            counts,
-        }
-    }
+    use crate::tcp_connection_history::test_support::stored_minute_split as minute;
 
     #[test]
     fn total_extrema_are_computed_from_simultaneous_sums() {

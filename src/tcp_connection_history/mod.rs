@@ -14,6 +14,8 @@ use crate::{
 
 mod collector;
 mod rollup;
+#[cfg(test)]
+mod test_support;
 mod wire;
 
 pub use collector::{
@@ -795,28 +797,8 @@ pub fn floor_minute(at: DateTime<Utc>) -> DateTime<Utc> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tcp_connection_usage::{
-        PersistedTcpConnectionEndpointUsage, PersistedTcpConnectionUsage,
-    };
-
-    fn legacy_usage(minute: DateTime<Utc>) -> PersistedTcpConnectionUsage {
-        let mut usage = PersistedTcpConnectionUsage {
-            latest_minute: Some(minute.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
-            ..PersistedTcpConnectionUsage::default()
-        };
-        usage.endpoints.insert(
-            "ep-a".to_string(),
-            PersistedTcpConnectionEndpointUsage {
-                node_id: "node-a".to_string(),
-                endpoint_id: "ep-a".to_string(),
-                endpoint_tag: "edge".to_string(),
-                port: 443,
-                counts: vec![0; MINUTES_WINDOW - 1].into_iter().chain([3]).collect(),
-                first_observed_at: None,
-            },
-        );
-        usage
-    }
+    use crate::tcp_connection_history::test_support::deleted_registry;
+    use crate::tcp_connection_history::test_support::legacy_usage;
 
     #[test]
     fn imports_legacy_minutes_once_and_never_overwrites_full_class_data() {
@@ -824,26 +806,28 @@ mod tests {
         let mut store = TcpConnectionHistoryStore::open(dir.path()).unwrap();
         let minute = floor_minute(Utc::now());
         let usage = legacy_usage(minute);
+        let node = xp_test_fixtures::label_node1_variant2();
+        let endpoint = xp_test_fixtures::endpoint_fixtureinline_a();
 
-        assert!(store.import_legacy("node-a", &usage).unwrap());
-        let minutes = store.load_minutes("node-a", minute, minute).unwrap();
+        assert!(store.import_legacy(node, &usage).unwrap());
+        let minutes = store.load_minutes(node, minute, minute).unwrap();
         assert_eq!(minutes.len(), 1);
         assert_eq!(minutes[0].total, 3);
         assert!(minutes[0].partial);
         assert_eq!(
-            minutes[0].counts[&(ConnectionClass::Inbound, "ep-a".to_string())],
+            minutes[0].counts[&(ConnectionClass::Inbound, endpoint.to_string())],
             3
         );
 
         let full = FullSiteMinuteSample::new(
-            BTreeMap::from([((ConnectionClass::Inbound, "ep-a".to_string()), 5_u32)]),
+            BTreeMap::from([((ConnectionClass::Inbound, endpoint.to_string()), 5_u32)]),
             false,
             false,
             vec![ConnectionClass::Inbound],
         );
-        store.record_minute("node-a", minute, &full).unwrap();
-        assert!(!store.import_legacy("node-a", &usage).unwrap());
-        let minutes = store.load_minutes("node-a", minute, minute).unwrap();
+        store.record_minute(node, minute, &full).unwrap();
+        assert!(!store.import_legacy(node, &usage).unwrap());
+        let minutes = store.load_minutes(node, minute, minute).unwrap();
         assert_eq!(minutes[0].total, 5);
         assert!(!minutes[0].partial);
     }
@@ -853,33 +837,35 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut store = TcpConnectionHistoryStore::open(dir.path()).unwrap();
         let minute = floor_bucket(floor_minute(Utc::now()), Resolution::FiveMinute);
+        let node = xp_test_fixtures::label_node1_variant2();
+        let endpoint = xp_test_fixtures::endpoint_fixtureinline_a();
         let first = FullSiteMinuteSample::new(
             BTreeMap::from([
-                ((ConnectionClass::Inbound, "ep-a".to_string()), 4_u32),
+                ((ConnectionClass::Inbound, endpoint.to_string()), 4_u32),
                 ((ConnectionClass::OutboundOther, "0".to_string()), 1_u32),
             ]),
             false,
             false,
             vec![ConnectionClass::Inbound, ConnectionClass::OutboundOther],
         );
-        store.record_minute("node-a", minute, &first).unwrap();
+        store.record_minute(node, minute, &first).unwrap();
         let second = FullSiteMinuteSample::new(
-            BTreeMap::from([((ConnectionClass::Inbound, "ep-a".to_string()), 0_u32)]),
+            BTreeMap::from([((ConnectionClass::Inbound, endpoint.to_string()), 0_u32)]),
             false,
             false,
             vec![ConnectionClass::Inbound],
         );
         store
-            .record_minute("node-a", minute + Duration::minutes(1), &second)
+            .record_minute(node, minute + Duration::minutes(1), &second)
             .unwrap();
         store
-            .refresh_rollups_for_minute("node-a", minute + Duration::minutes(1))
+            .refresh_rollups_for_minute(node, minute + Duration::minutes(1))
             .unwrap();
-        store.refresh_rollups_for_minute("node-a", minute).unwrap();
+        store.refresh_rollups_for_minute(node, minute).unwrap();
 
         let start = floor_bucket(minute, Resolution::FiveMinute);
         let series = store
-            .load_rollup_series("node-a", Resolution::FiveMinute, start, start)
+            .load_rollup_series(node, Resolution::FiveMinute, start, start)
             .unwrap();
         assert_eq!(series.total.len(), 1);
         assert_eq!(series.total[0].max, 5);
@@ -887,7 +873,7 @@ mod tests {
         assert_eq!(series.classes[&ConnectionClass::Inbound][0].max, 4);
         let daily = store
             .load_rollup_series(
-                "node-a",
+                node,
                 Resolution::Daily,
                 floor_bucket(minute, Resolution::Daily),
                 floor_bucket(minute, Resolution::Daily),
@@ -898,16 +884,11 @@ mod tests {
     }
 
     #[test]
-    fn budget_guard_stops_new_minutes_without_dropping_retained_data() {
+    fn budget_guard_keeps_retained_minutes_after_the_local_ceiling() {
         assert_eq!(16_384_usize * 6, 98_304);
         let ceiling = 96_u64 * 1024 * 1024;
         assert!(ceiling / 100 * 80 > 76 * 1024 * 1024);
     }
-}
-
-#[cfg(test)]
-mod filter_tests {
-    use super::*;
 
     #[test]
     fn deleted_endpoint_subjects_are_removed_without_touching_total() {
@@ -923,46 +904,41 @@ mod filter_tests {
             truncated: false,
             partial: false,
         });
-        series
-            .subjects
-            .insert((ConnectionClass::Inbound, "ep-a".to_string()), Vec::new());
-        series
-            .subjects
-            .insert((ConnectionClass::Inbound, "ep-b".to_string()), Vec::new());
-        let deleted = BTreeMap::from([(ConnectionClass::Inbound, vec!["ep-a".to_string()])]);
+        series.subjects.insert(
+            (
+                ConnectionClass::Inbound,
+                xp_test_fixtures::endpoint_fixtureinline_a().to_string(),
+            ),
+            Vec::new(),
+        );
+        series.subjects.insert(
+            (
+                ConnectionClass::Inbound,
+                xp_test_fixtures::endpoint_fixtureinline_b().to_string(),
+            ),
+            Vec::new(),
+        );
+        let registry = deleted_registry();
+        let deleted = deleted_subjects(&registry, xp_test_fixtures::label_node1_variant2());
         filter_deleted_subjects(&mut series, &deleted);
-        assert!(
-            !series
-                .subjects
-                .contains_key(&(ConnectionClass::Inbound, "ep-a".to_string()))
-        );
-        assert!(
-            series
-                .subjects
-                .contains_key(&(ConnectionClass::Inbound, "ep-b".to_string()))
-        );
+        assert!(!series.subjects.contains_key(&(
+            ConnectionClass::Inbound,
+            xp_test_fixtures::endpoint_fixtureinline_a().to_string()
+        )));
+        assert!(series.subjects.contains_key(&(
+            ConnectionClass::Inbound,
+            xp_test_fixtures::endpoint_fixtureinline_b().to_string()
+        )));
         assert_eq!(series.total[0].max, 2);
     }
 
     #[test]
     fn registry_filter_is_scoped_to_the_node() {
-        let registry = BTreeMap::from([
-            (
-                "ep-a".to_string(),
-                crate::state::DeletedEndpointRecord {
-                    node_id: "node-a".to_string(),
-                    generation: 1,
-                },
-            ),
-            (
-                "ep-b".to_string(),
-                crate::state::DeletedEndpointRecord {
-                    node_id: "node-b".to_string(),
-                    generation: 1,
-                },
-            ),
-        ]);
-        let deleted = deleted_subjects(&registry, "node-a");
-        assert_eq!(deleted[&ConnectionClass::Inbound], vec!["ep-a".to_string()]);
+        let registry = deleted_registry();
+        let deleted = deleted_subjects(&registry, xp_test_fixtures::label_node1_variant2());
+        assert_eq!(
+            deleted[&ConnectionClass::Inbound],
+            vec![xp_test_fixtures::endpoint_fixtureinline_a().to_string()]
+        );
     }
 }

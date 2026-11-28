@@ -142,25 +142,12 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::tcp_connection_history::StoredMinute;
     use crate::tcp_connection_history::rollup::{PointSeries, Resolution, aggregate_points};
-
-    fn minute(at: &str, total: u32) -> StoredMinute {
-        StoredMinute {
-            minute: DateTime::parse_from_rfc3339(at)
-                .unwrap()
-                .with_timezone(&Utc),
-            total,
-            truncated: false,
-            partial: false,
-            classes_observed: vec![ConnectionClass::Inbound],
-            counts: BTreeMap::from([((ConnectionClass::Inbound, "ep-a".to_string()), total)]),
-        }
-    }
+    use crate::tcp_connection_history::test_support::stored_minute;
 
     #[test]
     fn daily_payload_binds_bucket_totals_and_classes() {
-        let minutes = vec![minute("2026-11-26T10:00:00Z", 3)];
+        let minutes = vec![stored_minute("2026-11-26T10:00:00Z", 3)];
         let start = DateTime::parse_from_rfc3339("2026-11-26T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
@@ -189,16 +176,14 @@ mod tests {
         for index in 0..(MAX_SUBJECTS_PER_RECORD + 5) {
             counts.insert((ConnectionClass::OutboundOther, index.to_string()), 1_u32);
         }
-        let minutes = vec![StoredMinute {
-            minute: DateTime::parse_from_rfc3339("2026-11-26T10:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc),
-            total: counts.values().sum(),
-            truncated: false,
-            partial: false,
-            classes_observed: vec![ConnectionClass::OutboundOther],
-            counts,
-        }];
+        let total = counts.values().sum();
+        let minutes = vec![
+            crate::tcp_connection_history::test_support::stored_minute_with_counts(
+                "2026-11-26T10:00:00Z",
+                total,
+                counts,
+            ),
+        ];
         let start = DateTime::parse_from_rfc3339("2026-11-26T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);

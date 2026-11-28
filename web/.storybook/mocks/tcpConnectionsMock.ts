@@ -2,8 +2,6 @@ import type { AdminNode } from "../../src/api/adminNodes";
 import type { AdminNodeTcpConnectionsResponse } from "../../src/api/adminTcpConnections";
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
-const STEP_MS = 5 * 60_000;
-
 /**
  * Deterministic full-site payload for the demo and Storybook mocks: one day of 5-minute buckets
  * with a broad daily rhythm, split into the four connection classes.
@@ -21,19 +19,19 @@ export function buildNodeTcpConnections(
 		endpoint_tag: fixtureCatalog.endpointTag.fixture51(),
 		port: fixtureCatalog.endpoint.port8443(),
 	};
-	const windowStart = Date.parse(fixtureCatalog.timestamp.t20260307T010000());
-	const windowEnd = Date.parse(fixtureCatalog.timestamp.t20260308T005900());
-	const bucketCount = Math.floor((windowEnd - windowStart) / STEP_MS) + 1;
-	const minuteCount = Math.floor((windowEnd - windowStart) / 60_000) + 1;
-	const wave = (index: number) => {
-		const phase = (index / bucketCount) * Math.PI * 4;
-		return Math.max(
-			0,
-			Math.round(8 + 5 * Math.sin(phase) + 2 * Math.sin(phase / 3)),
-		);
-	};
-	const point = (bucket: number, value: number) => ({
-		bucket_start: new Date(bucket).toISOString(),
+	// Bucket labels come from approved catalog timestamps; the demo never invents minute data.
+	const bucketLabels = [
+		fixtureCatalog.timestamp.t20260308T000000(),
+		fixtureCatalog.timestamp.t20260308T000100(),
+		fixtureCatalog.timestamp.t20260308T000200(),
+		fixtureCatalog.timestamp.t20260308T003000(),
+		fixtureCatalog.timestamp.t20260308T005500(),
+		fixtureCatalog.timestamp.t20260308T005800(),
+		fixtureCatalog.timestamp.t20260308T005900(),
+	];
+	const wave = [3, 9, 12, 14, 9, 5, 6];
+	const point = (bucket: string, value: number) => ({
+		bucket_start: bucket,
 		min: value,
 		avg: value,
 		max: value,
@@ -42,8 +40,8 @@ export function buildNodeTcpConnections(
 		truncated: false,
 		partial: false,
 	});
-	const totalPoints = Array.from({ length: bucketCount }, (_, index) =>
-		point(windowStart + index * STEP_MS, wave(index)),
+	const totalPoints = bucketLabels.map((bucket, index) =>
+		point(bucket, wave[index]),
 	);
 	const scale = (factor: number) =>
 		totalPoints.map((entry) => ({
@@ -52,9 +50,6 @@ export function buildNodeTcpConnections(
 			avg: Math.round(entry.avg * factor),
 			max: Math.round(entry.max * factor),
 		}));
-	const minutes = Array.from({ length: minuteCount }, (_, index) =>
-		new Date(windowStart + index * 60_000).toISOString(),
-	);
 	return {
 		node,
 		window: "24h",
@@ -65,17 +60,27 @@ export function buildNodeTcpConnections(
 		per_endpoint_series: [
 			{
 				...endpointA,
-				series: minutes.map((minute, index) => ({
-					minute,
-					count: Math.max(0, Math.round(4 + 3 * Math.sin(index / 17))),
-				})),
+				series: [
+					{ minute: fixtureCatalog.timestamp.t20260308T000000(), count: 4 },
+					{ minute: fixtureCatalog.timestamp.t20260308T000100(), count: 6 },
+					{ minute: fixtureCatalog.timestamp.t20260308T000200(), count: 5 },
+					{ minute: fixtureCatalog.timestamp.t20260308T003000(), count: 3 },
+					{ minute: fixtureCatalog.timestamp.t20260308T005500(), count: 2 },
+					{ minute: fixtureCatalog.timestamp.t20260308T005800(), count: 2 },
+					{ minute: fixtureCatalog.timestamp.t20260308T005900(), count: 3 },
+				],
 			},
 			{
 				...endpointB,
-				series: minutes.map((minute, index) => ({
-					minute,
-					count: Math.max(0, Math.round(2 + 2 * Math.cos(index / 13))),
-				})),
+				series: [
+					{ minute: fixtureCatalog.timestamp.t20260308T000000(), count: 2 },
+					{ minute: fixtureCatalog.timestamp.t20260308T000100(), count: 3 },
+					{ minute: fixtureCatalog.timestamp.t20260308T000200(), count: 3 },
+					{ minute: fixtureCatalog.timestamp.t20260308T003000(), count: 1 },
+					{ minute: fixtureCatalog.timestamp.t20260308T005500(), count: 1 },
+					{ minute: fixtureCatalog.timestamp.t20260308T005800(), count: 1 },
+					{ minute: fixtureCatalog.timestamp.t20260308T005900(), count: 2 },
+				],
 			},
 		],
 		quality: "complete",
