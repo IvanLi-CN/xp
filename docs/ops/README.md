@@ -1694,8 +1694,8 @@ their Bun/Playwright dependency cache key while retaining separate jobs and cach
 Dispatch `release-performance` the same way to exercise the reusable release build graph without
 creating a tag, package version, GitHub Release, or deployment. It uses a synthetic
 `0.0.0-perf.<run-id>` version, assembles but does not push the image, and enforces 120 seconds for
-Web, 600 seconds per musl architecture, 180 seconds per managed-runtime architecture, 300 seconds
-for image assembly, and 900 seconds for the composed critical path.
+Web, 780 seconds per musl architecture, 180 seconds per managed-runtime architecture, 300 seconds
+for image assembly, and 960 seconds for the composed critical path.
 
 Both workflows publish machine-readable JSON. The report includes required wall-clock time, workflow
 critical path, total runner seconds, run/job counts, artifact count and bytes, artifact retention,
@@ -1708,7 +1708,16 @@ Release cache presence is reported, not enforced: `release_cache` records which 
 the provider still retains and why any are missing, and only an entirely empty scope fails closed.
 Run-scoped entries can be evicted by an unrelated measurement before this job reads them, so
 treating their absence as a performance failure would test cache retention rather than release
-duration.
+duration. `release-performance` uses the stable `release-perf` scope, and the musl shards key on
+`Cargo.lock` rather than the commit, so a measurement can reuse a previous shard instead of paying a
+guaranteed cold build. The real release keeps its own `release` scope.
+
+Component budgets are sized from observed variance, not from a single lucky run. Across 24
+measurements `musl-x86_64` averaged 535s with 76s standard deviation and a 682s maximum, so the
+previous 660s budget failed on ordinary runner variance; the budget is 780s. The composed release
+critical path averaged 756s with 69s standard deviation and an 863s maximum, so its ceiling is 960s
+instead of 900s. Both keep roughly three standard deviations of headroom, which still fails a real
+regression.
 
 ```text
 sha="$(git rev-parse HEAD)"

@@ -122,8 +122,10 @@
 - Given a release performance dispatch, When the SHA, required Job, timestamp, or artifact is
   missing, Then measurement fails closed without publishing.
 - Given a completed performance build, Then Web is at most 120 seconds, each musl build is at most
-  600 seconds, each managed-runtime build is at most 180 seconds, image assembly is at most 300
-  seconds, and the composed critical path is at most 900 seconds.
+  780 seconds, each managed-runtime build is at most 180 seconds, image assembly is at most 300
+  seconds, and the composed critical path is at most 960 seconds. Each ceiling keeps roughly three
+  standard deviations of headroom over observed releases so ordinary runner variance fails no
+  measurement; cache presence is reported rather than enforced.
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 

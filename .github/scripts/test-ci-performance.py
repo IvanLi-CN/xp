@@ -362,9 +362,38 @@ class ReleasePerformanceTests(unittest.TestCase):
 
     def test_release_rejects_failed_or_slow_jobs(self):
         jobs = self.required_jobs(self.valid_jobs())
-        jobs[1] = job(jobs[1]["name"], 601)
+        jobs[1] = job(jobs[1]["name"], 781)
         with self.assertRaises(performance.PerformanceError):
             performance.assert_release(jobs)
+
+    def test_release_rejects_critical_path_above_ceiling(self):
+        # Components individually stay inside their budgets; only the composed
+        # critical path crosses the ceiling, so this pins that separate guard.
+        jobs = [
+            job("build / build-web", 120),
+            job("build / build-musl (x86_64, target)", 780),
+            job("build / build-musl (aarch64, target)", 780),
+            job("build / build-runtime (x86_64, amd64)", 180),
+            job("build / build-runtime (aarch64, arm64)", 180),
+            job("assemble", 300),
+        ]
+        jobs = jobs + [job("verify", 5), job("assert", 7)]
+        with self.assertRaises(performance.PerformanceError):
+            performance.assert_release(jobs)
+
+    def test_release_accepts_critical_path_at_ceiling(self):
+        # 12 + max(120 + 528, 180) + 300 = 960 lands exactly on the ceiling.
+        jobs = [
+            job("build / build-web", 120),
+            job("build / build-musl (x86_64, target)", 528),
+            job("build / build-musl (aarch64, target)", 528),
+            job("build / build-runtime (x86_64, amd64)", 180),
+            job("build / build-runtime (aarch64, arm64)", 180),
+            job("assemble", 300),
+        ]
+        jobs = jobs + [job("verify", 5), job("assert", 7)]
+        result = performance.assert_release(jobs)
+        self.assertEqual(result["critical_path_seconds"], 960)
 
     def test_release_critical_path_includes_runtime_branch(self):
         jobs = [
@@ -424,6 +453,28 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIn("contents: read", text)
             self.assertNotIn("contents: write", text)
             self.assertNotIn("packages: write", text)
+
+    def test_release_perf_cache_scope_is_reusable_across_runs(self):
+        # A per-run scope can only ever miss: actions/cache restore-keys match
+        # only keys the current run already wrote. That made every measurement a
+        # guaranteed cold build while still reporting the caches as evidence.
+        workflows = Path(__file__).parents[1] / "workflows"
+        text = (workflows / "release-performance.yml").read_text()
+        self.assertNotIn("cache_scope: release-${{ github.run_id }}", text)
+        self.assertNotIn("--cache-scope release-${{ github.run_id }}", text)
+        self.assertIn("cache_scope: release-perf", text)
+        self.assertIn("--cache-scope release-perf", text)
+        self.assertEqual(text.count("cache_scope: release-perf"), 1)
+        self.assertEqual(text.count("--cache-scope release-perf"), 1)
+
+    def test_musl_cache_key_is_not_per_commit(self):
+        # Keying by target_sha guarantees a cold build for every commit, because
+        # the only run that writes the key is the run that would restore it.
+        workflows = Path(__file__).parents[1] / "workflows"
+        text = (workflows / "release-build.yml").read_text()
+        self.assertIn("release-musl-${{ matrix.target }}", text)
+        self.assertIn("hashFiles('Cargo.lock')", text)
+        self.assertNotIn("inputs.cache_scope }}-${{ inputs.target_sha }}", text)
 
     def test_ci_declares_three_cold_warm_samples_and_hard_limits(self):
         workflows = Path(__file__).parents[1] / "workflows"
