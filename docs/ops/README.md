@@ -1694,8 +1694,8 @@ their Bun/Playwright dependency cache key while retaining separate jobs and cach
 Dispatch `release-performance` the same way to exercise the reusable release build graph without
 creating a tag, package version, GitHub Release, or deployment. It uses a synthetic
 `0.0.0-perf.<run-id>` version, assembles but does not push the image, and enforces 120 seconds for
-Web, 600 seconds per musl architecture, 180 seconds per managed-runtime architecture, 300 seconds
-for image assembly, and 900 seconds for the composed critical path.
+Web, 780 seconds per musl architecture, 180 seconds per managed-runtime architecture, 300 seconds
+for image assembly, and 960 seconds for the composed critical path.
 
 Both workflows publish machine-readable JSON. The report includes required wall-clock time, workflow
 critical path, total runner seconds, run/job counts, artifact count and bytes, artifact retention,
