@@ -1691,6 +1691,11 @@ required job start through the latest required job completion; queue delay remai
 and critical path follows the declared workflow dependency graph. Durations use GitHub Job
 `started_at` and `completed_at`; missing jobs, failed jobs, incomplete timestamps, SHA mismatches,
 and malformed cache receipts fail closed.
+Release cache presence is reported, not enforced: `release_cache` records which run-scoped prefixes
+the provider still retains and why any are missing, and only an entirely empty scope fails closed.
+Run-scoped entries can be evicted by an unrelated measurement before this job reads them, so
+treating their absence as a performance failure would test cache retention rather than release
+duration.
 
 ```text
 sha="$(git rev-parse HEAD)"

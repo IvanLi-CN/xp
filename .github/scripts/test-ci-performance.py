@@ -378,7 +378,7 @@ class ReleasePerformanceTests(unittest.TestCase):
         result = performance.assert_release(self.required_jobs(jobs))
         self.assertEqual(result["critical_path_seconds"], 142)
 
-    def test_release_requires_each_declared_cache_scope(self):
+    def test_release_reports_partial_cache_coverage_without_failing(self):
         caches = [
             {"key": f"Linux-{prefix}release-1-sha", "size_in_bytes": 1}
             for prefix in (
@@ -388,17 +388,30 @@ class ReleasePerformanceTests(unittest.TestCase):
                 "release-go-amd64-",
             )
         ]
+        result = performance.assert_release(
+            self.required_jobs(self.valid_jobs()), caches, "release-1"
+        )
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["release_cache"]["status"], "partial")
+        self.assertEqual(
+            result["release_cache"]["missing_prefixes"], ["release-go-arm64-"]
+        )
+        self.assertEqual(result["release_cache"]["observed_prefixes"], 4)
+
+        caches.append({"key": "Linux-release-go-arm64-release-1-sha", "size_in_bytes": 1})
+        complete = performance.assert_release(
+            self.required_jobs(self.valid_jobs()), caches, "release-1"
+        )
+        self.assertEqual(complete["release_cache"]["status"], "complete")
+        self.assertEqual(complete["release_cache"]["missing_prefixes"], [])
+
+    def test_release_fails_closed_when_no_cache_entry_matches_the_scope(self):
         with self.assertRaises(performance.PerformanceError):
             performance.assert_release(
-                self.required_jobs(self.valid_jobs()), caches, "release-1"
+                self.required_jobs(self.valid_jobs()),
+                [{"key": "Linux-release-web-release-9-sha", "size_in_bytes": 1}],
+                "release-1",
             )
-        caches.append({"key": "Linux-release-go-arm64-release-1-sha", "size_in_bytes": 1})
-        self.assertEqual(
-            performance.assert_release(
-                self.required_jobs(self.valid_jobs()), caches, "release-1"
-            )["status"],
-            "pass",
-        )
 
 
 class WorkflowContractTests(unittest.TestCase):
