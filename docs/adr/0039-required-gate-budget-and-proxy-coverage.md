@@ -10,7 +10,8 @@
 - `xray-e2e` 每次 PR 与每次 main push 都运行，实测 12m47s，其中 8m02s 是
   `Managed HTTPS fallback parity` 现场编译 `xp`/`xp-ops`/`xp-proxy` 三个 debug 二进制；
 - `ci-performance` 的 `paths` 覆盖 `src/**`、`web/**`、`Cargo.toml`，即每个产品 PR 都触发
-  30 分钟测量，并写入约 2.96 GiB、按 run+attempt 命名而永不复用的 Actions 缓存。
+  30 分钟测量，并写入约 2.96 GiB、按 run+attempt 命名而永不复用的 Actions 缓存。本 PR 只回收
+  这些缓存，**未窄化 `paths`**；那仍是未决项，普通产品 PR 仍会触发该测量。
 
 同时，`ci` 的 `cargo test`/`cargo clippy`/`run-rust-tests.sh` 全部作用于
 `workspace_default_members`（仅根包 `xp`），因此 `crates/xp-proxy` 与 `crates/xp-proxy-core`
@@ -49,9 +50,13 @@
 - 代理代码进入主干门禁；`xp-proxy-perf-gate` 不再对 XP 侧代理改动返回 not applicable。
 - 发布就绪改为等待 `xp-proxy-perf` 的 main push 成功；`xray-e2e` 不再阻塞发布。
 - `ci-performance` 的测量缓存必须在断言之后回收，否则会继续挤出 `resource-evidence`
-  的构建缓存，使每次证据运行都退化为约 27 分钟的冷编译。
-- 缓存 key 不再包含 `TARGET_SHA`: 每次合并都产生一份永不命中的新条目是缓存驱逐的主因。
-  Rust 缓存只绑定 `Cargo.lock` 与 toolchain，Web 源码变化不再重编译整个依赖图。
+  的构建缓存，使每次证据运行都退化为约 27 分钟的冷编译。回收不改变 PR 触发频率，
+  因此本次修复的只是缓存驱逐，不是测量次数。
+- Rust 缓存 key 不再包含 `TARGET_SHA`，改为绑定 `Cargo.lock`、toolchain 与 Rust/原型源码 hash。
+  `TARGET_SHA` 让每次合并都产生一份永不命中的新条目，这是缓存驱逐的主因；而源码 hash 让
+  「命中」等价于「输入字节相同」，避免固定 key 被 `actions/cache` 的「命中即不覆盖」语义
+  冻结在旧快照上。Web 源码不再进入 Rust key，因此前端改动不会触发整个依赖图重编译。
+  `web`、`storybook`、`docker-smoke` 的 key 未改。
 - 冷路径（新 `Cargo.lock` 或 toolchain 变更）不受 10 分钟预算约束，上限为 30 分钟；
   缓存仍会在该次运行结束时保存，后续运行回到热路径。
 - 资源证据与发布二进制之间不做 digest 绑定。证据运行以 `--features resource-fixture`
