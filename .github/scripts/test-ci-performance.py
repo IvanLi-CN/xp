@@ -481,6 +481,27 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(text.count("cache_scope: release-perf"), 1)
         self.assertEqual(text.count("--cache-scope release-perf"), 1)
 
+    def test_resource_gate_harness_skips_fat_lto_but_candidate_keeps_it(self):
+        # The candidate binaries are the measured artifact, so they must keep the
+        # full release profile. The test harness only launches that candidate with
+        # Command::new, so its own fat LTO and panic=abort cost dominates its build
+        # without changing any measurement. Measured on a scaled crate: 4.84s of
+        # harness build under release against 0.44s under the resource-gate profile.
+        root = Path(__file__).parents[2]
+        manifest = (root / "Cargo.toml").read_text()
+        self.assertIn('[profile.resource-gate]', manifest)
+        gate = manifest.split('[profile.resource-gate]', 1)[1].split('\n[', 1)[0]
+        self.assertIn('inherits = "release"', gate)
+        self.assertIn("lto = false", gate)
+        self.assertIn('panic = "unwind"', gate)
+        release = manifest.split('[profile.release]', 1)[1].split('\n[', 1)[0]
+        self.assertIn('lto = "fat"', release, "the measured candidate must keep fat LTO")
+
+        workflow = (root / ".github/workflows/resource-evidence.yml").read_text()
+        self.assertIn('cargo build --locked --release', workflow)
+        self.assertNotIn('cargo test --locked --release', workflow)
+        self.assertEqual(workflow.count('--profile resource-gate'), 6)
+
     def test_resource_evidence_restore_prefix_ignores_lockfile_hash(self):
         # The restore prefix used to repeat hashFiles(Cargo.lock, web/bun.lock), so
         # any dependency change made it point at a key that did not exist yet and
