@@ -44,7 +44,7 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 - 分钟瞬时样本、本地二进制历史、5m / daily Rollup、专用 History Stream 与保留。
 - 现有 node TCP connection API 的类别、窗口、分辨率与质量扩展。
 - Node Details `TCP connections` tab 的总线与类别拆分展示。
-- endpoint registry/marker、node 删除与 snapshot install 的可见视图清理。
+- endpoint registry、node 删除与 snapshot install 的可见视图清理。
 
 ### Out of scope
 
@@ -146,8 +146,10 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
   generation）；删除入口必须把 registry 写入与 endpoint 删除作为同一 cluster operation 提交，
   任一失败都不返回成功。该元数据不是连接样本，允许写 Raft。
 - 24h/7d 本地查询与 30d/90d 仓库查询都按 registry 过滤 subject；仓库历史本身不可变，不要求
-  重写 record。endpoint marker `node-history:endpoint:{endpoint_id}:` 由现有删除导出异步发布并
-  至少一次重试；marker 未发布前查询仍按 registry 过滤，不依赖 marker。
+  重写 record。
+- 不引入 endpoint 级仓库 tombstone：分片记录按 `(bucket, class, subject)` 混合存放，仓库 tombstone
+  只能按 record key 前缀整条删除，无法只删记录内的一个 subject。subject 可见性因此完全由 registry
+  在查询期决定，仓库侧不做 endpoint 级删除写入。
 - 查询把被覆盖的 subject 移出 `subjects`，并在 `deleted_subjects` 返回。total / classes 仍是
   节点历史事实，允许大于返回的 subject 之和。
 - 节点删除使用 `node-history:node:{node_id}:` 前缀 tombstone，清理全部本地与仓库历史；
@@ -229,7 +231,7 @@ TCP 连接，出站 socket 因本地端口是临时端口而被过滤掉，且�
 2. 记录先写本地 SQLite raw，再由 Source Delivery Journal 投递。
 3. 节点本地生成 1m / 5m；Repository 幂等接收 1m，生成 daily，只保留 daily。
 4. Web 查询 total 与拆分；本地窗口读本地，长期窗口读 Repository。
-5. 端点删除先持久化 `deleted_endpoints` registry，再发布 endpoint marker；查询按 registry 过滤
+5. 端点删除与 `deleted_endpoints` registry 在同一 cluster operation 提交；查询按 registry 过滤
    subject。节点删除清理全部历史；snapshot install 按 tombstone 集重建视图。
 
 ### Edge cases / errors

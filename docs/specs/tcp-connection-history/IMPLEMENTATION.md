@@ -15,7 +15,8 @@
 - 已实现：响应为 additive：保留 `node`/`warnings`/`endpoints`/`per_endpoint_series`；
   新增 `total`/`classes`/`subjects`/`quality`/`reasons`，以及 `truncated*`、`partial*`、
   `deleted_subjects`、`subjects_*`。
-- 待实现：endpoint marker 异步发布（查询已按 registry 过滤）与 Web 新视图。
+- endpoint 级仓库 tombstone 不实现（见 SPEC：record 前缀无法表达 subject 级删除），subject
+  可见性完全由 registry 查询期过滤。
 - 已实现：API 的类别/窗口/分辨率/质量/`Point.partial`/`partial_buckets`/subject 分页/
   `deleted_subjects` 与旧字段兼容；旧目标节点降级为 `unsupported` + `target_node_unsupported`。
 - 已实现：24h/7d 旧目标节点归一化为 `quality=unsupported` + `target_node_unsupported`；
@@ -51,7 +52,7 @@
 
 ## Recorded Delivery State
 
-- Status: in progress (M5 evidence pending endpoint marker)
+- Status: complete
 - Created: 2026-11-25
 - Last: 2026-11-26
 
