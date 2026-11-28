@@ -27,8 +27,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: >-
-    resource-evidence-${{ inputs.target_sha || github.sha }}
+  # Shares the heavyweight-cache group with ci-performance: both fill a 10 GiB
+  # repository cache pool, and a measurement running while the other writes its
+  # shards evicts the caches this job needs. The 128 MiB workload only claims
+  # 312s of the 2087s run, so a cold compile costs far more than queueing here.
+  group: heavy-cache-measurement
   cancel-in-progress: false
 
 jobs:

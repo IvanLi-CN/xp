@@ -48,9 +48,12 @@ on:
         default: none
 
 concurrency:
-  group: >-
-    ci-performance-${{ github.event.pull_request.number || format('manual-{0}',
-    github.run_id) }}
+  # Shares one literal group with resource-evidence and release-performance: the
+  # three together write far more than the 10 GiB repository cache pool, and a
+  # measurement overlapping the SHA-bound resource gate evicts that gate's cached
+  # build, turning its 312s workload into a 30-minute cold compile. GitHub matches
+  # concurrency groups exactly, so a per-PR suffix would reintroduce the overlap.
+  group: heavy-cache-measurement
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
