@@ -87,6 +87,18 @@ opt-level = "z"
 panic = "abort"
 strip = "symbols"
 
+# The resource gate compiles two kinds of binary. The candidate `xp`/`xp-ops` are
+# measured, so they keep the full release profile above. The test harness only
+# launches that candidate via `Command::new` and asserts on its behaviour, so its
+# own optimization level cannot change what is measured. Fat LTO and
+# `panic = "abort"` dominate that harness build and buy nothing here, so this
+# profile keeps the optimization the assertions rely on and drops both.
+[profile.resource-gate]
+inherits = "release"
+lto = false
+codegen-units = 16
+panic = "unwind"
+
 [dev-dependencies]
 ctor = "0.4"
 tokio = { version = "1", features = ["test-util"] }

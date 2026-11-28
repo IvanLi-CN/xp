@@ -145,15 +145,15 @@ jobs:
           else
             cargo build --locked --release "${resource_features[@]}" \
               --target "$CANDIDATE_TARGET" --bin xp --bin xp-ops
-            cargo test --locked --release "${resource_features[@]}" \
+            cargo test --locked --profile resource-gate "${resource_features[@]}" \
               --target "$CANDIDATE_TARGET" --lib \
               large_pretty_node_history_guard_stays_bounded -- --ignored --nocapture
           fi
           if [[ "$CANDIDATE_TARGET" = native ]]; then
-            cargo test --locked --release "${resource_features[@]}" --lib \
+            cargo test --locked --profile resource-gate "${resource_features[@]}" --lib \
               backup_cleanup_is_bounded_for_large_files
           else
-            cargo test --locked --release "${resource_features[@]}" \
+            cargo test --locked --profile resource-gate "${resource_features[@]}" \
               --target "$CANDIDATE_TARGET" --lib \
               backup_cleanup_is_bounded_for_large_files
           fi
@@ -169,7 +169,7 @@ jobs:
             test "$(cat candidate/version.txt)" = "xp $CANDIDATE_BUILD_VERSION"
             test "$(cat candidate/ops-version.txt)" = "xp-ops $CANDIDATE_BUILD_VERSION"
           fi
-          cargo test --locked --release "${resource_features[@]}" \
+          cargo test --locked --profile resource-gate "${resource_features[@]}" \
             --test mesh_transport_resource_e2e --no-run
       - name: verify user cgroup support
         run: |
@@ -194,10 +194,10 @@ jobs:
           mkdir -p resource-evidence
           log="resource-evidence/resource-workload.log"
           : > "$log"
-          cargo test --locked --release "${resource_features[@]}" \
+          cargo test --locked --profile resource-gate "${resource_features[@]}" \
             --test mesh_transport_resource_e2e \
             xp_source_delivery_journal_memory_e2e -- --ignored --nocapture 2>&1 | tee -a "$log"
-          cargo test --locked --release "${resource_features[@]}" \
+          cargo test --locked --profile resource-gate "${resource_features[@]}" \
             --test mesh_transport_resource_e2e \
             xp_repository_summary_memory_e2e -- --ignored --nocapture 2>&1 | tee -a "$log"
       - name: build resource attestation
