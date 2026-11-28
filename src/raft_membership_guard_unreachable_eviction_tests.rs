@@ -512,3 +512,158 @@ async fn absent_node_removal_rejects_a_target_that_is_not_absent() {
         "unexpected error: {error}"
     );
 }
+
+/// A DesiredState node that holds no Raft identity is the exact shape left behind by a single-node
+/// quorum recovery. `confirmed_absent` exists to clean it up, and the ordinary "must be a current
+/// voter" rule would reject precisely that shape.
+#[tokio::test]
+async fn absent_eviction_removes_a_desired_state_node_without_a_raft_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let local_raft_node_id = raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_d()).unwrap();
+    let absent_raft_node_id =
+        raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_e()).unwrap();
+    let store = Arc::new(Mutex::new(
+        JsonSnapshotStore::load_or_init(StoreInit {
+            data_dir: temp.path().to_path_buf(),
+            bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_d().to_owned()),
+            bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
+            bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+        })
+        .unwrap(),
+    ));
+    store
+        .lock()
+        .await
+        .upsert_node(Node {
+            node_id: xp_test_fixtures::identifier_ulid_e().to_owned(),
+            node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+            access_host: xp_test_fixtures::secondary_host().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        })
+        .unwrap();
+    let endpoint = store
+        .lock()
+        .await
+        .create_endpoint(
+            xp_test_fixtures::identifier_ulid_e().to_owned(),
+            crate::domain::EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            8_388,
+            serde_json::json!({}),
+        )
+        .unwrap();
+
+    // The local node is the only voter; the target keeps its DesiredState Node and endpoint but
+    // holds no Raft identity at all.
+    let mut metrics = openraft::RaftMetrics::new_initial(local_raft_node_id);
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(local_raft_node_id);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(
+        None,
+        openraft::Membership::new(
+            vec![BTreeSet::from([local_raft_node_id])],
+            BTreeMap::from([(
+                local_raft_node_id,
+                NodeMeta {
+                    name: xp_test_fixtures::primary_node_name().to_owned(),
+                    api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+                    raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
+                },
+            )]),
+        ),
+    ));
+    let (_metrics_tx, metrics_rx) = watch::channel(metrics);
+    let retain_values = Arc::new(Mutex::new(Vec::new()));
+    let raft: Arc<dyn RaftFacade> = Arc::new(RepairingRaft {
+        inner: LocalRaft::new(store.clone(), metrics_rx.clone()),
+        metrics: metrics_rx,
+        metrics_tx: _metrics_tx,
+        retain_values: retain_values.clone(),
+        fail_next_membership_change: Arc::new(AtomicBool::new(false)),
+    });
+
+    // Voter mode must refuse this shape; that is what makes the absent mode meaningful. The clean
+    // membership audit rejects it first because the absent node keeps `missing_desired_members`
+    // non-empty, which is exactly the deadlock absent mode exists to break.
+    let voter_mode_error = preview_unreachable_voter_eviction(
+        raft.clone(),
+        store.clone(),
+        xp_test_fixtures::identifier_ulid_e(),
+        &[],
+        false,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        voter_mode_error
+            .to_string()
+            .contains("missing_desired_members={14}"),
+        "voter mode must block on the non-clean audit: {voter_mode_error}"
+    );
+
+    let preview = preview_unreachable_voter_eviction(
+        raft.clone(),
+        store.clone(),
+        xp_test_fixtures::identifier_ulid_e(),
+        &[],
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(preview.raft_node_id, absent_raft_node_id);
+    assert_eq!(preview.endpoint_ids, vec![endpoint.endpoint_id.clone()]);
+    assert!(store.lock().await.state().membership_operations.is_empty());
+
+    let operation = begin_unreachable_voter_eviction(
+        raft.clone(),
+        store.clone(),
+        xp_test_fixtures::identifier_ulid_e(),
+        &preview.expected_membership,
+        EvictionConfirmation {
+            delete_endpoints: true,
+            expected_endpoint_ids: preview.endpoint_ids.clone(),
+            confirmed_unreachable: &[],
+            confirmed_absent: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(operation.kind, MembershipOperationKind::RemoveNode);
+    assert!(
+        operation
+            .evidence
+            .as_deref()
+            .unwrap_or_default()
+            .contains("permanent absence"),
+        "absent mode must record its own authorization reason: {:?}",
+        operation.evidence
+    );
+
+    // One pass marks the membership removed, the next deletes the node and its endpoints.
+    resume_membership_operations_once(raft.clone(), store.clone())
+        .await
+        .unwrap();
+    resume_membership_operations_once(raft.clone(), store.clone())
+        .await
+        .unwrap();
+    assert!(
+        store
+            .lock()
+            .await
+            .get_node(xp_test_fixtures::identifier_ulid_e())
+            .is_none()
+    );
+    assert!(store.lock().await.list_endpoints().is_empty());
+    // A lone voter is untouched by removing a node that never held an identity.
+    assert_eq!(
+        raft.metrics()
+            .borrow()
+            .membership_config
+            .membership()
+            .voter_ids()
+            .count(),
+        1
+    );
+}
