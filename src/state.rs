@@ -33,6 +33,8 @@ use std::{
     fs, io,
     path::PathBuf,
 };
+#[cfg(test)]
+mod deleted_endpoint_tests;
 mod deleted_endpoints;
 mod endpoint_meta;
 use deleted_endpoints::record_deleted_endpoint;
@@ -2489,6 +2491,9 @@ impl DesiredStateCommand {
                     }
                 }
 
+                // A re-created endpoint id is a new visible object; keeping the deletion
+                // record would hide its history subjects forever.
+                state.deleted_endpoints.remove(&endpoint.endpoint_id);
                 state
                     .endpoints
                     .insert(endpoint.endpoint_id.clone(), endpoint);

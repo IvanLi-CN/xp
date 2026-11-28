@@ -51,7 +51,7 @@ fn test_user(user_id: &str) -> User {
     }
 }
 
-fn test_node(_node_id: &str) -> Node {
+pub(super) fn test_node(_node_id: &str) -> Node {
     Node {
         node_id: xp_test_fixtures::label_node1().to_owned(),
         node_name: xp_test_fixtures::label_node1().to_owned(),
@@ -62,7 +62,7 @@ fn test_node(_node_id: &str) -> Node {
     }
 }
 
-fn ss_endpoint(endpoint_id: &str, _node_id: &str) -> Endpoint {
+pub(super) fn ss_endpoint(endpoint_id: &str, _node_id: &str) -> Endpoint {
     match endpoint_id {
         "endpoint_1" => Endpoint {
             endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),

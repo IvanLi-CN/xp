@@ -13,6 +13,8 @@ use crate::{
 };
 
 mod collector;
+#[cfg(test)]
+mod daily_publish_tests;
 mod rollup;
 #[cfg(test)]
 mod test_support;
@@ -457,6 +459,14 @@ impl TcpConnectionHistoryStore {
             let series = aggregate_points(&raw, resolution, bucket_start, bucket_end);
 
             let tx = self.conn.transaction()?;
+            let was_delivered: i64 = tx
+                .query_row(
+                    "SELECT MAX(delivered) FROM rollup_bucket
+                     WHERE node_id = ?1 AND resolution = ?2 AND bucket_unix = ?3",
+                    params![node_id, resolution.as_str(), bucket_start.timestamp()],
+                    |row| row.get::<_, Option<i64>>(0),
+                )?
+                .unwrap_or(0);
             tx.execute(
                 "DELETE FROM rollup_bucket
                  WHERE node_id = ?1 AND resolution = ?2 AND bucket_unix = ?3",
@@ -467,7 +477,7 @@ impl TcpConnectionHistoryStore {
                     "INSERT INTO rollup_bucket
                      (node_id, resolution, bucket_unix, class, subject, min, avg, max,
                       samples_expected, samples_actual, truncated, partial, delivered)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 )?;
                 let mut write_points =
                     |class: &str, subject: &str, points: &[Point]| -> Result<(), rusqlite::Error> {
@@ -484,7 +494,8 @@ impl TcpConnectionHistoryStore {
                                 i64::from(point.samples_expected),
                                 i64::from(point.samples_actual),
                                 point.truncated as i64,
-                                point.partial as i64
+                                point.partial as i64,
+                                was_delivered
                             ])?;
                         }
                         Ok(())
@@ -531,17 +542,24 @@ impl TcpConnectionHistoryStore {
         Ok(pages.max(0) as u64 * page_size.max(0) as u64)
     }
 
+    /// Only completed UTC days are published. Publishing the current day would send a payload
+    /// that changes every minute under the same record key.
     pub fn pending_daily_buckets(
         &self,
         node_id: &str,
         limit: usize,
+        now: DateTime<Utc>,
     ) -> Result<Vec<i64>, TcpConnectionHistoryError> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT bucket_unix FROM rollup_bucket
              WHERE node_id = ?1 AND resolution = 'daily' AND delivered = 0
+               AND bucket_unix + 86400 <= ?3
              ORDER BY bucket_unix LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![node_id, limit as i64], |row| row.get::<_, i64>(0))?;
+        let rows = stmt.query_map(
+            params![node_id, limit as i64, floor_minute(now).timestamp()],
+            |row| row.get::<_, i64>(0),
+        )?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
@@ -687,7 +705,7 @@ pub fn pending_daily_payloads(
     limit: usize,
 ) -> Result<Vec<(i64, serde_json::Value)>, TcpConnectionHistoryError> {
     let store = TcpConnectionHistoryStore::open(data_dir)?;
-    let buckets = store.pending_daily_buckets(node_id, limit)?;
+    let buckets = store.pending_daily_buckets(node_id, limit, Utc::now())?;
     let mut payloads = Vec::with_capacity(buckets.len());
     for bucket in buckets {
         let Some(start) = DateTime::from_timestamp(bucket, 0) else {

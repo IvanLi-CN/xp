@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use axum::{
@@ -203,6 +203,7 @@ pub(super) struct HistoryRequest<'a> {
     pub(super) endpoint_filter: &'a [String],
     pub(super) subjects_limit: usize,
     pub(super) reasons: Vec<String>,
+    pub(super) gaps: Vec<GapView>,
 }
 
 pub(super) fn build_history_view(request: HistoryRequest<'_>) -> ConnectionHistoryView {
@@ -215,6 +216,7 @@ pub(super) fn build_history_view(request: HistoryRequest<'_>) -> ConnectionHisto
         endpoint_filter,
         subjects_limit,
         reasons,
+        gaps,
     } = request;
     let deleted_subjects = deleted
         .iter()
@@ -333,7 +335,7 @@ pub(super) fn build_history_view(request: HistoryRequest<'_>) -> ConnectionHisto
         subjects_omitted: false,
         subjects_next_cursor: None,
         watermark,
-        gaps: Vec::new(),
+        gaps,
         total: SeriesView {
             approximate: false,
             points: total_points,
@@ -438,6 +440,7 @@ pub(super) fn build_local_tcp_history(request: LocalHistoryRequest<'_>) -> Conne
         endpoint_filter,
         subjects_limit,
         reasons: Vec::new(),
+        gaps: Vec::new(),
     });
     view.window = window.as_str().to_string();
     view
@@ -450,7 +453,14 @@ pub(super) fn build_tcp_connection_endpoint_views(
     let mut endpoints = store
         .list_endpoints()
         .into_iter()
-        .filter(|endpoint| endpoint.node_id == node_id)
+        // Deleted endpoints must disappear from the legacy fields too, not only from subjects.
+        .filter(|endpoint| {
+            endpoint.node_id == node_id
+                && !store
+                    .state()
+                    .deleted_endpoints
+                    .contains_key(&endpoint.endpoint_id)
+        })
         .map(|endpoint| TcpConnectionEndpointView {
             node_id: endpoint.node_id,
             endpoint_id: endpoint.endpoint_id,
@@ -473,7 +483,21 @@ pub(super) fn build_local_node_tcp_connections_report(
     window: TcpConnectionUsageWindow,
 ) -> TcpConnectionUsageWindowView {
     let endpoints = build_tcp_connection_endpoint_views(store, node_id);
-    build_tcp_connection_window_view(store.tcp_connection_usage(), Utc::now(), window, &endpoints)
+    let mut report = build_tcp_connection_window_view(
+        store.tcp_connection_usage(),
+        Utc::now(),
+        window,
+        &endpoints,
+    );
+    // The registry is authoritative for endpoint visibility across every response field.
+    let allowed = endpoints
+        .iter()
+        .map(|endpoint| endpoint.endpoint_id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    report
+        .per_endpoint_series
+        .retain(|series| allowed.contains(series.endpoint_id.as_str()));
+    report
 }
 
 pub(super) fn admin_tcp_response(
@@ -640,6 +664,7 @@ pub(super) async fn admin_get_node_tcp_connections(
                     "target_node_unsupported".to_string(),
                     "unsupported".to_string(),
                 ],
+                gaps: Vec::new(),
             });
             (report, history)
         };
@@ -690,6 +715,7 @@ pub(super) async fn admin_get_node_tcp_connections_from_repository(
     let start = now.saturating_sub(window.duration().num_seconds().max(0) as u64);
     let mut payloads = Vec::new();
     let mut reasons = Vec::new();
+    let mut gaps = Vec::<GapView>::new();
     let mut page_cursor = None;
     for _ in 0..16 {
         let request = crate::http::history_repository::RepositoryHistoryQuery {
@@ -714,6 +740,27 @@ pub(super) async fn admin_get_node_tcp_connections_from_repository(
             reasons.push("repository_unsupported".to_string());
             break;
         }
+        // Repository gaps are part of the managed response contract, not an empty placeholder.
+        for gap in plan.gaps() {
+            let (from, to) = (
+                gap.range().start_unix_seconds(),
+                gap.range().end_unix_seconds(),
+            );
+            let (Ok(from), Ok(to)) = (i64::try_from(from), i64::try_from(to)) else {
+                continue;
+            };
+            let (Some(from), Some(to)) = (
+                DateTime::from_timestamp(from, 0),
+                DateTime::from_timestamp(to, 0),
+            ) else {
+                continue;
+            };
+            gaps.push(GapView {
+                start: from.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                end: to.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                reason: gap.reason().unwrap_or("repository_gap").to_string(),
+            });
+        }
         for record in response.records() {
             if record.schema_id() == crate::tcp_connection_history::TCP_CONNECTION_HISTORY_SCHEMA {
                 payloads.push(record.payload().to_vec());
@@ -737,6 +784,7 @@ pub(super) async fn admin_get_node_tcp_connections_from_repository(
         endpoint_filter,
         subjects_limit,
         reasons,
+        gaps,
     });
     history.subjects_omitted = subjects_omitted;
     let endpoints = build_tcp_connection_endpoint_views(&store, &node.node_id)
