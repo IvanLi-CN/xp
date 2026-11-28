@@ -18,3 +18,5 @@
 /web/playwright-report
 /web/test-results
 .run/
+__pycache__/
+*.pyc
