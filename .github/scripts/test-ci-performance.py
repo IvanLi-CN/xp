@@ -493,7 +493,10 @@ class WorkflowContractTests(unittest.TestCase):
         gate = manifest.split('[profile.resource-gate]', 1)[1].split('\n[', 1)[0]
         self.assertIn('inherits = "release"', gate)
         self.assertIn("lto = false", gate)
-        self.assertIn('panic = "unwind"', gate)
+        # Any further deviation from [profile.release] forces every dependency to
+        # rebuild under the second profile, which costs more than the LTO it saves.
+        self.assertNotIn("panic", gate)
+        self.assertNotIn("opt-level", gate)
         release = manifest.split('[profile.release]', 1)[1].split('\n[', 1)[0]
         self.assertIn('lto = "fat"', release, "the measured candidate must keep fat LTO")
 
