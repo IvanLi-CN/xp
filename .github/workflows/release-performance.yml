@@ -36,10 +36,10 @@ on:
         required: true
         type: string
 
+# Shares one literal group with ci-performance and resource-evidence; see
+# ci-performance.yml for why a per-run suffix reintroduces cache eviction.
 concurrency:
-  group: >-
-    release-performance-${{ github.event.pull_request.number || format('manual-{0}',
-    github.run_id) }}
+  group: heavy-cache-measurement
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:

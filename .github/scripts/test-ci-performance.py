@@ -56,14 +56,28 @@ class CiPerformanceTests(unittest.TestCase):
             self.assertIn('.actions_caches | type == "array"', workflow)
             self.assertNotIn("--jq -s", workflow)
 
+    def test_cache_heavy_workflows_share_one_concurrency_group(self):
+        # All three write far more than the 10 GiB repository cache pool. GitHub
+        # matches concurrency groups exactly, so any per-run suffix lets a
+        # measurement overlap the SHA-bound resource gate and evict the cached
+        # build that gate needs; that gate then spends 30 minutes recompiling to
+        # run a 312-second workload.
+        workflows = SCRIPT_DIR.parent / "workflows"
+        for name in (
+            "ci-performance.yml",
+            "release-performance.yml",
+            "resource-evidence.yml",
+        ):
+            workflow = (workflows / name).read_text()
+            self.assertIn("concurrency:", workflow)
+            self.assertIn("group: heavy-cache-measurement", workflow)
+
     def test_performance_concurrency_only_cancels_pull_request_runs(self):
         workflows = SCRIPT_DIR.parent / "workflows"
         for name in ("ci-performance.yml", "release-performance.yml"):
             workflow = (workflows / name).read_text()
             self.assertIn("concurrency:", workflow)
             self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", workflow)
-            self.assertIn("format('manual-{0}',", workflow)
-            self.assertIn("github.run_id)", workflow)
 
     def test_performance_triggers_cover_build_inputs(self):
         workflows = SCRIPT_DIR.parent / "workflows"
