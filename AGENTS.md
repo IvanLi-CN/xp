@@ -238,6 +238,14 @@
   OpenRC supervisor PID files and direct children, or the official container entrypoint's private
   PID/start-time identity file. It never enumerates arbitrary processes, starts a helper, or
   treats XP-internal canary work as a separate process. Upgrades preserve the Resource Store.
+- TCP connection history persists 1m raw samples and 5m/daily rollups for the local node in
+  `${XP_DATA_DIR}/tcp_connections.sqlite3`, with a 7-day raw/5m and 90-day daily retention on the
+  node and daily-only retention on a History Repository. The legacy 7-day
+  `tcp_connection_usage.json` inbound mirror stays readable by older XP but is imported only once,
+  guarded by the `legacy_import_v1` marker, and never overwrites a fully classified minute.
+  Endpoint deletions are recorded in the Raft `deleted_endpoints` registry, which filters
+  subject detail at query time while node totals and class series stay immutable historical
+  facts. systemd, OpenRC, and Docker/Compose upgrades must preserve both files.
 - XP source-delivery history is a durable SQLite outbox with a fixed 128 MiB or 20,000-segment cap.
   Live capture and replay release their duplicate in-memory wire window before receiver rollback
   checkpoints; SQLite retains unacknowledged wires until real ACK, while JSON fallback keeps them.
