@@ -12,7 +12,12 @@ fn valid_source_marker(record: &SyncRecord, source: &str) -> bool {
     if key == format!("node-history:node:{}:", record.subject_node_id()).as_bytes() {
         return matches!(
             record.schema().0,
-            "runtime.v1" | "path_health.v1" | "traffic.v1" | "connections.v1" | "ip_usage.v1"
+            "runtime.v1"
+                | "path_health.v1"
+                | "traffic.v1"
+                | "connections.v1"
+                | "ip_usage.v1"
+                | crate::tcp_connection_history::TCP_CONNECTION_HISTORY_SCHEMA
         );
     }
     let Some(user) = key

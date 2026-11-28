@@ -917,21 +917,33 @@ To expose minute-level TCP connection history in the admin UI, the node must run
 
 1. Required: the node OS is Linux. Non-Linux platforms return an `unsupported_platform` warning instead of a zero-value chart.
 2. Required: business endpoints are configured in xp state with their actual listen `port`, because TCP history maps counts by node-local endpoint port.
-3. Scope: only socket-level `ESTABLISHED` inbound TCP connections on business endpoint listen ports are counted.
-4. Excluded: `xp` admin port, Xray API, `cloudflared`, and outbound connections are not part of this panel.
-5. Storage: xp persists the most recent 7 days of minute samples in `${XP_DATA_DIR}/tcp_connection_usage.json`.
+3. Scope: full-site sampling records `inbound`, `control_plane`, `outbound_runtime`, and
+   `outbound_other`. Node Details shows the full-site total plus class stack, and keeps the
+   legacy inbound chart below it for endpoint-level inspection.
+4. Retained for compatibility: the legacy inbound chart still covers only business endpoint
+   listen ports. The full-site chart above it already includes the XP admin port, Xray API,
+   `cloudflared`, and outbound sockets.
+5. Storage: xp persists the most recent 7 days of inbound-compatible samples in
+   `${XP_DATA_DIR}/tcp_connection_usage.json` and full-site raw minutes in
+   `${XP_DATA_DIR}/tcp_connections.sqlite3`.
 
 Operational notes:
 
-- The chart aggregates selected endpoints by direct per-minute summation; there is no cross-endpoint deduplication.
+- The legacy inbound chart aggregates selected endpoints by direct per-minute summation; there is
+  no cross-endpoint deduplication.
+- The full-site chart separates `control_plane`, `outbound_runtime`, and `outbound_other`, so it is
+  the panel to read when Xray, `xp-proxy`, or another local process is the suspected source.
 - TCP history is independent from Xray `statsUserOnline`; missing online IP stats do not block TCP connection sampling.
 - Socket read failures surface as warnings in the admin UI and do not interrupt the quota worker main flow.
+- Preserve `tcp_connections.sqlite3` with the other data files on upgrade; the legacy JSON mirror
+  remains inbound-only.
 
 Quick checks on a node:
 
 ```
 uname -s
 ls -l "${XP_DATA_DIR}/tcp_connection_usage.json" || true
+ls -l "${XP_DATA_DIR}/tcp_connections.sqlite3" || true
 ss -tn state established '( sport = :443 or sport = :8443 )' || true
 head -n 5 /proc/net/tcp
 ```
@@ -981,6 +993,7 @@ ${XP_DATA_DIR}/
   state.json
   usage.json
   history.sqlite3
+  tcp_connections.sqlite3
   node_history_cache.json
   inbound_ip_usage.json
   service_runtime.json

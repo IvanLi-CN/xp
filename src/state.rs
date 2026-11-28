@@ -33,7 +33,12 @@ use std::{
     fs, io,
     path::PathBuf,
 };
+#[cfg(test)]
+mod deleted_endpoint_tests;
+mod deleted_endpoints;
 mod endpoint_meta;
+use deleted_endpoints::record_deleted_endpoint;
+pub use deleted_endpoints::{DeletedEndpointRecord, DeletedEndpointRegistry};
 use endpoint_meta::build_endpoint_meta;
 mod command_compat;
 mod mesh_gate;
@@ -51,8 +56,8 @@ pub(crate) mod history_storage;
 mod probe_state;
 mod reverse_assignment;
 pub use config_types::{
-    NodeUserEndpointMembership, NodeWeightPolicyConfig, UserGlobalWeightConfig, UserMihomoProfile,
-    UserNodeQuotaConfig, UserNodeWeightConfig,
+    GeoDbUpdateSettingsCompat, NodeUserEndpointMembership, NodeWeightPolicyConfig,
+    UserGlobalWeightConfig, UserMihomoProfile, UserNodeQuotaConfig, UserNodeWeightConfig,
 };
 pub(crate) use probe_state::encode_node_egress_probe_compat_note;
 use probe_state::prune_endpoint_probe_hour_map;
@@ -279,34 +284,6 @@ fn write_history_snapshot(
         })
 }
 
-const fn default_geo_db_update_interval_days_compat() -> u8 {
-    1
-}
-
-fn default_geo_db_provider_compat() -> String {
-    "dbip_lite".to_string()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GeoDbUpdateSettingsCompat {
-    #[serde(default = "default_geo_db_provider_compat")]
-    pub provider: String,
-    #[serde(default)]
-    pub auto_update_enabled: bool,
-    #[serde(default = "default_geo_db_update_interval_days_compat")]
-    pub update_interval_days: u8,
-}
-
-impl Default for GeoDbUpdateSettingsCompat {
-    fn default() -> Self {
-        Self {
-            provider: default_geo_db_provider_compat(),
-            auto_update_enabled: false,
-            update_interval_days: default_geo_db_update_interval_days_compat(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MihomoDeliveryMode {
@@ -391,7 +368,12 @@ pub struct PersistedState {
     /// to exist in Raft snapshots/state.json, but newer binaries do not use it at runtime.
     #[serde(default, rename = "geo_db_update_settings")]
     pub geo_db_update_settings_compat: GeoDbUpdateSettingsCompat,
+    /// Endpoints whose history subjects must stay hidden after deletion. This is the durable
+    /// deletion fact for query-time filtering; connection samples themselves never enter Raft.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub deleted_endpoints: DeletedEndpointRegistry,
 }
+
 impl PersistedState {
     pub fn empty() -> Self {
         Self {
@@ -424,6 +406,7 @@ impl PersistedState {
             reverse_mesh_assignments: BTreeMap::new(),
             reverse_mesh_generation_counters: BTreeMap::new(),
             geo_db_update_settings_compat: GeoDbUpdateSettingsCompat::default(),
+            deleted_endpoints: BTreeMap::new(),
         }
     }
 
@@ -2508,6 +2491,9 @@ impl DesiredStateCommand {
                     }
                 }
 
+                // A re-created endpoint id is a new visible object; keeping the deletion
+                // record would hide its history subjects forever.
+                state.deleted_endpoints.remove(&endpoint.endpoint_id);
                 state
                     .endpoints
                     .insert(endpoint.endpoint_id.clone(), endpoint);
@@ -2625,6 +2611,13 @@ impl DesiredStateCommand {
                     None,
                 )?;
                 let deleted = state.endpoints.remove(endpoint_id).is_some();
+                if let Some(current) = current.as_ref().filter(|_| deleted) {
+                    record_deleted_endpoint(
+                        &mut state.deleted_endpoints,
+                        endpoint_id,
+                        &current.node_id,
+                    );
+                }
                 state.endpoint_probe_history.remove(endpoint_id);
                 sync_node_user_endpoint_memberships(state);
                 Ok(DesiredStateApplyResult::EndpointDeleted { deleted })

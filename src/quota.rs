@@ -13,10 +13,7 @@ use crate::{
     quota_policy,
     reconcile::ReconcileHandle,
     state::{JsonSnapshotStore, membership_key, membership_xray_email},
-    tcp_connection_usage::{
-        TcpConnectionMinuteSample, TcpConnectionUsageWarning,
-        collect_established_inbound_connections_by_port,
-    },
+    tcp_connection_history::{persist_connections_minute, sample_connections_minute},
     xray,
 };
 
@@ -229,52 +226,16 @@ async fn run_quota_tick_at_with_geo(
                 .filter(|endpoint| endpoint.node_id == local_node_id)
                 .collect::<Vec<_>>()
         };
-        let mut tcp_samples = Vec::<TcpConnectionMinuteSample>::new();
-        let mut tcp_linux_only = cfg!(target_os = "linux");
-        let mut tcp_warning = if tcp_linux_only {
-            None
-        } else {
-            Some(TcpConnectionUsageWarning {
-                code: "unsupported_platform".to_string(),
-                message: "TCP connection count history is currently only supported on Linux nodes."
-                    .to_string(),
-            })
-        };
-        if tcp_linux_only {
-            let listen_ports = tcp_endpoint_samples
-                .iter()
-                .map(|endpoint| endpoint.port)
-                .collect::<std::collections::BTreeSet<_>>();
-            match collect_established_inbound_connections_by_port(&listen_ports) {
-                Ok(counts_by_port) => {
-                    tcp_samples = tcp_endpoint_samples
-                        .iter()
-                        .map(|endpoint| TcpConnectionMinuteSample {
-                            node_id: endpoint.node_id.clone(),
-                            endpoint_id: endpoint.endpoint_id.clone(),
-                            endpoint_tag: endpoint.tag.clone(),
-                            port: endpoint.port,
-                            count: counts_by_port.get(&endpoint.port).copied().unwrap_or(0),
-                        })
-                        .collect();
-                }
-                Err(crate::tcp_connection_usage::TcpConnectionUsageError::Unsupported(message)) => {
-                    tcp_linux_only = false;
-                    tcp_warning = Some(TcpConnectionUsageWarning {
-                        code: "unsupported_platform".to_string(),
-                        message,
-                    });
-                }
-                Err(err) => {
-                    tcp_warning = Some(TcpConnectionUsageWarning {
-                        code: "socket_inspection_failed".to_string(),
-                        message: format!(
-                            "Failed to inspect local TCP socket state for connection counts: {err}"
-                        ),
-                    });
-                }
-            }
-        }
+        let sampling = sample_connections_minute(
+            config,
+            &config.data_dir,
+            &local_node_id,
+            &tcp_endpoint_samples,
+        );
+        let tcp_samples = sampling.legacy_samples;
+        let full_site_sample = sampling.full_site;
+        let tcp_linux_only = sampling.linux_only;
+        let tcp_warning = sampling.warning;
 
         let mut store_guard = store.lock().await;
         if let Err(err) = store_guard.record_tcp_connection_usage_samples(
@@ -284,6 +245,24 @@ async fn run_quota_tick_at_with_geo(
             &tcp_samples,
         ) {
             warn!(%err, "quota tick: failed to persist tcp connection usage snapshot");
+        }
+        if let Some(sample) = full_site_sample.as_ref() {
+            let legacy_usage = store_guard.tcp_connection_usage().clone();
+            match persist_connections_minute(
+                &config.data_dir,
+                &local_node_id,
+                sample_minute,
+                &legacy_usage,
+                Some(sample),
+            ) {
+                Ok(false) => {
+                    warn!("quota tick: tcp connection history reached its local budget");
+                }
+                Ok(true) => {}
+                Err(err) => {
+                    warn!(%err, "quota tick: failed to persist full-site tcp connection sample");
+                }
+            }
         }
         drop(store_guard);
 

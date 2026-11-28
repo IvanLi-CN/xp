@@ -1,5 +1,8 @@
 # 节点 TCP 连接数面板
 
+> 全站分类、total 与分层历史由 [tcp-connection-history](../tcp-connection-history/SPEC.md)
+> 扩展并取代；本规格保留为入站采样口径与历史实现记录。
+
 ## Related ADRs
 
 None
@@ -9,6 +12,8 @@ None
 - 现有节点详情里的 `IP usage` 面板回答的是“源 IP 占用情况”，不是系统级 TCP 连接数。
 - 节点运营侧需要直接观察“当前业务入站端口上到底有多少 TCP 连接”，而不是推断 IP 数或在线用户数。
 - 现有仓库没有本地分钟级 TCP 连接历史，也没有 node detail 维度的 endpoint 聚合过滤能力。
+- 出站连接、全站分类与分层 rollup 由 `../tcp-connection-history/SPEC.md` 扩展并取代其端点求和
+  展示语义；本规格的入站采样口径仍被引用。
 
 ## 目标 / 非目标
 

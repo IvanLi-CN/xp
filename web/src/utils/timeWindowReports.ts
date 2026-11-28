@@ -6,7 +6,7 @@ import type {
 } from "../api/adminIpUsage";
 import type {
 	AdminNodeTcpConnectionsResponse,
-	AdminTcpConnectionUsageWindow,
+	AdminTcpConnectionHistoryWindow,
 } from "../api/adminTcpConnections";
 import type {
 	AdminNodeTrafficResponse,
@@ -30,11 +30,18 @@ function floorTo(value: number, step: number): number {
 }
 
 function minuteRange(
-	window: AdminIpUsageWindow | AdminTcpConnectionUsageWindow,
+	window: AdminIpUsageWindow | AdminTcpConnectionHistoryWindow,
 	now: number,
 ): WindowRange {
 	const end = floorTo(now, MINUTE_MS);
-	const minutes = window === "24h" ? 24 * 60 : 7 * 24 * 60;
+	const minutes =
+		window === "24h"
+			? 24 * 60
+			: window === "7d"
+				? 7 * 24 * 60
+				: window === "30d"
+					? 30 * 24 * 60
+					: 90 * 24 * 60;
 	return { end, start: end - (minutes - 1) * MINUTE_MS };
 }
 
@@ -171,10 +178,12 @@ export function emptyUserIpUsageResponse(
 
 export function alignNodeTcpConnectionsResponse(
 	report: AdminNodeTcpConnectionsResponse,
-	window: AdminTcpConnectionUsageWindow,
+	window: AdminTcpConnectionHistoryWindow,
 	now: number,
 ): AdminNodeTcpConnectionsResponse {
 	const range = minuteRange(window, now);
+	const inWindow = (point: { bucket_start: string }) =>
+		inRange(point.bucket_start, range);
 	return {
 		...report,
 		window,
@@ -184,12 +193,23 @@ export function alignNodeTcpConnectionsResponse(
 			...series,
 			series: series.series.filter((point) => inRange(point.minute, range)),
 		})),
+		total: report.total
+			? { ...report.total, points: report.total.points.filter(inWindow) }
+			: undefined,
+		classes: report.classes?.map((series) => ({
+			...series,
+			points: series.points.filter(inWindow),
+		})),
+		subjects: report.subjects?.map((series) => ({
+			...series,
+			points: series.points.filter(inWindow),
+		})),
 	};
 }
 
 export function emptyNodeTcpConnectionsResponse(
 	report: AdminNodeTcpConnectionsResponse,
-	window: AdminTcpConnectionUsageWindow,
+	window: AdminTcpConnectionHistoryWindow,
 	now: number,
 ): AdminNodeTcpConnectionsResponse {
 	return alignNodeTcpConnectionsResponse(
@@ -200,6 +220,9 @@ export function emptyNodeTcpConnectionsResponse(
 				...series,
 				series: [],
 			})),
+			total: report.total ? { ...report.total, points: [] } : undefined,
+			classes: report.classes?.map((series) => ({ ...series, points: [] })),
+			subjects: report.subjects?.map((series) => ({ ...series, points: [] })),
 		},
 		window,
 		now,

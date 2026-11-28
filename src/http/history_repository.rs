@@ -49,15 +49,15 @@ use initial_backfill_query::RepositoryInitialBackfillQuery;
 pub(crate) use worker::spawn_repository_replica_worker;
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct RepositoryHistoryQuery {
-    start_unix_seconds: u64,
-    end_unix_seconds: u64,
-    page_size: usize,
+    pub(super) start_unix_seconds: u64,
+    pub(super) end_unix_seconds: u64,
+    pub(super) page_size: usize,
     #[serde(default)]
-    page_cursor: Option<String>,
+    pub(super) page_cursor: Option<String>,
     #[serde(default)]
-    subject_node_id: Option<String>,
+    pub(super) subject_node_id: Option<String>,
     #[serde(default)]
-    schema_id: Option<String>,
+    pub(super) schema_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

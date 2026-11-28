@@ -70,6 +70,7 @@ pub(super) fn base_capabilities() -> Vec<&'static str> {
         "admin.endpoint-conditional-update",
         "admin.alerts",
         "admin.resource-monitoring",
+        crate::tcp_connection_history::REPOSITORY_CAPABILITY,
         "admin.config",
         "admin.quota-policy",
         "admin.status-events",
