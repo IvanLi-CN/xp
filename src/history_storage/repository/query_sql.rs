@@ -265,6 +265,21 @@ pub(crate) fn page_index_present(connection: &Connection) -> Result<bool> {
     Ok(count == 1)
 }
 
+/// Report whether all three subject coverage indexes exist.
+pub(super) fn subject_indexes_present(connection: &Connection) -> Result<bool> {
+    let count: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'index'
+             AND name IN ('repository_history_records_subject_start',
+                          'repository_history_records_subject_end',
+                          'repository_history_records_subject_received')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    Ok(count == 3)
+}
+
 /// Build the record page index and drop the superseded one.
 ///
 /// This is deliberately not part of startup schema preparation. Queries stay correct without it;

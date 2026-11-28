@@ -11,6 +11,18 @@ use crate::{
     },
 };
 
+/// Open a throwaway store with the subject coverage indexes present.
+///
+/// They are maintenance work owned by a background worker, so a test that asserts on coverage
+/// must build them itself instead of relying on startup preparation.
+fn open_storage_with_subject_indexes(path: &std::path::Path) -> HistoryStorage {
+    let storage = HistoryStorage::open(path);
+    storage
+        .build_repository_subject_indexes()
+        .expect("subject coverage indexes");
+    storage
+}
+
 #[test]
 fn repository_query_scopes_records_and_coverage_to_the_subject_node() {
     let temporary = tempfile::tempdir().expect("temporary directory");
@@ -51,7 +63,7 @@ fn repository_query_scopes_records_and_coverage_to_the_subject_node() {
     .expect("segment")
     .sign(&key)
     .expect("signature");
-    let storage = HistoryStorage::open(temporary.path());
+    let storage = open_storage_with_subject_indexes(temporary.path());
     let mut runtime = RepositoryReplicaRuntime::load(storage).expect("runtime");
     runtime
         .receive_wire(
@@ -128,7 +140,8 @@ fn a_source_backpressure_gap_makes_a_fully_covered_query_partial() {
     .sign(&key)
     .expect("second signature");
     let mut runtime =
-        RepositoryReplicaRuntime::load(HistoryStorage::open(temporary.path())).expect("runtime");
+        RepositoryReplicaRuntime::load(open_storage_with_subject_indexes(temporary.path()))
+            .expect("runtime");
     for segment in [&first, &second] {
         runtime
             .receive_wire(
@@ -196,7 +209,8 @@ fn an_incomplete_aggregate_for_another_subject_does_not_degrade_this_query() {
     .sign(&key)
     .expect("signature");
     let mut runtime =
-        RepositoryReplicaRuntime::load(HistoryStorage::open(temporary.path())).expect("runtime");
+        RepositoryReplicaRuntime::load(open_storage_with_subject_indexes(temporary.path()))
+            .expect("runtime");
     runtime
         .receive_wire(
             "cluster-a",
