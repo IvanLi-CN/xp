@@ -27,11 +27,12 @@ permissions:
   contents: read
 
 concurrency:
-  # Shares the heavyweight-cache group with ci-performance: both fill a 10 GiB
-  # repository cache pool, and a measurement running while the other writes its
-  # shards evicts the caches this job needs. The 128 MiB workload only claims
-  # 312s of the 2087s run, so a cold compile costs far more than queueing here.
-  group: heavy-cache-measurement
+  # Shares the per-ref heavy-cache group with the two measurement workflows. The
+  # 128 MiB workload claims only 312s of a 2087s run, so losing the cached build to
+  # a concurrent measurement costs far more than queueing here. This workflow never
+  # cancels: its evidence is bound to one SHA.
+  group: >-
+    heavy-cache-measurement-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:

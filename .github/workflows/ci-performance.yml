@@ -48,12 +48,14 @@ on:
         default: none
 
 concurrency:
-  # Shares one literal group with resource-evidence and release-performance: the
-  # three together write far more than the 10 GiB repository cache pool, and a
-  # measurement overlapping the SHA-bound resource gate evicts that gate's cached
-  # build, turning its 312s workload into a 30-minute cold compile. GitHub matches
-  # concurrency groups exactly, so a per-PR suffix would reintroduce the overlap.
-  group: heavy-cache-measurement
+  # Measurement runs write far more than the 10 GiB repository cache pool, so runs
+  # that can overlap must queue rather than evict each other. The group is keyed by
+  # ref, not shared globally: the resource gate runs only on main and its evidence is
+  # bound to one SHA, so a pull_request sync must never cancel it. Within one ref the
+  # group is identical across all three cache-heavy workflows, which is what keeps
+  # them apart while preserving the existing cancel-superseded-PR behaviour.
+  group: >-
+    heavy-cache-measurement-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:

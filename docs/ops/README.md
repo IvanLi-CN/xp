@@ -1688,14 +1688,15 @@ remains
 the tighter regression signal after cache population.
 
 The three cache-heavy workflows — `ci-performance`, `release-performance`, and
-`resource-evidence` — share one literal concurrency group, so only one runs at a time. Together they
-write far more than the 10 GiB repository cache pool, and GitHub matches concurrency groups exactly,
-so any per-run suffix would let a measurement overlap the SHA-bound resource gate and evict the
-cached build that gate needs. That eviction is the difference between a 312-second workload and a
-30-minute cold compile, so the workflows queue instead. `ci-performance` and `release-performance`
-still cancel only superseded pull-request runs; `resource-evidence` never cancels, because its
-evidence is bound to one SHA. The Web and Storybook jobs share their Bun/Playwright dependency
-cache key while retaining separate jobs and cache receipts.
+`resource-evidence` — share one concurrency group per ref, so runs against the same ref queue instead
+of running together. Together they write far more than the 10 GiB repository cache pool, and an
+overlapping measurement evicts the cached build another one needs, which is the difference between a
+312-second workload and a 30-minute cold compile. The group must be keyed by ref and not shared
+globally: `ci-performance` and `release-performance` cancel superseded pull-request runs, and a
+global group let a pull-request sync cancel the main-branch resource gate mid-measurement.
+`resource-evidence` never cancels, because its evidence is bound to one SHA. The Web and Storybook
+jobs share their Bun/Playwright dependency cache key while retaining separate jobs and cache
+receipts.
 
 Dispatch `release-performance` the same way to exercise the reusable release build graph without
 creating a tag, package version, GitHub Release, or deployment. It uses a synthetic
