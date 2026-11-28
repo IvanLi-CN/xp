@@ -274,32 +274,34 @@ mod tests {
         let history = NodeHistoryHandle::new(directory.path().join("node-history.json"));
         history.clear_node("target-a").await.unwrap();
         let (version, markers) = history
-            .repository_deletion_snapshot_bounded("collector", 5, 128 * 1024)
+            .repository_deletion_snapshot_bounded("collector", usize::MAX, 128 * 1024)
             .await
             .unwrap();
-        assert_eq!(markers.len(), 5);
+        // One complete node intent covers every exported history schema.
+        let per_node_schemas = markers.len();
+        assert_eq!(per_node_schemas, 6);
         assert!(
             history
-                .repository_deletion_snapshot_bounded("collector", 4, 128 * 1024)
+                .repository_deletion_snapshot_bounded("collector", per_node_schemas - 1, 128 * 1024)
                 .await
                 .is_err()
         );
         assert!(
             history
-                .repository_deletion_snapshot_bounded("collector", 5, 1)
+                .repository_deletion_snapshot_bounded("collector", per_node_schemas, 1)
                 .await
                 .is_err()
         );
         let after = history
-            .repository_deletion_snapshot_bounded("collector", 5, 128 * 1024)
+            .repository_deletion_snapshot_bounded("collector", per_node_schemas, 128 * 1024)
             .await
             .unwrap();
         assert_eq!(after.0, version);
-        assert_eq!(after.1.len(), 5);
+        assert_eq!(after.1.len(), per_node_schemas);
         history.clear_node("target-b").await.unwrap();
         assert!(
             history
-                .repository_deletion_snapshot_bounded("collector", 5, 128 * 1024)
+                .repository_deletion_snapshot_bounded("collector", per_node_schemas, 128 * 1024)
                 .await
                 .is_err()
         );
@@ -331,7 +333,7 @@ mod tests {
             drop(history);
             let restored = NodeHistoryHandle::new(path);
             let pending = restored.repository_deletion_markers("local").await.unwrap();
-            assert_eq!(pending.len(), if node { 5 } else { 1 });
+            assert_eq!(pending.len(), if node { 6 } else { 1 });
             assert_ne!(old, pending);
         }
     }

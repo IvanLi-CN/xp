@@ -132,7 +132,7 @@ async fn node_deletion_fanout_is_atomic_and_survives_ack_and_restart() {
                 .await
                 .unwrap()
                 .len(),
-            5
+            6
         );
     }
 }
@@ -165,7 +165,7 @@ async fn old_repository_ack_cannot_clear_a_reentered_deletion_intent() {
         let new = history.repository_deletion_markers("local").await.unwrap();
         assert_eq!(
             new.len(),
-            if node { 5 } else { 1 },
+            if node { 6 } else { 1 },
             "old ACK must preserve the new propagation obligation after restart"
         );
         assert_ne!(
