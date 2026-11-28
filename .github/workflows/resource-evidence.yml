@@ -1,6 +1,11 @@
 name: resource-evidence
 
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - resource-evidence.json
+      - resource-workload.log
   workflow_dispatch:
     inputs:
       target_sha:
@@ -21,15 +26,20 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: >-
+    resource-evidence-${{ inputs.target_sha || github.sha }}
+  cancel-in-progress: false
+
 jobs:
   measure:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      TARGET_SHA: ${{ inputs.target_sha }}
+      TARGET_SHA: ${{ inputs.target_sha || github.sha }}
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_RELEASE_DEBUG: "0"
-      CANDIDATE_TARGET: ${{ inputs.candidate_target || 'native' }}
+      CANDIDATE_TARGET: ${{ inputs.candidate_target || 'x86_64-unknown-linux-musl' }}
       CANDIDATE_BUILD_VERSION: ${{ inputs.build_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -68,7 +78,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with: {toolchain: 1.96.0}
       - name: prepare native Linux musl toolchain
-        if: inputs.candidate_target == 'x86_64-unknown-linux-musl'
+        if: env.CANDIDATE_TARGET == 'x86_64-unknown-linux-musl'
         run: |
           sudo apt-get update
           sudo apt-get install --yes musl-tools
@@ -206,3 +216,23 @@ jobs:
           name: measured-candidate-${{ github.run_id }}
           path: candidate
           if-no-files-found: error
+
+  notify_failure:
+    needs: measure
+    if: ${{ failure() || cancelled() }}
+    permissions:
+      id-token: write
+    uses: IvanLi-CN/oidrune/.github/workflows/notify.yml@e48822f99c6402a753ed86557ea029754cbab20b
+    with:
+      outcome: failure
+      summary: |
+        🧪 Resource Evidence Failed · ${{ github.repository }}
+        status: failure
+        project: ${{ github.repository }}
+        workflow: ${{ github.workflow }}
+        target SHA: ${{ github.event.inputs.target_sha || github.sha }}
+        run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        ref: ${{ format('branch: {0}', github.ref_name) }}
+        attempt: ${{ github.run_attempt }}
+        actor: ${{ github.actor }}
+        details: resource evidence measurement did not produce a v2 attestation

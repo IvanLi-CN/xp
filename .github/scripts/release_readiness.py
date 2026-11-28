@@ -15,7 +15,10 @@ from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
 
-REQUIRED_WORKFLOWS = ("ci", "fixture-policy", "xray-e2e")
+# These are workflow names from each workflow's `name:` field, not required-check names.
+# `xp-proxy-perf` publishes the check `xp-proxy-perf-gate`, and that check only runs on pull
+# requests; readiness reads the push run's workflow-level conclusion instead.
+REQUIRED_WORKFLOWS = ("ci", "fixture-policy", "xp-proxy-perf")
 FAILURE_CONCLUSIONS = {
     "failure",
     "cancelled",

@@ -302,6 +302,28 @@ _Avoid_: 跳过性能测试、性能通过
 被人明确作废、保留原始记录但不再参与有效结果汇总或复用的一次性能测试结果。
 _Avoid_: 测试失败、版本禁测、门禁豁免
 
+**Performance Sample**:
+一次性能验收中独立完成的冷/热成对测量；每个 sample 使用自己的缓存命名空间，因此
+不与其他 sample 或上一次 attempt 共享缓存。
+_Avoid_: 重试、平均值
+
+**Required Gate**:
+合并前必须成功的检查集合；只有 Required Gate 受墙钟预算约束，验收测量与发布流程不受。
+_Avoid_: 全部 CI、建议检查
+
+**Resource Evidence**:
+在 128 MiB/no-swap cgroup 内针对某个精确 commit 取得的内存与吞吐证明，以及绑定该证明
+与其工作负载日志的摘要。
+_Avoid_: 性能测试、历史基线报告
+
+**Evidence Commit**:
+仅父提交为目标 commit、仅含证据文件、并由仓库 owner 签名的一份独立提交。
+_Avoid_: 证据附件、release tag
+
+**Measurement Cache**:
+按运行与 attempt 命名、仅服务于单次验收测量、事后必须回收的 Actions 缓存条目。
+_Avoid_: 共享构建缓存、长期缓存
+
 **Control Plane**:
 The XP authority that stores and coordinates cluster, endpoint, user and membership state.
 It produces the complete desired snapshot for a node's data plane.

@@ -1,10 +1,11 @@
 name: xray-e2e
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+  schedule:
+    # Weekly containment probe for the published Xray runtime artifacts. The PR path is
+    # covered by the `rust` and `xp-proxy-perf-gate` required checks instead.
+    - cron: "37 3 * * 1"
 
 permissions:
   contents: read
@@ -20,19 +21,19 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: validate managed ingress readiness probe
         run: python3 scripts/testbox/test-native-reality-host.py
 
       - name: setup rust
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
         with:
           toolchain: 1.96.0
           components: rustfmt, clippy
 
       - name: setup bun
-        uses: oven-sh/setup-bun@v2.2.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: .bun-version
 

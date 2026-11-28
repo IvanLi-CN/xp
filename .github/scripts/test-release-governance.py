@@ -126,7 +126,7 @@ class ReadinessTests(unittest.TestCase):
         payload = {"workflow_runs": [
             {"id": 1, "name": "ci", "head_sha": sha, "event": "push", "head_branch": "main", "status": "completed", "conclusion": "success"},
             {"id": 2, "name": "fixture-policy", "head_sha": sha, "event": "push", "head_branch": "main", "status": "completed", "conclusion": "success"},
-            {"id": 3, "name": "xray-e2e", "head_sha": sha, "event": "push", "head_branch": "main", "status": "completed", "conclusion": "success"},
+            {"id": 3, "name": "xp-proxy-perf", "head_sha": sha, "event": "push", "head_branch": "main", "status": "completed", "conclusion": "success"},
         ]}
         self.assertEqual(readiness.evaluate(payload, sha), ("ready", "all_required_workflows_success"))
 
@@ -217,6 +217,25 @@ class ReadinessTests(unittest.TestCase):
             with self.assertRaises(readiness.ReadinessError):
                 readiness.validate_resource_evidence_files(evidence_path, log_path, sha)
 
+    def test_readiness_names_workflows_not_required_checks(self) -> None:
+        # Readiness filters GitHub workflow runs by the workflow `name:` field. `xp-proxy-perf`
+        # publishes the check `xp-proxy-perf-gate`, which only runs on pull requests, so a
+        # regression that swapped one for the other would never match a push run.
+        sha = "a" * 40
+        workflow_name = "xp-proxy-perf"
+        check_name = "xp-proxy-perf-gate"
+        self.assertIn(workflow_name, readiness.REQUIRED_WORKFLOWS)
+        self.assertNotIn(check_name, readiness.REQUIRED_WORKFLOWS)
+        payload = {"workflow_runs": [
+            {"id": 1, "name": workflow_name, "head_sha": sha, "event": "push",
+             "head_branch": "main", "status": "completed", "conclusion": "success"},
+        ]}
+        self.assertEqual(readiness.evaluate(payload, sha), ("pending", "ci:missing; fixture-policy:missing; xp-proxy-perf:completed/success:1"))
+        payload["workflow_runs"][0]["name"] = check_name
+        status, detail = readiness.evaluate(payload, sha)
+        self.assertEqual(status, "pending")
+        self.assertIn("xp-proxy-perf:missing", detail)
+
     def test_missing_and_failed_runs_are_distinguished(self) -> None:
         sha = "c" * 40
         payload = {"workflow_runs": [
@@ -229,7 +248,7 @@ class ReadinessTests(unittest.TestCase):
 
         pending, pending_detail = readiness.evaluate({"workflow_runs": []}, sha)
         self.assertEqual(pending, "pending")
-        self.assertIn("xray-e2e", pending_detail)
+        self.assertIn("xp-proxy-perf", pending_detail)
 
     def test_wrong_sha_or_event_does_not_satisfy_gate(self) -> None:
         sha = "d" * 40
@@ -264,7 +283,7 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual(status, "failed")
         self.assertIn("ci:completed/failure:1", detail)
         self.assertIn("fixture-policy:missing", detail)
-        self.assertIn("xray-e2e:missing", detail)
+        self.assertIn("xp-proxy-perf:missing", detail)
 
 
 class WorkflowIntegrationTests(unittest.TestCase):

@@ -1635,8 +1635,8 @@ Post-upgrade validation for nodes expected to expose a managed-default VLESS ing
 Normal release intent is the merged pull request's type and channel labels as reconstructed from
 GitHub Issue events through the unique merge event. The current labels on an already merged PR are
 not authoritative, and historical PR labels must not be edited to trigger a release. A release is
-published only after the target SHA has successful `ci`, `fixture-policy`, and `xray-e2e` push runs
-on `main`.
+published only after the target SHA has successful `ci`, `fixture-policy`, and `xp-proxy-perf` push
+runs on `main`.
 
 For a corrective release, an owner first dispatches the `resource-evidence` workflow from the exact
 merged SHA, signs its downloaded two-file artifact as an evidence commit whose only parent is that
@@ -1645,9 +1645,12 @@ SHA, and then dispatches the `release` workflow with the exact merged `head_sha`
 evidence commit.
 The current evidence contract is v2: the evidence commit must have the target as its only parent and
 contain only `resource-evidence.json` and `resource-workload.log`; pre-v2 evidence commits must be
-regenerated. The commit must also have a GitHub-verified valid signature by the repository
-owner. The workflow itself also requires the dispatch actor and re-run actor to be the repository
-owner, and verifies the pinned owner signing key with `git verify-commit`. It recomputes the log
+regenerated. Evidence remains source-level: the measured candidate is built with
+`--features resource-fixture`, the published musl binaries are not, so their digests cannot match
+and the release neither compares them nor claims that the shipped bytes were measured.
+The commit must also have a GitHub-verified valid signature by the repository owner. The workflow
+itself also requires the dispatch actor and re-run actor to be the repository owner, and verifies
+the pinned owner signing key with `git verify-commit`. It recomputes the log
 digest, publishes the evidence files and commit identity as release assets, then fails before tag
 creation if the target is not on `main`, the expected version does not match, evidence is malformed
 or mismatched, or any required workflow is missing or unsuccessful. This is an owner-dispatched

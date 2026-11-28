@@ -211,5 +211,13 @@ scripts/e2e/run-local-xray-e2e.sh
    - `cargo fmt --check`
    - `cargo clippy -- -D warnings`
    - `cargo test`
-3. Docs：
+3. Native 数据面：
+   - `cargo test -p xp-proxy -p xp-proxy-core --all-targets`
+   - `cargo clippy -p xp-proxy -p xp-proxy-core --all-targets --all-features -- -D warnings`
+   - 根包测试不覆盖这两个 crate，因此它们有独立 job。
+4. Docs：
    - `bunx --no-install dprint check`（或 fmt 后检查无 diff）
+
+合并前 required 检查的墙钟预算按热路径 ≤10 分钟计；`rust` job 因冷编译加完整
+lib 套件实测 10m24s，上限为 30 分钟。真实 Xray E2E 不在 PR 路径上：它验证的是已发布的
+运行时工件，改为手动派发并每周运行一次。
