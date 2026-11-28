@@ -94,7 +94,7 @@ jobs:
             target
           key: >-
             ${{ runner.os }}-resource-evidence-${{ hashFiles('Cargo.lock', 'web/bun.lock') }}-${{
-            inputs.candidate_target || 'native' }}
+            env.CANDIDATE_TARGET }}
           restore-keys: >-
             ${{ runner.os }}-resource-evidence-${{ hashFiles('Cargo.lock', 'web/bun.lock') }}
       - name: build embedded web assets
