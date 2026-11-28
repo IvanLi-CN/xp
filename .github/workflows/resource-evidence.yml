@@ -28,7 +28,7 @@ permissions:
 
 concurrency:
   group: >-
-    resource-evidence-${{ github.event_name == 'push' && github.sha || inputs.target_sha }}
+    resource-evidence-${{ inputs.target_sha || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -219,7 +219,7 @@ jobs:
 
   notify_failure:
     needs: measure
-    if: ${{ failure() }}
+    if: ${{ failure() || cancelled() }}
     permissions:
       id-token: write
     uses: IvanLi-CN/oidrune/.github/workflows/notify.yml@e48822f99c6402a753ed86557ea029754cbab20b

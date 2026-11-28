@@ -161,6 +161,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: write
+      contents: read
     steps:
       - name: delete this run's performance caches
         env: {GH_TOKEN: '${{ github.token }}'}

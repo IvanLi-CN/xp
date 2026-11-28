@@ -20,6 +20,9 @@
   jobs and transfers run-scoped artifacts to the publisher.
 - `release-performance.yml` reuses that graph with read-only permissions and machine-readable
   duration assertions; image assembly uses `push=false` and cache-only output.
+- `release_readiness.py` requires exact-SHA main push success for `ci`, `fixture-policy`, and
+  `xp-proxy-perf`; the workflow name and the required check name differ on purpose, so readiness
+  matches the workflow name.
 - Formal Release relies on exact-SHA readiness instead of repeating format, lint, and tests before
   artifact compilation.
 

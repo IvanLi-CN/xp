@@ -73,7 +73,8 @@ jobs:
             target
           key: >-
             ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-${{
-            hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+            hashFiles('Cargo.lock', 'rust-toolchain.toml', 'build.rs', 'src/**',
+            'crates/**', 'proto/**', 'tests/**', 'fixture-policy/**') }}
           restore-keys: |
             ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-
             ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-ci-', runner.os) || '' }}
@@ -179,7 +180,8 @@ jobs:
             target
           key: >-
             ${{ runner.os }}-rust-clippy-${{ env.CACHE_NAMESPACE }}-${{
-            hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+            hashFiles('Cargo.lock', 'rust-toolchain.toml', 'build.rs', 'src/**',
+            'crates/**', 'proto/**', 'tests/**', 'fixture-policy/**') }}
           restore-keys: |
             ${{ runner.os }}-rust-clippy-${{ env.CACHE_NAMESPACE }}-
             ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-clippy-ci-', runner.os) || '' }}
@@ -329,7 +331,8 @@ jobs:
             target
           key: >-
             ${{ runner.os }}-rust-contracts-${{ env.CACHE_NAMESPACE }}-${{
-            hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+            hashFiles('Cargo.lock', 'rust-toolchain.toml', 'build.rs', 'src/**',
+            'crates/**', 'proto/**', 'tests/**', 'fixture-policy/**') }}
           restore-keys: |
             ${{ runner.os }}-rust-contracts-${{ env.CACHE_NAMESPACE }}-
             ${{ env.CACHE_PHASE == 'normal' && format('{0}-rust-contracts-ci-', runner.os) || '' }}
