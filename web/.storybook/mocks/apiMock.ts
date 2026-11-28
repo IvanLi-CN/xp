@@ -102,6 +102,7 @@ import {
 	buildFixtureUserQuotaSummaryItem,
 	buildUserNodeQuotaStatusItem,
 } from "./staticFixtureMappings";
+import { buildNodeTcpConnections as buildTcpConnectionsMock } from "./tcpConnectionsMock";
 
 export type StorybookApiMockConfig = {
 	identityNamespace?: "demo";
@@ -935,60 +936,7 @@ function createDefaultSeed(): MockStateSeed {
 		},
 	} satisfies Record<string, AdminNodeMihomoResourcePolicy>;
 	const nodeTcpConnectionsByNodeId = Object.fromEntries(
-		nodes.map((node) => [
-			node.node_id,
-			{
-				node,
-				window: "24h" as const,
-				window_start: fixtureCatalog.timestamp.t20260307T010000(),
-				window_end: fixtureCatalog.timestamp.t20260308T005900(),
-				warnings: [],
-				endpoints: [
-					{
-						endpoint_id: fixtureCatalog.endpointId.fixture27(),
-						endpoint_tag: fixtureCatalog.endpointTag.fixture49(),
-						port: fixtureCatalog.endpoint.port443(),
-					},
-					{
-						endpoint_id: fixtureCatalog.endpointId.fixture50(),
-						endpoint_tag: fixtureCatalog.endpointTag.fixture51(),
-						port: fixtureCatalog.endpoint.port8443(),
-					},
-				],
-				per_endpoint_series: [
-					{
-						endpoint_id: fixtureCatalog.endpointId.fixture27(),
-						endpoint_tag: fixtureCatalog.endpointTag.fixture49(),
-						port: fixtureCatalog.endpoint.port443(),
-						series: [
-							{
-								minute: fixtureCatalog.timestamp.t20260308T005800(),
-								count: 2,
-							},
-							{
-								minute: fixtureCatalog.timestamp.t20260308T005900(),
-								count: 3,
-							},
-						],
-					},
-					{
-						endpoint_id: fixtureCatalog.endpointId.fixture50(),
-						endpoint_tag: fixtureCatalog.endpointTag.fixture51(),
-						port: fixtureCatalog.endpoint.port8443(),
-						series: [
-							{
-								minute: fixtureCatalog.timestamp.t20260308T005800(),
-								count: 1,
-							},
-							{
-								minute: fixtureCatalog.timestamp.t20260308T005900(),
-								count: 2,
-							},
-						],
-					},
-				],
-			},
-		]),
+		nodes.map((node) => [node.node_id, buildTcpConnectionsMock(node)]),
 	) satisfies Record<string, AdminNodeTcpConnectionsResponse>;
 	const nodeHistoryByNodeId = Object.fromEntries(
 		nodes.map((node) => [node.node_id, buildNodeHistory(node)]),
@@ -1572,7 +1520,13 @@ async function handleRequest(
 		if (!report) {
 			return errorResponse(404, "not_found", "node not found");
 		}
-		const window = url.searchParams.get("window") === "7d" ? "7d" : "24h";
+		const requestedWindow = url.searchParams.get("window");
+		const window =
+			requestedWindow === "7d" ||
+			requestedWindow === "30d" ||
+			requestedWindow === "90d"
+				? requestedWindow
+				: "24h";
 		return jsonResponse(selectWindowedNodeTcpConnections(report, window));
 	}
 

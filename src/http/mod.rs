@@ -41,6 +41,7 @@ mod resource_mesh_error;
 mod resource_monitoring;
 mod stale_learner_retirement;
 mod status_events;
+mod tcp_connections;
 mod unreachable_voter_eviction;
 use crate::{
     admin_token::{AdminTokenHash, AdminTokenVerifier, AdminTokenVerifyError},
@@ -107,11 +108,6 @@ use crate::{
         history_repository::{HistoryStorage, replica::RepositoryReplicaRuntime},
     },
     subscription,
-    tcp_connection_usage::{
-        TcpConnectionEndpointView, TcpConnectionUsageEndpointOption,
-        TcpConnectionUsageEndpointSeries, TcpConnectionUsageWarning, TcpConnectionUsageWindow,
-        TcpConnectionUsageWindowView, build_window_view as build_tcp_connection_window_view,
-    },
     upgrade_job::{
         UpgradeJobStatus, UpgradeStartError, UpgradeSupport, read_reconciled_status, start_upgrade,
         support_status,
@@ -1262,7 +1258,7 @@ pub fn build_router_with_mesh_telemetry(
         .route("/nodes/{node_id}/ip-usage", get(admin_get_node_ip_usage))
         .route(
             "/nodes/{node_id}/tcp-connections",
-            get(admin_get_node_tcp_connections),
+            get(tcp_connections::admin_get_node_tcp_connections),
         )
         .route(
             "/nodes/{node_id}/runtime/events",
@@ -1435,7 +1431,7 @@ pub fn build_router_with_mesh_telemetry(
         )
         .route(
             "/_internal/nodes/tcp-connections/local",
-            get(admin_internal_get_local_node_tcp_connections),
+            get(tcp_connections::admin_internal_get_local_node_tcp_connections),
         )
         .route(
             "/_internal/nodes/runtime/local/events",
@@ -2479,11 +2475,6 @@ struct TrafficQuery {
     node_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct TcpConnectionUsageQuery {
-    window: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AdminNodeIpUsageResponse {
     node: Node,
@@ -2553,28 +2544,6 @@ struct AdminUserIpUsageResponse {
     unreachable_nodes: Vec<String>,
     warnings: Vec<IpUsageWarning>,
     groups: Vec<AdminUserIpUsageNodeGroup>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AdminNodeTcpConnectionsResponse {
-    node: Node,
-    window: TcpConnectionUsageWindow,
-    window_start: String,
-    window_end: String,
-    warnings: Vec<TcpConnectionUsageWarning>,
-    endpoints: Vec<TcpConnectionUsageEndpointOption>,
-    per_endpoint_series: Vec<TcpConnectionUsageEndpointSeries>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AdminInternalNodeTcpConnectionsLocalResponse {
-    node: Node,
-    window: TcpConnectionUsageWindow,
-    window_start: String,
-    window_end: String,
-    warnings: Vec<TcpConnectionUsageWarning>,
-    endpoints: Vec<TcpConnectionUsageEndpointOption>,
-    per_endpoint_series: Vec<TcpConnectionUsageEndpointSeries>,
 }
 
 #[derive(Debug, Serialize)]
@@ -3092,130 +3061,6 @@ fn parse_ip_usage_window(query: &IpUsageQuery) -> Result<IpUsageWindow, ApiError
     IpUsageWindow::parse(query.window.as_deref()).map_err(ApiError::invalid_request)
 }
 
-fn parse_tcp_connection_usage_window(
-    query: &TcpConnectionUsageQuery,
-) -> Result<TcpConnectionUsageWindow, ApiError> {
-    TcpConnectionUsageWindow::parse(query.window.as_deref()).map_err(ApiError::invalid_request)
-}
-
-fn build_ip_usage_membership_views(
-    store: &JsonSnapshotStore,
-    node_id: &str,
-    user_id: Option<&str>,
-) -> Vec<InboundIpUsageMembershipView> {
-    let endpoints_by_id = store
-        .list_endpoints()
-        .into_iter()
-        .map(|endpoint| (endpoint.endpoint_id.clone(), endpoint))
-        .collect::<std::collections::BTreeMap<_, _>>();
-
-    let mut memberships = Vec::new();
-    for membership in store.state().node_user_endpoint_memberships.iter() {
-        if membership.node_id != node_id {
-            continue;
-        }
-        if let Some(user_id) = user_id
-            && membership.user_id != user_id
-        {
-            continue;
-        }
-        let Some(endpoint) = endpoints_by_id.get(&membership.endpoint_id) else {
-            continue;
-        };
-        memberships.push(InboundIpUsageMembershipView {
-            membership_key: crate::state::membership_key(
-                &membership.user_id,
-                &membership.endpoint_id,
-            ),
-            endpoint_id: membership.endpoint_id.clone(),
-            endpoint_tag: endpoint.tag.clone(),
-        });
-    }
-    memberships
-}
-
-fn build_local_node_ip_usage_report(
-    store: &JsonSnapshotStore,
-    node_id: &str,
-    window: IpUsageWindow,
-) -> IpUsageReport {
-    let warnings = build_warnings(store.inbound_ip_usage().online_stats_unavailable);
-    let memberships = build_ip_usage_membership_views(store, node_id, None);
-    build_window_view(
-        store.inbound_ip_usage(),
-        Utc::now(),
-        window,
-        &memberships,
-        warnings,
-    )
-}
-
-fn build_local_user_node_ip_usage_report(
-    store: &JsonSnapshotStore,
-    user_id: &str,
-    node_id: &str,
-    window: IpUsageWindow,
-) -> IpUsageReport {
-    let warnings = build_warnings(store.inbound_ip_usage().online_stats_unavailable);
-    let memberships = build_ip_usage_membership_views(store, node_id, Some(user_id));
-    build_window_view(
-        store.inbound_ip_usage(),
-        Utc::now(),
-        window,
-        &memberships,
-        warnings,
-    )
-}
-
-fn build_tcp_connection_endpoint_views(
-    store: &JsonSnapshotStore,
-    node_id: &str,
-) -> Vec<TcpConnectionEndpointView> {
-    let mut endpoints = store
-        .list_endpoints()
-        .into_iter()
-        .filter(|endpoint| endpoint.node_id == node_id)
-        .map(|endpoint| TcpConnectionEndpointView {
-            node_id: endpoint.node_id,
-            endpoint_id: endpoint.endpoint_id,
-            endpoint_tag: endpoint.tag,
-            port: endpoint.port,
-        })
-        .collect::<Vec<_>>();
-    endpoints.sort_by(|left, right| {
-        left.endpoint_tag
-            .cmp(&right.endpoint_tag)
-            .then_with(|| left.port.cmp(&right.port))
-            .then_with(|| left.endpoint_id.cmp(&right.endpoint_id))
-    });
-    endpoints
-}
-
-fn build_local_node_tcp_connections_report(
-    store: &JsonSnapshotStore,
-    node_id: &str,
-    window: TcpConnectionUsageWindow,
-) -> TcpConnectionUsageWindowView {
-    let endpoints = build_tcp_connection_endpoint_views(store, node_id);
-    build_tcp_connection_window_view(store.tcp_connection_usage(), Utc::now(), window, &endpoints)
-}
-
-fn node_tcp_connections_response_from_report(
-    node: Node,
-    window: TcpConnectionUsageWindow,
-    report: TcpConnectionUsageWindowView,
-) -> AdminNodeTcpConnectionsResponse {
-    AdminNodeTcpConnectionsResponse {
-        node,
-        window,
-        window_start: report.window_start,
-        window_end: report.window_end,
-        warnings: report.warnings,
-        endpoints: report.endpoints,
-        per_endpoint_series: report.per_endpoint_series,
-    }
-}
-
 fn ip_geo_lookup_warning(state: &AppState) -> Option<IpUsageWarning> {
     if state.geo_db_update.ip_geo_source() == IpGeoSource::Missing {
         return None;
@@ -3288,100 +3133,73 @@ fn merge_ip_usage_warnings(groups: &[AdminUserIpUsageNodeGroup]) -> Vec<IpUsageW
     warnings
 }
 
-async fn admin_internal_get_local_node_tcp_connections(
-    Extension(state): Extension<AppState>,
-    internal: Option<Extension<InternalSignatureAuth>>,
-    Query(query): Query<TcpConnectionUsageQuery>,
-) -> Result<Json<AdminInternalNodeTcpConnectionsLocalResponse>, ApiError> {
-    if internal.is_none() {
-        return Err(ApiError::unauthorized("internal auth required"));
+fn build_ip_usage_membership_views(
+    store: &JsonSnapshotStore,
+    node_id: &str,
+    user_id: Option<&str>,
+) -> Vec<InboundIpUsageMembershipView> {
+    let endpoints_by_id = store
+        .list_endpoints()
+        .into_iter()
+        .map(|endpoint| (endpoint.endpoint_id.clone(), endpoint))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    let mut memberships = Vec::new();
+    for membership in store.state().node_user_endpoint_memberships.iter() {
+        if membership.node_id != node_id {
+            continue;
+        }
+        if let Some(user_id) = user_id
+            && membership.user_id != user_id
+        {
+            continue;
+        }
+        let Some(endpoint) = endpoints_by_id.get(&membership.endpoint_id) else {
+            continue;
+        };
+        memberships.push(InboundIpUsageMembershipView {
+            membership_key: crate::state::membership_key(
+                &membership.user_id,
+                &membership.endpoint_id,
+            ),
+            endpoint_id: membership.endpoint_id.clone(),
+            endpoint_tag: endpoint.tag.clone(),
+        });
     }
-    let window = parse_tcp_connection_usage_window(&query)?;
-    let node = {
-        let store = state.store.lock().await;
-        store.get_node(&state.cluster.node_id).ok_or_else(|| {
-            ApiError::not_found(format!("node not found: {}", state.cluster.node_id))
-        })?
-    };
-    let report = {
-        let store = state.store.lock().await;
-        build_local_node_tcp_connections_report(&store, &node.node_id, window)
-    };
-    Ok(Json(AdminInternalNodeTcpConnectionsLocalResponse {
-        node,
-        window,
-        window_start: report.window_start,
-        window_end: report.window_end,
-        warnings: report.warnings,
-        endpoints: report.endpoints,
-        per_endpoint_series: report.per_endpoint_series,
-    }))
+    memberships
 }
 
-async fn admin_get_node_tcp_connections(
-    Extension(state): Extension<AppState>,
-    Path(node_id): Path<String>,
-    Query(query): Query<TcpConnectionUsageQuery>,
-) -> Result<Json<AdminNodeTcpConnectionsResponse>, ApiError> {
-    let window = parse_tcp_connection_usage_window(&query)?;
-    let node = {
-        let store = state.store.lock().await;
-        store
-            .get_node(&node_id)
-            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
-    };
-
-    if node.node_id == state.cluster.node_id {
-        let report = {
-            let store = state.store.lock().await;
-            build_local_node_tcp_connections_report(&store, &node.node_id, window)
-        };
-        return Ok(Json(node_tcp_connections_response_from_report(
-            node, window, report,
-        )));
-    }
-
-    let base = node.api_base_url.trim_end_matches('/');
-    if base.is_empty() {
-        return Err(ApiError::internal(format!(
-            "node is unreachable: {}",
-            node.node_id
-        )));
-    }
-
-    let client = state.mesh_client.clone();
-    let response = send_mesh_internal_read(
-        &state,
-        &client,
-        &node,
-        format!(
-            "/api/admin/_internal/nodes/tcp-connections/local?window={}",
-            window.as_str()
-        ),
-        Duration::from_secs(3),
+fn build_local_node_ip_usage_report(
+    store: &JsonSnapshotStore,
+    node_id: &str,
+    window: IpUsageWindow,
+) -> IpUsageReport {
+    let warnings = build_warnings(store.inbound_ip_usage().online_stats_unavailable);
+    let memberships = build_ip_usage_membership_views(store, node_id, None);
+    build_window_view(
+        store.inbound_ip_usage(),
+        Utc::now(),
+        window,
+        &memberships,
+        warnings,
     )
-    .await?;
+}
 
-    if !response.status().is_success() {
-        return Err(ApiError::internal(format!(
-            "node tcp connections request failed: {}",
-            response.status()
-        )));
-    }
-
-    let remote = response
-        .json::<AdminInternalNodeTcpConnectionsLocalResponse>()
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    Ok(Json(AdminNodeTcpConnectionsResponse {
-        node: remote.node,
-        window: remote.window,
-        window_start: remote.window_start,
-        window_end: remote.window_end,
-        warnings: remote.warnings,
-        endpoints: remote.endpoints,
-        per_endpoint_series: remote.per_endpoint_series,
-    }))
+fn build_local_user_node_ip_usage_report(
+    store: &JsonSnapshotStore,
+    user_id: &str,
+    node_id: &str,
+    window: IpUsageWindow,
+) -> IpUsageReport {
+    let warnings = build_warnings(store.inbound_ip_usage().online_stats_unavailable);
+    let memberships = build_ip_usage_membership_views(store, node_id, Some(user_id));
+    build_window_view(
+        store.inbound_ip_usage(),
+        Utc::now(),
+        window,
+        &memberships,
+        warnings,
+    )
 }
 
 async fn admin_internal_get_local_node_ip_usage(

@@ -95,3 +95,31 @@ impl<'de> Deserialize<'de> for UserMihomoProfile {
         })
     }
 }
+
+const fn default_geo_db_update_interval_days_compat() -> u8 {
+    1
+}
+
+fn default_geo_db_provider_compat() -> String {
+    "dbip_lite".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GeoDbUpdateSettingsCompat {
+    #[serde(default = "default_geo_db_provider_compat")]
+    pub provider: String,
+    #[serde(default)]
+    pub auto_update_enabled: bool,
+    #[serde(default = "default_geo_db_update_interval_days_compat")]
+    pub update_interval_days: u8,
+}
+
+impl Default for GeoDbUpdateSettingsCompat {
+    fn default() -> Self {
+        Self {
+            provider: default_geo_db_provider_compat(),
+            auto_update_enabled: false,
+            update_interval_days: default_geo_db_update_interval_days_compat(),
+        }
+    }
+}

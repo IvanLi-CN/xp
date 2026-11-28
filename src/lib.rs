@@ -54,6 +54,7 @@ pub mod reverse_relay;
 pub mod state;
 mod state_join_command;
 pub mod subscription;
+pub mod tcp_connection_history;
 pub mod tcp_connection_usage;
 pub mod upgrade_job;
 pub mod uptime_monitor;

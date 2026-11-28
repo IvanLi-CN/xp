@@ -71,6 +71,7 @@ pub(super) struct SourceRecordBatch {
     pub(super) uptime_capture_gap_ids: Vec<String>,
     pub(super) resource_rollup_buckets: Vec<i64>,
     pub(super) resource_gap_ids: Vec<i64>,
+    pub(super) tcp_connection_daily_buckets: Vec<i64>,
 }
 
 impl SourceRecordBatch {
@@ -83,6 +84,7 @@ impl SourceRecordBatch {
             uptime_capture_gap_ids: Vec::new(),
             resource_rollup_buckets: Vec::new(),
             resource_gap_ids: Vec::new(),
+            tcp_connection_daily_buckets: Vec::new(),
         }
     }
 
@@ -118,6 +120,13 @@ impl SourceRecordBatch {
         state
             .resource_monitoring
             .mark_gaps_enqueued(&self.resource_gap_ids);
+        if let Err(err) = crate::tcp_connection_history::mark_daily_payloads_delivered(
+            &state.config.data_dir,
+            &state.cluster.node_id,
+            &self.tcp_connection_daily_buckets,
+        ) {
+            tracing::warn!(%err, "failed to mark tcp connection daily buckets delivered");
+        }
     }
 }
 
@@ -350,6 +359,28 @@ pub(super) async fn source_records(
             false,
         )?);
     }
+    let tcp_connection_daily = crate::tcp_connection_history::pending_daily_payloads(
+        &state.config.data_dir,
+        &state.cluster.node_id,
+        16,
+    )
+    .unwrap_or_default();
+    let tcp_connection_daily_buckets = tcp_connection_daily
+        .iter()
+        .map(|(bucket, _)| *bucket)
+        .collect::<Vec<_>>();
+    for (bucket, payload) in tcp_connection_daily {
+        let start = u64::try_from(bucket).unwrap_or_default();
+        records.push(source_record_with_key_for_subject(
+            crate::tcp_connection_history::TCP_CONNECTION_HISTORY_SCHEMA,
+            &state.cluster.node_id,
+            &state.cluster.node_id,
+            start,
+            crate::tcp_connection_history::daily_record_key(&state.cluster.node_id, start),
+            payload,
+            false,
+        )?);
+    }
     Ok(SourceRecordBatch {
         records: Some(records),
         deletion_markers,
@@ -364,6 +395,7 @@ pub(super) async fn source_records(
             .collect(),
         resource_rollup_buckets,
         resource_gap_ids,
+        tcp_connection_daily_buckets,
     })
 }
 

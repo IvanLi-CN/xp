@@ -471,9 +471,7 @@ export const TcpConnectionsTab: Story = {
 			await canvas.findByRole("tab", { name: "TCP connections" }),
 		);
 		await expect(
-			await canvas.findByText(
-				/Per-minute ESTABLISHED inbound TCP connections/i,
-			),
+			await canvas.findByText(/All established TCP sockets on this node/i),
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByText(/Connections per minute/i),
