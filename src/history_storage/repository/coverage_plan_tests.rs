@@ -9,6 +9,8 @@ use super::*;
 fn repository_coverage_query_uses_a_subject_seek_without_table_reads() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
+    // Subject indexes are maintenance work, not startup work: build them as the worker does.
+    assert!(storage.build_repository_subject_indexes().unwrap());
     let backend = storage.lock_backend();
     let Backend::Sqlite(connection) = &*backend else {
         panic!("test storage should use SQLite");

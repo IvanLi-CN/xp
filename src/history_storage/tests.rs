@@ -504,6 +504,8 @@ fn repository_keyset_indexes_avoid_a_full_sort_for_compaction_and_export() {
 fn repository_coverage_and_incomplete_ranges_keep_subject_and_tombstone_semantics() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
+    // Coverage seeks name the subject indexes, which the background worker owns.
+    assert!(storage.build_repository_subject_indexes().unwrap());
     let record = RepositoryHistoryRecordRow {
         source_node_id: "source-a".to_owned(),
         source_epoch: 1,

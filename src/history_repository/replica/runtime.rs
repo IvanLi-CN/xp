@@ -639,6 +639,16 @@ impl RepositoryReplicaRuntime {
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
     }
 
+    /// Build the subject coverage indexes if they are missing, returning whether this call built
+    /// them. Owned by the background worker for the same reason as the page index.
+    pub(crate) fn build_repository_subject_indexes(
+        &mut self,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        self.storage
+            .build_repository_subject_indexes()
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+    }
+
     pub(crate) fn runtime_capacity(
         &mut self,
     ) -> Result<RepositoryCapacity, RepositoryRuntimeError> {
