@@ -296,3 +296,70 @@ pub(crate) fn build_page_index(connection: &Connection) -> Result<()> {
         ))
         .map_err(sqlite_error)
 }
+
+/// Incomplete-aggregate range, split so every predicate can use the index.
+///
+/// The single statement this replaces wrapped three conditions in shapes SQLite cannot push into
+/// an index: `(?N IS NULL OR schema_id = ?N)`, `COALESCE(aggregate_start, observed_start)`, and
+/// `(aggregate_complete = 0 OR aggregate_complete IS NULL)`. Any one of them turned the query into
+/// a scan of the subject's whole slice: 2665 ms per call on the production repository.
+///
+/// Two facts make the split cheap. `aggregate_complete` is the index's second column, so an
+/// equality there is a seek; on the measured repository only 3011 of 268222 subject rows are `0`,
+/// and null is a separate equality. Stating the window on `observed_*` (indexed, non-null) instead
+/// of the COALESCE keeps the range sargable while the per-row `aggregate_*` bound still decides the
+/// same rows, so the result set is unchanged.
+pub(crate) fn incomplete_aggregate_range_sql(
+    subject_node_id: Option<&str>,
+    schema_id: Option<&str>,
+    aggregate_start_present: bool,
+) -> &'static str {
+    const SUBJECT_SCHEMA_PRESENT: &str = "
+        SELECT MIN(aggregate_start), MAX(aggregate_end) FROM repository_history_records
+        INDEXED BY repository_history_records_aggregate_completeness
+        WHERE subject_node_id = ?1 AND aggregate_complete = 0 AND schema_id = ?2
+          AND aggregate_start IS NOT NULL AND aggregate_start <= ?3 AND aggregate_end >= ?4
+    ";
+    const SUBJECT_SCHEMA_ABSENT: &str = "
+        SELECT MIN(observed_start), MAX(observed_end) FROM repository_history_records
+        INDEXED BY repository_history_records_aggregate_completeness
+        WHERE subject_node_id = ?1 AND aggregate_complete IS NULL AND schema_id = ?2
+          AND observed_start <= ?3 AND observed_end >= ?4
+    ";
+    const SUBJECT_ONLY_PRESENT: &str = "
+        SELECT MIN(aggregate_start), MAX(aggregate_end) FROM repository_history_records
+        INDEXED BY repository_history_records_aggregate_completeness
+        WHERE subject_node_id = ?1 AND aggregate_complete = 0
+          AND aggregate_start IS NOT NULL AND aggregate_start <= ?3 AND aggregate_end >= ?4
+    ";
+    const SUBJECT_ONLY_ABSENT: &str = "
+        SELECT MIN(observed_start), MAX(observed_end) FROM repository_history_records
+        INDEXED BY repository_history_records_aggregate_completeness
+        WHERE subject_node_id = ?1 AND aggregate_complete IS NULL
+          AND observed_start <= ?3 AND observed_end >= ?4
+    ";
+    const REPOSITORY_PRESENT: &str = "
+        SELECT MIN(aggregate_start), MAX(aggregate_end) FROM repository_history_records
+        INDEXED BY repository_history_records_aggregate_completeness
+        WHERE aggregate_complete = 0
+          AND aggregate_start IS NOT NULL AND aggregate_start <= ?3 AND aggregate_end >= ?4
+    ";
+    const REPOSITORY_ABSENT: &str = "
+        SELECT MIN(observed_start), MAX(observed_end) FROM repository_history_records
+        INDEXED BY repository_history_records_aggregate_completeness
+        WHERE aggregate_complete IS NULL
+          AND observed_start <= ?3 AND observed_end >= ?4
+    ";
+    match (
+        subject_node_id.is_some(),
+        schema_id.is_some(),
+        aggregate_start_present,
+    ) {
+        (true, true, true) => SUBJECT_SCHEMA_PRESENT,
+        (true, true, false) => SUBJECT_SCHEMA_ABSENT,
+        (true, false, true) => SUBJECT_ONLY_PRESENT,
+        (true, false, false) => SUBJECT_ONLY_ABSENT,
+        (false, _, true) => REPOSITORY_PRESENT,
+        (false, _, false) => REPOSITORY_ABSENT,
+    }
+}

@@ -48,17 +48,6 @@ pub(super) const COVERAGE_SUBJECT_RECEIVED_SQL: &str = "
     WHERE subject_node_id = ?1 AND is_tombstone = 0
 ";
 
-pub(super) const INCOMPLETE_AGGREGATE_SUBJECT_SQL: &str = "
-    SELECT MIN(COALESCE(aggregate_start, observed_start)),
-           MAX(COALESCE(aggregate_end, observed_end))
-    FROM repository_history_records
-    INDEXED BY repository_history_records_aggregate_completeness
-    WHERE subject_node_id = ?1 AND is_tombstone = 0
-      AND (?2 IS NULL OR schema_id = ?2)
-      AND (aggregate_complete = 0 OR aggregate_complete IS NULL)
-      AND COALESCE(aggregate_start, observed_start) <= ?3
-      AND COALESCE(aggregate_end, observed_end) >= ?4
-";
 /// A repository-history row is deliberately stored outside the control snapshot.
 /// The metadata columns keep retention and paged queries in SQLite rather than loading the
 /// two-year repository window into the replica process.
@@ -848,23 +837,17 @@ impl HistoryStorage {
             diagnostic.finish();
             return Ok(None);
         };
-        let sql = if subject_node_id.is_some() {
-            INCOMPLETE_AGGREGATE_SUBJECT_SQL
-        } else {
-            "
-                SELECT MIN(COALESCE(aggregate_start, observed_start)),
-                       MAX(COALESCE(aggregate_end, observed_end))
-                FROM repository_history_records
-                INDEXED BY repository_history_records_aggregate_completeness
-                WHERE is_tombstone = 0 AND ?1 IS NULL
-                  AND (?2 IS NULL OR schema_id = ?2)
-                  AND (aggregate_complete = 0 OR aggregate_complete IS NULL)
-                  AND COALESCE(aggregate_start, observed_start) <= ?3
-                  AND COALESCE(aggregate_end, observed_end) >= ?4
-            "
-        };
-        let result = connection
-            .query_row(
+        // Two index seeks, not one scan: rows with a stored aggregate range and rows without it
+        // are answered by separate equality branches, because `(aggregate_complete = 0 OR
+        // aggregate_complete IS NULL)` alone drops the index and costs seconds per call.
+        let mut bounds: Option<(u64, u64)> = None;
+        for aggregate_start_present in [true, false] {
+            let sql = query_sql::incomplete_aggregate_range_sql(
+                subject_node_id,
+                schema_id,
+                aggregate_start_present,
+            );
+            let row = connection.query_row(
                 sql,
                 params![
                     subject_node_id,
@@ -881,12 +864,22 @@ impl HistoryStorage {
                         u64::try_from(row.get::<_, i64>(1)?).unwrap_or(u64::MAX),
                     )))
                 },
-            )
-            .map_err(sqlite_error);
-        if result.is_ok() {
+            );
+            match row.map_err(sqlite_error) {
+                Ok(Some((start, end))) => {
+                    bounds = Some(match bounds {
+                        Some((low, high)) => (low.min(start), high.max(end)),
+                        None => (start, end),
+                    });
+                }
+                Ok(None) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        if bounds.is_some() {
             diagnostic.finish();
         }
-        result
+        Ok(bounds)
     }
 
     pub(crate) fn clear_repository_history(&self) -> Result<()> {

@@ -30,12 +30,20 @@ impl RepositoryReplicaRuntime {
         )?;
         let mut candidates = vec![local_candidate];
         if let Some(coverage) = self.repository_coverage(query.subject_node_id())? {
+            // A subject-scoped query only needs that subject's own continuous watermarks. Returning
+            // every stream of every source node inflated the response to 152 entries for a single
+            // node, and the resource-history panel pays that cost on every request.
             let watermarks = self
                 .receiver
                 .as_ref()
                 .map(SegmentReceiver::continuous_watermarks)
                 .unwrap_or_default()
                 .into_iter()
+                .filter(|cursor| {
+                    query
+                        .subject_node_id()
+                        .is_none_or(|subject_node_id| cursor.source_node_id() == subject_node_id)
+                })
                 .map(watermark_from_cursor)
                 .collect::<Result<Vec<_>, _>>()?;
             let mut gaps = self
